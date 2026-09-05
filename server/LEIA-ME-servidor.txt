@@ -1,0 +1,137 @@
+MODO SERVIDOR (opcional) — envio automático por email + salvamento automático
+================================================================================
+
+O app funciona inteiramente no navegador, sem precisar de nenhum servidor.
+Este "modo servidor" é OPCIONAL, útil para duas coisas:
+
+  a) Envio automático por email (sem precisar clicar em "enviar" no seu
+     programa de email toda vez).
+
+  b) Salvamento automático de cada item em ARQUIVO assim que você confirma
+     o cadastro na tela de captura — sem precisar exportar manualmente.
+     Como uma página web não acessa o disco do computador sozinha, é o
+     servidor (rodando no PC) que grava os arquivos; e como tanto o
+     navegador do PC quanto o do celular apontam para a MESMA URL desse
+     servidor, os dois acabam enxergando o mesmo catálogo — é assim que
+     "sincroniza" entre os aparelhos.
+
+     Configurável em Configurações → "Salvamento automático em arquivo":
+       - "Um arquivo por item": cria server/itens/<patrimonio>__<id>.json para
+         cada item (o ID único vai no nome para nunca sobrescrever nada,
+         mesmo se dois aparelhos catalogarem o mesmo patrimônio).
+       - "Um único arquivo com o catálogo completo": mantém
+         server/catalogo-unico.json sempre atualizado com todos os itens.
+       - "Ambos": faz as duas coisas.
+
+  c) Sincronização entre VÁRIOS aparelhos ao mesmo tempo (PCs e celulares).
+     Com o servidor configurado, cada aparelho pode catalogar simultaneamente:
+     todo item nasce com um ID único (gerado no navegador), então nada é
+     sobrescrito — mesmo cadastrando o MESMO número de patrimônio em dois
+     aparelhos ao mesmo tempo, os dois catálogos ficam salvos e aparecem
+     juntos na busca ("N catálogos recebidos para este patrimônio"). Cada
+     aparelho puxa periodicamente do servidor (server/catalogo-unico.json,
+     via a ação "listar") o que os outros cadastraram. Configurável em
+     Configurações → "🔗 Sincronização entre aparelhos" (apelido do aparelho,
+     sincronizar automaticamente, ou "Sincronizar agora" manual).
+
+TRÊS CENÁRIOS DE USO — escolha um em Configurações → "🖥️ Servidor local" →
+"Onde estão o servidor e a câmera?". O app mostra o passo a passo certo assim
+que você escolhe; resumo dos três:
+
+  1) Servidor e câmera no mesmo PC — cataloga com a webcam, tudo local, sem
+     rede nenhuma envolvida. O mais simples.
+  2) Servidor e câmera no mesmo celular — cataloga em campo, sem PC por
+     perto (usa um servidor PHP no próprio celular, ex.: via Termux no
+     Android).
+  3) Servidor no PC, câmera no celular — uma ou mais pessoas cadastram pelo
+     celular e o catálogo já cai direto no PC. EXIGE que o celular esteja na
+     MESMA REDE WI-FI do PC — com dados móveis (4G/5G) o celular NÃO alcança
+     o servidor local do PC (não é um endereço da internet). Veja também a
+     observação sobre a câmera abaixo, que é mais crítica nesse cenário.
+
+PASSO A PASSO — Windows, usando XAMPP (inclui PHP pronto):
+1. Baixe e instale o XAMPP: https://www.apachefriends.org/
+2. Copie o arquivo "receive.php" desta pasta (server/) para:
+     C:\xampp\htdocs\catalogo\
+   (crie a pasta "catalogo" se ela não existir)
+3. (Opcional, só para envio automático de email) Renomeie
+   "config.php.example" para "config.php", copie para a mesma pasta, e
+   edite-o preenchendo o email de destino. Sem isso, o resto (salvamento
+   automático, sincronização entre aparelhos) funciona normalmente.
+4. Abra o Painel de Controle do XAMPP e clique em "Start" ao lado de "Apache".
+5. No app, abra Configurações → "🖥️ Servidor local" → "URL do servidor" e
+   coloque:  http://localhost/catalogo/receive.php
+   (se for acessar do CELULAR pela rede local — cenário 3 acima — use o IP
+   do computador em vez de "localhost", por exemplo:
+   http://192.168.0.10/catalogo/receive.php — o celular precisa estar na
+   MESMA REDE WI-FI do computador, não em dados móveis)
+6. Selecione o modo "Servidor" ou "Ambos" na seção de email, se for usar.
+
+PASSO A PASSO — alternativa simples via linha de comando (qualquer sistema):
+1. Baixe e instale o PHP: https://www.php.net/downloads
+2. Coloque receive.php e config.php (renomeado a partir do .example) numa
+   pasta, por exemplo: C:\catalogo-servidor\
+3. Abra o Prompt de Comando/Terminal dentro dessa pasta e rode:
+     php -S localhost:8000
+4. Use a URL no app:  http://localhost:8000/receive.php
+
+OBSERVAÇÕES IMPORTANTES:
+- A câmera do navegador só funciona em "contexto seguro": localhost (no
+  próprio PC) ou HTTPS. Se for acessar o app do celular por um servidor na
+  rede local via http://, a câmera pode não funcionar — veja o README.md
+  principal do projeto para alternativas (ex: gerar um certificado local com
+  mkcert, ou habilitar exceção nas flags do Chrome para testes).
+- A função mail() do PHP depende de o computador/servidor conseguir enviar
+  email de fato. Em hospedagens compartilhadas costuma funcionar; num XAMPP
+  local do zero, pode ser necessário configurar um relay SMTP (ex: com o
+  pacote PHPMailer) — o arquivo receive.php já indica onde adaptar isso.
+- Uma cópia de cada envio recebido fica salva em server/recebidos/ (criada
+  automaticamente) — é seu backup mesmo se o email falhar.
+
+IMPORTAR OBJETOS 3D (.obj) — rodada 51:
+- Se o app estiver rodando por este servidor (não por file:///), ele busca
+  sozinho uma lista de objetos .obj assim que a tela 3D é aberta — sem
+  precisar clicar em nada.
+- Para isso funcionar, crie uma pasta chamada "objetos" na MESMA pasta onde
+  está o receive.php (ou receive.js), e coloque os arquivos .obj dentro
+  dela. Por exemplo, com o XAMPP do passo a passo acima:
+    C:\xampp\htdocs\catalogo\objetos\minha-mesa.obj
+- Cada arquivo .obj vira um objeto a mais na lista de objetos do 3D (o "+"
+  no canto da tela), do lado dos objetos padrão (mesa, coluna, cubo, etc).
+- Só o formato .obj é suportado (vértices/faces em texto simples) — sem
+  arquivo .mtl (materiais/textura) nem qualquer outro formato (.fbx, .glb,
+  .stl, etc). O objeto aparece com uma cor sólida no 3D.
+- Rodando por file:///, sem nenhum servidor, essa busca automática não
+  existe (o navegador não pode listar pastas do disco sozinho por
+  segurança) — nesse caso, o painel de objetos do 3D mostra um botão
+  "📥 Importar .obj" pra escolher o(s) arquivo(s) manualmente. Nos dois
+  casos, os objetos importados ficam só na memória RAM da aba aberta —
+  precisam ser importados de novo a cada vez que a página é recarregada.
+
+PASTA DE DADOS — onde os arquivos ficam salvos (NOVO, 03/09/2026):
+- Enquanto o servidor (receive.js ou receive.php) estiver rodando, TUDO que
+  ele grava (itens/, catalogo-unico.json, preferencias-usuario.json,
+  backup-completo.json, recebidos/) fica dentro de uma pasta de DADOS
+  dedicada — por padrão "dados/", criada automaticamente ao lado do
+  receive.js/receive.php, na primeira vez que algo é salvo.
+- Isso é ALÉM do IndexedDB do navegador, que continua sendo usado sempre,
+  com ou sem servidor — o servidor é uma cópia extra, "independente do
+  navegador" (sobrevive a limpar os dados do navegador, trocar de aparelho
+  etc.).
+- Pra mudar essa pasta (pode ser em qualquer outro lugar do computador),
+  duas formas, à sua escolha:
+    a) Pelo próprio app: Configurações → "🖥️ Servidor local" → campo "Pasta
+       onde o servidor guarda os arquivos" → "💾 Salvar pasta". Aceita um
+       caminho relativo (à pasta do servidor) ou absoluto (ex:
+       D:\Backups\catalogacao).
+    b) Manualmente: crie/edite um arquivo "config.json" na mesma pasta do
+       receive.js/receive.php, com o conteúdo: {"pastaDados": "caminho aqui"}
+- Dentro do app, Configurações → "🖥️ Servidor local" mostra, em tempo real,
+  qual é a pasta atual e quando foi o último salvamento de preferências/
+  backup completo (com ✅/⏳ ao lado) — é como fica "claro visualmente" que
+  o salvamento em arquivo está funcionando.
+- Backup completo automático: a cada ~5 minutos (com servidor configurado),
+  o app envia um espelho de TUDO (patrimônios, mapas, fotos, configurações —
+  o mesmo conteúdo do botão "⬇️ Exportar backup") pro servidor guardar em
+  backup-completo.json, dentro da pasta de dados. O botão
+  "⬇️ Restaurar tudo do servidor" (mesma seção) busca esse arquivo de volta.

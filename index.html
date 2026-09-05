@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Catalogação de Itens</title>
+<meta name="theme-color" content="#0f1216">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="assets/icon-192.png">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
+<link rel="stylesheet" href="css/style.css">
+<!-- Modelador 3D (pedido do usuário, 28/08/2026 — rodada de modularização):
+     estilos que antes ficavam inline em js/modeler3d.js, movidos pra cá. -->
+<link rel="stylesheet" href="css/modeler3d.css">
+</head>
+<body>
+
+<!-- Barra de carregamento inicial — pura HTML/CSS, aparece imediatamente (antes de
+     qualquer JS rodar) e é escondida pelo app.js assim que a primeira tela é
+     desenhada. Cobre o tempo de abrir o banco local (IndexedDB), que normalmente
+     é rápido, mas dá um retorno visual em vez de deixar a tela em branco. -->
+<div id="boot-bar" class="boot-bar">
+  <div class="boot-bar-fill"></div>
+  <span class="boot-bar-label">Carregando…</span>
+</div> 
+
+<!-- Status de carregamento das bibliotecas de terceiros (leitura de código de
+     barras), que baixam em segundo plano depois que a tela já apareceu — ver
+     js/libloader.js. Escondido por padrão; app.js mostra e atualiza a barra. -->
+<div id="lib-status" class="lib-status hidden">
+  <div class="lib-status-track"><div class="lib-status-fill" id="lib-status-fill"></div></div>
+  <span id="lib-status-text">Carregando bibliotecas…</span>
+</div>
+
+<div id="app">
+
+  <header class="topbar">
+    <!-- Conteúdo padrão do cabeçalho (título + atalhos) — usado em toda
+         tela, MENOS no Mapa: lá, mapview.js esconde isto e usa
+         #topbar-mapa (abaixo) no lugar, com a barra de ferramentas própria
+         dele (ver body.view-mapa em style.css e mapview.js mount/unmount). -->
+    <div id="topbar-default" class="topbar-default">
+      <div class="topbar-default-row">
+        <h1 id="view-title">Catalogação de Itens</h1>
+        <div class="spacer"></div>
+        <button class="icon-btn" id="btn-verlista-top" title="Ver lista simples (patrimônio/tipo/descrição/setor)">👁️</button>
+        <button class="icon-btn" id="btn-settings-top" title="Configurações">⚙️</button>
+        <!-- Pedido do usuário (31/08/2026): "O botão 'Ajuda', atualmente presente
+             em 'Mapa'->'Planta baixa'->'Modo Desenho', deve sair de onde está e
+             ir para o lado direito do botão 'configurações do app'." Antes vivia
+             só dentro da barra de ferramentas do Mapa (#tbm-help, ver
+             mapview.js) — conteúdo (Log de alterações / Sobre) não é específico
+             do Mapa, então mudou pra cá, no cabeçalho global (visível em toda
+             tela), à direita de "⚙️ Configurações". Handler continua em
+             MapView (_toggleHelpMenu/_closeHelpMenu/_openChangelogModal/
+             _openAboutModal, mapview.js) — ver wiring em app.js _wireNav. -->
+        <button class="icon-btn" id="btn-ajuda-top" title="Ajuda">❓</button>
+      </div>
+      <!-- Aviso chamativo (pedido do usuário, 26/08/2026): some quando a
+           conferência de patrimônio já tem nome definido — ver
+           App._updateConfNomeBanner() em app.js, que mostra/esconde e
+           preenche isto sempre que a tela muda ou o nome é salvo. Clicar
+           leva direto pro campo (⚙️ Configurações → 📦 Catálogo → 🗂️
+           Conferência de patrimônio), sem precisar decorar o caminho. -->
+      <div id="conf-nome-banner" class="conf-nome-banner hidden" title="Toque para ir definir o nome da conferência agora">
+        <span class="conf-nome-banner-msg">⚠️ <b>Defina o nome para a conferência de patrimônio</b></span>
+        <span class="conf-nome-banner-path">⚙️ Configurações → 📦 Catálogo → 🗂️ Conferência de patrimônio</span>
+      </div>
+    </div>
+    <!-- Preenchido/esvaziado por mapview.js (mount/unmount) — 4 linhas de
+         ferramentas do Mapa, só existem enquanto essa tela está aberta. -->
+    <div id="topbar-mapa" class="topbar-mapa"></div>
+  </header>
+
+  <main id="view"></main>
+
+  <!-- Preenchida/esvaziada por mapview.js (_mountBottombarMapa/_unmountBottombarMapa),
+       só existe enquanto a Planta baixa (sub-tela do Mapa) está aberta — mesma visibilidade
+       condicionada a body.view-mapa-planta que já esconde/mostra #topbar-mapa acima
+       (ver css/style.css). Unidade/zoom%/coordenadas do cursor (linha A) + slider de
+       zoom com botões -/+ (linha B). -->
+  <div id="bottombar-mapa" class="bottombar-mapa"></div>
+
+  <nav class="bottomnav">
+    <button data-view="tabela" class="active" title="Ver todos os itens catalogados em tabela"><span class="ic">📋</span>Tabela</button>
+    <button data-view="flashcards" title="Ver os itens catalogados em cartões com foto"><span class="ic">🗂️</span>Cartões</button>
+    <button data-view="capturar" title="Abrir a câmera para catalogar um novo item"><span class="ic">📷</span>Fotos</button>
+    <button data-view="mapa" title="Ver/editar a planta do ambiente"><span class="ic">🗺️</span>Mapa</button>
+    <button data-view="buscar" title="Buscar um item pelo patrimônio, descrição ou setor"><span class="ic">🔎</span>Buscar</button>
+  </nav>
+</div>
+
+<!-- Templates HTML para as views (preenchidos via JS) -->
+<template id="tpl-modal-item">
+  <div class="modal-backdrop" data-role="backdrop">
+    <div class="modal-sheet">
+      <div class="handle"></div>
+      <div data-role="content"></div>
+    </div>
+  </div>
+</template>
+
+<!-- Bibliotecas de terceiros (leitura de código de barras) — NÃO são carregadas
+     aqui como <script defer> (isso travava a tela em branco até baixarem por
+     completo, especialmente em conexão lenta). São injetadas dinamicamente
+     pelo js/libloader.js, depois que a tela principal já apareceu — continuam
+     sendo cacheadas pelo Service Worker para uso offline após o primeiro
+     carregamento. Veja README.md para instruções de como vendorizar
+     localmente (100% offline desde o início). -->
+
+<script src="js/db.js"></script>
+<script src="js/utils.js"></script>
+<!-- Pedido do usuário (28/08/2026, rodada 18): "Modularize o flip dos botões
+     que é usado atualmente em 'Ver lista simples'" — js/flip.js
+     (window.Flip.makeSortable) precisa vir ANTES de qualquer arquivo que o
+     use (js/table.js, mais abaixo, e js/verlistasimples.js). -->
+<script src="js/flip.js"></script>
+<script src="js/eventlog.js"></script>
+<script src="js/icons.js"></script>
+<!-- Importação de objetos 3D customizados de arquivo .obj (rodada 51) —
+     independente do resto (só lê texto/monta arrays, sem Three.js), carregada
+     cedo; consumida por view3d.js (catálogo) e engine3d.js (montagem da malha). -->
+<script src="js/objimport.js"></script>
+<!-- Pedido do usuário (27/08/2026): módulo separado para o cálculo da
+     "impressão digital" do aparelho — precisa vir ANTES de js/session.js
+     (que o consome). Ver js/devicefingerprint.js. -->
+<script src="js/devicefingerprint.js"></script>
+<script src="js/session.js"></script>
+<script src="js/geo.js"></script>
+<script src="js/perf.js"></script>
+<script src="js/history.js"></script>
+<script src="js/avatar.js"></script>
+<script src="js/barcode.js"></script>
+<script src="js/libloader.js"></script>
+<script src="js/mapping.js"></script>
+<script src="js/organizeview.js"></script>
+<script src="js/ambientephotos.js"></script>
+<!-- "Receitas" dos modelos 3D dos objetos padrão (rodada 51 — pedido do
+     usuário: "coloque em um arquivo separado do restante do código as
+     'receitas' para montar os modelos 3D dos objetos") — extraído de
+     engine3d.js; precisa vir ANTES dele (compartilha o mesmo escopo de
+     topo de script, ver comentário no início do arquivo). -->
+<script src="js/engine3d-profiles.js"></script>
+<!-- NOVO (01/09/2026) — item GRANDE #9: js/maptxt.js (novo formato de
+     arquivo de texto pro mapa — ver comentário grande no topo do próprio
+     arquivo). Precisa vir DEPOIS de mapping.js e engine3d-profiles.js (usa
+     Mapping.resolveDoorWindowPos/recalcBounds e window.OBJECT3D_PROFILES
+     pra montar a legenda/símbolos), e ANTES de settings.js (que chama
+     MapTxt.exportarMapa/parseTexto na tela de Exportar/Importar). -->
+<script src="js/maptxt.js"></script>
+<script src="js/engine3d.js"></script>
+<!-- Modelador 3D (pedido do usuário, 28/08/2026 — rodada de modularização:
+     "Modularize o Modelador para que, tudo que seja relacionado a ele, esteja
+     em arquivos separados"): antes era js/modeler3d.js sozinho, agora
+     dividido em js/modeler/*.js, cada um com uma responsabilidade (ver
+     comentário no topo de js/modeler/modeler-core.js). Ordem IMPORTA — cada
+     um só usa o que já carregou antes dele: mesh (dados puros) -> gizmo (usa
+     mesh) -> render (usa mesh+gizmo) -> input (usa mesh+gizmo+render) -> ui
+     (usa todos) -> core (orquestra tudo, é quem vira `window.Modeler3D`).
+     Tudo carregado como <script> clássico (sem type="module"), igual todo
+     resto do app — nenhum import()/export/fetch de arquivo local, então
+     continua funcionando 100% sob file:///// (ver histórico grande em
+     engine3d.js sobre por que isso importa pra este app). Precisa vir DEPOIS
+     de engine3d.js (usa window.Cam3DMath e o mesmo THREE já carregado pelo
+     motor) e ANTES de js/mapview.js/js/view3d.js (que CHAMAM
+     window.Modeler3D — botão "🔧 Modelar" no painel de objeto e no cartão do
+     3D). -->
+<script src="js/modeler/modeler-mesh.js"></script>
+<script src="js/modeler/modeler-gizmo.js"></script>
+<script src="js/modeler/modeler-render.js"></script>
+<script src="js/modeler/modeler-input.js"></script>
+<script src="js/modeler/modeler-ui.js"></script>
+<script src="js/modeler/modeler-core.js"></script>
+<script src="js/email.js"></script>
+<script src="js/autosave.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/autoexport.js"></script>
+<!-- NOVO (01/09/2026), item GRANDE #3 do pedido de 12 itens: preferências +
+     backup completo espelhados no servidor local (ver js/serverprefs.js).
+     Depois de sync.js/autoexport.js (mesma família de módulos "servidor
+     local opcional"), antes de settings.js (que expõe
+     SettingsView.CHAVES_PREFERENCIA, lido por ServerPrefs em tempo de
+     execução — a ordem de carregamento não importa pra isso, é lookup
+     tardio, mas mantém os módulos "irmãos" agrupados por clareza). -->
+<script src="js/serverprefs.js"></script>
+<script src="js/p2p.js"></script>
+<script src="js/localbackup.js"></script>
+<script src="js/storagestatus.js"></script>
+<script src="js/table.js"></script>
+<script src="js/flashcards.js"></script>
+<script src="js/capture.js"></script>
+<script src="js/mapconfig.js"></script>
+<script src="js/mapselection.js"></script>
+<script src="js/mapview.js"></script>
+<script src="js/photogrid.js"></script>
+<script src="js/view3d.js"></script>
+<!-- NOVO (01/09/2026), item GRANDE #5 do pedido de 12 itens — tela "🛠️
+     Acessar modelos" (ver js/modelos3d.js). Depois de view3d.js/modeler-
+     core.js (usa Engine3D e Modeler3D) e antes de app.js (que referencia
+     Modelos3DView direto no literal de views, ver app.js — precisa já
+     existir como global nesse ponto). -->
+<script src="js/modelos3d.js"></script>
+<script src="js/search.js"></script>
+<script src="js/verlistasimples.js"></script>
+<script src="js/exportdeps.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/unify.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+<?php
+// config.php.example — OPCIONAL: copie este arquivo para "config.php" e
+// preencha, só se quiser o envio automático de email. Sem ele, o
+// salvamento automático em arquivo e a sincronização entre aparelhos
+// continuam funcionando normalmente (receive.php não exige mais este
+// arquivo para funcionar).
+define('DESTINO_EMAIL', 'seuemail@exemplo.com'); // para onde as catalogações serão enviadas
+define('EMAIL_REMETENTE', 'catalogo@localhost');
+// Dica: se o mail() nativo do PHP não funcionar no seu provedor (comum em hosts
+// compartilhados), use a biblioteca PHPMailer com SMTP autenticado em vez dele.

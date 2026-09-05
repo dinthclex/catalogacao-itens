@@ -1,0 +1,378 @@
+/* modeler3d.css — Modelador 3D: estilos da UI (toolbar/painel N/menus) e do
+ * canvas 2D de overlay (wireframe/pontos/contorno/origem — ver
+ * js/modeler/modeler-render.js). Pedido do usuário (28/08/2026):
+ * "Modularize o Modelador para que, tudo que seja relacionado a ele, esteja
+ * em arquivos separados em relação ao restante do projeto" — antes estes
+ * estilos eram injetados via <style> direto de dentro do JS (js/modeler3d.js
+ * de uma rodada anterior); agora vivem aqui como um arquivo CSS de verdade,
+ * carregado por <link> no index.html (funciona igual sob file:/// — é só
+ * outro arquivo local, sem CORS/módulo nenhum envolvido). */
+
+.m3d-root { position: absolute; inset: 0; pointer-events: none; z-index: 40; font-size: 13px; }
+
+/* Canvas 2D de overlay (wireframe/dots/contorno/origem) — irmão do canvas
+   WebGL dentro de .view3d-wrap (ver engine3d.js/view3d.js), sempre por cima
+   dele na ordem do DOM. pointer-events:none: nunca rouba clique/hover do
+   canvas de baixo (quem trata mouse é sempre js/modeler/modeler-input.js,
+   ouvindo o MESMO canvas WebGL). */
+.m3d-overlay-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 35; }
+
+/* "Cursor" falso do modo "cursor infinito" (pedido do usuário — ver
+   comentário grande em modeler-render.js buildSceneObjects). Escondido por
+   padrão (display:none); modeler-input.js liga/desliga e posiciona a cada
+   quadro enquanto um arrasto modal está com o ponteiro de fato travado. Um
+   retículo simples (círculo + cruz), fácil de ver sobre qualquer fundo. */
+.m3d-fakecursor {
+  position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px;
+  pointer-events: none; z-index: 999; display: none;
+}
+.m3d-fakecursor::before, .m3d-fakecursor::after {
+  content: ''; position: absolute; background: #fff;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.85);
+}
+.m3d-fakecursor::before { left: 8px; top: 0; width: 2px; height: 18px; }
+.m3d-fakecursor::after { left: 0; top: 8px; width: 18px; height: 2px; }
+
+/* Pedido do usuário (03/09/2026): "Adicionar"/"Remover" saíram daqui (foram
+   pra "Ferramentas de malha" na aba lateral, ver modeler-ui.js
+   `_buildFerramentasPanel`) — as linhas que sobraram (modo/câmera/gizmo/
+   seleção) devem "ficar posicionalmente, por enquanto, ao lado do 'Mirar'"
+   (1º slot da hotbar de baixo, `.v3d-hotbar` em style.css, sempre o mais à
+   esquerda dela — pedido explícito: só POSIÇÃO na tela, não vira o mesmo
+   grupo de botões). A hotbar fica centralizada horizontalmente
+   (bottom:42px; left:50%; translateX(-50%)) então seu início exato varia
+   com a largura da tela/lista de slots — aproximação: ancorada no canto
+   inferior esquerdo, na mesma altura da hotbar, o que a coloca ao lado dela
+   na maioria das telas sem depender de medir a hotbar em JS. Não foi
+   possível conferir visualmente (sem navegador ao vivo nesta sessão). */
+/* REPOSICIONADO (03/09/2026), pedido do usuário: "Os botões do Modelador
+   devem ficar a 20% da esquerda da tela de modo que não fiquem na frente
+   dos botões da lateral esquerda." Causa raiz do problema relatado:
+   `left:10px` deixava esta toolbar bem em cima dos botões fixos da lateral
+   esquerda do 3D (o "+" #m3d-sidebar-toggle e companhia, ver view3d.js), que
+   também moram perto da borda esquerda. Trocado pra `left:20%` (medido a
+   partir da borda esquerda da TELA — `.m3d-root`/`.view3d-wrap` cobrem
+   `inset:0`, então 20% aqui já é 20% da largura da janela toda), o que
+   afasta a toolbar dos botões da lateral esquerda na maioria dos tamanhos de
+   tela sem precisar medir nada em JS. Mantido `bottom:42px` (mesma altura
+   de antes, ao lado da hotbar — ver comentário grande acima). */
+.m3d-toolbar { position: absolute; bottom: 42px; left: 20%; display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
+.m3d-row { display: flex; gap: 4px; align-items: center; background: rgba(20,22,26,0.82); backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 4px; flex-wrap: wrap; }
+/* Pedido do usuário: "No Remover... coloque o título 'Remover:' acima dos
+   botões, como no Blender." — rótulo simples, sem fundo/borda (igual ao
+   "Remove:" do Blender), logo acima da linha `#m3d-remove-row`. Visibilidade
+   ligada/desligada junto com a linha (só Modo Edição) via JS — ver
+   `ModelerUI.updateToolbarActive`. */
+/* Pedido do usuário (correção): o rótulo não estava aparecendo — a margem
+   negativa (`-2px` embaixo) tentada antes podia ficar por baixo da linha de
+   botões seguinte (que tem fundo/`backdrop-filter` próprio, ver `.m3d-row`),
+   escondendo o texto por cima dela. Sem margem negativa nenhuma agora. */
+.m3d-row-label { color: #cdd4de; font-size: 11px; font-weight: 600; padding-left: 2px; margin-top: 2px; }
+.m3d-btn { background: rgba(255,255,255,0.06); color: #e8ecf2; border: 1px solid rgba(255,255,255,0.14); border-radius: 6px; padding: 5px 9px; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.m3d-btn:hover { background: rgba(255,255,255,0.14); }
+.m3d-btn.active { background: #3a7bd5; border-color: #3a7bd5; color: #fff; }
+.m3d-dropdown { position: relative; }
+/* position:fixed (não mais absolute relativo a .m3d-dropdown) + anexado
+   direto em .m3d-root (ver modeler-ui.js `showFloatingMenuAt`) — corrige o
+   menu ficando embaixo das linhas seguintes da toolbar: cada .m3d-row com
+   `backdrop-filter` cria seu próprio stacking context, e um filho de UMA
+   linha nunca vence z-index contra outra linha (comparação só vale dentro
+   do mesmo stacking context). left/top calculados em JS a partir do botão. */
+.m3d-menu { position: fixed; background: rgba(24,26,31,0.97); border: 1px solid rgba(255,255,255,0.16); border-radius: 8px; padding: 4px; min-width: 190px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); z-index: 200; pointer-events: auto; }
+.m3d-menu button { display: block; width: 100%; text-align: left; background: none; border: none; color: #e8ecf2; padding: 7px 10px; border-radius: 5px; cursor: pointer; font-size: 12.5px; }
+.m3d-menu button:hover { background: rgba(255,255,255,0.12); }
+.m3d-menu-sep { height: 1px; background: rgba(255,255,255,0.14); margin: 4px 2px; }
+.m3d-npanel { position: absolute; top: 64px; right: 10px; width: 200px; background: rgba(20,22,26,0.88); backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; pointer-events: auto; max-height: 70vh; overflow: auto; }
+.m3d-npanel.collapsed .m3d-npanel-body { display: none; }
+.m3d-npanel-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; font-weight: 700; color: #e8ecf2; border-bottom: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
+.m3d-npanel-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+/* Pedido do usuário (rodada 47): "No botão 'Sair do Modelador' coloque um
+   fundo um pouco mais escuro para destacar no 'céu azul claro'." — o
+   .m3d-btn genérico usa um fundo translúcido bem claro
+   (rgba(255,255,255,0.06)), que quase some contra o céu claro do
+   Modelador; aqui só este botão ganha um fundo escuro próprio. */
+.m3d-exit { position: absolute; top: 64px; right: 220px; pointer-events: auto; background: rgba(20,22,26,0.55); }
+.m3d-exit:hover { background: rgba(20,22,26,0.75); }
+
+/* Painel N — campo numérico estilo Blender (pedido do usuário, com
+   screenshots do "Transform" do Blender). Sub-painel recolhível
+   "Transformação" dentro de "Propriedades": */
+/* Pedido do usuário: "onde fica o título 'Transformação', em vez de '3px 0
+   6px' coloque '3px 0 18px'. Para aumentar o espaço e não clicar sem
+   querer acabando por recolher os botões todos." — mais respiro ABAIXO do
+   título clicável (que recolhe/expande a seção inteira), pra afastar o
+   primeiro botão/campo logo abaixo e reduzir cliques acidentais nele. */
+/* Pedido do usuário (correção, rodada seguinte): volta o padding original
+   ('3px 0 6px' — a tentativa anterior de '3px 0 18px' mexeu no espaço
+   ERRADO). O respiro de 30px pedido ("para não clicar sem querer acabando
+   por recolher os botões todos") agora é um `margin-top` no CORPO
+   (`.m3d-nf-collapsible-body`, o grupo de botões), não um padding no
+   cabeçalho clicável — separa visualmente cabeçalho de conteúdo sem
+   aumentar a área clicável do próprio título. */
+.m3d-nf-collapsible-head { display: flex; align-items: center; gap: 5px; padding: 3px 0 6px; cursor: pointer; color: #e8ecf2; font-weight: 700; font-size: 12px; user-select: none; }
+.m3d-nf-collapsible-arrow { display: inline-block; width: 10px; font-size: 10px; color: #9fb3c8; }
+.m3d-nf-collapsible-body.collapsed { display: none; }
+.m3d-nf-collapsible-body { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+
+/* Rótulo da seção acima do grupo de 3 (ex. "Posição:") — igual ao
+   "Location:"/"Rotation:" do Blender. */
+.m3d-nf-grouplabel { color: #9fb3c8; font-size: 11px; margin: 0 0 3px; }
+
+/* O GRUPO (ex. X/Y/Z empilhados) é quem recebe o arredondamento —
+   pedido do usuário: "quando for apenas uma entrada de valor... fica um
+   semicírculo. Quando for dois botões... só as bordas de EXTREMIDADE do
+   conjunto... 1/4 de círculo... três ou mais... apenas os de cima e de
+   baixo... os que não estiverem nas duas extremidades ficam com cantos
+   retos". Um único campo (`:only-child`) vira "pílula" (raio bem maior
+   que a altura); com 2+ campos, só o primeiro (topo) e o último (base)
+   arredondam — o(s) do meio ficam de canto reto (regra padrão, sem
+   seletor especial). */
+/* Pedido do usuário: botão "Modo de Rotação" (Blender: dropdown "XYZ
+   Euler" logo abaixo dos 3 campos X/Y/Z de Rotação) — largura total,
+   alinhado à esquerda, mesmo visual dos outros botões (`.m3d-btn`). */
+.m3d-rotmode-wrap { margin: -2px 0 2px; }
+.m3d-rotmode-btn { width: 100%; text-align: left; }
+.m3d-nf-group { display: flex; flex-direction: column; }
+.m3d-nf-group .m3d-numfield:only-child { border-radius: 999px; }
+.m3d-nf-group .m3d-numfield:first-child:not(:only-child) { border-radius: 10px 10px 0 0; }
+.m3d-nf-group .m3d-numfield:last-child:not(:only-child) { border-radius: 0 0 10px 10px; }
+.m3d-nf-group .m3d-numfield:not(:first-child) { border-top: none; }
+
+/* Pedido de correção do usuário: "o cursor, sobre os botões, deve ser a
+   seta padrão. Quando clicar e arrastar, aí sim, fica o cursor de
+   redimensionar" — `default` na maior parte do tempo, `ew-resize` só
+   durante o arraste de verdade (`.dragging`, ligada/desligada em JS). */
+.m3d-numfield { position: relative; display: flex; align-items: center; height: 22px; min-width: 0; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18); cursor: default; user-select: none; font-family: inherit; }
+.m3d-numfield.dragging { cursor: ew-resize; }
+/* Pedido do usuário: "o hover afeta toda a região do retângulo de uma vez
+   só, sem ter destaque especial para os botões da extremidade" — um único
+   estado de hover pro retângulo INTEIRO, nada diferente por cima das
+   setas. Pedido de correção: "Quando um botão estiver selecionado (sendo
+   editado) ou clique (quando o botão baixou), deve ficar levemente
+   escurecido" — `.m3d-nf-pressed` (mousedown) e `.editing` (editando)
+   usam um fundo mais ESCURO que o hover normal, pra diferenciar
+   "passando o mouse" de "interagindo de verdade". */
+.m3d-numfield:hover { background: rgba(255,255,255,0.13); }
+.m3d-numfield.dragging, .m3d-numfield.m3d-nf-pressed, .m3d-numfield.editing { background: rgba(0,0,0,0.28); }
+.m3d-nf-disp { flex: 1; display: flex; justify-content: space-between; align-items: center; padding: 0 15px; overflow: hidden; white-space: nowrap; min-width: 0; }
+.m3d-nf-label { color: #9fb3c8; font-size: 11px; flex-shrink: 0; margin-right: 4px; overflow: hidden; text-overflow: ellipsis; }
+.m3d-nf-value { color: #e8ecf2; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+/* Pedido de correção: "a fonte de texto de exibição e a fonte de quando se
+   edita o valor devem ser a mesma" (rodada seguinte: "não só a fonte...
+   mas também o TAMANHO da fonte... deve ficar o tamanho que é atualmente
+   da exibição") — `<input type="text">` cai na regra genérica
+   `input[type=text]` de css/style.css (form padrão do app: fundo claro,
+   padding grande, `font-size: 14.5px`), que tem especificidade MAIOR que um
+   simples seletor de classe (`input[type=text]` = elemento + atributo,
+   vence `.m3d-nf-input` sozinho) — por isso o tamanho ainda saía diferente
+   mesmo com esta regra já existindo. Corrigido usando um seletor
+   `.m3d-numfield .m3d-nf-input` (dois níveis), com especificidade maior que
+   a regra genérica, garantindo que ESTE `font-size` (igual ao de
+   `.m3d-nf-value`, 12px) sempre vence. */
+.m3d-numfield .m3d-nf-input { flex: 1; width: 100%; min-width: 0; background: rgba(0,0,0,0.35); border: none; border-radius: 0; outline: none; color: #e8ecf2; font-family: inherit; font-size: 12px; padding: 0 8px; height: 100%; }
+
+/* Setas de decremento/incremento — pedido de correção do usuário: "as
+   setas devem ser triângulos ISÓSCELES e devem ser menores como no
+   Blender. E devem ficar visíveis (não só no hover, como é atualmente)".
+   `border`-triângulo simétrico (topo/base iguais) = isósceles; sempre
+   `opacity:1` (sem depender de JS pra aparecer). */
+/* Pedido do usuário (correção, rodada seguinte): "os botões de aumentar e
+   diminuir agora não estão funcionando, está indo direto como se tivesse
+   clicado no meio" — causa raiz: `pointer-events: none` aqui (herdado de
+   quando a detecção era só por coordenada no elemento PAI, sem precisar que
+   a seta em si fosse clicável) IMPEDIA totalmente que os cliques
+   chegassem às setas — todo clique "vazava" direto pro `.m3d-nf-disp`/
+   `.m3d-numfield` por baixo, sempre entrando em modo de edição. Agora que
+   cada seta tem seu PRÓPRIO listener (`wireArrow`, ver modeler-ui.js
+   `_createNumField`), precisa aceitar clique de verdade — `pointer-events:
+   auto` (mais `cursor: pointer`, indicando que é clicável). */
+.m3d-nf-arrow { position: absolute; top: 0; bottom: 0; width: 14px; display: flex; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer; z-index: 2; }
+.m3d-nf-arrow-l { left: 2px; }
+.m3d-nf-arrow-r { right: 2px; }
+.m3d-nf-arrow::before { content: ''; display: block; width: 0; height: 0; }
+.m3d-nf-arrow-l::before { border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-right: 5px solid #9fb3c8; }
+.m3d-nf-arrow-r::before { border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid #9fb3c8; }
+/* Pedido do usuário (rodada 44): "quando clica para editar o número
+   manualmente, os botões de extremidade dele não devem ser exibidos. Acho
+   que pelo botão 'ficar na frente' cobria o sinal de menos e eu não
+   conseguia ver por causa disso, mesmo o sinal estando ali 'embaixo'." —
+   causa raiz confirmada: as setas têm `z-index: 2` e ficam absolutamente
+   posicionadas por CIMA do campo inteiro (inclusive por cima do `<input>`
+   de edição, que ocupa `width:100%` — ver `_createNumField`), então a
+   seta esquerda (`left: 2px`) tampava visualmente o "-" de um número
+   negativo digitado bem no início do campo. `.editing` já é ligada/
+   desligada em `startEdit`/`endEdit` (modeler-ui.js) — só faltava esconder
+   as setas nesse estado. */
+.m3d-numfield.editing .m3d-nf-arrow { display: none; }
+/* REPOSICIONADO (03/09/2026), pedido do usuário: "O texto informativo que
+   fica ali ('Tab: Modo Objeto/Edição...') pode ser colocado em outra
+   posição que não fica em cima nem fica tapado." Antes (`bottom:74px;
+   left:10px`) ficava logo acima de `.m3d-toolbar`, que agora foi
+   reposicionada pra `left:20%` (ver comentário grande lá) — deixar o hint
+   parado no canto inferior esquerdo passaria a ficar OUTRA VEZ perto dos
+   botões da lateral esquerda do 3D. Movido pro TOPO, centralizado
+   horizontalmente, logo abaixo da `.camera-topbar` (que ocupa o topo da
+   tela) — área livre, sem nenhum outro HUD/painel do 3D ou do Modelador
+   passando por ali (toolbar/hotbar/HUD de posição/joystick ficam todos na
+   metade de baixo da tela). */
+.m3d-hint { position: absolute; top: 54px; left: 50%; transform: translateX(-50%); color: #cdd6e0; background: rgba(20,22,26,0.7); border-radius: 6px; padding: 4px 8px; font-size: 11.5px; pointer-events: none; max-width: min(90vw, 640px); text-align: center; }
+
+/* Pedido do usuário: "Quando os elementos não ficarem visíveis, o ícone de
+   olho deve ser esmaecido" (botão "Limitar visíveis" desligado). */
+.m3d-eye-icon { opacity: 1; transition: opacity .12s; }
+.m3d-eye-icon.m3d-eye-dim { opacity: .35; filter: grayscale(1); }
+
+/* ==========================================================================
+   NOVO (01/09/2026) — item grande "barra lateral estilo Blender": botão "+"
+   do lado esquerdo do canvas + submenu deslizante (abas verticais
+   Ferramentas/Criar). Ver comentário grande no innerHTML de
+   `ModelerUI.build` (modeler-ui.js) pra citação verbatim completa do pedido
+   e a decisão documentada sobre "sua largura deve ser igual ao botão '+' do
+   lado direito". Visual espelhado do "+" já existente do lado direito do
+   canvas 3D (`.v3d-objcat-toggle`, css/style.css) — mesma altura/largura,
+   só invertido (borda arredondada do lado de FORA, ou seja à esquerda aqui).
+   ========================================================================== */
+.m3d-sidebar-toggle {
+  position: absolute; top: 50%; left: 0; transform: translateY(-50%); z-index: 41;
+  width: 24px; height: 28px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 0 10px 10px 0; border-left: none;
+  font-size: 16px; line-height: 1;
+  pointer-events: auto;
+}
+.m3d-sidebar-toggle.active { background: #3a7bd5; border-color: #3a7bd5; color: #fff; }
+
+/* "abre-se um sub menu que ocupa de 10% da altura do canvas até 90% da
+   altura do canvas" (pedido verbatim) — `top:10%`/`height:80%` são
+   exatamente essa faixa. Escondido (largura 0, conteúdo cortado) quando
+   fechado, "desliza" pra fora (mesma técnica de `.v3d-objcat-panel`) quando
+   `.open`. */
+.m3d-sidebar-panel {
+  position: absolute; top: 10%; height: 80%; left: 0; z-index: 40;
+  width: 300px; max-width: 82vw;
+  background: rgba(20,22,26,0.92); backdrop-filter: blur(4px);
+  border: 1px solid rgba(255,255,255,0.14); border-left: none;
+  border-radius: 0 10px 10px 0;
+  display: flex; flex-direction: row; overflow: hidden;
+  box-shadow: 2px 0 14px rgba(0,0,0,0.35);
+  transform: translateX(-100%);
+  transition: transform .2s ease;
+  pointer-events: none;
+}
+.m3d-sidebar-panel.open { transform: translateX(0); pointer-events: auto; }
+
+/* Abas verticais (Ferramentas/Criar) — "assim como no Blender, faça botões
+   verticais com um texto escrito na vertical de baixo para cima. Ficam
+   posicionadas à esquerda do submenu e dentro dele" (pedido verbatim).
+   `writing-mode:vertical-rl` sozinho escreve de CIMA pra BAIXO — o
+   `rotate(180deg)` inverte pra "de baixo pra cima", exatamente como pedido
+   (mesmo truque de CSS usado pras abas verticais do Blender). */
+.m3d-sidebar-tabs {
+  display: flex; flex-direction: column; flex-shrink: 0;
+  width: 30px; border-right: 1px solid rgba(255,255,255,0.12);
+  background: rgba(0,0,0,0.18);
+}
+.m3d-sidebar-tab {
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  background: none; border: none; color: #9fb3c8;
+  padding: 10px 6px; font-size: 12px; letter-spacing: .02em;
+  cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.m3d-sidebar-tab:hover { background: rgba(255,255,255,0.08); color: #e8ecf2; }
+.m3d-sidebar-tab.active { background: #3a7bd5; color: #fff; }
+
+.m3d-sidebar-content { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.m3d-sidebar-tabcontent { flex: 1; display: flex; flex-direction: column; padding: 8px; overflow-y: auto; gap: 2px; }
+/* Na aba "Criar", a lista de botões de primitiva NÃO deve consumir todo o
+   scroll — só a região de Propriedades no fim é que rola sozinha ("ficam na
+   parte de baixo do submenu em uma região com scroll", pedido verbatim) —
+   por isso aqui o container inteiro não rola (`overflow:hidden`), e é a
+   `.m3d-sidebar-props` (última filha) que ganha `overflow-y:auto` com
+   `flex:1` (ocupa o espaço restante, empurrando os grupos de botões pra
+   cima, fixos). */
+.m3d-sidebar-tabcontent-criar { overflow-y: hidden; }
+/* CORRIGIDO (01/09/2026), pedido verbatim: "Ao acessar o menu lateral para
+   adicionar as primitivas, a parte para editar as suas propriedades não
+   está aparecendo. Só aparece se recolhe o 'Adicionar primitiva'. Deve
+   ficar aparente, mesmo com o 'Adicionar primitiva' expandido. Aqui, um
+   scroll pode ser gerado." Causa raiz: bug clássico de flexbox — um filho
+   flex (`.m3d-nf-collapsible-body`, os grupos de botão de primitiva) sem
+   `min-height` explícito tem `min-height:auto` por padrão, que NUNCA deixa
+   ele encolher abaixo da altura intrínseca do próprio CONTEÚDO, não importa
+   quanto `flex-shrink` tenha (o padrão já é 1) — com 3 grupos de botões
+   (Mesh/Lâmpada/Outros) expandidos, essa altura mínima "travada" já
+   ultrapassava a altura inteira do painel, sobrando ZERO espaço pra
+   `.m3d-sidebar-props` (mesmo com `flex:1` — não tem como um `flex:1`
+   "roubar" espaço de um irmão que se recusa a encolher). `min-height:0`
+   aqui destrava o encolhimento (permite ficar menor que o conteúdo);
+   `overflow-y:auto` junto (autorizado pelo pedido, "um scroll pode ser
+   gerado") garante que, encolhido, o próprio grupo de botões ganha rolagem
+   PRÓPRIA em vez de cortar botões sem aviso — escopado só à aba "Criar"
+   (`.m3d-sidebar-tabcontent-criar >`), não mexe nos `.m3d-nf-collapsible-
+   body` da aba "Ferramentas" (container diferente, já rola inteiro). */
+.m3d-sidebar-tabcontent-criar > .m3d-nf-collapsible-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* NOVO (01/09/2026), pedido verbatim (item 10 da rodada de 13 itens): "Para
+   o menu lateral 'Criar', uma linha divisória entre as seções 'Adicionar
+   primitiva' e 'objeto criado' deve ser posta. Clicando e arrastando ela,
+   redimensiona a divisão vertical do menu." Barra fina, cursor de
+   redimensionar vertical (`ns-resize` — a divisão é HORIZONTAL na tela, mas
+   arrastar pra CIMA/BAIXO é que redimensiona, por isso o cursor do eixo
+   vertical); ver `modeler-ui.js` `_buildCriarPanel`/`_wireCriarDivider` pro
+   arrasto em si (calcula `primitivaHeightPx`, salvo em
+   `state._sidebarUI`, sobrevive a re-renderizações da mesma sessão — mesmo
+   padrão já usado por `primitivaCollapsed`). Área de clique um pouco maior
+   que a linha visual (`padding` vertical), pra não exigir mira cirúrgica. */
+.m3d-sidebar-divider {
+  flex: 0 0 auto; height: 9px; margin: 2px 0; padding: 4px 0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: ns-resize; touch-action: none;
+}
+.m3d-sidebar-divider::before {
+  content: ''; width: 100%; height: 1px; background: rgba(255,255,255,0.18);
+}
+.m3d-sidebar-divider:hover::before,
+.m3d-sidebar-divider.m3d-sidebar-divider-dragging::before {
+  background: #3a7bd5; height: 2px;
+}
+
+.m3d-sidebar-btngrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 8px; }
+.m3d-sidebar-primbtn { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; font-size: 10.5px; text-align: center; white-space: normal; line-height: 1.15; }
+.m3d-sidebar-primicon { font-size: 16px; line-height: 1; }
+
+.m3d-sidebar-props { flex: 1; min-height: 60px; overflow-y: auto; border-top: 1px solid rgba(255,255,255,0.12); padding-top: 8px; margin-top: 4px; display: flex; flex-direction: column; gap: 8px; }
+.m3d-sidebar-props-empty { color: #9fb3c8; font-size: 11.5px; line-height: 1.4; }
+.m3d-sidebar-textfield { display: flex; flex-direction: column; gap: 3px; }
+.m3d-sidebar-textfield label { color: #9fb3c8; font-size: 11px; }
+.m3d-sidebar-textfield input { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; color: #e8ecf2; font-size: 12px; padding: 4px 8px; font-family: inherit; }
+
+.m3d-sidebar-histrow { display: flex; gap: 4px; }
+.m3d-sidebar-histrow .m3d-btn { flex: 1; }
+
+/* Modal "Histórico do Desfazer" — "Todo o histórico do 3D aparece [...]
+   todas as ações do app no 3D" (pedido verbatim). Overlay cobrindo o
+   Modelador inteiro (mesmo espírito de `.m3d-menu`, só que centralizado e
+   maior, por ser uma lista potencialmente longa — até 300 entradas,
+   `ModelerMesh._ACTIONLOG_MAX`). */
+.m3d-history-modal-overlay {
+  position: absolute; inset: 0; z-index: 300;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: auto;
+}
+.m3d-history-modal {
+  width: min(420px, 86vw); max-height: 76%;
+  background: rgba(22,24,29,0.98); border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.m3d-history-modal-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.12); font-weight: 700; color: #e8ecf2; }
+.m3d-history-modal-list { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 1px; }
+.m3d-history-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 5px; font-size: 12px; }
+.m3d-history-row:hover { background: rgba(255,255,255,0.06); }
+.m3d-history-idx { color: #6d7a89; font-size: 10.5px; min-width: 22px; text-align: right; }
+.m3d-history-label { flex: 1; color: #e8ecf2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m3d-history-time { color: #9fb3c8; font-size: 10.5px; flex-shrink: 0; }
