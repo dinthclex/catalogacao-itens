@@ -1857,7 +1857,17 @@ class Map2DRenderer {
       const fd = opts.formaDraft;
       ctx.save();
       ctx.globalAlpha = this._layerOpacity(fd.obj.layerId);
-      this._drawFormaShape(ctx, fd.obj, fd.geom.center.x, fd.geom.center.y, false);
+      // ATUALIZADO (06/09/2026), pedido verbatim: "selecionar um retículo
+      // (clique único) SEMPRE [deve] mostrar o gizmo de 8 alças, e a grade
+      // só [deve ficar] amarela quando de fato selecionado (seja por
+      // clique único com gizmo, seja com o painel aberto)." — o rascunho em
+      // progresso (`opts.formaDraft`, gizmo/reedição ativa via
+      // _startFormaReedit) JÁ CONTA como "selecionado" pra este efeito; só
+      // pro Retículo métrico (`fd.obj.reticuloMetrico`), que é o único tipo
+      // de forma cuja grade interna muda de cor com `selected` (ver
+      // _drawFormaShape) — formas comuns continuam com `false` aqui, sem
+      // mudança de aparência (nunca foi pedido pra elas).
+      this._drawFormaShape(ctx, fd.obj, fd.geom.center.x, fd.geom.center.y, !!fd.obj.reticuloMetrico);
       ctx.restore();
     }
 
@@ -6840,6 +6850,23 @@ const MapView = {
             // saber COMO desenhar em tempo real, antes de finalizar de
             // verdade).
             layerId: this._formaDraft.reedit ? this._formaDraft.reedit.orig.layerId : this._activeLayerId,
+            // BUG CORRIGIDO (06/09/2026) — Retículo métrico: este literal
+            // (o "obj sintético" usado só pra DESENHAR o corpo do rascunho
+            // em progresso, ver Map2DRenderer._drawFormaShape) nunca levava
+            // `reticuloMetrico`/`reticuloOrigemX/Y`/`reticuloOrigemModo` —
+            // sem a flag, `_drawFormaShape` nunca entrava no bloco que
+            // desenha a grade 1×1m (`if (obj.forma === 'retangulo' &&
+            // obj.reticuloMetrico)`), então a grade interna simplesmente
+            // não aparecia enquanto o gizmo estava ativo (reedição em
+            // progresso) — reaparecendo só depois de finalizar, quando o
+            // desenho volta a usar o objeto de verdade (this.mapData.objects,
+            // que tem a flag). Corrigido copiando os 3 campos do rascunho
+            // (`this._formaDraft`, ver _startFormaReedit/_applyFormaDraftFieldPatch,
+            // que já preserva os três durante toda a edição).
+            reticuloMetrico: !!this._formaDraft.reticuloMetrico,
+            reticuloOrigemX: this._formaDraft.reticuloOrigemX,
+            reticuloOrigemY: this._formaDraft.reticuloOrigemY,
+            reticuloOrigemModo: this._formaDraft.reticuloOrigemModo,
           },
           geom: formaDraftGeom,
           // Marcador VERDE da âncora de redimensionamento — 3 pedidos do
@@ -6858,9 +6885,20 @@ const MapView = {
           // EXATO que está ficando fixo naquele arraste específico (ver
           // _onObjectsPointerDown "kind:'resize'"/this._formaDraftDrag.
           // anchorWorld) — antes ou depois do arraste, nenhum marcador.
+          // ATUALIZADO (06/09/2026) — reescrita do resize do gizmo (ver
+          // _onObjectsPointerDown/_onObjectsPointerMove "kind:'resize'"):
+          // a âncora de redimensionamento agora é SEMPRE a alça/aresta
+          // OPOSTA à arrastada (nunca mais depende de `_formaResizeAnchor`
+          // pra decidir ONDE fica), então o marcador verde aparece durante
+          // QUALQUER arraste de uma das 8 alças, não só nas opções
+          // 'top-left'/'top-right'/'bottom-left'/'bottom-right' de antes —
+          // `_formaResizeAnchor === 'free'` continua com seu próprio
+          // marcador arrastável de sempre (`geom.resizeAnchor`, feature
+          // independente — ver hit.kind==='resizeAnchor'), sem relação com
+          // este resize.
           resizeAnchorScreen: (this._formaResizeAnchor === 'free')
             ? formaDraftGeom?.resizeAnchor
-            : (['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(this._formaResizeAnchor) && this._formaDraftDrag?.kind === 'resize' && this._formaDraftDrag.anchorWorld)
+            : (this._formaDraftDrag?.kind === 'resize' && this._formaDraftDrag.anchorWorld)
               ? this._renderer.worldToScreen(this._formaDraftDrag.anchorWorld.x, this._formaDraftDrag.anchorWorld.y)
               : null,
         }
@@ -9809,74 +9847,49 @@ const MapView = {
           // retângulo se move, "descolando" da grade do canto dele.
           this._formaDraftDrag = { kind: 'move', startWorld: world, orig: { x: d.x, y: d.y, pivot: d.pivot ? { ...d.pivot } : null, resizeAnchor: d.resizeAnchor ? { ...d.resizeAnchor } : null, reticuloOrigem: d.reticuloMetrico ? { x: d.reticuloOrigemX ?? d.x, y: d.reticuloOrigemY ?? d.y } : null } };
         } else if (hit.kind === 'resize') {
+          // REESCRITO DO ZERO (06/09/2026), pedido verbatim: "O gizmo ainda
+          // não está funcionando como deveria. [...] Ao clicar e arrastar a
+          // alça superior esquerda, o retângulo deve ser ancorado (fixado)
+          // na alça inferior direita. [...] Atualmente as alças que
+          // deveriam ficar ancoradas (fixadas) estão se movendo, mesmo que
+          // um pouco, também." — REMOVIDA por completo a abordagem anterior
+          // (âncora nomeada/'livre'/'pivot' guardada como PROPORÇÃO `tX`/
+          // `tY` do retângulo, dividindo o deslocamento por
+          // `(handleFrac - tX)`), inclusive o "fallback" específico do
+          // Retículo métrico que tentava (sem sucesso, por 2 rodadas)
+          // consertar o caso em que esse denominador batia perto de 0 — o
+          // usuário pediu EXPLICITAMENTE pra não tentar mais consertar
+          // aquela versão e reescrever com o algoritmo padrão de mercado
+          // pra resize de retângulo rotacionável: a alça OPOSTA (o CANTO ou
+          // o MEIO DE ARESTA oposto — topLeft↔bottomRight, topMid↔bottomMid,
+          // topRight↔bottomLeft, midRight↔midLeft, exatamente os pares
+          // pedidos) fica FIXA no MUNDO — `anchorWorld` abaixo — calculada
+          // UMA ÚNICA VEZ aqui, no início do arraste, a partir da posição
+          // ATUAL (`d.x/y`, `d.largura/profundidade`, `d.angulo`) — e NUNCA
+          // mais recalculada durante o arraste (ver _onObjectsPointerMove,
+          // "kind:'resize'"), o que garante matematicamente que aquele
+          // ponto não se move nem 1px: não há mais nenhuma divisão por uma
+          // proporção que possa chegar perto de zero. `w0`/`h0`/`angulo0`
+          // (tamanho/ângulo no INÍCIO do arraste) também são guardados aqui
+          // — o ângulo nunca muda durante um resize (só durante um giro,
+          // outra operação, "kind:'rotate'" abaixo). `reticuloOrigemX/Y`
+          // (grade do Retículo métrico) e `obj.angulo` propositalmente NUNCA
+          // são tocados por este novo algoritmo (nem aqui nem no pointermove)
+          // — resize só muda largura/profundidade/centro, igual sempre foi
+          // pro resto da ferramenta Formas. NOTA/decisão de design: a partir
+          // desta rodada, o seletor "Âncora de redimensionamento" do
+          // cabeçalho (_formaResizeAnchor — livre/pivot/4 cantos nomeados)
+          // deixa de influenciar ESTE resize pelas 8 alças do gizmo (que
+          // agora SEMPRE ancora no canto/aresta oposto, como pedido) — ele
+          // continua existindo/funcionando só pra o ponto arrastável
+          // próprio (`d.resizeAnchor`/`d.pivot`, hit.kind==='resizeAnchor'/
+          // 'pivot' logo acima), sem efeito colateral neste bloco.
           const ang = d.angulo || 0;
           const cos = Math.cos(ang), sin = Math.sin(ang);
-          // Âncora de redimensionamento (pedido do usuário, 25/08/2026 —
-          // seção "Âncoras" do cabeçalho, ver _formaResizeAnchor/
-          // _formaAnchorSectionHtml). Guardado como PROPORÇÃO (`tX`/`tY`,
-          // 0..1 — 0 = borda esquerda/de cima, 1 = borda direita/de baixo,
-          // podendo passar de 0..1 se a âncora estiver fora do retângulo) em
-          // vez de uma distância fixa em metros — pedido explícito do
-          // usuário: "o ponto de âncora... está a 30% da borda esquerda...
-          // a 40% da borda de cima... ao redimensionar, o ponto de âncora
-          // CONTINUA a 30%/40%", ou seja, é a PROPORÇÃO que fica fixa
-          // (relativa ao retângulo de cada instante), não uma distância em
-          // metros — ver a matemática em _onObjectsPointerMove
-          // "kind:'resize'". 'free' e 'pivot' funcionam IGUAL entre si —
-          // cada um lê a proporção de um ponto PRÓPRIO, arrastável pelo
-          // usuário (`d.resizeAnchor`/`d.pivot`, ver hit.kind==='resizeAnchor'/
-          // 'pivot' — pedido do usuário: "'livre' significa poder movê-lo
-          // manualmente para qualquer posição, assim como é feito com a
-          // âncora de giro") — a diferença entre os dois é só QUAL ponto:
-          // 'pivot' reusa o mesmo da âncora de giro (label: "compartilham a
-          // mesma posição"); 'free' é um ponto independente, só dele. Com
-          // uma âncora NOMEADA (um dos 4 cantos), o ponto parado é sempre
-          // aquele canto, não importa qual alça é arrastada.
-          const FIXED_CORNERS = {
-            'top-left': { tX: 0, tY: 0 }, 'top-right': { tX: 1, tY: 0 },
-            'bottom-left': { tX: 0, tY: 1 }, 'bottom-right': { tX: 1, tY: 1 },
-          };
-          const ra = this._formaResizeAnchor;
-          let tX, tY, anchorWorld;
-          // NOVO (04/09/2026), pedido verbatim: "A ferramenta 'Retículo
-          // métrico' deve ter a sua origem no primeiro ponto, até para
-          // quando for redimensionada (no redimensionamento, deve ser a
-          // partir da sua origem, não do seu centro como é atualmente)."
-          // Causa raiz do "do centro": Retículo métrico nunca grava
-          // `d.resizeAnchor` (nasce `null`, ver criação em
-          // _onObjectsPointerDown, ramo 'reticulo'/_finalizeFormaDraft), e
-          // com a âncora global da ferramenta Formas em 'free' (padrão,
-          // `_formaResizeAnchor`) o ramo `pv = d.resizeAnchor || {x:d.x,
-          // y:d.y}` caía sempre no fallback = CENTRO. Retículo métrico nem
-          // mostra o seletor de âncora no próprio cabeçalho (ver
-          // _reticuloToolctxHtml) — usar a âncora global herdada de um uso
-          // anterior da ferramenta Formas deixaria o comportamento
-          // imprevisível de qualquer forma, então aqui SEMPRE usa
-          // `reticuloOrigemX/Y` (o mesmo ponto de mundo fixo, gravado uma
-          // única vez na criação, que já é a origem da grade 1×1m
-          // desenhada por cima — ver Map2DRenderer._drawObjectShape),
-          // ignorando `ra` por completo pra este tipo de objeto.
-          if (d.reticuloMetrico) {
-            const pv = { x: d.reticuloOrigemX ?? d.x, y: d.reticuloOrigemY ?? d.y };
-            const lx = (pv.x - d.x) * cos + (pv.y - d.y) * sin;
-            const ly = -(pv.x - d.x) * sin + (pv.y - d.y) * cos;
-            tX = d.largura > 1e-6 ? (lx / d.largura + 0.5) : 0.5;
-            tY = d.profundidade > 1e-6 ? (ly / d.profundidade + 0.5) : 0.5;
-            anchorWorld = pv;
-          } else if (ra === 'pivot' || ra === 'free') {
-            const pv = ra === 'pivot' ? (d.pivot || { x: d.x, y: d.y }) : (d.resizeAnchor || { x: d.x, y: d.y });
-            const lx = (pv.x - d.x) * cos + (pv.y - d.y) * sin;
-            const ly = -(pv.x - d.x) * sin + (pv.y - d.y) * cos;
-            tX = d.largura > 1e-6 ? (lx / d.largura + 0.5) : 0.5;
-            tY = d.profundidade > 1e-6 ? (ly / d.profundidade + 0.5) : 0.5;
-            anchorWorld = { x: pv.x, y: pv.y };
-          } else {
-            const fc = FIXED_CORNERS[ra] || { tX: 0, tY: 0 };
-            tX = fc.tX; tY = fc.tY;
-            const anchorLocal = { x: (tX - 0.5) * d.largura, y: (tY - 0.5) * d.profundidade };
-            anchorWorld = { x: d.x + anchorLocal.x * cos - anchorLocal.y * sin, y: d.y + anchorLocal.x * sin + anchorLocal.y * cos };
-          }
-          this._formaDraftDrag = { kind: 'resize', sx: hit.sx, sy: hit.sy, anchorWorld, tX, tY, angulo0: ang, viaContour: !!hit.viaContour };
+          const oppSx = -hit.sx, oppSy = -hit.sy;
+          const anchorLocal = { x: oppSx * d.largura / 2, y: oppSy * d.profundidade / 2 };
+          const anchorWorld = { x: d.x + anchorLocal.x * cos - anchorLocal.y * sin, y: d.y + anchorLocal.x * sin + anchorLocal.y * cos };
+          this._formaDraftDrag = { kind: 'resize', sx: hit.sx, sy: hit.sy, anchorWorld, w0: d.largura, h0: d.profundidade, angulo0: ang, viaContour: !!hit.viaContour };
         } else if (hit.kind === 'rotate') {
           const pivot = d.pivot || { x: d.x, y: d.y };
           this._formaDraftDrag = {
@@ -10482,75 +10495,53 @@ const MapView = {
       } else if (drag.kind === 'resizeAnchor') {
         d.resizeAnchor = world;
       } else if (drag.kind === 'resize') {
-        // Vetor do cursor relativo à ÂNCORA (fixa no mundo durante todo o
-        // arraste — canto/aresta oposto à alça em modo 'free', ou o ponto
-        // NOMEADO escolhido em _formaResizeAnchor — ver
-        // _onObjectsPointerDown), descontando a rotação.
+        // REESCRITO DO ZERO (06/09/2026) — ver comentário grande em
+        // _onObjectsPointerDown "hit.kind==='resize'" pro pedido verbatim e
+        // pra causa raiz do algoritmo antigo (removido). Algoritmo padrão de
+        // ancoragem geométrica: (1) vetor cursor-menos-âncora, desfazendo a
+        // rotação `angulo0` pro referencial LOCAL do retângulo (mesma
+        // convenção de `_pointInObjectShape`: `cos(-ang)`/`sin(-ang)`); (2)
+        // conforme o TIPO de alça (`drag.sx/sy`, ver _formaDraftHandleDefs):
+        // CANTO (sx!==0 E sy!==0) mexe nos dois eixos; MEIO DE ARESTA
+        // VERTICAL (topMid/bottomMid, sx===0) só na altura; MEIO DE ARESTA
+        // HORIZONTAL (midLeft/midRight, sy===0) só na largura — o eixo NÃO
+        // controlado por aquela alça nunca muda (nem o tamanho, nem a
+        // posição do centro nesse eixo, relativa à âncora); (3) novo centro
+        // = âncora + metade do vetor local (rotacionado de volta pro
+        // mundo) — nenhuma divisão por proporção em lugar nenhum (a causa
+        // das duas rodadas de bugs anteriores: um denominador que podia
+        // chegar perto de zero). `reticuloOrigemX/Y` (Retículo métrico) e
+        // `d.angulo` propositalmente NUNCA são tocados aqui.
         const cosI = Math.cos(-drag.angulo0), sinI = Math.sin(-drag.angulo0);
         const vx = world.x - drag.anchorWorld.x, vy = world.y - drag.anchorWorld.y;
-        const lvx = vx * cosI - vy * sinI, lvy = vx * sinI + vy * cosI;
-        // Redimensiona MANTENDO A PROPORÇÃO da âncora em relação ao
-        // retângulo (pedido do usuário, 25/08/2026: "o ponto de âncora...
-        // está a 30% da borda esquerda... a 40% da borda de cima... ao
-        // esticar, o ponto de âncora CONTINUA a 30%/40%"). A alça arrastada
-        // representa uma proporção conhecida do retângulo NOVO (0 = mesma
-        // borda da âncora nesse eixo, 1 = a borda oposta — ver
-        // `handleFracX/Y`); como o vetor do cursor até a âncora (`lvx`/`lvy`)
-        // é exatamente a distância entre essas duas proporções vezes o
-        // tamanho novo, dá pra isolar o tamanho: newW = lvx / (handleFracX -
-        // tX). Passar a alça PARA O OUTRO LADO da âncora dá um resultado
-        // negativo — vira "espelhado" nesse eixo (flipH/flipV, só usado pela
-        // imagem — ver _drawFormaShape — retângulo/polígono são simétricos,
-        // só a posição muda); a MAGNITUDE guardada (`d.largura`/
-        // `d.profundidade`) nunca é negativa. Cada eixo só é tocado se a
-        // alça arrastada o controla (drag.sx/sy !== 0); o outro eixo mantém
-        // tamanho E flip de antes (mesma proporção `tX`/`tY`, mesma
-        // âncora — nada muda nele até ser arrastado). Quando a alça
-        // arrastada tem a MESMA proporção da âncora nesse eixo (só possível
-        // arrastando uma alça do mesmo lado de uma âncora NOMEADA que já
-        // está bem naquela borda — divisor ~0), ignora o quadro em vez de
-        // disparar um salto absurdo.
-        const EPS = 1e-4;
-        let newW = d.largura, flipH = !!d.flipH;
-        if (drag.sx !== 0) {
-          const handleFracX = (drag.sx + 1) / 2;
-          const denom = handleFracX - drag.tX;
-          if (Math.abs(denom) > EPS) {
-            const rawW = lvx / denom;
-            newW = Math.max(MIN, Math.abs(rawW));
-            flipH = rawW < 0;
-          }
-        }
-        let newD = d.profundidade, flipV = !!d.flipV;
-        if (drag.sy !== 0) {
-          const handleFracY = (drag.sy + 1) / 2;
-          const denom = handleFracY - drag.tY;
-          if (Math.abs(denom) > EPS) {
-            const rawD = lvy / denom;
-            newD = Math.max(MIN, Math.abs(rawD));
-            flipV = rawD < 0;
-          }
-        }
-        // Imagem + Shift segurado (pedido do usuário): redimensiona
-        // PROPORCIONALMENTE — trava a razão largura/profundidade na
-        // proporção ORIGINAL da imagem (d.stamp.aspect), usando como
-        // referência o eixo que a alça arrastada de fato controla (largura
-        // numa alça horizontal/de canto, profundidade numa alça só-vertical).
+        const lx = vx * cosI - vy * sinI, ly = vx * sinI + vy * cosI;
+        const isCorner = drag.sx !== 0 && drag.sy !== 0;
+        const isVerticalMid = drag.sx === 0; // topMid/bottomMid
+        let newW = drag.w0, newH = drag.h0;
+        if (isCorner) { newW = Math.max(MIN, Math.abs(lx)); newH = Math.max(MIN, Math.abs(ly)); }
+        else if (isVerticalMid) { newH = Math.max(MIN, Math.abs(ly)); }
+        else { newW = Math.max(MIN, Math.abs(lx)); } // meio de aresta horizontal (midLeft/midRight)
+        // Imagem + Shift segurado (pedido do usuário, comportamento de
+        // sempre): trava a razão largura/profundidade na proporção ORIGINAL
+        // da imagem (d.stamp.aspect), a partir do eixo que a alça arrastada
+        // de fato controla.
         if (e.shiftKey && d.stamp?.forma === 'imagem' && d.stamp.aspect) {
-          if (drag.sx !== 0) newD = Math.max(MIN, newW / d.stamp.aspect);
-          else newW = Math.max(MIN, newD * d.stamp.aspect);
+          if (!isVerticalMid) newH = Math.max(MIN, newW / d.stamp.aspect);
+          else newW = Math.max(MIN, newH * d.stamp.aspect);
         }
-        // Novo centro = âncora + rotação(deslocamento até o centro, já com
-        // o tamanho NOVO) — mantém a âncora exatamente parada no lugar E na
-        // MESMA proporção (tX/tY) dentro do retângulo novo.
-        const signX = flipH ? -1 : 1, signY = flipV ? -1 : 1;
-        const offsetX = signX * (0.5 - drag.tX) * newW;
-        const offsetY = signY * (0.5 - drag.tY) * newD;
-        const cos0 = Math.cos(drag.angulo0), sin0 = Math.sin(drag.angulo0);
-        d.x = drag.anchorWorld.x + offsetX * cos0 - offsetY * sin0;
-        d.y = drag.anchorWorld.y + offsetX * sin0 + offsetY * cos0;
+        // Espelhar arrastando a alça pra ALÉM da âncora continua possível
+        // (comportamento de sempre, só usado pela forma "imagem" — ver
+        // _drawFormaShape) — comparação de sinal simples (sem nenhuma
+        // divisão), não a causa dos bugs anteriores.
+        const flipH = (drag.sx !== 0 && lx !== 0) ? (Math.sign(lx) !== Math.sign(drag.sx)) : !!d.flipH;
+        const flipV = (drag.sy !== 0 && ly !== 0) ? (Math.sign(ly) !== Math.sign(drag.sy)) : !!d.flipV;
+        const cLx = isVerticalMid ? 0 : (lx === 0 ? 0 : Math.sign(lx)) * newW / 2;
+        const cLy = (isCorner || isVerticalMid) ? (ly === 0 ? 0 : Math.sign(ly)) * newH / 2 : 0;
+        const cosA = Math.cos(drag.angulo0), sinA = Math.sin(drag.angulo0);
+        d.x = drag.anchorWorld.x + cLx * cosA - cLy * sinA;
+        d.y = drag.anchorWorld.y + cLx * sinA + cLy * cosA;
         d.largura = newW;
-        d.profundidade = newD;
+        d.profundidade = newH;
         d.flipH = flipH;
         d.flipV = flipV;
       } else if (drag.kind === 'rotate') {
@@ -11957,12 +11948,50 @@ const MapView = {
    *  explicitamente que aqui seja só "deselecionar") — e fecha o painel de
    *  propriedades, se for dele. Retorna `true` se havia mesmo algo pra
    *  desmarcar (o chamador usa isso pra decidir se deve, ou não, seguir com
-   *  o resto do gesto, ex. começar a desenhar um retículo novo). */
+   *  o resto do gesto, ex. começar a desenhar um retículo novo).
+   *
+   *  BUG CORRIGIDO (06/09/2026), pedido verbatim: "Às vezes, a janela de
+   *  propriedades some e não volta mais. [...] a grade fica travada em
+   *  amarelo [...] nem clicando em uma área vazia ou simplesmente fora do
+   *  retículo [...] ele [é] deselecionado [...] as linhas [ficam] amarelas
+   *  [mesmo depois de] deselecionado." — CAUSA RAIZ (confirmada lendo o
+   *  ciclo de vida inteiro de seleção/painel, código por código): esta
+   *  função só fazia QUALQUER COISA quando `this._formaDraft?.reedit`
+   *  estava vivo — se esse rascunho já tivesse sido finalizado/perdido por
+   *  OUTRO caminho (ex.: `ensureCommitted` chamado pelos botões "Excluir"/
+   *  "Trocar tipo/forma"/"Associar item" do painel de propriedades, ver
+   *  _openObjectPanel, que chama `_finalizeFormaDraft()` diretamente sem
+   *  passar por aqui) enquanto `this._panelEl`/`this._selectedObjectId`/
+   *  `this._renderer.selectedObjectId` CONTINUAVAM apontando pro mesmo
+   *  retículo, esta função retornava `false` sem tocar em NADA — nenhum
+   *  clique seguinte (em área vazia OU em outro retículo, já que
+   *  `_startFormaReedit` também nunca limpava essa sobra — ver lá) jamais
+   *  conseguia mais fechar aquele painel "fantasma" nem apagar a seleção:
+   *  a grade ficava com as linhas amarelas (`selected = obj.id ===
+   *  this.selectedObjectId`, ver Map2DRenderer.render) PARA SEMPRE, mesmo
+   *  sem gizmo e sem painel nenhum realmente representando essa "seleção".
+   *  Corrigido: agora SEMPRE que houver uma seleção de retículo (com OU
+   *  sem reedição/gizmo ainda ativo) — painel aberto para ele, ou só a
+   *  seleção "pintada" presa no renderer — esta função finaliza a reedição
+   *  (se houver) e limpa a seleção por completo, mesmo sem painel vivo
+   *  (senão a variável ficaria presa de novo, exatamente pelo mesmo
+   *  motivo). */
   _deselectReticuloEmProgresso() {
-    if (!this._formaDraft?.reedit) return false;
-    const id = this._formaDraft.reedit.id;
-    this._finalizeFormaDraft();
-    if (this._selectedObjectId === id && this._panelEl) this._closePanel();
+    const reeditId = this._formaDraft?.reedit?.id ?? null;
+    if (reeditId != null) this._finalizeFormaDraft();
+    const selId = this._selectedObjectId ?? this._renderer?.selectedObjectId ?? null;
+    const selObj = selId != null ? (this._map?.objects || []).find((o) => o.id === selId) : null;
+    const eraReticuloSelecionado = reeditId != null || !!(selObj && selObj.reticuloMetrico);
+    if (!eraReticuloSelecionado) return false;
+    if (this._panelEl) {
+      this._closePanel(); // já zera _selectedObjectId/_renderer.selectedObjectId por completo (ver _closePanel)
+    } else {
+      // Sem painel vivo (ex.: só o gizmo estava ativo, sem nunca ter
+      // aberto o painel de propriedades) — limpa a seleção "solta" do
+      // renderer/mapview diretamente, senão fica presa do mesmo jeito.
+      this._selectedObjectId = null;
+      if (this._renderer) this._renderer.selectedObjectId = null;
+    }
     return true;
   },
 
@@ -12000,6 +12029,21 @@ const MapView = {
     if (!this._map || !obj || (obj.forma !== 'retangulo' && obj.forma !== 'poligono' && obj.forma !== 'imagem')) return;
     if (this._elLayerLocked(obj.layerId)) { Utils.toast('🔒 Esta forma está numa camada bloqueada.', { type: 'warn' }); return; }
     if (this._formaDraft) this._finalizeFormaDraft(); // rascunho anterior (se houver) termina primeiro — mesma prioridade de "clicar fora" (ver _onObjectsPointerDown)
+    // BUG CORRIGIDO (06/09/2026), pedido verbatim: "[a grade amarela] não
+    // [é desmarcada] nem clicando em outro retículo" — se sobrou uma
+    // seleção/painel "órfã" de um retículo DIFERENTE deste (ver causa raiz
+    // grande em _deselectReticuloEmProgresso — um painel fechado pela
+    // metade por outro caminho, deixando `_selectedObjectId`/`_renderer.
+    // selectedObjectId` presos), entrar em reedição de UM NOVO retículo
+    // nunca limpava essa sobra — o retículo antigo continuava com a grade
+    // amarela pra sempre, mesmo o usuário conseguindo editar normalmente
+    // este aqui. Fecha/limpa a seleção antiga primeiro, sempre que ela
+    // apontar pra um objeto diferente do que está entrando em reedição
+    // agora (`_openObjectPanel`, chamado logo depois em quem chama esta
+    // função, já vai setar a seleção nova corretamente).
+    if ((this._selectedObjectId && this._selectedObjectId !== obj.id) || (this._renderer && this._renderer.selectedObjectId && this._renderer.selectedObjectId !== obj.id)) {
+      this._closePanel();
+    }
     const orig = { ...obj };
     this._map.objects = (this._map.objects || []).filter((o) => o.id !== obj.id);
     this._formaDraft = {
@@ -13269,6 +13313,27 @@ const MapView = {
   _closePanel() {
     this._panelEl?.remove();
     this._panelEl = null;
+    // BUG CORRIGIDO (05/09/2026), pedido verbatim: "quando se minimiza a
+    // janela de propriedades e, depois, clica-se no botão de 'fechar' dela,
+    // mesmo dando dois cliques em cima de um retículo, ela não volta mais a
+    // aparecer." — causa raiz: `this._objPanelCollapsed` (estado de
+    // "minimizado", ver botão "▾/▸" no cabeçalho/_openObjectPanel) nunca era
+    // resetado por `_closePanel` — só `_ensureObjPanelVisivelECentralizado`
+    // (chamada pelo duplo clique, ver _onCanvasDblClick) desfazia isso,
+    // e só DEPOIS do painel novo já existir no DOM. Minimizar e then fechar
+    // deixava essa flag travada em `true` "vazando" pra fora do ciclo de vida
+    // do painel que a gerou; qualquer reabertura seguinte (inclusive por um
+    // caminho que não passe por _ensureObjPanelVisivelECentralizado — ex.:
+    // um clique único que só reativa o gizmo sem reabrir painel algum,
+    // seguido de qualquer outra reabertura) nascia com o painel já colapsado
+    // (só o cabeçalho visível, ver CSS ".map2d-props-panel.collapsed"),
+    // fácil de confundir com "não aparece". Fechar de vez (✕) é uma ação
+    // mais forte que minimizar — deve sempre devolver o painel ao estado
+    // "normal" (não-colapsado) para a PRÓXIMA vez que for aberto, então a
+    // flag é resetada aqui, incondicionalmente, por qualquer caminho que
+    // passe por _closePanel (✕, clicar fora, Desvincular, trocar de pino
+    // etc. — mesma lista do comentário logo abaixo).
+    this._objPanelCollapsed = false;
     // NOVO (05/09/2026) — roda de rotação/inclinação da foto no mapa (ver
     // _openFotoPinWheel/_closeFotoPinWheel) vive JUNTO com este painel (só
     // faz sentido enquanto uma foto está selecionada pra editar orientação)
@@ -13805,6 +13870,24 @@ const MapView = {
            preview 3D em #fotopin-3dpreview, ver _drawFotoPinPreview. -->
       <div class="fotopin-orient-row">
         <div class="fotopin-orient-controls">
+          <!-- NOVO (05/09/2026), pedido verbatim: "Deve ser possível
+               configurar o valor do snap com números inteiros, tanto na
+               janela de propriedades do orb de foto [...]." — este painel
+               não tinha NENHUM controle de snap antes (só o recorte da roda
+               de "Marcar aqui", ver _openFotoPinWheel); campo novo, mesmo
+               par toggle+valor de lá — liga/desliga em
+               this._fotoPinRotSnapAtivo e o passo em
+               this._fotoPinRotSnapValor (estado COMPARTILHADO entre os
+               dois lugares, sessão apenas — mesma flag, então ligar/mudar
+               aqui já reflete na roda de "Marcar aqui" e vice-versa). -->
+          <label class="map-panel-field fotopin-snap-field" title="Encaixar o ângulo dos botões ◄► abaixo (e do arrasto na roda de 'Marcar aqui') em passos do valor ao lado — desligado, os botões variam de 1 em 1 grau.">
+            <span>🧲 Snap de rotação</span>
+            <span class="fotopin-snap-controls">
+              <button type="button" class="map2d-fotopin-wheel-snap15" id="fotopin-snap-toggle"></button>
+              <input type="number" id="fotopin-snap-valor" min="1" step="1">
+              <span>°</span>
+            </span>
+          </label>
           <div class="map-panel-field"><span>Direção (giro em Y)</span><div id="fotopin-dir-widget"></div></div>
           <div class="map-panel-field"><span>Inclinação (perpendicular)</span><div id="fotopin-perp-widget"></div></div>
         </div>
@@ -13906,17 +13989,52 @@ const MapView = {
       const v = parseFloat(String(e.target.value).replace(',', '.'));
       salvarOrientacao({ mapaAltura: isNaN(v) ? 0 : v });
     };
-    const PASSO_GRAUS = 15; // mesmo passo de sempre deste painel (botões E arrasto — ver comentário grande acima)
-    const dirWidget = ModelerUI._createNumField({
-      label: 'Direção', value: Math.round((pin.dirAngulo || 0) * 180 / Math.PI), step: PASSO_GRAUS, formatMode: 'rotation', suffix: '°',
-      onCommit: (graus) => salvarOrientacao({ mapaDirAngulo: graus * Math.PI / 180 }),
-    });
-    panel.querySelector('#fotopin-dir-widget').appendChild(dirWidget.el);
-    const perpWidget = ModelerUI._createNumField({
-      label: 'Inclinação', value: Math.round((pin.rotPerp || 0) * 180 / Math.PI), step: PASSO_GRAUS, formatMode: 'rotation', suffix: '°',
-      onCommit: (graus) => salvarOrientacao({ mapaRotPerp: graus * Math.PI / 180 }),
-    });
-    panel.querySelector('#fotopin-perp-widget').appendChild(perpWidget.el);
+    // ATUALIZADO (05/09/2026), pedido verbatim: "Deve ser possível
+    // configurar o valor do snap com números inteiros [...]. Ao desligar o
+    // snap, os botões triplos de definição das rotações, também, devem
+    // variar normalmente [...]. Passam a variar em 1 grau." — MESMO estado
+    // compartilhado (sessão apenas) usado pela roda de "Marcar aqui" (ver
+    // _openFotoPinWheel/passoAtualGraus): `this._fotoPinRotSnapAtivo`
+    // (liga/desliga) e `this._fotoPinRotSnapValor` (inteiro, graus). O passo
+    // dos 2 widgets ◄► é fixado na CRIAÇÃO deles (ModelerUI._createNumField
+    // não expõe um jeito de trocar depois) — por isso, como na roda,
+    // `criarWidgets()` destrói e recria os 2 sempre que o snap muda.
+    this._fotoPinRotSnapAtivo = this._fotoPinRotSnapAtivo !== false;
+    this._fotoPinRotSnapValor = Math.max(1, Math.round(this._fotoPinRotSnapValor || 15));
+    const dirWidgetHost = panel.querySelector('#fotopin-dir-widget');
+    const perpWidgetHost = panel.querySelector('#fotopin-perp-widget');
+    const snapToggleBtn = panel.querySelector('#fotopin-snap-toggle');
+    const snapValorInput = panel.querySelector('#fotopin-snap-valor');
+    let dirWidget = null, perpWidget = null;
+    const atualizarSnapUI = () => {
+      snapToggleBtn.textContent = '🧲';
+      snapToggleBtn.classList.toggle('active', this._fotoPinRotSnapAtivo);
+      snapToggleBtn.title = `Encaixar o ângulo dos botões ◄► (e o arrasto na roda de 'Marcar aqui'): ${this._fotoPinRotSnapAtivo ? 'LIGADO' : 'DESLIGADO'} — desligado, os botões variam de 1 em 1 grau.`;
+      snapValorInput.value = this._fotoPinRotSnapValor;
+    };
+    const criarWidgets = () => {
+      const passo = this._fotoPinRotSnapAtivo ? this._fotoPinRotSnapValor : 1;
+      dirWidgetHost.innerHTML = '';
+      perpWidgetHost.innerHTML = '';
+      dirWidget = ModelerUI._createNumField({
+        label: 'Direção', value: Math.round((pin.dirAngulo || 0) * 180 / Math.PI), step: passo, formatMode: 'rotation', suffix: '°',
+        onCommit: (graus) => salvarOrientacao({ mapaDirAngulo: graus * Math.PI / 180 }),
+      });
+      dirWidgetHost.appendChild(dirWidget.el);
+      perpWidget = ModelerUI._createNumField({
+        label: 'Inclinação', value: Math.round((pin.rotPerp || 0) * 180 / Math.PI), step: passo, formatMode: 'rotation', suffix: '°',
+        onCommit: (graus) => salvarOrientacao({ mapaRotPerp: graus * Math.PI / 180 }),
+      });
+      perpWidgetHost.appendChild(perpWidget.el);
+    };
+    atualizarSnapUI();
+    criarWidgets();
+    snapToggleBtn.onclick = () => { this._fotoPinRotSnapAtivo = !this._fotoPinRotSnapAtivo; atualizarSnapUI(); criarWidgets(); };
+    snapValorInput.onchange = () => {
+      this._fotoPinRotSnapValor = Math.max(1, Math.round(parseFloat(snapValorInput.value) || 15));
+      atualizarSnapUI();
+      criarWidgets();
+    };
     const previewCanvas = panel.querySelector('#fotopin-3dpreview');
     this._drawFotoPinPreview(previewCanvas, pin.dirAngulo || 0, pin.rotPerp || 0);
     // NOVO (03/09/2026) — arrastar-pra-orbitar (ver comentário grande em
@@ -14069,29 +14187,41 @@ const MapView = {
     // MESMO estilo original) pra Direção, verde (linha mais curta + seta na
     // ponta) pra Inclinação — os dois sempre visíveis ao mesmo tempo,
     // cada um refletindo seu próprio ângulo salvo (ver atualizarMarcador).
-    // NOVO (05/09/2026), pedido verbatim: "Ao lado do botão de troca de
-    // rotação (que troca entre rotação em torno de y e rotação de
-    // inclinação), deve haver um toggle para o snap de 15 graus (para
-    // ativar/desativar). Por padrão fica habilitado." Campo escolhido:
-    // `this._fotoPinRotSnap15` (sessão apenas, sem persistência — mesmo
-    // padrão já usado por outros toggles de UMA ferramenta/tela específica
-    // no arquivo, ex. `_reticuloAutoApply`/`_wallSnapEnabled`, nenhum dos
-    // quais persiste em DB.getSetting; só as preferências de CONFIGURAÇÃO
-    // GERAL do mapa 2D — grade/réguas/snap da grade — usam DB.getSetting/
-    // setSetting). `!== false` trata "nunca definido ainda" como LIGADO
-    // (padrão pedido), e persiste só enquanto o mapa 2D continuar aberto
-    // nesta sessão (reabrir o app volta ao padrão ligado).
-    this._fotoPinRotSnap15 = this._fotoPinRotSnap15 !== false;
+    // ATUALIZADO (05/09/2026), pedido verbatim: "Deve ser possível
+    // configurar o valor do snap com números inteiros [...]. Ao desligar o
+    // snap, os botões triplos de definição das rotações, também, devem
+    // variar normalmente (sem a submissão ao snap). Passam a variar em 1
+    // grau." — o toggle booleano "🧲 15°" de uma rodada anterior (campo
+    // `this._fotoPinRotSnap15`) virou DOIS campos: `this._fotoPinRotSnapAtivo`
+    // (liga/desliga — MESMO papel de `_fotoPinRotSnap15`, só renomeado pra
+    // deixar claro que agora é independente do VALOR) e
+    // `this._fotoPinRotSnapValor` (inteiro, graus, padrão 15 — o passo em si,
+    // agora editável). MIGRAÇÃO (pro changelog): `_fotoPinRotSnap15` não
+    // existe mais; nenhuma persistência em DB envolvida (sempre foi só
+    // sessão, mesmo padrão de `_reticuloAutoApply`/`_wallSnapEnabled` — ver
+    // comentário original abaixo), então não há dado antigo pra migrar de
+    // verdade. `!== false`/`|| 15` tratam "nunca definido ainda" como
+    // LIGADO/15° (mesmo padrão de sempre).
+    this._fotoPinRotSnapAtivo = this._fotoPinRotSnapAtivo !== false;
+    this._fotoPinRotSnapValor = Math.max(1, Math.round(this._fotoPinRotSnapValor || 15));
     el.innerHTML = [
-      // NOVO (05/09/2026) — botão de modo + toggle "Snap 15°" lado a lado
-      // (pedido verbatim: "ao lado do botão de troca de rotação... deve
-      // haver um toggle") — precisam de um wrapper em ROW porque
-      // `.map2d-fotopin-wheel` (o pai deles) é uma coluna flex (ver CSS);
-      // sem o wrapper, os dois empilhariam um embaixo do outro em vez de
-      // ficarem lado a lado.
+      // ATUALIZADO (06/09/2026), pedido verbatim: "deixe o snap como estava
+      // antes (apenas o valor ali unido ao ícone). A configuração dele, deve
+      // ficar junto com os outros dois botões: 'Direção (giro em Y)' e
+      // 'Inclinação (perpendicular)'." — a rodada anterior (05/09) tinha
+      // colocado o snap aqui em cima, ao lado do botão de modo, como DOIS
+      // elementos separados (um botão-toggle "🧲" + um `<input>` numérico ao
+      // lado, com visual de toggle+campo bem distintos — ver CSS
+      // `.map2d-fotopin-wheel-snap15`/`-snap-valor` antigas). Removido daqui
+      // — este `.toprow` agora só tem o botão de modo — e movido pra dentro
+      // do recorte (`#map2d-fotopin-wheel-cutout`, ver abaixo), junto dos
+      // outros dois campos, como UM controle compacto só (ícone+valor
+      // fundidos visualmente, sem parecer um toggle separado do campo — ver
+      // `.map2d-fotopin-wheel-snap-compact` no CSS) — a funcionalidade
+      // (clicar no ícone liga/desliga o snap; o número continua editável)
+      // não mudou, só a apresentação visual e o lugar.
       '<div class="map2d-fotopin-wheel-toprow">',
       '<button type="button" class="map2d-fotopin-wheel-mode" id="map2d-fotopin-wheel-mode" title="Alternar entre \'Direção (giro em Y)\' e \'Inclinação\' - o que a roda ao lado controla no momento">🔄</button>',
-      `<button type="button" class="map2d-fotopin-wheel-snap15 ${this._fotoPinRotSnap15 ? 'active' : ''}" id="map2d-fotopin-wheel-snap15" title="Encaixar o ângulo em passos de 15° ao arrastar ('Definir rotações'): ${this._fotoPinRotSnap15 ? 'LIGADO' : 'DESLIGADO'} — desligado, o ângulo fica livre.">🧲 15°</button>`,
       '</div>',
       '<div class="map2d-fotopin-wheel-dial" id="map2d-fotopin-wheel-dial" title="Ângulo atual - toque fora do botão para ver/ajustar por número">',
       '<div class="map2d-fotopin-wheel-marker marker-dir" id="map2d-fotopin-wheel-marker-dir"></div>',
@@ -14102,6 +14232,14 @@ const MapView = {
       '<div class="map2d-fotopin-wheel-cutout hidden" id="map2d-fotopin-wheel-cutout">',
       '<div class="map-panel-field"><span>Direção (giro em Y)</span><div id="map2d-fotopin-wheel-dir-widget"></div></div>',
       '<div class="map-panel-field"><span>Inclinação (perpendicular)</span><div id="map2d-fotopin-wheel-perp-widget"></div></div>',
+      '<div class="map-panel-field">',
+      '<span>Encaixe (snap)</span>',
+      `<span class="map2d-fotopin-wheel-snap-compact ${this._fotoPinRotSnapAtivo ? 'active' : ''}" title="Encaixar o ângulo ao arrastar ('Definir rotações') e nos botões ◄►: ${this._fotoPinRotSnapAtivo ? 'LIGADO' : 'DESLIGADO'} — toque no ícone pra ligar/desligar; desligado, o ângulo varia livre (1 em 1 grau nos botões ◄►).">`,
+      '<button type="button" id="map2d-fotopin-wheel-snap15">🧲</button>',
+      `<input type="number" id="map2d-fotopin-wheel-snap-valor" min="1" step="1" value="${this._fotoPinRotSnapValor}" title="Valor do snap, em graus inteiros (ex.: 15)">`,
+      '<span class="deg">°</span>',
+      '</span>',
+      '</div>',
       '</div>',
     ].join('');
     wrap.appendChild(el);
@@ -14109,6 +14247,7 @@ const MapView = {
     this._fotoPinWheelMode = this._fotoPinWheelMode || 'dir'; // 'dir' (rotação em Y) | 'tilt' (inclinação) — lembra o último modo usado enquanto o mapa continuar aberto
     const modeBtn = el.querySelector('#map2d-fotopin-wheel-mode');
     const snap15Btn = el.querySelector('#map2d-fotopin-wheel-snap15');
+    const snapValorInput = el.querySelector('#map2d-fotopin-wheel-snap-valor');
     const dial = el.querySelector('#map2d-fotopin-wheel-dial');
     const markerDir = el.querySelector('#map2d-fotopin-wheel-marker-dir');
     const markerTilt = el.querySelector('#map2d-fotopin-wheel-marker-tilt');
@@ -14123,9 +14262,25 @@ const MapView = {
     // ativo (ver ativarDefinir/desativarDefinir).
     const previewBox = document.createElement('div');
     previewBox.className = 'map2d-fotopin-wheel-previewbox hidden';
-    previewBox.innerHTML = '<canvas id="map2d-fotopin-wheel-previewbox-canvas" width="112" height="112"></canvas><span class="fotopin-orient-preview-label">Preview 3D</span>';
+    // NOVO (05/09/2026), pedido verbatim: "Na janelinha do preview, no canto
+    // inferior esquerdo, deve ter um pequeno botão que ativa/desativa o
+    // 'giro livre' [...] ou o 'giro atrelado às rotações a serem
+    // definidas'." — botão dentro de um wrapper próprio (`-canvaswrap`,
+    // `position:relative` — ver CSS) só em volta do CANVAS (não do rótulo
+    // "Preview 3D" abaixo dele), pra poder ancorar o botão no canto
+    // inferior-ESQUERDO do canvas em si via `position:absolute` (ver
+    // _wireFotoPinPreviewOrbit/redesenharPreview mais abaixo pro
+    // comportamento dos 2 modos).
+    previewBox.innerHTML = [
+      '<div class="map2d-fotopin-wheel-previewbox-canvaswrap">',
+      '<canvas id="map2d-fotopin-wheel-previewbox-canvas" width="112" height="112"></canvas>',
+      '<button type="button" class="map2d-fotopin-wheel-orbit-toggle" id="map2d-fotopin-wheel-orbit-toggle"></button>',
+      '</div>',
+      '<span class="fotopin-orient-preview-label">Preview 3D</span>',
+    ].join('');
     wrap.appendChild(previewBox);
     const previewCanvas = previewBox.querySelector('canvas');
+    const orbitToggleBtn = previewBox.querySelector('#map2d-fotopin-wheel-orbit-toggle');
 
     // BUG CORRIGIDO (03-05/09/2026), pedido verbatim (nesta rodada): "Ao
     // clicar e arrastar no preview, deve interagir com ele, ou seja, mudar
@@ -14151,10 +14306,60 @@ const MapView = {
     // verbatim) e `opts.getOrbit` (o estado a mutar, em vez do padrão fixo
     // `this._fotoPinPreviewOrbit`).
     let wheelPreviewOrbit = null;
+    // BUG CORRIGIDO (05/09/2026), pedido verbatim: "Atualmente, fica
+    // atrelado às rotações a serem definidas e, uma vez clicando e
+    // arrastando para mover a perspectiva do preview, fica permanentemente
+    // no 'giro livre'. E acaba por não voltar ao 'giro atrelado às rotações
+    // a serem definidas'." Causa raiz: `wheelPreviewOrbit` (o estado do
+    // "giro livre") nascia `null` (= modo atrelado, usa `orbitPreviewBox()`
+    // ao vivo) mas, assim que o 1º arrasto acontecia, virava um objeto
+    // {yaw,pitch} PERMANENTE — nunca mais voltava a `null`, e nada no
+    // código sequer CONSULTAVA esse estado pra decidir entre os 2 modos: uma
+    // vez arrastado, `redesenharPreview` (ver `wheelPreviewOrbit ||
+    // orbitPreviewBox()` de antes) sempre preferia o valor não-nulo, pra
+    // sempre. Corrigido com um modo EXPLÍCITO (`modoOrbitLivre`, boolean,
+    // padrão `false` = atrelado) que só o botão novo (canto inferior-
+    // esquerdo do preview, ver HTML acima) muda — nunca o arrasto em si.
+    // `redesenharPreview` agora escolhe com base NESSE estado (não mais só
+    // em `wheelPreviewOrbit` ser nulo ou não) e o próprio arrasto
+    // (`_wireFotoPinPreviewOrbit`, `opts.isLivre` novo) só tem efeito
+    // enquanto o modo já estiver em "livre" — no modo "atrelado", arrastar o
+    // preview não faz mais nada (a câmera é 100% automática).
+    let modoOrbitLivre = false;
+    const atualizarOrbitToggleBtn = () => {
+      orbitToggleBtn.textContent = modoOrbitLivre ? '🔓 Livre' : '🎯 Atrelado';
+      orbitToggleBtn.classList.toggle('active', modoOrbitLivre);
+      orbitToggleBtn.title = modoOrbitLivre
+        ? "Giro do preview: LIVRE — arraste o preview pra orbitar a câmera manualmente. Toque pra voltar a 'Atrelado'."
+        : "Giro do preview: ATRELADO — a câmera segue automaticamente o ângulo sendo definido/arrastado no mapa. Toque pra soltar em 'Livre' (arrastar o preview orbita a câmera manualmente).";
+      // Cursor "grab" só faz sentido quando arrastar de fato orbita algo —
+      // no modo "atrelado" (arrasto bloqueado, ver `opts.isLivre` em
+      // _wireFotoPinPreviewOrbit), o cursor padrão evita sugerir uma
+      // interação que não vai ter efeito nenhum.
+      previewCanvas.style.cursor = modoOrbitLivre ? 'grab' : 'default';
+    };
+    orbitToggleBtn.onclick = () => { modoOrbitLivre = !modoOrbitLivre; atualizarOrbitToggleBtn(); redesenharPreview(); };
     this._wireFotoPinPreviewOrbit(previewCanvas, () => redesenharPreview(), {
       buttons: [0, 1],
+      isLivre: () => modoOrbitLivre,
       getOrbit: () => (wheelPreviewOrbit = wheelPreviewOrbit || { ...orbitPreviewBox() }),
+      // NOVO (06/09/2026), pedido verbatim: "o simples clicar ali na
+      // janelinha já deve definir automaticamente como livre" — chamado
+      // pelo pointerdown do preview (ver _wireFotoPinPreviewOrbit) ANTES de
+      // começar a arrastar, só quando ainda estava "atrelado".
+      onAutoLivre: () => { modoOrbitLivre = true; atualizarOrbitToggleBtn(); },
+      // NOVO (06/09/2026), pedido verbatim: "Ao clicar na janelinha, habilite
+      // o cursor infinito" — só esta roda pequena (ver
+      // _wireFotoPinPreviewOrbit); o preview grande do painel de
+      // propriedades não pediu isso, continua sem Pointer Lock.
+      infiniteCursor: true,
     });
+    // Chamado DEPOIS de `_wireFotoPinPreviewOrbit` de propósito — aquela
+    // função também seta `canvas.style.cursor='grab'` (valor inicial fixo,
+    // sem saber do modo "atrelado"/"livre" de cima); chamar depois garante
+    // que o cursor final reflita o modo padrão ("atrelado" → cursor normal),
+    // não o "grab" genérico da função de baixo.
+    atualizarOrbitToggleBtn();
 
     // NOVO (05/09/2026), pedido verbatim: "Um texto de auxílio deve ser
     // exibido em algum lugar informando que está habilitado a definição das
@@ -14200,7 +14405,17 @@ const MapView = {
     // cache, ver `anguloAtual`/`redesenharPreview`).
     let fotoCache = null;
     const lerFoto = async () => { fotoCache = await DB.getAmbientePhoto(photoId); return fotoCache; };
-    const PASSO_GRAUS = 15; // mesmo passo dos 3 botõezinhos (_openFotoPinPopover) — arrastar também "encaixa" de 15 em 15°, pra bater com os outros controles
+    // ATUALIZADO (05/09/2026), pedido verbatim: "Ao desligar o snap, os
+    // botões triplos de definição das rotações, também, devem variar
+    // normalmente (sem a submissão ao snap). Passam a variar em 1 grau." —
+    // `PASSO_GRAUS` (constante fixa em 15°) virou esta função: com o snap
+    // LIGADO, o passo dos botões ◄► (e o encaixe do arrasto, ver
+    // `onMapPointerMove` abaixo) é `this._fotoPinRotSnapValor` (agora
+    // configurável, ver `snapValorInput`); DESLIGADO, os botões ◄► passam a
+    // variar de 1 EM 1 grau (pedido verbatim) — o arrasto em si, desligado,
+    // continua livre/contínuo (nenhum arredondamento, ver `encaixado` mais
+    // abaixo — "desligado, o ângulo fica livre", comportamento de sempre).
+    const passoAtualGraus = () => (this._fotoPinRotSnapAtivo ? this._fotoPinRotSnapValor : 1);
     const anguloAtual = () => {
       if (!fotoCache) return 0;
       return this._fotoPinWheelMode === 'tilt' ? (fotoCache.mapaRotPerp || 0) : (fotoCache.mapaDirAngulo || 0);
@@ -14222,13 +14437,30 @@ const MapView = {
     // não arrastou o preview pra orbitar (ver `wheelPreviewOrbit`/
     // redesenharPreview logo abaixo); depois do 1º arrasto, a câmera fica
     // livre (como o preview grande) até fechar/reabrir a roda.
+    // BUG CORRIGIDO (06/09/2026), pedido verbatim: "Na janelinha do preview,
+    // o giro em y está 180 graus a frente do que deveria. Além de ser a
+    // vista de baixo para cima (no atrelado), deveria ser a vista de cima
+    // para baixo." — causa raiz: a câmera fixa do modo "Direção" (atrelado,
+    // vista de topo) usava `pitch: Math.PI/2` (+90°), que olha o cenário de
+    // BAIXO pra CIMA (pedido: deveria ser o oposto); ajustado o SINAL do
+    // pitch (180° de diferença, exatamente como o usuário descreveu) pra
+    // `-Math.PI/2`, olhando de CIMA pra BAIXO. Modo Inclinação (`tilt`,
+    // pitch:0, vista de perfil) não tem "cima/baixo" — não é afetado por
+    // este bug nem por esta correção.
     const orbitPreviewBox = () => {
       const dirAngulo = fotoCache?.mapaDirAngulo || 0;
       if (this._fotoPinWheelMode === 'tilt') return { yaw: Math.PI / 2 - dirAngulo, pitch: 0 };
-      return { yaw: 0, pitch: Math.PI / 2 };
+      return { yaw: 0, pitch: -Math.PI / 2 };
     };
     const redesenharPreview = () => {
-      if (previewCanvas) this._drawFotoPinPreview(previewCanvas, fotoCache?.mapaDirAngulo || 0, fotoCache?.mapaRotPerp || 0, wheelPreviewOrbit || orbitPreviewBox());
+      // BUG CORRIGIDO (05/09/2026) — ver comentário grande em
+      // `modoOrbitLivre`/`orbitToggleBtn` acima: no modo "atrelado" (padrão),
+      // SEMPRE usa a câmera automática (`orbitPreviewBox()`, ao vivo),
+      // ignorando qualquer `wheelPreviewOrbit` de um arrasto anterior — só
+      // no modo "livre" (ligado explicitamente pelo botão) é que o valor
+      // arrastado (`wheelPreviewOrbit`) é usado.
+      const orbitAtual = modoOrbitLivre ? (wheelPreviewOrbit || orbitPreviewBox()) : orbitPreviewBox();
+      if (previewCanvas) this._drawFotoPinPreview(previewCanvas, fotoCache?.mapaDirAngulo || 0, fotoCache?.mapaRotPerp || 0, orbitAtual);
       dirWidget?.setValue(Math.round((fotoCache?.mapaDirAngulo || 0) * 180 / Math.PI));
       perpWidget?.setValue(Math.round((fotoCache?.mapaRotPerp || 0) * 180 / Math.PI));
       // Se o painel GRANDE de propriedades também estiver aberto pra esta
@@ -14292,8 +14524,13 @@ const MapView = {
       helpEl.classList.remove('hidden');
       const tilt = this._fotoPinWheelMode === 'tilt';
       helpIcon.className = 'icon ' + (tilt ? 'tilt' : 'dir');
+      // NOVO (05/09/2026), pedido verbatim: "A informação textual sobre a
+      // definição da inclinação, deve aparecer, além do que já está, a
+      // informação de que a referência de 0 grau é a direita da cruz no
+      // centro da tela." — complementa o texto já existente (mantido:
+      // "Inclinação (horizonte)"), só acrescenta a referência de 0°.
       helpTxt.textContent = tilt
-        ? 'Definindo rotação: Inclinação (horizonte)'
+        ? 'Definindo rotação: Inclinação (0° = horizonte, à direita da cruz)'
         : 'Definindo rotação: Direção (vista de cima)';
     };
     modeBtn.onclick = () => {
@@ -14311,14 +14548,37 @@ const MapView = {
       // sem `definindo`, não existe linha tracejada nenhuma na tela.
       if (definindo) atualizarTracejadoImediato();
     };
-    // NOVO (05/09/2026), pedido verbatim: "deve haver um toggle para o
-    // snap de 15 graus (para ativar/desativar)." — só alterna a flag e
-    // atualiza a aparência do próprio botão; o efeito de verdade (arredondar
-    // ou não o ângulo durante o arrasto) mora em `onMapPointerMove`, ver lá.
+    // ATUALIZADO (05/09/2026), pedido verbatim: "deve haver um toggle para o
+    // snap [...] (para ativar/desativar)." — alterna a flag, atualiza a
+    // aparência do botão E recria os 2 widgets ◄►/valor com o passo novo
+    // (1° desligado — ver `criarWidgets`/`passoAtualGraus`); o efeito no
+    // ARRASTO (arredondar ou não o ângulo) mora em `onMapPointerMove`/
+    // `anguloEncaixado`, ver lá — chamado de novo aqui só porque muda o
+    // `title` do botão, que também depende do estado ligado/desligado.
+    // ATUALIZADO (06/09/2026) — `.active` agora vai no wrapper compacto
+    // (`.map2d-fotopin-wheel-snap-compact`, ícone+valor fundidos — ver HTML/
+    // CSS), não mais no botão isolado (não existe mais como elemento visual
+    // à parte).
+    const snapCompactEl = snap15Btn.closest('.map2d-fotopin-wheel-snap-compact');
     snap15Btn.onclick = () => {
-      this._fotoPinRotSnap15 = !this._fotoPinRotSnap15;
-      snap15Btn.classList.toggle('active', this._fotoPinRotSnap15);
-      snap15Btn.title = `Encaixar o ângulo em passos de 15° ao arrastar ('Definir rotações'): ${this._fotoPinRotSnap15 ? 'LIGADO' : 'DESLIGADO'} — desligado, o ângulo fica livre.`;
+      this._fotoPinRotSnapAtivo = !this._fotoPinRotSnapAtivo;
+      const titulo = `Encaixar o ângulo ao arrastar ('Definir rotações') e nos botões ◄►: ${this._fotoPinRotSnapAtivo ? 'LIGADO' : 'DESLIGADO'} — toque no ícone pra ligar/desligar; desligado, o ângulo varia livre (1 em 1 grau nos botões ◄►).`;
+      snapCompactEl?.classList.toggle('active', this._fotoPinRotSnapAtivo);
+      if (snapCompactEl) snapCompactEl.title = titulo;
+      criarWidgets();
+    };
+    // NOVO (05/09/2026), pedido verbatim: "Deve ser possível configurar o
+    // valor do snap com números inteiros [...] no recorte dela feito para a
+    // tela de vinculação da posição da foto tirada no mapa." — campo
+    // numérico ao lado do toggle (ver HTML/`snapValorInput` acima); grava em
+    // `this._fotoPinRotSnapValor` (inteiro, mínimo 1 — valores não-inteiros
+    // ou menores que 1 são arredondados/clampados pro mínimo válido) e recria
+    // os 2 widgets ◄►/valor com o passo novo.
+    snapValorInput.onchange = () => {
+      const v = Math.max(1, Math.round(parseFloat(snapValorInput.value) || 15));
+      this._fotoPinRotSnapValor = v;
+      snapValorInput.value = v;
+      criarWidgets();
     };
 
     // -------- "🎯 Definir rotações" -- arrasto NA TELA DO MAPA (não mais
@@ -14368,28 +14628,40 @@ const MapView = {
     // não muda (0°=topo/norte, como sempre).
     const valorParaModo = (angRaw) => (this._fotoPinWheelMode === 'tilt' ? angRaw - Math.PI / 2 : angRaw);
     const angRawParaModo = (valor) => (this._fotoPinWheelMode === 'tilt' ? valor + Math.PI / 2 : valor);
+    // NOVO (05/09/2026), pedido verbatim: "deve haver um toggle para o
+    // snap de 15 graus (para ativar/desativar). Por padrão fica
+    // habilitado." — antes disto, o encaixe de 15° rodava SEMPRE, sem
+    // nenhuma forma de desligar; agora só arredonda quando
+    // `this._fotoPinRotSnapAtivo` estiver ligado (ver snap15Btn.onclick
+    // abaixo) — desligado, o ângulo usado é o "cru" (`valor`), livre.
+    // Extraída pra função própria (antes só existia dentro de
+    // `onMapPointerMove`) — BUG CORRIGIDO (05/09/2026), pedido verbatim: "a
+    // linha tracejada [...] deve se submeter ao snap também, quando ele
+    // estiver habilitado." Causa raiz: `desenharTracejado` (tanto aqui
+    // quanto em `onMapPointerDown`) sempre usava `angRaw` (o ângulo CRU, do
+    // dedo/mouse de verdade) — o valor ENCAIXADO só era calculado DEPOIS,
+    // só pro rótulo numérico/gravação — a linha tracejada nunca refletia o
+    // snap, mesmo com ele ligado. Agora ambos os pontos de desenho usam o
+    // MESMO ângulo (já encaixado, se for o caso) que acaba sendo salvo.
+    const anguloEncaixado = (angRaw) => {
+      const valor = valorParaModo(angRaw);
+      const passoRad = passoAtualGraus() * Math.PI / 180;
+      return this._fotoPinRotSnapAtivo ? Math.round(valor / passoRad) * passoRad : valor;
+    };
     const onMapPointerDown = (e) => {
       if (!definindo) return;
       mapDragging = true;
       try { this._renderer.canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignorado */ }
       const { angRaw, cx, cy } = anguloDoEventoMapa(e);
-      desenharTracejado(cx, cy, angRaw);
+      desenharTracejado(cx, cy, angRawParaModo(anguloEncaixado(angRaw)));
       e.preventDefault();
       e.stopPropagation();
     };
     const onMapPointerMove = (e) => {
       if (!definindo || !mapDragging) return;
       const { angRaw, cx, cy } = anguloDoEventoMapa(e);
-      desenharTracejado(cx, cy, angRaw);
-      const valor = valorParaModo(angRaw);
-      // NOVO (05/09/2026), pedido verbatim: "deve haver um toggle para o
-      // snap de 15 graus (para ativar/desativar). Por padrão fica
-      // habilitado." — antes disto, o encaixe de 15° rodava SEMPRE, sem
-      // nenhuma forma de desligar; agora só arredonda quando
-      // `this._fotoPinRotSnap15` estiver ligado (ver snap15Btn.onclick
-      // abaixo) — desligado, o ângulo usado é o "cru" (`valor`), livre.
-      const passoRad = PASSO_GRAUS * Math.PI / 180;
-      const encaixado = this._fotoPinRotSnap15 ? Math.round(valor / passoRad) * passoRad : valor;
+      const encaixado = anguloEncaixado(angRaw);
+      desenharTracejado(cx, cy, angRawParaModo(encaixado));
       const graus = Math.round((encaixado * 180 / Math.PI + 360) % 360);
       const tilt = this._fotoPinWheelMode === 'tilt';
       const marker = tilt ? markerTilt : markerDir;
@@ -14457,17 +14729,36 @@ const MapView = {
     // Widgets de 3 botões (◄valor►) — MESMO componente/passo do painel
     // grande (_openFotoPinPopover), dentro do recorte desta roda — editar
     // por aqui grava pelo MESMO `salvar` da roda (marcador/preview
-    // acompanham na hora).
-    const dirWidget = ModelerUI._createNumField({
-      label: 'Direção', value: 0, step: PASSO_GRAUS, formatMode: 'rotation', suffix: '°',
-      onCommit: (graus) => { const rad = graus * Math.PI / 180; if (this._fotoPinWheelMode !== 'dir') { this._fotoPinWheelMode = 'dir'; atualizarModoUI(); } salvar(rad); atualizarMarcador(); },
-    });
-    el.querySelector('#map2d-fotopin-wheel-dir-widget').appendChild(dirWidget.el);
-    const perpWidget = ModelerUI._createNumField({
-      label: 'Inclinação', value: 0, step: PASSO_GRAUS, formatMode: 'rotation', suffix: '°',
-      onCommit: (graus) => { const rad = graus * Math.PI / 180; if (this._fotoPinWheelMode !== 'tilt') { this._fotoPinWheelMode = 'tilt'; atualizarModoUI(); } salvar(rad); atualizarMarcador(); },
-    });
-    el.querySelector('#map2d-fotopin-wheel-perp-widget').appendChild(perpWidget.el);
+    // acompanham na hora). ATUALIZADO (05/09/2026), pedido verbatim: "Ao
+    // desligar o snap, os botões triplos de definição das rotações, também,
+    // devem variar normalmente [...]. Passam a variar em 1 grau." — o passo
+    // (`step`) destes 2 widgets é fixado na CRIAÇÃO deles pelo componente
+    // (`ModelerUI._createNumField` não expõe um jeito de trocar o passo de
+    // um widget já criado) — por isso, em vez de criar só uma vez, isto foi
+    // extraído pra `criarWidgets()`, chamada de novo (destruindo e recriando
+    // os 2 `<div>`s) toda vez que o snap liga/desliga ou o valor configurado
+    // muda (ver snap15Btn.onclick/snapValorInput.onchange abaixo) — sempre
+    // com o passo ATUAL (`passoAtualGraus()`) e o valor salvo mais recente
+    // (do `fotoCache`, pra não perder o ângulo ao recriar).
+    const dirWidgetHost = el.querySelector('#map2d-fotopin-wheel-dir-widget');
+    const perpWidgetHost = el.querySelector('#map2d-fotopin-wheel-perp-widget');
+    let dirWidget = null, perpWidget = null;
+    const criarWidgets = () => {
+      const passo = passoAtualGraus();
+      dirWidgetHost.innerHTML = '';
+      perpWidgetHost.innerHTML = '';
+      dirWidget = ModelerUI._createNumField({
+        label: 'Direção', value: Math.round((fotoCache?.mapaDirAngulo || 0) * 180 / Math.PI), step: passo, formatMode: 'rotation', suffix: '°',
+        onCommit: (graus) => { const rad = graus * Math.PI / 180; if (this._fotoPinWheelMode !== 'dir') { this._fotoPinWheelMode = 'dir'; atualizarModoUI(); } salvar(rad); atualizarMarcador(); },
+      });
+      dirWidgetHost.appendChild(dirWidget.el);
+      perpWidget = ModelerUI._createNumField({
+        label: 'Inclinação', value: Math.round((fotoCache?.mapaRotPerp || 0) * 180 / Math.PI), step: passo, formatMode: 'rotation', suffix: '°',
+        onCommit: (graus) => { const rad = graus * Math.PI / 180; if (this._fotoPinWheelMode !== 'tilt') { this._fotoPinWheelMode = 'tilt'; atualizarModoUI(); } salvar(rad); atualizarMarcador(); },
+      });
+      perpWidgetHost.appendChild(perpWidget.el);
+    };
+    criarWidgets();
     this._fotoPinWheelCleanup = () => {
       desativarDefinir();
       mapCanvas?.removeEventListener('pointerdown', onMapPointerDown);
@@ -14625,9 +14916,26 @@ const MapView = {
     // Inclinação controla), sem alterar em nada a "sombra" no chão (que já
     // só depende de `dirAngulo`, ver `pontaChao` abaixo) nem o
     // comportamento já correto da Direção (`dirAngulo` não muda aqui).
+    // BUG CORRIGIDO (05/09/2026), pedido verbatim: "O 0 grau da rotação em y
+    // deve ser no norte [já é, ver fix de FASE logo acima]. Atualmente, o
+    // giro do preview está girando ao contrário [agora é de SENTIDO, não de
+    // fase]." Causa raiz: MESMA categoria de bug já corrigida pra
+    // Inclinação (ver `rotX(dir, -(rotPerp...))` acima) — o sinal do ângulo
+    // alimentado em `rotY` não batia com o sentido de giro esperado. Ground
+    // truth já documentado no comentário grande de `_renderFrame`/desenho
+    // da setinha do pino no mapa (ver `ctx.rotate(-(foto.dirAngulo...))`,
+    // 04/09/2026): alimentando `+dirAngulo` sem compensação nenhuma (como
+    // este `rotY` fazia até agora), a rotação "verdadeira" gira em sentido
+    // ANTI-horário conforme `dirAngulo` aumenta — oposto ao sentido horário
+    // esperado (mesmo pedido do usuário: arrastar em sentido horário no mapa
+    // deve girar em sentido horário também no preview). Corrigido negando
+    // SÓ o ângulo alimentado em `rotY` (não o vetor de partida — isso
+    // reintroduziria os 180° de atraso já corrigidos acima): como `a=0`
+    // continua `a=0` depois de negado, a fase (norte = "pra cima") não muda,
+    // só o SENTIDO de giro conforme o ângulo se afasta de 0.
     let dir = { x: 0, y: 0, z: -1 };
     dir = rotX(dir, -(rotPerp || 0));
-    dir = rotY(dir, dirAngulo || 0);
+    dir = rotY(dir, -(dirAngulo || 0));
     const ponta = project({ x: dir.x * 0.85, y: dir.y * 0.85, z: dir.z * 0.85 });
 
     // NOVO (04/09/2026), pedido verbatim: "a preview 3D deve exibir 'na
@@ -14744,21 +15052,62 @@ const MapView = {
     const PX_PER_RAD = 140; // sensibilidade do arrasto — quanto maior, mais "duro" (precisa arrastar mais pra girar o mesmo tanto)
     canvas.addEventListener('pointerdown', (e) => {
       if (opts.buttons && !opts.buttons.includes(e.button)) return;
+      // ATUALIZADO (06/09/2026), pedido verbatim: "entre o 'atrelado' e
+      // 'livre', o simples clicar ali na janelinha já deve definir
+      // automaticamente como livre. Depois se quiser, o usuário clica no
+      // botão para atrelar de novo." — antes, clicar/arrastar enquanto
+      // "atrelado" simplesmente NÃO FAZIA NADA (`return` aqui, ver `opts.
+      // isLivre`); agora avisa quem chamou (`opts.onAutoLivre`, só a roda de
+      // rotações passa isto — ver _openFotoPinWheel) pra trocar sozinho pro
+      // modo "livre" e o arrasto já continua neste mesmo toque, sem exigir
+      // clicar no botão primeiro.
+      if (opts.isLivre && !opts.isLivre()) opts.onAutoLivre?.();
       dragging = true; lastX = e.clientX; lastY = e.clientY;
       canvas.style.cursor = 'grabbing';
-      canvas.setPointerCapture?.(e.pointerId);
+      // NOVO (06/09/2026), pedido verbatim: "Ao clicar na janelinha, habilite
+      // o cursor infinito." — `opts.infiniteCursor` (só a roda de rotações
+      // passa isto; o preview GRANDE do painel de propriedades continua
+      // sem pointer lock, comportamento inalterado) pede o Pointer Lock do
+      // navegador no canvas — o cursor do sistema some/fica preso, e o
+      // deslocamento passa a ser lido por `e.movementX/Y` (ver pointermove
+      // abaixo) em vez de posição absoluta, permitindo arrastar
+      // indefinidamente sem esbarrar na borda da tela. `setPointerCapture`
+      // (usado pelo preview grande) e Pointer Lock não se combinam bem —
+      // com lock pedido, pula a captura de ponteiro normal.
+      if (opts.infiniteCursor) { try { canvas.requestPointerLock?.(); } catch (_) { /* navegador sem suporte — cai pro arrasto normal, com fronteira de tela */ } }
+      else canvas.setPointerCapture?.(e.pointerId);
       e.preventDefault();
     });
     canvas.addEventListener('pointermove', (e) => {
       if (!dragging) return;
-      const dx = e.clientX - lastX, dy = e.clientY - lastY;
+      // Com Pointer Lock ativo, `e.movementX/Y` já é o delta desde o último
+      // evento (o cursor fica travado no lugar, então posição absoluta
+      // `clientX/Y` pararia de mudar) — sem isto, o arrasto pararia assim
+      // que o cursor (invisível) encostasse numa borda "fantasma" da tela.
+      const usandoLock = opts.infiniteCursor && document.pointerLockElement === canvas;
+      const dx = usandoLock ? (e.movementX || 0) : (e.clientX - lastX);
+      const dy = usandoLock ? (e.movementY || 0) : (e.clientY - lastY);
       lastX = e.clientX; lastY = e.clientY;
       const orbit = getOrbit();
       orbit.yaw += dx / PX_PER_RAD;
-      orbit.pitch = Utils.clamp(orbit.pitch - dy / PX_PER_RAD, -1.4, 1.4);
+      // BUG CORRIGIDO (06/09/2026), pedido verbatim: "só é possível girar
+      // infinitamente na horizontal do preview, porém na vertical só está
+      // sendo possível girar até a parte de cima ou até a parte de baixo,
+      // sem dar continuidade a rotação." — causa raiz: `orbit.pitch` era
+      // limitado (`Utils.clamp(..., -1.4, 1.4)`, pouco menos de ±90°),
+      // enquanto `orbit.yaw` (linha acima) nunca teve limite nenhum —
+      // arrastar verticalmente até o topo/fundo simplesmente parava de
+      // fazer efeito (o valor já estava no limite, "grudado" lá). Removido o
+      // `Utils.clamp` — pitch agora acumula livre, exatamente como o yaw já
+      // fazia, girando continuamente em qualquer direção.
+      orbit.pitch -= dy / PX_PER_RAD;
       redraw();
     });
-    const endDrag = () => { dragging = false; canvas.style.cursor = 'grab'; };
+    const endDrag = () => {
+      dragging = false;
+      canvas.style.cursor = 'grab';
+      if (opts.infiniteCursor && document.pointerLockElement === canvas) { try { document.exitPointerLock(); } catch (_) { /* ignorado */ } }
+    };
     canvas.addEventListener('pointerup', endDrag);
     canvas.addEventListener('pointercancel', endDrag);
     canvas.addEventListener('pointerleave', () => { if (!dragging) canvas.style.cursor = 'grab'; });
@@ -18698,7 +19047,26 @@ const MapView = {
       undo: async () => { await DB.saveAmbientePhoto(before); await this._refreshMapaIfShowing(); },
       redo: async () => { await DB.saveAmbientePhoto({ ...before, ...patch }); await this._refreshMapaIfShowing(); },
     });
-    if (confirmCb) confirmCb(photoId); else await this._showScreen('entry');
+    // ATUALIZADO (06/09/2026), pedido verbatim: "após clicar em 'Marcar
+    // aqui', acaba voltando para a tela do 'Mapa'. Deve permanecer na tela
+    // 'Mapa'->'Planta baixa' [...] Por padrão deve permanecer" — ANTES,
+    // sem um `confirmCb` (caso do fluxo "tirei uma foto agora" vindo de
+    // js/capture.js, que nunca passa esse callback), este `else` SEMPRE
+    // chamava `_showScreen('entry')`, trocando pra tela "Mapa" mesmo o
+    // usuário tendo acabado de ajustar a posição na Planta baixa. Agora lê,
+    // NA HORA (não cacheada — a config pode ter mudado durante o fluxo de
+    // posicionamento, ver a nova seção "📸 Fotos" em mapconfig.js/
+    // Configurações 2D), a config `fotosMarcarAquiAcao` (mesmo padrão
+    // DB.getSetting/setSetting já usado por outras prefs do mapa 2D, ex.
+    // `mapa2dSnapGrade`): 'permanecer' (padrão) não navega pra lugar
+    // nenhum — o fluxo de vinculação só se fecha (faixa/roda já fechadas
+    // acima, ver _hidePhotoPlacementBanner), a tela continua sendo
+    // Mapa->Planta baixa; 'fotos' volta pra tela "Fotos" (rodapé do app),
+    // comportamento explicitamente pedido como alternativa.
+    if (confirmCb) { confirmCb(photoId); return; }
+    const acao = await DB.getSetting('fotosMarcarAquiAcao', 'permanecer');
+    if (acao === 'fotos') window.App?.navigate?.('capturar');
+    // else ('permanecer', padrão): não navega — fica em Mapa->Planta baixa.
   },
 
   // ---------- Vincular um ITEM recém-cadastrado a um lugar no mapa (opção

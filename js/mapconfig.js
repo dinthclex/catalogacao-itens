@@ -832,6 +832,18 @@ const MapConfig = {
 
   async open(map, opts = {}) {
     const cfg = await this.get();
+    // NOVO (06/09/2026), pedido verbatim: "[o botão 'Marcar aqui', em
+    // 'Fotos'] deve haver duas ações padrão [...] Isto deve ficar em uma
+    // seção chamada 'Fotos', nas 'configurações 2D'." — lida DIRETO por
+    // `DB.getSetting`/gravada por `DB.setSetting` (chave própria
+    // `fotosMarcarAquiAcao`), sem passar pelo blob único `mapa3dConfig`
+    // (`this._cache`/`this.set()`) que o resto deste arquivo usa — mesmo
+    // padrão de outras preferências "soltas" do mapa 2D, ex.
+    // `mapa2dSnapGrade` (ver mapview.js), que também vivem fora desse blob.
+    // Lida de novo (sem cache) toda vez que este modal abre, pra sempre
+    // refletir o valor mais recente. Consumida em mapview.js
+    // `_placePhotoPinAtWorld`.
+    const fotosMarcarAquiAcao = (opts.context === '2d') ? await DB.getSetting('fotosMarcarAquiAcao', 'permanecer') : 'permanecer';
     const rdCustom = !this.RENDER_DISTANCE_PRESETS.includes(Number(cfg.renderDistance));
     const fpsCustom = Number(cfg.fpsLimite) > 0 && !this.FPS_LIMITE_PRESETS.includes(Number(cfg.fpsLimite));
     const modal = document.createElement('div');
@@ -1044,12 +1056,51 @@ const MapConfig = {
           </label>
           ${this._flagsLegendHtml()}
         </div>
-        <!-- Seção "📷 Foto" (pedido do usuário, 26/08/2026) — opções da
+        <!-- NOVO (06/09/2026), pedido verbatim: "ao tirar um foto é possível
+             vincular a uma posição do mapa 2D, após clicar em 'Marcar aqui',
+             acaba voltando para a tela do 'Mapa'. Deve permanecer na tela
+             'Mapa'->'Planta baixa' [...] deve haver duas ações padrão: uma,
+             é conforme acabei de descrever; outra, é voltar para a tela de
+             'Fotos' [...] Isto deve ficar em uma seção chamada 'Fotos', nas
+             'configurações 2D'. Por padrão deve permanecer na tela
+             'Mapa'->'Planta baixa'." — seção NOVA, separada da seção "Foto"
+             logo abaixo (que é sobre 'Mapa'->'Foto', um conceito diferente
+             — ver comentário ali) — ícone 📍 (o mesmo espírito de "Marcar
+             aqui") escolhido de propósito, diferente do ícone da seção
+             "Foto" abaixo E do emoji usado pelo botão "Fotos" do rodapé do
+             app, pra não confundir as três. Lida/gravada direto por
+             DB.getSetting/setSetting (ver 'fotosMarcarAquiAcao' acima, e
+             mapview.js '_placePhotoPinAtWorld'), fora do blob 'mapa3dConfig'
+             — segue o padrão de outras prefs "soltas" do mapa 2D (ex.
+             'mapa2dSnapGrade'), não o padrão do resto deste arquivo. -->
+        <div class="mapconfig-section">
+          <h4>📍 Fotos</h4>
+          <span class="d" style="display:block; margin-bottom:5px">Ao confirmar "✅ Marcar aqui" (vincular uma foto a uma posição no mapa, em "Fotos" → tirar/escolher foto → 🗺️), o que fazer depois:</span>
+          <label class="radio-opt">
+            <input type="radio" name="mc-fotos-marcar-aqui" value="permanecer" ${fotosMarcarAquiAcao !== 'fotos' ? 'checked' : ''}>
+            <span><span class="t">Permanecer em Mapa → Planta baixa (padrão)</span><br><span class="d">Continua na tela onde o botão "Marcar aqui" está — dá pra ajustar mais coisas no mapa em seguida, sem precisar entrar de novo.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-fotos-marcar-aqui" value="fotos" ${fotosMarcarAquiAcao === 'fotos' ? 'checked' : ''}>
+            <span><span class="t">Voltar para Fotos</span><br><span class="d">Volta pra tela "Fotos" (o mesmo botão do rodapé do app) — comportamento de antes desta rodada.</span></span>
+          </label>
+        </div>
+        <!-- Seção "Foto" (pedido do usuário, 26/08/2026) — opções da
              ferramenta "📏 Medidas" de "Mapa" → "Foto" (ver ambientephotos.js
              _drawMedida/_openMedidaValorModal). Ver DEFAULTS acima pro
-             significado de cada campo. -->
+             significado de cada campo.
+             ATUALIZADO (06/09/2026), pedido verbatim: "o ícone dessa seção
+             deve ser igual ao ícone presente em 'Mapa'->'Foto'. Para não
+             confundir visualmente com o botão 'Fotos' [do rodapé] e sua
+             seção 'Fotos' [acima] (ambos com o mesmo ícone)." — causa raiz:
+             este h4 usava o emoji 📷, visualmente muito parecido com o
+             emoji da seção/botão "Fotos" (rodapé) — trocado pelo MESMO SVG
+             inline usado pelo botão de verdade "Mapa"->"Foto" (ver
+             mapview.js '_photoIconSvg()' — moldura + sol/montanha —,
+             copiado aqui porque MapConfig é um módulo à parte, sem acesso
+             direto aos métodos de MapView). -->
         <div class="mapconfig-section">
-          <h4>📷 Foto</h4>
+          <h4><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-4px; margin-right:2px"><rect x="3" y="4" width="18" height="16" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.6" fill="currentColor" stroke="none"/><path d="M3 16l5.5-5 4 4 3-3L21 16"/></svg> Foto</h4>
           <label class="radio-opt">
             <input type="checkbox" id="mc-medida-setas" ${cfg.medidaSetasAtivo !== false ? 'checked' : ''}>
             <span><span class="t">Seta nas extremidades da medida</span><br><span class="d">Depois de tocar em "✅ Inserir medida" (ferramenta 📏 Medidas de "Mapa" → "Foto"), a reta ganha uma pequena seta em cada ponta.</span></span>
@@ -1626,6 +1677,14 @@ const MapConfig = {
     // NOVO (05/09/2026) — radios da nova seção "🧭 Modo Navegação" (ação
     // padrão da Régua/Grade ao LIGAR "Modo Navegação", ver
     // DEFAULTS.modoNavReguaAcao/modoNavGradeAcao).
+    // NOVO (06/09/2026) — seção "📍 Fotos" (ver HTML acima) — gravado DIRETO
+    // via DB.setSetting (chave `fotosMarcarAquiAcao`), fora do `this.set()`/
+    // blob `mapa3dConfig` que o resto deste modal usa (mesmo padrão de
+    // `mapa2dSnapGrade`, ver comentário grande onde `fotosMarcarAquiAcao` é
+    // lida, no topo de `open()`).
+    modal.querySelectorAll('input[name="mc-fotos-marcar-aqui"]').forEach((r) => {
+      r.addEventListener('change', async (e) => { if (e.target.checked) await DB.setSetting('fotosMarcarAquiAcao', e.target.value); });
+    });
     modal.querySelectorAll('input[name="mc-modonav-regua"]').forEach((r) => {
       r.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ modoNavReguaAcao: e.target.value }); });
     });

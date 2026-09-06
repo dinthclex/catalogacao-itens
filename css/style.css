@@ -1140,10 +1140,11 @@ datalist {}
    inteira — exatamente o pedido ("da grade, não da tela"). Semitransparente
    (fundo com alpha baixo) pra não esconder o mapa por baixo. */
 .map2d-fotopin-wheel { position: absolute; right: 18px; bottom: 18px; z-index: 40; display: flex; flex-direction: column; align-items: flex-start; pointer-events: none; }
-/* NOVO (05/09/2026) — wrapper em ROW pro botão de modo + o toggle "Snap
-   15°" ficarem lado a lado (ver mapview.js _openFotoPinWheel) — o pai
-   `.map2d-fotopin-wheel` é uma coluna, então sem isto os dois empilhariam
-   um embaixo do outro. */
+/* NOVO (05/09/2026) — wrapper em ROW só com o botão de modo (o toggle de
+   snap que morava aqui ao lado mudou de lugar — ver comentário grande em
+   `.map2d-fotopin-wheel-snap-compact`, 06/09/2026) — o pai
+   `.map2d-fotopin-wheel` é uma coluna, então sem este wrapper este botão
+   não ficaria na posição/margem certas. */
 .map2d-fotopin-wheel-toprow { pointer-events: none; display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 0 0 6px 2px; }
 .map2d-fotopin-wheel-mode {
   pointer-events: auto; width: 34px; height: 34px; border-radius: 50%;
@@ -1151,22 +1152,49 @@ datalist {}
   display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
 }
 .map2d-fotopin-wheel-mode:hover { background: rgba(35, 43, 54, .9); }
-/* NOVO (05/09/2026), pedido verbatim: "Ao lado do botão de troca de
-   rotação [...] deve haver um toggle para o snap de 15 graus (para
-   ativar/desativar). Por padrão fica habilitado." — pílula compacta ao
-   lado do botão redondo de modo (ver mapview.js _openFotoPinWheel,
-   `this._fotoPinRotSnap15`); `.active` (LIGADO, padrão) destaca em verde,
-   mesma cor da seta de Inclinação (marker-tilt), pra reforçar que afeta
-   os dois modos de rotação (Direção e Inclinação). */
-.map2d-fotopin-wheel-snap15 {
-  pointer-events: auto; height: 34px; padding: 0 10px; border-radius: 17px; font-size: 12px; font-weight: 600;
-  background: rgba(20, 26, 34, .78); border: 1px solid rgba(255, 255, 255, .22); color: rgba(255, 255, 255, .7);
-  display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
-  white-space: nowrap;
+/* ATUALIZADO (06/09/2026), pedido verbatim: "deixe o snap como estava antes
+   (apenas o valor ali unido ao ícone). A configuração dele, deve ficar junto
+   com os outros dois botões: 'Direção (giro em Y)' e 'Inclinação
+   (perpendicular)'." — as regras antigas `.map2d-fotopin-wheel-snap15`/
+   `-snap-valor`/`-snap-graus` (rodada 05/09, um botão-toggle E um campo
+   numérico como DOIS elementos visualmente separados, flutuando ao lado do
+   botão de modo) saem daqui — o controle mudou de lugar (agora dentro do
+   recorte `.map2d-fotopin-wheel-cutout`, junto dos outros dois campos, ver
+   mapview.js _openFotoPinWheel) e virou ESTE único elemento compacto: ícone
+   e valor fundidos visualmente numa mesma "pílula" (sem parecer um toggle
+   separado do campo) — `.active` (LIGADO, padrão) destaca em verde, mesma
+   cor da seta de Inclinação (marker-tilt), igual antes. */
+.map2d-fotopin-wheel-snap-compact {
+  pointer-events: auto; display: inline-flex; align-items: center; height: 28px; border-radius: 8px;
+  background: rgba(20, 26, 34, .6); border: 1px solid rgba(255, 255, 255, .22); color: rgba(255, 255, 255, .7);
+  overflow: hidden;
 }
-.map2d-fotopin-wheel-snap15:hover { background: rgba(35, 43, 54, .9); }
-.map2d-fotopin-wheel-snap15.active {
-  background: rgba(124, 255, 178, .22); border-color: #7cffb2; color: #7cffb2;
+.map2d-fotopin-wheel-snap-compact.active { border-color: #7cffb2; color: #7cffb2; }
+.map2d-fotopin-wheel-snap-compact button {
+  pointer-events: auto; width: 28px; height: 100%; border: none; background: transparent; color: inherit;
+  font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none;
+}
+.map2d-fotopin-wheel-snap-compact button:hover { background: rgba(255, 255, 255, .1); }
+.map2d-fotopin-wheel-snap-compact input {
+  pointer-events: auto; width: 34px; height: 100%; border: none; border-left: 1px solid rgba(255, 255, 255, .22);
+  background: transparent; color: #fff; font-size: 12.5px; text-align: center;
+}
+.map2d-fotopin-wheel-snap-compact .deg { pointer-events: none; padding-right: 7px; font-size: 12px; }
+/* NOVO (05/09/2026) — MESMO par toggle+valor acima, só que dentro do painel
+   grande de propriedades do orb de foto (ver mapview.js
+   _openFotoPinPopover) — aqui dentro de um `.map-panel-field` comum (fundo
+   claro/escuro do tema, não mais flutuando sobre o mapa), por isso cores
+   neutras (`currentColor`) em vez das cores fixas de cima. */
+.fotopin-snap-field .fotopin-snap-controls { display: flex; align-items: center; gap: 6px; }
+.fotopin-snap-field #fotopin-snap-toggle {
+  width: 28px; height: 28px; border-radius: 8px; font-size: 14px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border, rgba(128, 128, 128, .4)); color: inherit;
+  display: flex; align-items: center; justify-content: center;
+}
+.fotopin-snap-field #fotopin-snap-toggle.active { background: rgba(124, 255, 178, .22); border-color: #7cffb2; }
+.fotopin-snap-field #fotopin-snap-valor {
+  width: 52px; height: 28px; border-radius: 8px; font-size: 13px; text-align: center;
+  background: transparent; border: 1px solid var(--border, rgba(128, 128, 128, .4)); color: inherit;
 }
 /* "acima e à esquerda da roda" (pedido verbatim) — a roda é maior e fica
    embaixo/à direita do botão de modo dentro da mesma coluna flex acima. */
@@ -1267,6 +1295,28 @@ datalist {}
 .map2d-fotopin-wheel-previewbox canvas {
   width: 112px; height: 112px; border: 1px solid var(--border); border-radius: 8px; background: #0a0e14;
   box-shadow: 0 2px 10px rgba(0, 0, 0, .4);
+}
+/* ATUALIZADO (06/09/2026), pedido verbatim: "Deixe o botão no canto superior
+   direito da janelinha de preview." — botão que ativa/desativa o 'giro
+   livre'/'giro atrelado às rotações a serem definidas' (pedido original,
+   05/09/2026), mudou do canto INFERIOR-ESQUERDO pro canto SUPERIOR-DIREITO —
+   wrapper só em volta do canvas (`position: relative`), pra ancorar o botão
+   dentro dele via `position: absolute`, sem afetar o rótulo "Preview 3D"
+   abaixo (fora deste wrapper). */
+.map2d-fotopin-wheel-previewbox-canvaswrap { position: relative; width: 112px; height: 112px; }
+.map2d-fotopin-wheel-orbit-toggle {
+  position: absolute; right: 4px; top: 4px; z-index: 1; pointer-events: auto;
+  height: 22px; padding: 0 7px; border-radius: 11px; font-size: 10.5px; font-weight: 600;
+  background: rgba(10, 14, 20, .85); border: 1px solid rgba(255, 255, 255, .25); color: rgba(255, 255, 255, .75);
+  cursor: pointer; white-space: nowrap;
+}
+.map2d-fotopin-wheel-orbit-toggle:hover { background: rgba(30, 38, 48, .9); }
+/* `.active` = modo "🔓 Livre" (destacado em âmbar, mesma cor de alerta/
+   atenção usada noutros botões "modo especial ligado" do app) — padrão
+   ("🎯 Atrelado") fica neutro/discreto, sem destaque, por ser o comportamento
+   de sempre. */
+.map2d-fotopin-wheel-orbit-toggle.active {
+  background: rgba(255, 209, 102, .22); border-color: #ffd166; color: #ffd166;
 }
 /* NOVO (05/09/2026), pedido verbatim: "Um texto de auxílio deve ser exibido
    em algum lugar informando que está habilitado a definição das rotações
