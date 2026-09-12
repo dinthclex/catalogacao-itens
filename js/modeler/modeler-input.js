@@ -27,6 +27,25 @@ const ModelerInput = {
   bind(state) {
     state.listeners = [];
     const canvas = state.canvas;
+    // [11/09/2026] NOVO — ver comentário grande em `.m3d-cursor-crosshair`
+    // (css/modeler3d.css) pro pedido verbatim completo: faz o cursor
+    // PADRÃO do canvas (fora de um arrasto travado) já nascer com o MESMO
+    // desenho do cursor falso usado durante arrastos G/R/S/gizmo — a troca
+    // entre os dois estados (travado/solto) deixa de "pular" de um ícone
+    // pro outro. Removida em `unbind` (abaixo), pra não vazar esse cursor
+    // pra fora do Modelador (navegação normal do "Ver em 3D" usa o MESMO
+    // `#v3d-canvas`, mas com seu próprio cursor de sempre).
+    // [11/09/2026] CORRIGIDO — pedido verbatim: "No 'Ver em 3D', ao clicar
+    // em uma câmera e selecionar 'Ver através desta câmera', no Modelador, o
+    // cursor deve continuar sendo o cursor default." Com `state.camLocked`
+    // (ver modeler-core.js — só true dentro de "Ver através desta câmera")
+    // a classe abaixo NÃO é aplicada — o cursor "solto" do canvas fica no
+    // padrão do navegador (seta), em vez da cruz de sempre. `_updateFakeCursor`
+    // (mais abaixo) já sabe alternar pra uma variante do cursor FALSO em
+    // formato de seta (`.m3d-fakecursor-arrow`, ver css/modeler3d.css) neste
+    // mesmo modo, mantendo o "mesmo cursor aparentemente" mesmo durante um
+    // arrasto travado por Pointer Lock.
+    if (!state.camLocked) canvas.classList.add('m3d-cursor-crosshair');
     this._on(state, window, 'keydown', (e) => this._onKeyDown(state, e));
     // Pedido do usuário (câmera livre — WASD/setas): precisa saber quais
     // teclas estão SEGURADAS (não só o instante do keydown) pra mover a
@@ -38,6 +57,69 @@ const ModelerInput = {
     this._on(state, window, 'mousemove', (e) => this._onMouseMove(state, e));
     this._on(state, window, 'mouseup', (e) => this._onMouseUp(state, e));
     this._on(state, canvas, 'wheel', (e) => this._onWheel(state, e), { passive: false });
+    // [11/09/2026] BUG RELATADO: "No 'Ver em 3D', no Modelador. Fiz um
+    // teste, criei um novo cubo 3D, tentei movê-lo clicando e arrastando a
+    // seta de um dos eixos, o cursor permaneceu a cruz. No soltar, o cursor
+    // default deveria aparecer de novo, mas parece que fica travado pelo
+    // ponter lock com o cursor de cruz." CAUSA RAIZ: `_updateFakeCursor`
+    // (mais abaixo) — que é quem de fato esconde o cursor falso (cruz) e
+    // devolve `canvas.style.cursor` pro normal assim que o Pointer Lock é
+    // solto — só era chamada de dentro de `_onMouseMove`. `_confirmModal`
+    // (chamado no `mouseup` que solta o arrasto do gizmo, ver `_onMouseUp`)
+    // pede `document.exitPointerLock()`, mas isso NÃO gera sozinho nenhum
+    // `mousemove` — se o usuário soltar o botão sem mexer o mouse de novo
+    // logo em seguida (comum: solta e para), `_updateFakeCursor` nunca era
+    // chamada de novo, e o cursor falso (cruz) ficava visível indefinidamente
+    // com o cursor OS de verdade escondido (`style.cursor = 'none'`), preso
+    // até o próximo movimento físico do mouse. CORRIGIDO: escuta o evento
+    // `pointerlockchange` do próprio navegador (disparado toda vez que o
+    // Pointer Lock muda de estado, INDEPENDENTE de `mousemove`) e chama
+    // `_updateFakeCursor` nesse instante — cobre `_confirmModal`,
+    // `_cancelModal` e o botão do meio (`_onMouseUp`/Escape) de uma vez só,
+    // sem depender de o usuário mexer o mouse depois de soltar.
+    this._on(state, document, 'pointerlockchange', () => {
+      // [11/09/2026] CORRIGIDO — pedido verbatim: "cursor duplicado" +
+      // "Sair do Modelador" impossível de clicar. CAUSA RAIZ ENCONTRADA:
+      // `state.canvas.requestPointerLock(...)` (chamada em `_onMouseDown`
+      // pro botão do MEIO, e em `_startModal` pro modal G/R/S/Extrudar —
+      // ver os 2 lugares) é ASSÍNCRONA — a Promise que ela devolve só
+      // resolve (o lock só ENGATA de verdade) alguns milissegundos DEPOIS
+      // da chamada, nunca no mesmo tick. Num clique/arrasto RÁPIDO (soltar
+      // o botão do meio quase na hora, ou confirmar G/R/S com um clique
+      // rápido), `mouseup` roda `_releasePointerLockIfOwned` (`_onMouseUp`/
+      // `_confirmModal`) ANTES dessa Promise resolver — nesse instante
+      // `document.pointerLockElement` AINDA é `null` (o lock nem engatou),
+      // então a checagem `if (document.pointerLockElement === state.canvas)`
+      // lá dentro é um no-op, e `state.modal`/`state.orbitDrag` já voltam a
+      // `null` no mouseup normalmente. Alguns milissegundos depois, o lock
+      // finalmente ENGATA de verdade — agora "órfão": nenhum modal/orbitDrag
+      // mais o justifica, e nada no código volta a chamar
+      // `_releasePointerLockIfOwned` (só mouseup/Escape fazem isso, e nenhum
+      // dos dois vai disparar de novo sozinho). A partir daí, o Pointer Lock
+      // continua ENGATADO indefinidamente: (1) `_updateFakeCursor` mostra o
+      // cursor falso (`locked` vira `true`) SOBRE o cursor OS de verdade, que
+      // volta a aparecer normalmente em qualquer elemento FORA do canvas —
+      // como "Sair do Modelador" — já que `cursor:none` só é aplicado ao
+      // `<canvas>` (daí os "dois cursores" relatados); (2) com o Pointer Lock
+      // ativo, o NAVEGADOR roteia todo clique (mousedown/mouseup/click) pro
+      // ELEMENTO TRAVADO (o canvas), na posição CONGELADA de onde o lock foi
+      // pedido, nunca pro elemento realmente sob o cursor visual (falso ou
+      // real) — clicar em "Sair do Modelador" (um elemento FORA do canvas)
+      // nunca chega ao botão, sempre "desaparece" dentro do canvas — dando a
+      // impressão de UI travada. CORRIGIDO EM 2 CAMADAS: (A) aqui — sempre
+      // que o Pointer Lock ENGATA (`pointerlockchange` com
+      // `pointerLockElement===canvas`) sem NENHUM `state.modal`/
+      // `state.orbitDrag` em andamento pra justificá-lo, libera IMEDIATAMENTE
+      // (fecha a janela de corrida — o lock "órfão" nunca chega a interceptar
+      // um clique de verdade). (B) rede de segurança em `_onMouseDown`
+      // (busque "lock órfão" lá) — cobre qualquer outra corrida não prevista
+      // aqui, encaminhando o clique pro elemento visual certo antes de
+      // liberar o lock.
+      if (document.pointerLockElement === state.canvas && !state.modal && !state.orbitDrag) {
+        this._releasePointerLockIfOwned(state);
+      }
+      this._updateFakeCursor(state, canvas.getBoundingClientRect());
+    });
     // Pedido do usuário: "O botão direito deve ser habilitado, no modo
     // Modelador, para apenas o app, pois, atualmente, fica abrindo o menu do
     // navegador." O canvas já tinha essa supressão (e o View3D "de fora"
@@ -56,6 +138,12 @@ const ModelerInput = {
   unbind(state) {
     (state.listeners || []).forEach(({ target, type, fn, opts }) => target.removeEventListener(type, fn, opts));
     state.listeners = [];
+    // [11/09/2026] ver comentário grande em `bind` acima — desfaz a classe
+    // do cursor customizado (e qualquer `style.cursor`/`'none'` inline que
+    // tenha sobrado de um arrasto travado em andamento) pra não vazar pra
+    // navegação normal do "Ver em 3D" ao sair do Modelador.
+    state.canvas?.classList.remove('m3d-cursor-crosshair');
+    if (state.canvas) state.canvas.style.cursor = '';
   },
 
   _isTypingTarget(e) {
@@ -142,6 +230,19 @@ const ModelerInput = {
     }
 
     if (code === 'Tab') { e.preventDefault(); this.toggleMode(state); return; }
+    // [11/09/2026] NOVO — rede de segurança complementar à correção em
+    // `_onMouseDown` (ver comentário grande lá, botão do meio +
+    // `state.camLocked`): se por qualquer motivo um `orbitDrag` ainda
+    // estiver com o Pointer Lock preso neste instante (ex.: `camLocked`
+    // virou true DEPOIS que o arrasto já tinha começado), ESC agora também
+    // solta ele aqui — antes só `_cancelModal` chamava
+    // `_releasePointerLockIfOwned`, e `orbitDrag` (botão do meio/direito)
+    // NUNCA é um `state.modal`, então ESC não fazia nada por ele.
+    if (code === 'Escape' && state.orbitDrag && document.pointerLockElement === state.canvas) {
+      state.orbitDrag = null;
+      this._releasePointerLockIfOwned(state);
+      return;
+    }
     if (code === 'Escape') { this._deselectAll(state); return; }
 
     if (state.mode === 'edit') {
@@ -192,6 +293,37 @@ const ModelerInput = {
   // ==================== mouse ====================
 
   _onMouseDown(state, e) {
+    // [11/09/2026] REDE DE SEGURANÇA — ver comentário grande em `bind()`
+    // (listener de `pointerlockchange`) pra causa raiz completa do "cursor
+    // duplicado"/"Sair do Modelador impossível de clicar" (corrida entre
+    // `requestPointerLock` assíncrono e o mouseup que já liberou
+    // modal/orbitDrag antes do lock engatar de verdade). Esta checagem cobre
+    // qualquer OUTRA corrida não prevista naquele ponto: se o Pointer Lock
+    // já está engatado no canvas SEM nenhum `state.modal`/`state.orbitDrag`
+    // em andamento pra justificá-lo, este `mousedown` é um "lock órfão" —
+    // o navegador roteou o clique pro canvas (elemento travado) mesmo o
+    // usuário visualmente mirando outro elemento (ex.: "Sair do Modelador",
+    // sob o cursor FALSO). Em vez de processar como clique normal no
+    // canvas: acha o elemento de verdade sob a posição visual do cursor
+    // falso (`document.elementFromPoint`), libera o lock, e ENCAMINHA um
+    // clique sintético pra esse elemento (se for outro, fora do canvas) —
+    // "Sair do Modelador"/qualquer botão da UI nunca mais fica preso atrás
+    // de um lock órfão.
+    if (document.pointerLockElement === state.canvas && !state.modal && !state.orbitDrag) {
+      const rect = state.canvas.getBoundingClientRect();
+      const vx = state.mouse.vx ?? e.clientX;
+      const vy = state.mouse.vy ?? e.clientY;
+      const wrapX = (((vx - rect.left) % rect.width) + rect.width) % rect.width;
+      const wrapY = (((vy - rect.top) % rect.height) + rect.height) % rect.height;
+      const visualX = rect.left + wrapX, visualY = rect.top + wrapY;
+      this._releasePointerLockIfOwned(state);
+      const real = document.elementFromPoint(visualX, visualY);
+      if (real && real !== state.canvas && typeof real.click === 'function') {
+        real.click();
+      }
+      e.preventDefault();
+      return;
+    }
     // NOVO (02/09/2026), pedido verbatim (rodada C): "No 'editar', dos
     // modelos 3D, é que deve desabilitar a ação padrão do navegador
     // (rolagem rápida, que acaba travando a movimentação do 'editar') do
@@ -210,6 +342,43 @@ const ModelerInput = {
     if (e.button === 1) e.preventDefault();
     state.mouse.downX = e.clientX; state.mouse.downY = e.clientY;
     state.mouse.downButton = e.button; state.mouse.moved = false;
+
+    // [09/09/2026] Ajuste solicitado pelo usuário: "Definir origem" >
+    // "Personalizado (x/y/z)" > suboção "sobre arestas/vértices do mouse" —
+    // ver `enterOriginPickMode`/`_updateOriginPickHover` abaixo e
+    // `ModelerUI._openOrigemCustomPanel`/`_buildFerramentasPanel`. Enquanto
+    // `state._pickOriginMode` está ativo, o botão ESQUERDO confirma o ponto
+    // em preview (se houver um sob o cursor — ver `_updateOriginPickHover`)
+    // como a nova origem, e o botão DIREITO cancela o modo (sem contar como
+    // um clique de seleção normal — `state.mouse.moved = true` força
+    // `_onMouseUp` a tratar como "foi arrasto", pulando `_handleSelectClick`).
+    // O botão do MEIO (órbita da câmera) é deixado passar direto pro fluxo
+    // normal abaixo — dá pra girar a câmera sem sair do modo de escolha.
+    if (state._pickOriginMode) {
+      if (e.button === 0) {
+        if (state._originPickHover) {
+          const { local } = state._originPickHover;
+          this.setOrigin(state, 'personalizado', { x: local[0], y: local[1], z: local[2] });
+          // A malha inteira acabou de ser re-referenciada pro ponto
+          // escolhido (novo 0,0,0 local) — os 3 campos x/y/z do painel (ver
+          // `ModelerUI._renderOrigemCustomPanel`) voltam a mostrar 0,
+          // representando "nenhum deslocamento adicional a partir daqui
+          // ainda" (ver `_origemCustomUI.accum`, zerado também).
+          if (state._origemCustomUI) {
+            state._origemCustomUI.accum = [0, 0, 0];
+            const api = state._origemCustomUI.fieldsApi;
+            if (api) { api.setValue('x', 0); api.setValue('y', 0); api.setValue('z', 0); }
+          }
+        }
+        return;
+      }
+      if (e.button === 2) {
+        this.exitOriginPickMode(state);
+        state.mouse.moved = true;
+        if (window.ModelerUI) ModelerUI.renderSidebar(state.view3d);
+        return;
+      }
+    }
 
     if (state.modal) {
       if (e.button === 0) { this._confirmModal(state); return; }
@@ -237,7 +406,24 @@ const ModelerInput = {
       // simples (ver `_onMouseUp`); travar o ponteiro nele mudaria esse
       // clique simples de comportamento (o cursor "sumiria" mesmo sem
       // arrastar), então fica de fora.
-      if (e.button === 1) {
+      // [11/09/2026] CORRIGIDO — pedido verbatim: "No 'Ver em 3D', ao clicar
+      // em uma câmera e selecionar 'Ver através desta câmera', no Modelador,
+      // ao clicar com o botão do meio do mouse, o ponteiro fica fixo com a
+      // cruz e, mesmo apertando esc, não sai." CAUSA RAIZ: com
+      // `state.camLocked` (câmera travada na pose calibrada — ver "13/09/2026
+      // — ITEM E" em `_onMouseMove`, mais abaixo), o arrasto do botão do
+      // MEIO já não tem NENHUM efeito na câmera (`if (state.camLocked)
+      // return;`, antes de girar/panorâmica) — mas o Pointer Lock + cursor
+      // falso (cruz) abaixo era pedido DE QUALQUER FORMA, sem nenhum jeito
+      // óbvio de "soltar" essa sensação de travado depois (a câmera não se
+      // mexe, então arrastar/soltar não dá nenhuma pista visual de que já
+      // terminou; e ESC, fora de um modal G/R/S — `state.modal`, nada a ver
+      // com `orbitDrag` — nunca chamava `_releasePointerLockIfOwned`, ver
+      // `_onKeyDown`/`_cancelModal`). CORRIGIDO: com `state.camLocked`, nem
+      // pede Pointer Lock nem mostra o cursor falso pro botão do meio — não
+      // há nada pra "orbitar" mesmo, então não faz sentido nenhum trocar de
+      // cursor.
+      if (e.button === 1 && !state.camLocked) {
         // Pedido do usuário (rodada 44, sobre o cursor infinito ainda não
         // ficar "contínuo" na vertical): "acredito que é uma limitação do
         // Three.js. Dá para contornar isso de algum jeito?" Não é bem do
@@ -298,18 +484,64 @@ const ModelerInput = {
     // número usado pra matemática de raycasting, não uma posição real na
     // tela). Fora de um modal (ponteiro livre, sem lock), vx/vy acompanham
     // clientX/clientY normalmente.
+    // [11/09/2026] Ajuste solicitado pelo usuário: "ao soltar [um arrasto
+    // travado por Pointer Lock], o cursor salta para a posição do clique
+    // com o cursor antigo — não deve ser assim." Causa raiz completa no
+    // comentário grande em `_releasePointerLockIfOwned` (mais abaixo) — em
+    // resumo, o navegador devolve o cursor OS de verdade pra posição
+    // CONGELADA de onde o Pointer Lock foi pedido, nunca pra onde o cursor
+    // falso estava de fato ao soltar. Quando existe um "rebase" pendente
+    // (`state._cursorRebaseTo`, setado lá), este é o 1º `mousemove` de
+    // verdade depois do destravamento — `e.clientX/Y` ainda reporta essa
+    // posição CONGELADA/errada. Em vez de aceitar isso, calcula o
+    // DESLOCAMENTO entre ela e onde o cursor falso realmente parou
+    // (`state.mouse.rebaseDX/Y`) — somado a TODO `clientX/Y` reportado daqui
+    // em diante (ramo `else` logo abaixo), até o PRÓXIMO travamento (que
+    // naturalmente "absorve" esse deslocamento, já que `vx/vy` parte do
+    // valor JÁ corrigido, não de `clientX/Y` cru — ver ramo `if` abaixo).
+    if (state._cursorRebaseTo && document.pointerLockElement !== state.canvas) {
+      state.mouse.rebaseDX = state._cursorRebaseTo.x - e.clientX;
+      state.mouse.rebaseDY = state._cursorRebaseTo.y - e.clientY;
+      state._cursorRebaseTo = null;
+    }
     if (document.pointerLockElement === state.canvas) {
       state.mouse.vx = (state.mouse.vx ?? e.clientX) + e.movementX;
       state.mouse.vy = (state.mouse.vy ?? e.clientY) + e.movementY;
     } else {
-      state.mouse.vx = e.clientX;
-      state.mouse.vy = e.clientY;
+      // Soma o deslocamento de rebase (0,0 na maior parte do tempo — só
+      // fica diferente de zero depois de destravar um Pointer Lock, ver
+      // acima) — mantém o cursor falso (e `vx/vy`, usado pro raycasting)
+      // exatamente onde o último arrasto parou, sem descontinuidade.
+      state.mouse.vx = e.clientX + (state.mouse.rebaseDX || 0);
+      state.mouse.vy = e.clientY + (state.mouse.rebaseDY || 0);
     }
     state.mouse.x = ((state.mouse.vx - rect.left) / rect.width) * 2 - 1;
     state.mouse.y = -((state.mouse.vy - rect.top) / rect.height) * 2 + 1;
     if (Math.hypot(e.clientX - state.mouse.downX, e.clientY - state.mouse.downY) > 4) state.mouse.moved = true;
     this._updateFakeCursor(state, rect);
 
+    // [09/09/2026] Ajuste solicitado pelo usuário: "Ao passar o cursor do
+    // mouse pelas arestas do objeto, vai aparecendo um ponto onde será o
+    // pivô caso se clique naquele instante." — só atualiza o preview quando
+    // NÃO há um arrasto de órbita da câmera em andamento (deixa o botão do
+    // meio girar a câmera livremente mesmo com o modo de escolha ativo — ver
+    // `_onMouseDown` acima) nem um modal G/R/S/Extrudar aberto.
+    if (state._pickOriginMode && !state.modal && !state.orbitDrag) {
+      this._updateOriginPickHover(state, e);
+      return;
+    }
+
+    // [11/09/2026] Reconfirmado nesta rodada (pedido do usuário: "o
+    // shift+botão esquerdo do mouse deve continuar funcionando" mesmo
+    // vindo de 'Ver através desta câmera'): este ramo (arrasto de gizmo
+    // G/R/S/Extrudar/Duplicar, sempre iniciado pelo botão ESQUERDO — ver
+    // `_onMouseDown`/`_startModal`) NUNCA consulta `state.camLocked` — só o
+    // ramo `orbitDrag` logo abaixo (botão do MEIO/DIREITO, câmera) consulta
+    // essa flag. Ou seja, qualquer arrasto do botão esquerdo (com ou sem
+    // Shift — nenhuma tecla modificadora muda esse fluxo) já continua
+    // funcionando normalmente dentro de 'Ver através desta câmera', tanto
+    // antes quanto depois desta rodada — `camLocked` trava só câmera
+    // (WASD/olhar-ao-redor/zoom/pan), nunca seleção/edição de malha.
     if (state.modal) { this._updateModal(state, e); return; }
     if (state.orbitDrag) {
       // Com o Pointer Lock ativo (ver `_onMouseDown` acima), `clientX/Y`
@@ -321,6 +553,16 @@ const ModelerInput = {
       const dx = locked ? (e.movementX || 0) : e.clientX - state.orbitDrag.lastX;
       const dy = locked ? (e.movementY || 0) : e.clientY - state.orbitDrag.lastY;
       state.orbitDrag.lastX = e.clientX; state.orbitDrag.lastY = e.clientY;
+      // [13/09/2026 — ITEM E] Guard de travamento (ver comentário grande em
+      // modeler-core.js `enter()`) — pedido verbatim: "não deve ser possível
+      // apontar a câmera para qualquer lado clicando com o botão do meio do
+      // mouse." Com `state.camLocked`, nem a ROTAÇÃO (yaw/pitch, mais abaixo)
+      // nem o PAN (Shift+botão do meio, logo abaixo) aplicam nada — só
+      // consome o gesto (o Pointer Lock/cursor infinito do `_onMouseDown`
+      // continua funcionando visualmente, sem efeito na câmera) — o botão
+      // DIREITO continua selecionando normalmente num clique simples, isso
+      // não passa por aqui (ver `_onMouseUp`/`_handleSelectClick`).
+      if (state.camLocked) return;
       // Pedido do usuário (Shift+MMB, igual ao Blender): "ao segurar shift e
       // mover a câmera com o botão do meio do mouse, ela deve se deslocar
       // lateralmente... num plano paralelo ao plano da tela da câmera" — e,
@@ -400,7 +642,57 @@ const ModelerInput = {
     const el = state.fakeCursorEl;
     if (!el) return;
     const locked = document.pointerLockElement === state.canvas;
-    if (!locked) { el.style.display = 'none'; return; }
+    // [11/09/2026] `rebasing`: além de travado (`locked`), também mantém o
+    // cursor falso visível — E o cursor OS de verdade ESCONDIDO
+    // (`state.canvas.style.cursor = 'none'`, abaixo) — enquanto existir um
+    // deslocamento de rebase ativo (`state.mouse.rebaseDX/Y`, ver
+    // `_onMouseMove`/`_releasePointerLockIfOwned`). Sem isso, no instante em
+    // que o Pointer Lock é solto, o navegador revela o cursor OS de verdade
+    // na posição CONGELADA errada (o "salto" reportado) enquanto o cursor
+    // falso já tivesse sumido — mantendo os dois em sincronia (falso
+    // visível, OS escondido) até o deslocamento ser consumido evita esse
+    // flash. `state.canvas` é o MESMO canvas usado pela navegação normal
+    // (`#v3d-canvas`, ver `modeler-core.js`) — por isso a mudança é sempre
+    // por `style` inline aqui, nunca uma regra CSS solta, e sempre
+    // restaurada (`cursor:''`) assim que não precisa mais, pra não vazar
+    // pro modo de navegação normal fora do Modelador.
+    // [11/09/2026] CORRIGIDO — pedido verbatim: "criei um novo cubo 3D,
+    // tentei movê-lo clicando e arrastando a seta de um dos eixos, o cursor
+    // permaneceu a cruz. No soltar, o cursor default deveria aparecer de
+    // novo, mas parece que fica travado pelo ponter lock com o cursor de
+    // cruz." CAUSA RAIZ: `rebasing` usava `state.mouse.rebaseDX/rebaseDY`
+    // (o DESLOCAMENTO fixo somado a `clientX/Y` pra corrigir `vx/vy` —
+    // permanece diferente de zero PRA SEMPRE depois do 1º arrasto travado da
+    // sessão do Modelador, ver comentário grande em `_onMouseMove`) como
+    // sinal de "ainda destravando" — como esse valor nunca volta a
+    // zero/undefined sozinho, o cursor falso (cruz) ficava aceso e o cursor
+    // OS de verdade escondido (`cursor:'none'`) PARA SEMPRE depois do
+    // primeiro G/R/S/Extrudar/arrasto de gizmo, mesmo bem depois de soltar.
+    // CORRIGIDO: usa `state._cursorRebaseTo` (setado só em
+    // `_releasePointerLockIfOwned`, e consumido/zerado no PRÓXIMO
+    // `mousemove` de verdade — ver início de `_onMouseMove`) — um sinal
+    // realmente TRANSITÓRIO de "acabei de destravar, esperando o 1º
+    // movimento de verdade pra corrigir a posição" — assim que esse 1º
+    // movimento chega (ou, via o novo listener de `pointerlockchange` em
+    // `bind()`, imediatamente ao destravar, se o mouse não se mexer mais),
+    // o cursor OS padrão volta a aparecer normalmente, sem ficar preso.
+    const rebasing = !!state._cursorRebaseTo;
+    if (!locked && !rebasing) {
+      el.style.display = 'none';
+      if (state.canvas.style.cursor === 'none') state.canvas.style.cursor = '';
+      return;
+    }
+    state.canvas.style.cursor = 'none';
+    // [11/09/2026] NOVO — pedido verbatim: "No 'Ver em 3D', ao clicar em uma
+    // câmera e selecionar 'Ver através desta câmera', no Modelador, o cursor
+    // deve continuar sendo o cursor default [...] para dar a impressão que
+    // 'sempre foi o mesmo cursor'." Com `state.camLocked`, o cursor "solto"
+    // é a seta padrão do navegador (ver `bind`, acima — a classe
+    // `.m3d-cursor-crosshair` some) — pra combinar, o cursor FALSO (este
+    // elemento, visível só durante o arrasto travado) também precisa virar
+    // uma seta (`.m3d-fakecursor-arrow`, css/modeler3d.css) em vez da cruz
+    // de sempre. Fora de `camLocked`, comportamento 100% igual a antes.
+    el.classList.toggle('m3d-fakecursor-arrow', !!state.camLocked);
     const wrapX = (((state.mouse.vx - rect.left) % rect.width) + rect.width) % rect.width;
     const wrapY = (((state.mouse.vy - rect.top) % rect.height) + rect.height) % rect.height;
     el.style.display = 'block';
@@ -412,9 +704,12 @@ const ModelerInput = {
     if (state.modal && state.modal.endOnMouseUp && e.button === 0) { this._confirmModal(state); return; }
     if (e.button === 1) {
       state.orbitDrag = null;
-      // Desfaz o Pointer Lock pedido em `_onMouseDown` (cursor infinito) —
-      // mesmo idioma já usado pra sair dos modais G/R/S (ver `_cancelModal`).
-      if (document.pointerLockElement === state.canvas) { try { document.exitPointerLock(); } catch (err) { /* ignora */ } }
+      // [11/09/2026] Antes tinha seu PRÓPRIO `exitPointerLock()` inline
+      // aqui, duplicado do de `_confirmModal`/`_cancelModal` — trocado pra
+      // chamar o mesmo `_releasePointerLockIfOwned` deles (ver comentário
+      // grande lá) pra também ganhar a correção do "salto" do cursor ao
+      // soltar, sem duplicar a lógica de novo.
+      this._releasePointerLockIfOwned(state);
       return;
     }
     if (e.button === 2) {
@@ -436,7 +731,12 @@ const ModelerInput = {
     // mover a câmera pra FRENTE/TRÁS na direção que ela está olhando de
     // verdade (incluindo o pitch — `cameraForward`, não a versão achatada
     // do WASD), igual a um "acelerador" de voo comum em editores 3D.
-    if (state.camPosMode === 'free' && state.freeCam) {
+    // [13/09/2026 — ITEM E] Guard de travamento (ver comentário grande em
+    // modeler-core.js `enter()`) — a roda do mouse move `freeCam` pra
+    // frente/trás (comentário abaixo); com `camLocked` isso também mudaria a
+    // posição da câmera travada, então fica inerte (o `e.preventDefault()`
+    // acima continua evitando o scroll da página, só não move nada).
+    if (state.camPosMode === 'free' && state.freeCam && !state.camLocked) {
       const fwd = window.Cam3DMath.cameraForward(state.freeCam);
       const step = -Math.sign(e.deltaY) * 0.4;
       state.freeCam.x += fwd.x * step;
@@ -444,6 +744,7 @@ const ModelerInput = {
       state.freeCam.z += fwd.z * step;
       return;
     }
+    if (state.camPosMode === 'free' && state.camLocked) return;
     state.orbit.dist = Math.max(0.5, Math.min(20, state.orbit.dist * (1 + Math.sign(e.deltaY) * 0.1)));
   },
 
@@ -1064,13 +1365,65 @@ const ModelerInput = {
     }
   },
 
+  /** Solta o Pointer Lock (se este canvas o possuía) ao FIM de qualquer
+   *  arrasto travado (G/R/S/Extrudar/Duplicar via `_confirmModal`/
+   *  `_cancelModal`, e o arrasto do botão do MEIO da câmera via
+   *  `_onMouseUp` — os 3 pontos que chamam este método).
+   *
+   *  [11/09/2026] BUG CORRIGIDO — pedido verbatim: "no 'soltar', o cursor
+   *  salta para a posição do clique com o cursor antigo. Não deve ser
+   *  assim." CAUSA RAIZ: `document.exitPointerLock()` é o navegador quem
+   *  decide pra onde o cursor OS de verdade "reaparece" — e ele SEMPRE
+   *  volta pra posição CONGELADA de onde o Pointer Lock foi pedido (o
+   *  `mousedown`/tecla que iniciou o arrasto), nunca pra onde o cursor
+   *  FALSO (`state.fakeCursorEl`, a posição visual de verdade durante o
+   *  arrasto, acumulada via `movementX/Y` sem limite — ver `_onMouseMove`)
+   *  estava de fato ao soltar. Não existe NENHUMA API de navegador pra
+   *  "teletransportar" o cursor OS pra outro lugar (por segurança) — ou
+   *  seja, esse "salto" pro ponto de partida é comportamento do PRÓPRIO
+   *  NAVEGADOR, não um bug introduzido aqui, mas a versão ANTERIOR deste
+   *  método piorava a sensação: escondia o cursor falso NA HORA (linha
+   *  removida abaixo), revelando o cursor OS de verdade exatamente nesse
+   *  lugar errado no mesmíssimo instante — daí o "salto" ficar tão visível.
+   *
+   *  CORRIGIDO com uma técnica de "rebase" (mesmo espírito do "wrap"/módulo
+   *  já usado pelo cursor falso pra dar a volta nas bordas da tela — ver
+   *  `_updateFakeCursor`): em vez de aceitar a posição errada do navegador,
+   *  guarda ONDE o cursor falso estava de verdade (`state._cursorRebaseTo`,
+   *  já em coordenadas de TELA/`clientX/Y`, com o mesmo "wrap" aplicado) e
+   *  NÃO esconde o cursor falso agora — ele continua visível, parado
+   *  exatamente ali (`_updateFakeCursor` também passou a manter o cursor OS
+   *  de verdade ESCONDIDO, via `state.canvas.style.cursor = 'none'`,
+   *  enquanto isso). O PRÓXIMO `mousemove` de verdade (que vai reportar a
+   *  posição CONGELADA/errada do navegador em `e.clientX/Y`) é interceptado
+   *  em `_onMouseMove`: calcula o DESLOCAMENTO entre essa posição errada e
+   *  `state._cursorRebaseTo`, guarda em `state.mouse.rebaseDX/Y` — somado a
+   *  TODO `clientX/Y` reportado daqui em diante — e o cursor falso/`vx/vy`
+   *  (usado pro raycasting de toda interação do Modelador) continuam
+   *  exatamente de onde o arrasto realmente parou, sem descontinuidade
+   *  nenhuma visível pro usuário. Único efeito colateral aceito (o
+   *  navegador genuinamente não deixa fazer melhor que isso): depois do
+   *  1º arrasto travado de uma sessão do Modelador, o cursor falso (cruz)
+   *  passa a representar o cursor de verdade sobre o canvas 3D pro RESTO
+   *  da sessão (em vez do cursor OS padrão) — o deslocamento de rebase é
+   *  constante a partir daí, então voltar a confiar no cursor OS de
+   *  verdade (que está fisicamente preso um deslocamento fixo longe de onde
+   *  o cursor "lógico" está) reintroduziria o mesmo salto mais tarde.
+   */
   _releasePointerLockIfOwned(state) {
-    if (document.pointerLockElement === state.canvas) { try { document.exitPointerLock(); } catch (err) { /* ignora */ } }
-    // Esconde o cursor falso na hora, sem esperar o próximo `mousemove`
-    // (`pointerlockchange`/o navegador destravando o cursor real pode
-    // demorar um instante, e sem isso o retículo falso ficaria visível
-    // "grudado" no último lugar até o mouse se mexer de novo).
-    if (state.fakeCursorEl) state.fakeCursorEl.style.display = 'none';
+    if (document.pointerLockElement === state.canvas) {
+      const rect = state.canvas.getBoundingClientRect();
+      // Fallback pra `downX/downY` no caso extremo (nunca visto na prática)
+      // de soltar o botão sem NENHUM `mousemove` real ter chegado a
+      // acontecer enquanto travado — mesma rede de segurança já usada em
+      // `_startModal` pra `startX/startY`.
+      const vx = state.mouse.vx ?? state.mouse.downX ?? rect.left;
+      const vy = state.mouse.vy ?? state.mouse.downY ?? rect.top;
+      const wrapX = (((vx - rect.left) % rect.width) + rect.width) % rect.width;
+      const wrapY = (((vy - rect.top) % rect.height) + rect.height) % rect.height;
+      state._cursorRebaseTo = { x: rect.left + wrapX, y: rect.top + wrapY };
+      try { document.exitPointerLock(); } catch (err) { /* ignora */ }
+    }
   },
 
   _confirmModal(state) {
@@ -1194,6 +1547,95 @@ const ModelerInput = {
     ModelerUI.updateToolbarActive(state);
     ModelerUI.updateNPanel(state);
     Utils.toast?.('Origem definida ✓', { type: 'ok', duration: 1500 });
+  },
+
+  // [09/09/2026] NOVO — pedido verbatim: "A opção 'Personalizado (x/y/z)'
+  // deve ter duas subopções [...] A outra opção deve funcionar assim, deve
+  // ser possível definir o ponto de origem do objeto com o cursor do mouse
+  // sobre as suas arestas e vértices. Ao passar o cursor do mouse pelas
+  // arestas do objeto, vai aparecendo um ponto onde será o pivô caso se
+  // clique naquele instante. Com o shift segurado, deve ser possível ir
+  // dando snap ao longo das arestas. O snap deve dar destaque para o centro
+  // do vértice e extremidades (apenas visual)." Reaproveita o MESMO picking
+  // em espaço de TELA já usado pra seleção de vértice/aresta em Modo Edição
+  // (`ModelerRender.pickElementAtScreen`/`screenPositions`, ver
+  // modeler-render.js) — sem raycasting 3D novo, só a mesma técnica de
+  // "ponto mais próximo na tela", generalizada pra achar o PONTO na
+  // ARESTA (não só o índice dela) mais perto do cursor.
+  //
+  // `state._pickOriginMode` (ligado/desligado aqui) é lido por
+  // `_onMouseMove`/`_onMouseDown` acima; `state._originPickHover` guarda o
+  // último ponto em preview (`{ local:[x,y,z], vertexHighlight:idxOuNull }`,
+  // espaço local da malha — mesma referência de `state.cm.vertices`).
+  enterOriginPickMode(state) {
+    state._pickOriginMode = true;
+    state._originPickHover = null;
+    Utils.toast?.('📐 Passe o mouse sobre as arestas do objeto e clique para definir a origem ali. Segure Shift para dar snap ao longo da aresta. Botão direito cancela.', { duration: 4200 });
+  },
+
+  exitOriginPickMode(state) {
+    state._pickOriginMode = false;
+    state._originPickHover = null;
+    if (window.ModelerRender) ModelerRender.updateOriginPickMarker(state, null, null);
+  },
+
+  /** Chamada a cada `mousemove` enquanto `state._pickOriginMode` está
+   *  ligado — acha a aresta (`state.cm.edges`) mais perto do cursor, em
+   *  espaço de TELA (mesmo raciocínio de `ModelerRender._distSeg`, mas
+   *  também devolvendo o parâmetro `t` [0..1] ao longo da aresta pra achar o
+   *  PONTO, não só qual aresta). Sem Shift: `t` livre (qualquer ponto da
+   *  aresta) — perto o bastante de uma ponta (6% do comprimento), destaca o
+   *  VÉRTICE daquela ponta (só visual, não muda `t`). Com Shift: `t` é
+   *  arredondado pra passos discretos (`SNAP_STEPS`), "dando snap ao longo
+   *  da aresta" — nos 2 passos das extremidades, o destaque de vértice
+   *  também liga (mesmo efeito visual, agora coincidindo com o ponto de
+   *  verdade, já que o snap ali cai exatamente em cima do vértice). */
+  _updateOriginPickHover(state, e) {
+    const rect = state.canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    const screenVerts = ModelerRender.screenPositions(state, rect.width, rect.height);
+    const HOVER_PX = 26; // raio de tolerância em pixels CSS pra "encostar" numa aresta
+    let bestEdge = -1, bestT = 0, bestD = HOVER_PX;
+    (state.cm.edges || []).forEach((edge, ei) => {
+      const pa = screenVerts[edge[0]], pb = screenVerts[edge[1]];
+      if (!pa || !pb) return;
+      const dx = pb.x - pa.x, dy = pb.y - pa.y;
+      const len2 = dx * dx + dy * dy;
+      let t = len2 > 1e-6 ? ((px - pa.x) * dx + (py - pa.y) * dy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const cx = pa.x + t * dx, cy = pa.y + t * dy;
+      const d = Math.hypot(px - cx, py - cy);
+      if (d < bestD) { bestD = d; bestEdge = ei; bestT = t; }
+    });
+    if (bestEdge === -1) { this._clearOriginPickHover(state); return; }
+    const SNAP_STEPS = 10; // "dando snap ao longo das arestas" — 10 passos (10% em 10%)
+    let t = bestT;
+    let vertexHighlight = null;
+    if (e.shiftKey) {
+      t = Math.round(t * SNAP_STEPS) / SNAP_STEPS;
+      if (t <= 0.001) vertexHighlight = state.cm.edges[bestEdge][0];
+      else if (t >= 0.999) vertexHighlight = state.cm.edges[bestEdge][1];
+    } else if (t <= 0.06) {
+      vertexHighlight = state.cm.edges[bestEdge][0];
+    } else if (t >= 0.94) {
+      vertexHighlight = state.cm.edges[bestEdge][1];
+    }
+    const [ia, ib] = state.cm.edges[bestEdge];
+    const va = state.cm.vertices[ia], vb = state.cm.vertices[ib];
+    if (!va || !vb) { this._clearOriginPickHover(state); return; }
+    const local = [
+      va[0] + (vb[0] - va[0]) * t,
+      va[1] + (vb[1] - va[1]) * t,
+      va[2] + (vb[2] - va[2]) * t,
+    ];
+    state._originPickHover = { local, vertexHighlight };
+    ModelerRender.updateOriginPickMarker(state, local, vertexHighlight);
+  },
+
+  _clearOriginPickHover(state) {
+    if (!state._originPickHover) return;
+    state._originPickHover = null;
+    if (window.ModelerRender) ModelerRender.updateOriginPickMarker(state, null, null);
   },
 
   triggerDuplicate(state) {

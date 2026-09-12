@@ -1,0 +1,430 @@
+/* ==============================================================================
+   HISTÓRICO DE ALTERAÇÕES DESTE ARQUIVO (mais recente primeiro)
+   ==============================================================================
+   Rodada 31 (2026-09-09): pedido do usuário — versão embutida do vanishCam (ver
+     js/embed-api.js/index.html/README-embed.md). O antigo body{display:flex;
+     flex-direction:column} (que organizava #topbar sobre #main) MOVEU para o
+     novo #vanishcamRoot (novo wrapper em index.html, envolvendo TODO o markup
+     visível) — necessário para vanishCamMount() poder mover essa árvore
+     inteira para dentro de um container escolhido pelo app hospedeiro. No uso
+     avulso (sem vanishCamMount()), nada muda visualmente: #vanishcamRoot
+     ocupa 100% do <body> exatamente como o <body> ocupava 100% da janela
+     antes. Nova classe .embedded (aplicada por vanishCamMount()) — só adiciona
+     position:relative, para conter corretamente elementos internos.
+   Rodada 28 (2026-09-09): novas classes — .subOption (recuo visual da subopção
+     "Prolongamento infinito" dentro de #manualPPThirdAxisField); .whatIsThisMockWrap/
+     .whatIsThisMock/.whatIsThisMockEq (os "mini-screenshots" dos controles reais
+     na janela "O que é isso?" > Dicas de uso, pedido do usuário). Os novos
+     botões-ícone .axisExtBtn (eixos 1/2/3, index.html) e #diagonalsEnabledBtn
+     (troca do antigo checkbox de "Linhas diagonais") reaproveitam .vpMoveBtn já
+     existente, sem CSS nova própria.
+   Rodada 27 (2026-09-09): nova regra #explainerActiveBanner svg{flex-shrink:0}
+     — o ícone (agora também dentro da faixa, ver histórico de index.html) não
+     pode encolher dentro do flex, já que o texto ao lado é bem mais longo. As
+     cores do ícone em si (#60a5fa/#ffe066) ficam definidas no próprio SVG em
+     index.html, não aqui (não são currentColor).
+   Rodada 26 (2026-09-09): novo #explainerActiveBanner — faixa fixa no topo do
+     viewport, visível enquanto o "explicador visual" está ativo, avisando que
+     clicar/arrastar na imagem estão desligados (pedido do usuário). O ícone SVG
+     novo de #explainerToggleBtn (index.html) não precisou de CSS própria — herda
+     color/currentColor do <button> normal.
+   Rodada 25 (2026-09-09): novas classes #whatIsThisOverlay/#whatIsThisBox — janela
+     "O que é isso?" (menu Arquivo, novo item acima de "Sobre"), mesmo padrão visual
+     de #aboutOverlay/#aboutBox (rodada 24) mas mais larga e com rolagem própria (bem
+     mais texto: definições + dicas de uso). #explainerToggleBtn.active — destaque
+     azul (mesmo de .vpMoveBtn.active) enquanto o "explicador visual" está ligado.
+     #explainerTooltip/#explainerTooltipTitle/#explainerTooltipDesc — a caixa de
+     texto (2 linhas) que segue o elemento sob o mouse com o explicador ativo; a
+     seta até o elemento é desenhada no canvas, não em CSS (ver canvas-render.js).
+   Rodada 24 (2026-09-09): novas classes #aboutOverlay/#aboutBox — janela "Sobre"
+     (menu Arquivo > Sobre) deixou de usar o #modalOverlay genérico e ganhou
+     janela própria, reaproveitando o visual de #shortcutsOverlay/#shortcutsBox
+     (rodada 13) — inclusive user-select:text no texto, mesmo padrão de
+     #cornerPopupBox/#shortcutsBox, pedido explícito do usuário ("deve poder
+     ser selecionáveis os textos ali"). #aboutBox h4 é o título da nova seção
+     "Código-fonte do VanishCam" (também pedido do usuário).
+   Rodada 17 (2026-09-08): (a) .vpMoveBtn ganhou position:relative (necessário
+     para posicionar o selo abaixo); (b) nova classe .lockCount — selo
+     redondo pequeno (canto superior direito) com a QUANTIDADE de
+     extremidades travadas (1 a 4) sobre o botão "Travar" (🔒) de cada eixo,
+     criado/atualizado via JS (updateVpLockBadge(), ui-controls.js);
+     :empty{display:none} o esconde quando não há nada travado.
+   Rodada 16 (2026-09-08): nova classe .vpMoveGroup (+ .vpMoveGroup .vpMoveBtn
+     :first-child/:last-child) — cola visualmente o novo botão auxiliar 📏
+     (distmode) ao botão "Mover" em cada eixo, mesmo padrão de .vpModeGroup
+     já existente (Transladar/Ancorar), só que genérico para .vpMoveBtn.
+   Rodada 14 (2026-09-08): sem novas classes — o botão "Trazer para perto"
+     (#bringCloseBtn) reaproveita o estilo padrão de <button> já existente,
+     só com width:100% inline (mesmo padrão do botão "Canto"/#cornerGuideBtn).
+   Rodada 13 (2026-09-08): vários ajustes pedidos pelo usuário (ver o histórico
+     completo, mais detalhado, no topo de index.html e dos arquivos .js tocados
+     nesta rodada). Resumo do que mudou aqui: (a) .vpMoveIconsRow ganhou
+     justify-content:flex-end — o grupo de botões "Mover/Travar/Transladar/
+     Ancorar", que ficava colado à ESQUERDA da fileira (por causa do
+     display:flex padrão), passou a ficar colado à DIREITA, para os eixos 1 e
+     2 (pedido explícito do usuário). (b) nova classe .vpModeGroup — agrupa
+     visualmente os botões "Transladar"/"Ancorar" (que agora ficam dentro de
+     uma <div> própria no HTML) sem o gap:6px do resto da fileira e com bordas
+     internas coladas (como um seletor segmentado de 2 opções), deixando mais
+     claro que são mutuamente exclusivos. (c) novo checkbox
+     #cornerPopupAnimateRow (popup do cubo 3D "Canto"). (d) #cornerPopupBox
+     ganhou user-select:text (e os elementos internos que são controles —
+     botões/checkbox — de volta para user-select:none), para que os textos da
+     janelinha do cubo possam ser selecionados (pedido do usuário; mesmo
+     padrão já usado em #leftPanel/#rightPanel). (e) novas classes
+     #shortcutsOverlay/#shortcutsBox/.shortcutRow/etc. — janela "Atalhos"
+     (menu Arquivo > Atalhos), reaproveitando o visual do #modalOverlay.
+   Rodada 12 (2026-09-08): #cornerPopupBox ganhou position:relative e o botão
+     redondo #cornerPopupCloseBtn (canto superior direito, "✕") para fechar o
+     popup do cubo 3D interativo explicitamente (ver js/corner-guide.js para
+     a correção do fechamento acidental durante um arraste).
+   Rodada 11 (2026-09-08): adicionadas .vpMoveIconsRow/.vpMoveBtn/.vpModeBtn/
+     .vpMoveRectNote — estilo dos novos grupos de botões-ícone "Mover" /
+     "Travar" / "Transladar" / "Ancorar" abaixo de cada linha de eixo de fuga
+     em "Eixos dos pontos de fuga" (eixos 1 e 2; o eixo 3 reaproveita
+     .vpModeBtn na sua própria linha "⇔ Transladar / ⚓ Ancorar").
+   Rodada 10 (2026-09-08): adicionadas #cornerPopupOverlay/#cornerPopupBox
+     (popup do cubo 3D interativo da Guia 3D "Canto") e #vp3LockToast (aviso
+     transitório de "não é possível mover o 3º ponto de fuga" quando as 4
+     extremidades do seu par de linhas estão travadas).
+   Rodada 9 (2026-09-07): adicionado este histórico de alterações (ver a mesma
+     nota nos demais arquivos do projeto). Sem mudança de comportamento.
+   Rodada 6 (2026-09-06): adicionadas as classes .sliderRow/.sliderVal — layout
+     dos novos controles "Tamanho das bolinhas"/"Espessura da linha" do painel
+     esquerdo (sliders horizontais com o valor numérico ao lado).
+   Rodada 5 (2026-09-06): adicionada a classe .calib-error — estilo da mensagem
+     de erro de calibração exibida abaixo de "Distância Focal".
+   ============================================================================== */
+:root{
+  --bg0:#1e1e1e; --bg1:#252526; --bg2:#2d2d30; --bg3:#3c3c3c;
+  --border:#454545; --text:#d4d4d4; --text-dim:#9a9a9a; --accent:#3b82f6;
+  --accent2:#60a5fa; --danger:#e05252; --ok:#3ecf8e;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;margin:0;padding:0;}
+body{
+  font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+  background:var(--bg0); color:var(--text); font-size:13px;
+  overflow:hidden; user-select:none;
+}
+/* Rodada 31 (2026-09-09): pedido do usuário — todo o markup visível passou a viver dentro de
+   #vanishcamRoot (index.html), para que a versão embutida (js/embed-api.js, vanishCamMount())
+   possa mover essa árvore inteira para dentro de um container do app hospedeiro. O antigo
+   "display:flex; flex-direction:column" do <body> (que organizava #topbar em cima de #main)
+   MOVEU para aqui, junto com height:100% — no uso AVULSO (index.html aberto direto, sem
+   vanishCamMount()), #vanishcamRoot ocupa 100% do <body> exatamente como o <body> ocupava 100% da
+   janela antes desta rodada, então nada muda visualmente. Quando embutido (classe .embedded,
+   aplicada por vanishCamMount()), ocupa 100% do container do hospedeiro em vez da janela — o
+   hospedeiro é responsável por dar a esse container uma altura definida (ex.: height:600px, ou
+   um flex/grid que lhe dê espaço), já que um <div> comum não tem altura própria. */
+#vanishcamRoot{
+  height:100%; width:100%;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+#vanishcamRoot.embedded{ position:relative; }
+button, select, input{font-family:inherit; font-size:12px; color:var(--text);}
+input[type=text], input[type=number]{
+  background:var(--bg3); border:1px solid var(--border); color:var(--text);
+  padding:3px 5px; border-radius:3px; width:100%;
+}
+select{background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:3px 4px; border-radius:3px;}
+button{background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:4px 8px; border-radius:3px; cursor:pointer;}
+button:hover{background:#4a4a4d;}
+button:active{background:#555;}
+button.primary{background:var(--accent); border-color:var(--accent);}
+button.primary:hover{background:var(--accent2);}
+h1,h2,h3,p{margin:0;}
+.hidden{display:none !important;}
+
+/* ---------- Top bar ---------- */
+#topbar{
+  height:32px; background:var(--bg1); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; padding:0 4px; flex-shrink:0; position:relative; z-index:50;
+}
+.menu-item{position:relative;}
+.menu-btn{background:transparent; border:none; padding:5px 10px; border-radius:3px;}
+.menu-btn:hover, .menu-btn.open{background:var(--bg3);}
+.menu-dropdown{
+  position:absolute; top:28px; left:0; background:#2b2b2d; border:1px solid var(--border);
+  border-radius:4px; min-width:260px; box-shadow:0 6px 18px rgba(0,0,0,.45); padding:4px 0;
+}
+.menu-dropdown .mi{padding:6px 14px; cursor:pointer; display:flex; justify-content:space-between; gap:20px; white-space:nowrap;}
+.menu-dropdown .mi:hover{background:var(--accent);}
+.menu-dropdown .sep{height:1px; background:var(--border); margin:4px 0;}
+.menu-dropdown .submenu-wrap{position:relative;}
+.menu-dropdown .submenu{
+  position:absolute; left:100%; top:-4px; background:#2b2b2d; border:1px solid var(--border);
+  border-radius:4px; min-width:220px; display:none; padding:4px 0; box-shadow:0 6px 18px rgba(0,0,0,.45);
+}
+.submenu-wrap:hover .submenu{display:block;}
+#appTitle{margin-left:8px; color:var(--text-dim); font-size:12px;}
+
+/* ---------- Main layout ---------- */
+#main{flex:1; display:flex; min-height:0;}
+#leftPanel, #rightPanel{
+  width:270px; flex-shrink:0; background:var(--bg1); border-right:1px solid var(--border);
+  padding:10px;
+}
+#leftPanel{overflow-y:auto;}
+/* O painel direito não pode rolar: layout compactado para caber sempre na tela. */
+#rightPanel{border-right:none; border-left:1px solid var(--border); overflow:hidden; padding:6px 10px; display:flex; flex-direction:column;}
+#leftPanel, #rightPanel{user-select:text;}
+#leftPanel button, #rightPanel button, #leftPanel .dotselect-btn, #rightPanel .dotselect-btn{user-select:none;}
+#viewportWrap{flex:1; position:relative; background:#111; overflow:hidden; min-width:0;}
+#viewport{position:absolute; inset:0; cursor:default;}
+#dropScreen{
+  position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:16px; color:var(--text-dim); pointer-events:none;
+}
+#dropScreen.dragover{background:rgba(59,130,246,.08);}
+#dropScreen *{pointer-events:auto;}
+#dropScreen .dz-text{font-size:16px;}
+#dropScreen button{padding:8px 16px; font-size:13px;}
+
+.field{margin-bottom:12px;}
+.field label.title{display:block; font-weight:600; margin-bottom:5px; color:#e8e8e8; font-size:12px;}
+.seg{display:flex; border:1px solid var(--border); border-radius:4px; overflow:hidden;}
+.seg button{flex:1; border:none; border-radius:0; background:var(--bg2); padding:5px 0;}
+.seg button + button{border-left:1px solid var(--border);}
+.seg button.active{background:var(--accent); color:#fff;}
+.row{display:flex; align-items:center; gap:6px; margin-bottom:6px;}
+.row .lbl{width:16px; color:var(--text-dim);}
+.row select, .row input{flex:1;}
+.checkboxRow{display:flex; align-items:center; gap:8px; cursor:pointer;}
+.checkboxRow input{width:auto; flex:none;}
+.checkboxRow.spread{justify-content:space-between;}
+/* Rodada 28 (2026-09-09): subopção "Prolongamento infinito" (dentro de #manualPPThirdAxisField) —
+   levemente recuada/com uma borda fina à esquerda, para ficar visualmente "dentro" do checkbox pai
+   acima dela, sem precisar de nenhum wrapper novo de layout. */
+.subOption{margin-left:14px; padding-left:8px; border-left:2px solid var(--border); margin-top:6px;}
+
+/* dropdown customizado com "bolinha" colorida (dotselect) */
+.dotselect{position:relative; width:100%;}
+.dotselect-btn{
+  width:100%; display:flex; align-items:center; gap:8px; text-align:left;
+  background:var(--bg3); border:1px solid var(--border); border-radius:4px; padding:5px 8px; cursor:pointer;
+}
+.dotselect-btn:hover{background:#4a4a4d;}
+.dotselect-label{flex:1;}
+.dotselect-caret{color:var(--text-dim); flex-shrink:0;}
+.dotselect-list{
+  position:absolute; top:calc(100% + 2px); left:0; right:0; z-index:60;
+  background:#2b2b2d; border:1px solid var(--border); border-radius:4px; padding:4px 0;
+  box-shadow:0 6px 18px rgba(0,0,0,.45); max-height:260px; overflow-y:auto;
+}
+.dotselect-item{display:flex; align-items:center; gap:8px; padding:6px 10px; cursor:pointer; user-select:none;}
+.dotselect-item:hover{background:var(--accent);}
+.dot{width:11px; height:11px; border-radius:50%; flex-shrink:0; display:inline-block;}
+
+.sliderRow{display:flex; align-items:center; gap:8px;}
+.sliderRow input[type=range]{flex:1; width:auto; accent-color:var(--accent);}
+.sliderRow .sliderVal{width:22px; text-align:right; color:var(--text-dim); font-size:11px; flex-shrink:0;}
+
+hr.sep{border:none; border-top:1px solid var(--border); margin:4px 0;}
+.section-title{display:flex; align-items:center; gap:6px; font-weight:600; margin:3px 0 3px; color:#e8e8e8; font-size:12px; line-height:1.1;}
+.section-title:first-child{margin-top:0;}
+.readout{display:flex; align-items:center; gap:6px; margin-bottom:2px;}
+.readout .rlabel{width:58px; color:var(--text-dim); flex-shrink:0; font-size:11.5px;}
+.readout input{background:var(--bg2); text-align:right; padding:1px 5px;}
+.copyBtn{flex-shrink:0; width:19px; height:19px; padding:0; display:flex; align-items:center; justify-content:center; font-size:10px;}
+.subrow{display:flex; gap:6px; margin-bottom:4px;}
+.subrow input{width:70px; flex:none; text-align:center;}
+.small-note{font-size:11px; color:var(--text-dim); margin-top:4px; line-height:1.4;}
+
+.vpMoveIconsRow{display:flex; align-items:center; gap:6px; margin:4px 0 2px; justify-content:flex-end;}
+.vpMoveBtn{
+  position:relative; flex:none; width:26px; height:26px; padding:0; display:flex; align-items:center;
+  justify-content:center; font-size:13px; background:var(--bg3);
+  border:1px solid var(--border); border-radius:4px; color:var(--text); cursor:pointer;
+}
+/* Rodada 17: selo com a QUANTIDADE de extremidades travadas (1 a 4) no canto do botão "Travar"
+   (🔒) de cada eixo — pedido do usuário para "perceber a quantidade" sem precisar abrir nada.
+   Criado/atualizado via JS (updateVpLockBadge(), ui-controls.js); fica vazio (e por isso
+   invisível, ver :empty abaixo) quando nenhuma extremidade está travada. */
+.lockCount{
+  position:absolute; top:-5px; right:-5px; min-width:13px; height:13px; padding:0 2px;
+  border-radius:7px; background:var(--danger); color:#fff; font-size:9px; line-height:13px;
+  text-align:center; font-weight:700; pointer-events:none; box-shadow:0 0 0 1px var(--bg3);
+}
+.lockCount:empty{ display:none; }
+.vpMoveBtn:hover{background:#4a4a4d;}
+.vpMoveBtn.active{background:var(--accent); border-color:var(--accent); color:#fff;}
+.vpMoveBtn.vpModeBtn{width:auto; padding:0 8px;}
+/* Sub-grupo "Transladar"/"Ancorar": os 2 botões ficam colados (sem o gap:6px da fileira, borda
+   interna compartilhada) para lembrar visualmente um seletor de 2 opções mutuamente exclusivas
+   — pedido do usuário ("deixe os botões colados um do lado do outro"). */
+.vpModeGroup{display:flex; align-items:center;}
+.vpModeGroup .vpModeBtn{border-radius:0;}
+.vpModeGroup .vpModeBtn:first-child{border-radius:4px 0 0 4px;}
+.vpModeGroup .vpModeBtn:last-child{border-radius:0 4px 4px 0; margin-left:-1px;}
+/* Rodada 16: sub-grupo do botão auxiliar "proporcional/comprimento fixo" colado à esquerda do
+   botão "Mover" (mesmo padrão visual de .vpModeGroup acima, só que para .vpMoveBtn em geral, não
+   só .vpModeBtn — pedido do usuário ("colado no botão de mover")). */
+.vpMoveGroup{display:flex; align-items:center;}
+.vpMoveGroup .vpMoveBtn{border-radius:0;}
+.vpMoveGroup .vpMoveBtn:first-child{border-radius:4px 0 0 4px;}
+.vpMoveGroup .vpMoveBtn:last-child{border-radius:0 4px 4px 0; margin-left:-1px;}
+.vpMoveRectNote{font-size:11px; color:var(--text-dim); margin:2px 0 4px; line-height:1.4; font-style:italic;}
+
+#rightPanel select{padding:1px 4px; margin-bottom:4px !important;}
+#rightPanel .field{margin-bottom:0;}
+#rightPanel input, #rightPanel select, #rightPanel button{font-size:11.5px;}
+.calib-error{
+  margin-top:8px; padding:6px 8px; font-size:11px; line-height:1.4;
+  color:#ffb4b4; background:rgba(224,82,82,.12); border:1px solid rgba(224,82,82,.4);
+  border-radius:4px;
+}
+
+/* modal */
+#modalOverlay{position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:200;}
+#modalBox{background:#2b2b2d; border:1px solid var(--border); border-radius:6px; padding:20px; width:360px; box-shadow:0 10px 30px rgba(0,0,0,.5);}
+#modalBox h3{margin-bottom:10px;}
+#modalBox p{margin-bottom:16px; color:var(--text-dim); line-height:1.5;}
+#modalBox .modalBtns{display:flex; justify-content:flex-end; gap:8px;}
+
+::-webkit-scrollbar{width:10px; height:10px;}
+::-webkit-scrollbar-thumb{background:#4a4a4d; border-radius:5px;}
+::-webkit-scrollbar-track{background:transparent;}
+
+/* popup do cubo 3D interativo (Guia 3D "Canto") */
+#cornerPopupOverlay{
+  position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex;
+  align-items:center; justify-content:center; z-index:210;
+}
+#cornerPopupBox{
+  position:relative; background:rgba(43,43,45,.92); border:1px solid var(--border);
+  border-radius:8px; padding:14px; box-shadow:0 10px 30px rgba(0,0,0,.55);
+}
+#cornerPopupCanvas{ display:block; border-radius:4px; cursor:grab; background:rgba(0,0,0,.25); }
+#cornerPopupCanvas:active{ cursor:grabbing; }
+#cornerPopupBox .small-note{ margin-top:8px; }
+#cornerPopupCloseBtn{
+  position:absolute; top:-10px; right:-10px; width:24px; height:24px; padding:0;
+  border-radius:50%; background:#3c3c3c; border:1px solid var(--border); color:var(--text);
+  display:flex; align-items:center; justify-content:center; font-size:12px; line-height:1;
+  cursor:pointer; z-index:1;
+}
+#cornerPopupCloseBtn:hover{ background:var(--danger); border-color:var(--danger); color:#fff; }
+/* Rodada 13: textos da janelinha do cubo (título/notas) selecionáveis (o body é user-select:none
+   por padrão) — mas os CONTROLES (botões, checkbox) continuam não-selecionáveis, mesmo padrão já
+   usado em #leftPanel/#rightPanel (ver mais acima). */
+#cornerPopupBox{ user-select:text; }
+#cornerPopupBox button, #cornerPopupBox input{ user-select:none; }
+#cornerPopupAnimateRow{
+  display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11.5px;
+  color:var(--text-dim); cursor:pointer;
+}
+
+/* aviso transitório (ex.: "as 4 extremidades do 3º eixo estão travadas") */
+#vp3LockToast{
+  position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
+  background:#3c1414; border:1px solid var(--danger); color:#ffdada;
+  padding:8px 14px; border-radius:5px; font-size:12px; max-width:420px; text-align:center;
+  z-index:220; box-shadow:0 6px 18px rgba(0,0,0,.5);
+  transition:opacity .25s ease; opacity:1;
+}
+#vp3LockToast.hidden{ opacity:0; }
+
+/* janela "Atalhos" (menu Arquivo > Atalhos) — mesmo visual do #modalOverlay, mas com uma lista
+   de linhas descrição/combinação de teclas em vez de uma mensagem única. */
+#shortcutsOverlay{
+  position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex;
+  align-items:center; justify-content:center; z-index:200;
+}
+#shortcutsBox{
+  background:#2b2b2d; border:1px solid var(--border); border-radius:6px; padding:20px;
+  width:460px; max-width:90vw; box-shadow:0 10px 30px rgba(0,0,0,.5); user-select:text;
+}
+#shortcutsBox h3{margin-bottom:12px;}
+#shortcutsBox button, #shortcutsBox select{user-select:none;}
+.shortcutRow{
+  display:flex; align-items:center; justify-content:space-between; gap:14px;
+  padding:7px 0; border-bottom:1px solid var(--border); font-size:12px;
+}
+.shortcutRow:last-of-type{border-bottom:none;}
+.shortcutDesc{color:var(--text); flex:1.3;}
+.shortcutKeys{color:var(--text-dim); text-align:right; flex:1;}
+.shortcutModName{color:var(--accent2); font-weight:600;}
+.shortcutConfigRow select{width:auto; flex:none;}
+
+/* janela "Sobre" (menu Arquivo > Sobre) — rodada 24, mesmo visual de #shortcutsOverlay/#shortcutsBox
+   acima, mas com texto corrido (atribuição ao fSpy original + seção "Código-fonte") em vez de uma
+   lista de linhas. user-select:text pedido explicitamente pelo usuário. */
+#aboutOverlay{
+  position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex;
+  align-items:center; justify-content:center; z-index:200;
+}
+#aboutBox{
+  background:#2b2b2d; border:1px solid var(--border); border-radius:6px; padding:20px;
+  width:460px; max-width:90vw; box-shadow:0 10px 30px rgba(0,0,0,.5); user-select:text;
+}
+#aboutBox h3{margin-bottom:10px;}
+#aboutBox h4{margin:16px 0 6px; font-size:12.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em;}
+#aboutBox p{color:var(--text-dim); line-height:1.5; margin-bottom:4px;}
+#aboutBox a{color:var(--accent2); word-break:break-all;}
+#aboutBox button{user-select:none;}
+
+/* janela "O que é isso?" (menu Arquivo > O que é isso?) — rodada 25 (2026-09-09), mesmo padrão
+   visual/de user-select:text de #aboutOverlay/#aboutBox acima, mas mais larga e com rolagem
+   própria (max-height + overflow-y:auto), por ter bem mais texto (definições + dicas de uso). */
+#whatIsThisOverlay{
+  position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex;
+  align-items:center; justify-content:center; z-index:200;
+}
+#whatIsThisBox{
+  background:#2b2b2d; border:1px solid var(--border); border-radius:6px; padding:20px;
+  width:560px; max-width:90vw; max-height:82vh; overflow-y:auto;
+  box-shadow:0 10px 30px rgba(0,0,0,.5); user-select:text;
+}
+#whatIsThisBox h3{margin-bottom:10px;}
+#whatIsThisBox h4{margin:16px 0 6px; font-size:12.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em;}
+#whatIsThisBox p{color:var(--text-dim); line-height:1.5; margin-bottom:8px;}
+#whatIsThisBox b{color:var(--text); font-weight:600;}
+#whatIsThisBox button, #whatIsThisBox select{user-select:none;}
+/* Rodada 28 (2026-09-09): "mini-screenshots" dos controles reais (mesmas classes .dotselect-btn/
+   .dot/.checkboxRow do app, só inertes) usados na seção "Dicas de uso" para ilustrar que 2
+   combinações de controles usam o mesmo par de linhas do 3º eixo — pedido explícito do usuário
+   ("Coloque os ícones e estilo em que aparecem como se fosse um screenshot"). */
+.whatIsThisMockWrap{display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:center; margin:4px 0 12px;}
+.whatIsThisMock{flex:1 1 200px; min-width:200px; background:#232325; border:1px solid var(--border); border-radius:6px; padding:10px 12px;}
+.whatIsThisMockEq{color:var(--text-dim); font-size:20px; font-weight:700; flex-shrink:0;}
+/* Botão liga/desliga o "explicador visual" — mesmo destaque azul de .active usado nos botões-ícone
+   .vpMoveBtn/.vpModeBtn (rodada 11/13), para deixar claro quando está ATIVO. */
+#explainerToggleBtn.active{background:var(--accent); border-color:var(--accent);}
+#explainerToggleBtn.active:hover{background:var(--accent2);}
+
+/* Tooltip do "explicador visual" (rodada 25) — <div> de texto (2 linhas) que segue o elemento sob
+   o mouse; a SETA até o elemento é desenhada no canvas (drawExplainerHoverArrow(),
+   canvas-render.js), não aqui. position:fixed (posicionado via JS em coordenadas de página) e
+   pointer-events:none — nunca deve interceptar cliques/hover do próprio app por baixo dele. */
+#explainerTooltip{
+  position:fixed; z-index:300; max-width:260px; pointer-events:none;
+  background:#1c1c1e; border:1px solid #ffe066; border-radius:5px; padding:8px 10px;
+  box-shadow:0 6px 18px rgba(0,0,0,.5);
+}
+#explainerTooltipTitle{color:#fff; font-weight:600; font-size:12.5px; margin-bottom:3px;}
+#explainerTooltipDesc{color:var(--text-dim); font-size:11.5px; line-height:1.4;}
+
+/* Faixa fixa no topo do viewport (rodada 26 — 2026-09-09), visível enquanto o "explicador visual"
+   está ativo, avisando que clicar/arrastar na imagem estão desligados (pedido explícito do
+   usuário) — mesma cor de destaque (#ffe066) já usada no tooltip/seta do explicador, para deixar
+   claro que faz parte do mesmo modo. Mostrada/escondida por setExplainerModeActive()
+   (canvas-render.js); position:fixed (não faz parte do fluxo do #viewportWrap) para nunca ficar
+   escondida atrás do canvas nem ser cortada por overflow:hidden dele.
+   Rodada 26: z-index abaixo dos modais/overlays (200) — não precisa aparecer por cima deles, já
+   que o usuário não interage com o canvas enquanto um estiver aberto — mas acima de tudo o resto. */
+#explainerActiveBanner{
+  position:fixed; top:10px; left:50%; transform:translateX(-50%);
+  display:flex; align-items:center; gap:10px;
+  background:#1c1c1e; border:1px solid #ffe066; color:#fff;
+  padding:7px 10px 7px 14px; border-radius:20px; font-size:12px;
+  z-index:190; box-shadow:0 6px 18px rgba(0,0,0,.5);
+}
+/* Rodada 27: o ícone SVG (mesmo do #explainerToggleBtn, cores fixas definidas no próprio SVG em
+   index.html) não pode encolher dentro do flex da faixa — o texto ao lado é bem mais longo. */
+#explainerActiveBanner svg{flex-shrink:0;}
+#explainerActiveBanner button{
+  background:#ffe066; border-color:#ffe066; color:#1c1c1e; font-weight:600;
+  padding:3px 10px; border-radius:14px;
+}
+#explainerActiveBanner button:hover{background:#fff0a6;}

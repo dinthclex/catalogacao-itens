@@ -42,12 +42,20 @@ const App = {
     // do painel de Objetos do Mapa (decisão do usuário via AskUserQuestion:
     // "No painel de Objetos do mapa", não em Configurações do app).
     modelos3d: Modelos3DView,
+    // NOVO (07/09/2026), pedido verbatim: "layout estilo Blender [...]
+    // Crie um layout de interface modular, redimensionável e baseada em
+    // blocos (tiled workspace)." — ver js/bsplayout.js (window.BSPLayout)
+    // pra estrutura de estado/árvore comentada. Segue o MESMO contrato
+    // mount(container)/unmount() de qualquer outra tela — nada de especial
+    // precisou mudar aqui em `navigate()` pra acomodar o Workspace.
+    workspace: BSPLayout,
   },
 
   titles: {
     tabela: 'Catalogação de Itens', flashcards: 'Cartões', capturar: 'Fotos',
     mapa: 'Mapa do ambiente', buscar: 'Buscar item', configuracoes: 'Configurações',
     unificar: 'Unificar conferência', modelos3d: 'Modelos 3D',
+    workspace: 'Workspace',
   },
 
   async init() {
@@ -158,7 +166,13 @@ const App = {
       if (status === 'saving') {
         show('💾 Salvando…', '#4f8cff');
       } else if (status === 'saved') {
-        show(`✅ Salvo — ${info.where}`, '#7cffb2');
+        // NOVO (07/09/2026), pedido verbatim: "mude até a cor do fundo da
+        // notificação" quando estiver rodando em servidor local — verde
+        // (#7cffb2) continua só pro caso 100% IndexedDB (sem servidor);
+        // com servidor configurado, um tom diferente (azul-petróleo) deixa
+        // visualmente claro que o destino mudou, mesmo antes de ler o texto
+        // (info.where/info.servidorAtivo vêm de db.js, ver _emitSaveStatus).
+        show(`✅ Salvo — ${info.where}`, info.servidorAtivo ? '#5fd0c8' : '#7cffb2');
         hideLater(2500);
       } else if (status === 'error') {
         show(`⚠️ Falha ao salvar — ${info.where}`, '#ff6b6b');
@@ -211,11 +225,56 @@ const App = {
   _wireNav() {
     if (this._navWired) return;
     this._navWired = true;
-    document.querySelectorAll('.bottomnav button').forEach((btn) => {
-      btn.addEventListener('click', () => this.navigate(btn.dataset.view));
+    // REMOVIDO (08/09/2026), pedido verbatim: "O 'cabeçalho' e o 'rodapé'
+    // do app não devem existir mais do jeito antigo (apenas HTML)."/"Agora
+    // o rodapé deve desaparecer [...] e a tela 'Botões' é que deve ficar
+    // ali em baixo." — o <nav class="bottomnav"> de verdade foi removido
+    // de index.html; o clique dos botões (chamar App.navigate) agora é
+    // ligado diretamente dentro de EDITOR_TYPES.botoes.mount()
+    // (js/bsplayout.js), já que os botões são recriados toda vez que essa
+    // divisão é montada — não faz mais sentido religar aqui uma única vez
+    // no boot.
+    // NOVO (08/09/2026): botão de emergência sempre visível
+    // (#bsp-shell-reset-btn, index.html, FORA do sistema de divisões) —
+    // restaura o layout padrão (Info/Conteúdo/Botões) se a pessoa fechar
+    // a divisão 'Info' sem querer e ficar sem a barra de controles de
+    // layout (único jeito de voltar, nesse caso).
+    document.getElementById('bsp-shell-reset-btn')?.addEventListener('click', () => {
+      this._safe('BSPLayout.resetToDefault', () => BSPLayout.resetToDefault());
     });
+    // REMOVIDO (08/09/2026), pedido verbatim: "O dropdown dentro da tela de
+    // 'Info' deve ser eliminado." — o <select id="topbar-info-select"> (e
+    // todo o wiring dele aqui) foi removido junto com `_infoMode`/
+    // `_enterInfoMode`/`_exitInfoMode` logo abaixo. Era redundante com o
+    // dropdown próprio de cada folha do BSP (.bsp-leaf-select, já tem a
+    // opção "ℹ️ Info") e era a causa raiz confirmada de 3 bugs relatados
+    // juntos: escolher outra opção nele chamava `_exitInfoMode()`, que
+    // zerava a barra de 4 botões de layouts (`#topbar-info-layoutbar`) e
+    // desligava `_infoMode` — do qual `BSPLayout._renderInfoBarControls()`
+    // dependia pra desenhar aquele botão. Como nada no sistema NOVO (a
+    // folha 'info' do BSP, sempre presente desde a rearquitetura) voltava
+    // a ligar `_infoMode`, a barra ficava permanentemente vazia depois da
+    // 1ª troca — mesmo voltando pra 'Info' pelo dropdown de cada folha.
+    // Ver comentário grande em index.html/bsplayout.js.
     document.getElementById('btn-verlista-top').onclick = () => this._showListaSimplesGlobal();
-    document.getElementById('btn-settings-top').onclick = () => this.navigate('configuracoes');
+    // SUBSTITUÍDO (09/09/2026), pedido verbatim: "Em 'Info', ao clicar em
+    // 'Configurações do app' (o ícone) a tela de 'configurações do app'
+    // não está abrindo, deve abrir em tela cheia." — a rodada anterior
+    // (08/09/2026) tinha corrigido `BSPLayout.revealEditorType` pra
+    // RECRIAR a folha 'configuracoes' se ela não existisse mais na árvore
+    // ativa (bug real, documentado no changelog), mas o pedido agora é
+    // outro: em vez de revelar/redimensionar uma DIVISÃO do BSP (que ainda
+    // podia ficar pequena, atrás de outro painel, ou simplesmente passar
+    // despercebida — daí o "não está abrindo" mesmo já funcionando por
+    // baixo), o botão passa a abrir Configurações como uma SOBREPOSIÇÃO EM
+    // TELA CHEIA de verdade (`_openSettingsFullscreen`, logo abaixo — MESMO
+    // padrão de 'foto'/'organizar', ver EDITOR_TYPES em js/bsplayout.js),
+    // sempre visível e óbvia, igual o pedido descreve. `EDITOR_TYPES.
+    // configuracoes` continua existindo em bsplayout.js pra quem quiser
+    // ATRIBUIR "⚙️ Configurações" manualmente ao dropdown de uma divisão
+    // (uso avançado) — só o botão ⚙️ do cabeçalho global mudou de
+    // comportamento.
+    document.getElementById('btn-settings-top').onclick = () => this._openSettingsFullscreen();
     // Pedido do usuário (31/08/2026): botão "Ajuda" saiu da barra de
     // ferramentas do Mapa (só aparecia lá dentro) e foi pro cabeçalho
     // global, ao lado de "⚙️ Configurações" — ver index.html e a nota
@@ -223,6 +282,15 @@ const App = {
     // de alterações"/"Sobre") continua morando em MapView; só o botão que
     // dispara mudou de lugar.
     document.getElementById('btn-ajuda-top').onclick = (e) => window.MapView?._toggleHelpMenu?.(e.currentTarget);
+    // NOVO (09/09/2026), pedido verbatim: "Faça um transicionador fácil e
+    // rápido entre os dois modos de visualização do app BSP/dockable ou o
+    // outro jeito." — ver js/classicmode.js (window.ClassicMode). Este
+    // botão fica no MESMO cabeçalho global que viaja entre os dois modos
+    // (dentro da folha 'Info' do Workspace, ou dentro de `#classic-shell`
+    // no modo Clássico — é o MESMO elemento físico nos dois casos), então
+    // fica "sempre acessível" automaticamente, sem precisar de nenhum
+    // tratamento especial aqui — decisão confirmada via AskUserQuestion.
+    document.getElementById('btn-layoutmode-top').onclick = () => ClassicMode.toggle();
     // Aviso "defina o nome da conferência" (pedido do usuário) — tocar nele
     // já leva direto pro campo, em vez de só dizer o caminho e deixar a
     // pessoa procurar sozinha (ver _goToConfNomeField abaixo).
@@ -234,37 +302,174 @@ const App = {
     window.addEventListener('catalogo:db-desatualizado', () => this._showStaleBanner());
   },
 
+  // REMOVIDO (08/09/2026), pedido verbatim: "O dropdown dentro da tela de
+  // 'Info' deve ser eliminado." — `_infoMode`/`_enterInfoMode`/
+  // `_exitInfoMode`/`_syncTopbarInfoSelect` (mais o <select id="topbar-
+  // info-select"> que eles controlavam) foram removidos. Esse "modo Info"
+  // avulso do cabeçalho era de ANTES da rearquitetura que tornou a folha
+  // 'info' parte permanente do BSP (sempre presente, ver
+  // BSPLayout._defaultTree()) — ficou redundante e, pior, era a causa raiz
+  // confirmada de bugs relatados juntos: `BSPLayout._renderInfoBarControls()`
+  // (a barra de 4 botões de layouts, "botão quádruplo") só desenhava
+  // enquanto `_infoMode` estava ligado — e nada no sistema novo voltava a
+  // ligá-lo, então a barra ficava permanentemente vazia. Ver comentário
+  // grande em bsplayout.js `_renderInfoBarControls`, que agora desenha
+  // sempre, sem depender de nenhum "modo" — e index.html, onde o <select>
+  // ficava. Os 3 pontos que chamavam `_syncTopbarInfoSelect(view)`
+  // (navigate(), closeView3D(), closeModelos3D()) também não precisam mais
+  // dela — removidos junto.
+
   async _boot() {
     document.getElementById('init-error')?.remove();
     EventLog.log('Aplicativo iniciado.');
+    // NOVO (07/09/2026), pedido verbatim (debug): "coloque no console do
+    // navegador tudo o que está sendo feito [...] para eu ver o que está
+    // travando." — marca de tempo do INÍCIO do boot, pra medir tudo daqui
+    // pra frente contra o mesmo ponto zero (ver `_safe` acima, prefixo
+    // "[BOOT]", e "[DB]"/"[SERVIDOR]" nos outros arquivos).
+    this._dbgBootInicio = performance.now();
+    console.log('[BOOT] _boot(): iniciado.');
     try {
-      this._safe('Session.init', () => Session.init()); // identidade única deste aparelho (ver session.js)
-      this._safe('registerServiceWorker', () => this._registerServiceWorker());
+      // ATUALIZADO (09/09/2026), pedido verbatim (bug relatado): "Demorou
+      // muito para aparecer alguma coisa na tela, só para saber se é o
+      // layout antigo ou o layout novo." — CAUSA RAIZ: a correção anterior
+      // do "flash" (mesma data, ver classicmode.js/css/index.html) impedia
+      // o Workspace/BSP de aparecer errado por uma fração de segundo, MAS
+      // manteve a ORDEM antiga — montar o Workspace inteiro, navegar pra
+      // 'tabela' dentro dele, só DEPOIS trocar pro Clássico — então, com o
+      // Clássico em cache, a tela ficava LISA (nada visível, só a
+      // .boot-bar fina no topo) pelo tempo de montar+navegar o Workspace
+      // INTEIRO, que ia ser jogado fora um instante depois mesmo assim.
+      // Resultado: demorava MAIS que antes (antes, pelo menos o Workspace
+      // aparecia rápido, mesmo sendo o "errado"). Agora: se o cache
+      // (`ClassicMode.readCachedPref()`, síncrono) já diz 'classic', o
+      // Workspace NEM É MONTADO aqui — entra direto em `ClassicMode.enter()`
+      // (que não depende do Workspace estar montado, ver `enter()` em
+      // classicmode.js) — a tela Clássica aparece o mais rápido que a
+      // arquitetura permite. O Workspace só é montado de verdade se/quando
+      // a pessoa apertar 🔀 pra voltar pra ele (ver `ClassicMode.exit()`,
+      // atualizado na mesma rodada pra chamar `BSPLayout.mount()` na 1ª
+      // vez em vez de só `_render()`) — nunca antes disso, nunca
+      // bloqueando a tela Clássica.
+      const prefereClassico = ClassicMode.readCachedPref() === 'classic';
+      if (prefereClassico) {
+        console.log('[BOOT] modo Clássico em cache — entrando direto (Workspace/BSP não é montado agora)...');
+        this._safe('Session.init', () => Session.init());
+        this._safe('registerServiceWorker', () => this._registerServiceWorker());
+        this._waitForDB(8000).catch((err) => {
+          console.error('Falha ao abrir o banco local:', err);
+          this._showInitError(err);
+        });
+        if (!sessionStorage.getItem('catalogo_sessao_inicio')) {
+          sessionStorage.setItem('catalogo_sessao_inicio', DB.nowISO());
+        }
+        await this._safe('ClassicMode.enter (boot)', () => ClassicMode.enter());
+        console.log(`[BOOT] ClassicMode.enter(): concluído em ${(performance.now() - this._dbgBootInicio).toFixed(0)}ms desde o início do boot — tela principal já visível a partir daqui.`);
+        this._hideBootBar();
+        // Só confirma/sincroniza o cache com o banco de verdade (melhor
+        // esforço) — a tela já está decidida e visível, isto não bloqueia
+        // nada; `enter()` é idempotente (`if (this._active) return`) então
+        // não faz nada de mais mesmo se o banco também disser 'classic'.
+        this._safe('ClassicMode.syncCacheFromDB', () => ClassicMode.restoreFromSettings());
+      } else {
+        // Fluxo original, sem mudança: Workspace/BSPLayout passa a ser a
+        // raiz PERMANENTE do app inteiro (não mais uma tela opcional
+        // acessada pelo antigo botão de rodapé) — montada AQUI, ANTES de
+        // qualquer `navigate()`, porque só depois desta chamada
+        // `<main id="view">` (e o cabeçalho `header.topbar`) passam a
+        // existir de verdade dentro do DOM (movidos de `#dom-parking`, ver
+        // index.html, pra dentro das divisões 'conteudo'/'info' — ver
+        // EDITOR_TYPES em js/bsplayout.js). `BSPLayout.mount()` já tolera
+        // o banco local ainda não estar pronto (mesmo comportamento de
+        // sempre, quando Workspace era aberta manualmente antes do boot
+        // terminar).
+        console.log('[BOOT] BSPLayout.mount(#app): montando cabeçalho/conteúdo/botões como divisões permanentes...');
+        await BSPLayout.mount(document.getElementById('app'));
+        console.log('[BOOT] BSPLayout.mount(#app): concluído.');
+        this._safe('Session.init', () => Session.init()); // identidade única deste aparelho (ver session.js)
+        this._safe('registerServiceWorker', () => this._registerServiceWorker());
 
-      // ANTES: um `await this._waitForDB(8000)` aqui travava a tela inteira
-      // (nada aparecia em #view, só a barra de progresso) pelo tempo que o
-      // banco local levasse pra abrir de verdade — em aparelhos/navegadores
-      // mais lentos isso podia chegar perto do teto de 8s com a tela vazia.
-      // Agora _waitForDB roda em PARALELO, só como um "vigia": mostra a
-      // barra de progresso e, se o banco genuinamente NUNCA abrir, desiste
-      // depois de `ms` com um erro claro — sem bloquear mais nada. A
-      // navegação (abaixo) já espera o banco sozinha, naturalmente, através
-      // de openDB()/tx() (ver db.js) — a diferença é que a ESTRUTURA da
-      // tela (barra de busca, botões, cabeçalho) aparece na hora, e só os
-      // DADOS (que realmente dependem do banco) ficam pendentes por um
-      // instante, em vez de tudo congelado atrás da barra de progresso.
-      this._waitForDB(8000).catch((err) => {
-        console.error('Falha ao abrir o banco local:', err);
-        this._showInitError(err);
-      });
+        // ANTES: um `await this._waitForDB(8000)` aqui travava a tela inteira
+        // (nada aparecia em #view, só a barra de progresso) pelo tempo que o
+        // banco local levasse pra abrir de verdade — em aparelhos/navegadores
+        // mais lentos isso podia chegar perto do teto de 8s com a tela vazia.
+        // Agora _waitForDB roda em PARALELO, só como um "vigia": mostra a
+        // barra de progresso e, se o banco genuinamente NUNCA abrir, desiste
+        // depois de `ms` com um erro claro — sem bloquear mais nada. A
+        // navegação (abaixo) já espera o banco sozinha, naturalmente, através
+        // de openDB()/tx() (ver db.js) — a diferença é que a ESTRUTURA da
+        // tela (barra de busca, botões, cabeçalho) aparece na hora, e só os
+        // DADOS (que realmente dependem do banco) ficam pendentes por um
+        // instante, em vez de tudo congelado atrás da barra de progresso.
+        this._waitForDB(8000).catch((err) => {
+          console.error('Falha ao abrir o banco local:', err);
+          this._showInitError(err);
+        });
 
-      if (!sessionStorage.getItem('catalogo_sessao_inicio')) {
-        sessionStorage.setItem('catalogo_sessao_inicio', DB.nowISO());
+        if (!sessionStorage.getItem('catalogo_sessao_inicio')) {
+          sessionStorage.setItem('catalogo_sessao_inicio', DB.nowISO());
+        }
+
+        // [13/09/2026] NOVO — pedido verbatim: "Ao dar boot, ou seja, ao
+        // carregar a página, pela primeira vez, por trás da splash screen
+        // (Tela de Abertura), deve carregar, por padrão, o modo
+        // 'Mapeamento de ambientes'." Antes, esta linha sempre navegava
+        // pra 'tabela' (tela de catalogação de itens), não importa o
+        // modo de operação — mesmo numa instalação NOVA, sem nada
+        // catalogado ainda, escolhendo depois "Mapeamento de ambientes"
+        // na splash screen (ver js/classicmode.js, que já usa esse MESMO
+        // modo como padrão da própria splash quando fechada sem escolher
+        // nada — "O padrão é o 'Mapeamento de ambientes'"). A tela por
+        // trás da splash (Workspace) abria sempre em 'Tabela'
+        // (catalogação), inconsistente com esse padrão. CORRIGIDO: só
+        // numa instalação genuinamente NOVA (mesma detecção de "nunca foi
+        // usado" já usada em classicmode.js — nenhum modo de operação
+        // salvo E nenhum nome de conferência salvo), a tela inicial passa
+        // a ser 'mapa' (Mapeamento de ambientes) em vez de 'tabela'. Uma
+        // instalação que já tinha ALGUM modo escolhido ou nome de
+        // conferência definido antes desta correção continua abrindo em
+        // 'Tabela' normalmente (comportamento inalterado pra quem já usa
+        // o app).
+        let telaInicialPadrao = 'tabela';
+        try {
+          const [modoJaEscolhido, nomeJaDefinido] = await Promise.all([
+            DB.getSetting(window.ClassicMode?._OPMODE_KEY || 'classicOperationMode', ''),
+            DB.getSetting('conferenciaNome', ''),
+          ]);
+          if (!modoJaEscolhido && !(nomeJaDefinido && nomeJaDefinido.trim())) telaInicialPadrao = 'mapa';
+        } catch (e) { /* melhor esforço — na dúvida, mantém 'tabela' */ }
+        console.log(`[BOOT] navigate(${telaInicialPadrao}): iniciando (tela principal ainda não está na tela)...`);
+        await this.navigate(telaInicialPadrao);
+        console.log(`[BOOT] navigate(${telaInicialPadrao}): concluído em ${(performance.now() - this._dbgBootInicio).toFixed(0)}ms desde o início do boot — tela principal já visível a partir daqui.`);
+        // Cobre o caso raro do cache estar ausente/desatualizado (ex.: 1ª
+        // vez que esta correção roda: o banco já diz 'classic' de uma
+        // sessão anterior, mas ainda não existia cache nenhum) — só nesse
+        // caso raro volta a acontecer o "flash" antigo (ver classicmode.js).
+        await this._safe('ClassicMode.restoreFromSettings', () => ClassicMode.restoreFromSettings());
+        this._hideBootBar();
       }
-
-      await this.navigate('tabela');
-      this._hideBootBar();
       this._safe('App.checkDuplicatePatrimoniosOnBoot', () => this._checkDuplicatePatrimoniosOnBoot());
+      // [10/09/2026] Pedido verbatim: "Ao iniciar o app, quando o app nunca
+      // foi usado no dispositivo, aparece o 'Modo de operação', transforme-o
+      // em um splash screen (Tela de Abertura) de janela independente, de
+      // modo que o app carregue normalmente, mas esta janela apareça com um
+      // botão de 'fechar'." — ANTES, esse modal só rodava dentro de
+      // `ClassicMode.enter()` (só aparecia pra quem entrava no modo Clássico,
+      // e bloqueava a montagem da tela Clássica até ser respondido). Agora:
+      // chamado aqui, 1x por boot, INDEPENDENTE do modo Clássico/BSP (os dois
+      // ramos acima já convergiram nesta linha).
+      // [10/09/2026] NOVO pedido verbatim, mesma rodada: "A splash screen
+      // deve sempre aparecer. Uma opção nas 'configurações do app' deve
+      // servir para habilitar/desabilitar que sempre aparece no boot." —
+      // `openSplashScreen()` (ver js/classicmode.js) agora mostra a janela
+      // EM TODO BOOT (não só na 1ª vez), a menos que a preferência "🎬
+      // Mostrar a Tela de Abertura ao iniciar o app" (⚙️ Configurações →
+      // 🖥️ Layout do app, chave `splashSempreAoAbrir`, padrão ligada) esteja
+      // desligada — nesse caso a chamada não faz nada. SEM `await`: "dispara
+      // e esquece", igual às outras etapas "bônus" desta seção — não atrasa
+      // nada do boot, a tela principal (Clássica ou Workspace) já está de
+      // pé por trás dela.
+      this._safe('ClassicMode.openSplashScreen (boot)', () => ClassicMode.openSplashScreen());
 
       // A partir daqui, tudo é "bônus" que roda em segundo plano — a tela
       // principal já está pronta e usável independentemente disso.
@@ -283,16 +488,36 @@ const App = {
       });
 
       this._loadRecognitionLibs();
-      this._safe('SyncModule.startAuto', () => SyncModule.startAuto()); // puxa catálogo de outros aparelhos, se houver servidor configurado
-      this._safe('AutoExport.start', () => AutoExport.start()); // backup automático periódico dos itens novos, se ativado (ver autoexport.js)
-      // NOVO (01/09/2026), item GRANDE #3 do pedido de 12 itens: envia
-      // preferências (ao mudar) e backup completo (periódico) pro servidor
-      // local configurado, se houver — ver js/serverprefs.js.
-      this._safe('ServerPrefs.start', () => ServerPrefs.start());
+      // MUDADO (07/09/2026), pedido verbatim: "Fica tudo travando [...] Logo
+      // que o app inicia ficou muito travado, deixe os processos rodando em
+      // segundo plano para não travar o app." — ANTES, o `await` aqui
+      // BLOQUEAVA as linhas seguintes (SyncModule.startAuto/AutoExport.start/
+      // ServerPrefs.start) por até uns 6s (2 candidatos de URL, 3s de prazo
+      // cada, se nenhum servidor responder — ver serverprefs.js) toda vez
+      // que o app abria sem 'servidorUrl' ainda preenchida — contribuindo
+      // pro travamento relatado logo no início do app. Como essas 3 linhas
+      // só fazem algo de verdade quando 'servidorUrl' JÁ está preenchida, a
+      // "espera" só existia pra não perder a 1ª sincronização/envio depois
+      // de ligar o app — isso não precisa BLOQUEAR o resto do boot: agora a
+      // detecção roda em paralelo ("dispara e esquece", igual ao resto desta
+      // seção) e, quando terminar (com ou sem sucesso), ela mesma dispara as
+      // 3 linhas seguintes via `.then()` — o boot não fica mais parado
+      // esperando o resultado da sondagem de rede.
+      const _iniciarDependentesDoServidor = () => {
+        this._safe('SyncModule.startAuto', () => SyncModule.startAuto()); // puxa catálogo de outros aparelhos, se houver servidor configurado
+        this._safe('AutoExport.start', () => AutoExport.start()); // backup automático periódico dos itens novos, se ativado (ver autoexport.js)
+        // NOVO (01/09/2026), item GRANDE #3 do pedido de 12 itens: envia
+        // preferências (ao mudar) e backup completo (periódico, em lote —
+        // ver js/serverprefs.js) pro servidor local configurado, se houver.
+        this._safe('ServerPrefs.start', () => ServerPrefs.start());
+      };
+      this._safe('ServerPrefs.autoDetectarServidorLocal', () => ServerPrefs.autoDetectarServidorLocal()).then(_iniciarDependentesDoServidor);
       // Selo "onde os dados ficam guardados" no cabeçalho (pedido do usuário —
       // ver storagestatus.js) — roda depois da tela principal já estar de pé,
-      // igual aos outros itens "bônus" desta seção.
+      // igual aos outros itens "bônus" desta seção; não depende da detecção
+      // acima (não precisa esperar por ela).
       this._safe('StorageStatus.mount', () => StorageStatus.mount());
+      console.log(`[BOOT] _boot(): função síncrona terminou de disparar tudo em ${(performance.now() - this._dbgBootInicio).toFixed(0)}ms desde o início (itens "bônus" acima continuam rodando em segundo plano — ver as linhas "[BOOT] ...: concluído em..." e "[SERVIDOR] ..." que ainda vão aparecer depois desta).`);
     } catch (err) {
       console.error('Falha ao iniciar o app:', err);
       this._showInitError(err);
@@ -312,13 +537,31 @@ const App = {
     }
   },
 
-  /** Roda fn (síncrona ou assíncrona) sem deixar uma exceção interromper o resto do init(). */
+  /** Roda fn (síncrona ou assíncrona) sem deixar uma exceção interromper o
+   *  resto do init(). NOVO (07/09/2026), pedido verbatim (debug): "coloque
+   *  no console do navegador tudo o que está sendo feito pelo servidor e em
+   *  segundo plano para eu ver o que está travando." — cada chamada por
+   *  `_safe` (praticamente TODA etapa "bônus" do boot passa por aqui, ver
+   *  `_boot()` abaixo) agora loga início/duração com o prefixo "[BOOT]" —
+   *  se algo travar por um instante no início do app, a etapa "presa" fica
+   *  visível (a linha "iniciando..." aparece, mas a de "concluído em Xms"
+   *  demora a aparecer). */
   _safe(label, fn) {
+    const _dbgInicio = performance.now();
+    console.log(`[BOOT] ${label}: iniciando...`);
     try {
       const r = fn();
-      if (r && typeof r.catch === 'function') return r.catch((e) => console.warn(`${label} falhou:`, e));
+      if (r && typeof r.catch === 'function') {
+        return r
+          .then((v) => { console.log(`[BOOT] ${label}: concluído em ${(performance.now() - _dbgInicio).toFixed(0)}ms`); return v; })
+          .catch((e) => { console.log(`[BOOT] ${label}: FALHOU após ${(performance.now() - _dbgInicio).toFixed(0)}ms`); console.warn(`${label} falhou:`, e); });
+      }
+      console.log(`[BOOT] ${label}: concluído (síncrono) em ${(performance.now() - _dbgInicio).toFixed(0)}ms`);
       return r;
-    } catch (e) { console.warn(`${label} falhou:`, e); }
+    } catch (e) {
+      console.log(`[BOOT] ${label}: FALHOU (síncrono) após ${(performance.now() - _dbgInicio).toFixed(0)}ms`);
+      console.warn(`${label} falhou:`, e);
+    }
   },
 
   /**
@@ -396,13 +639,29 @@ const App = {
    *  navigate() abaixo) e também assim que um nome é salvo (ver settings.js
    *  #st-conf-nome onchange) — assim o aviso some na hora, sem precisar
    *  trocar de tela pra "atualizar". Barato (DB.getSetting usa um cache em
-   *  memória — ver db.js _settingsCache), sem problema chamar toda vez. */
+   *  memória — ver db.js _settingsCache), sem problema chamar toda vez.
+   *
+   *  [10/09/2026] Pedido verbatim: "Caso se selecione, na tela de 'Modo de
+   *  operação', a opção 'Mapeamento de ambientes', então, a mensagem
+   *  persistente 'Defina o nome para a conferência de patrimônio' não deve
+   *  aparecer." — antes, este aviso só olhava pro nome (`conferenciaNome`);
+   *  agora também olha pro modo de operação escolhido na splash screen
+   *  (`DB.getSetting(ClassicMode._OPMODE_KEY)`, ver js/classicmode.js) — se
+   *  for 'mapeamento', o aviso fica escondido MESMO sem nome nenhum
+   *  definido (nesse modo não existe "conferência" pra nomear). Nos outros
+   *  casos (modo 'conferencia', ou modo ainda não escolhido/1ª visita) o
+   *  comportamento de sempre continua: aparece até um nome ser definido. */
   async _updateConfNomeBanner() {
     const banner = document.getElementById('conf-nome-banner');
     if (!banner) return;
     try {
-      const nome = await DB.getSetting('conferenciaNome', '');
-      banner.classList.toggle('hidden', !!(nome && nome.trim()));
+      const [nome, modoOperacao] = await Promise.all([
+        DB.getSetting('conferenciaNome', ''),
+        DB.getSetting(window.ClassicMode?._OPMODE_KEY || 'classicOperationMode', ''),
+      ]);
+      const temNome = !!(nome && nome.trim());
+      const modoMapeamento = modoOperacao === 'mapeamento';
+      banner.classList.toggle('hidden', temNome || modoMapeamento);
     } catch (e) {
       // Sem banco disponível ainda (ex: bem no início do boot) — deixa
       // escondido; a próxima chamada (próxima troca de tela) tenta de novo.
@@ -463,6 +722,49 @@ const App = {
   },
 
   /**
+   * NOVO (09/09/2026), pedido verbatim: "Em 'Info', ao clicar em
+   * 'Configurações do app' (o ícone) a tela de 'configurações do app' não
+   * está abrindo, deve abrir em tela cheia." — abre `SettingsView` como uma
+   * sobreposição fixa cobrindo a janela inteira (`position:fixed; inset:0`),
+   * por CIMA de todo o BSPLayout, em vez de tentar revelar/redimensionar
+   * uma divisão dele. Mesmo princípio de `.organize-overlay`/
+   * `#ambphotos-overlay` (ver css/style.css e organizeview.js): um `<div>`
+   * solto, fora da árvore de divisões, com `document.body.appendChild`.
+   * Idempotente — clicar de novo com a tela já aberta não duplica nada.
+   */
+  async _openSettingsFullscreen() {
+    if (document.getElementById('settings-fullscreen-overlay')) return;
+    const el = document.createElement('div');
+    el.id = 'settings-fullscreen-overlay';
+    el.className = 'settings-fullscreen-overlay';
+    el.innerHTML = `
+      <div class="settings-fullscreen-topbar">
+        <div class="settings-fullscreen-title">⚙️ Configurações do app</div>
+        <button type="button" class="btn secondary sm" id="settings-fullscreen-close">✕ Fechar</button>
+      </div>
+      <div class="settings-fullscreen-body" id="settings-fullscreen-body"></div>
+    `;
+    document.body.appendChild(el);
+    const fechar = () => {
+      // SettingsView.unmount() só zera a referência interna do container
+      // (ver settings.js) — não precisa "desfazer" nada visualmente porque o
+      // <div> inteiro (com tudo dentro) é removido do DOM logo em seguida.
+      window.SettingsView?.unmount?.();
+      el.remove();
+    };
+    el.querySelector('#settings-fullscreen-close').onclick = fechar;
+    // Esc fecha também (mesmo padrão de outras telas cheias do app, como o
+    // Modelador 3D) — listener 'once' pra não vazar/duplicar entre aberturas.
+    document.addEventListener('keydown', function onEsc(e) {
+      if (e.key === 'Escape' && document.getElementById('settings-fullscreen-overlay')) {
+        fechar();
+        document.removeEventListener('keydown', onEsc);
+      }
+    });
+    await window.SettingsView?.mount?.(el.querySelector('#settings-fullscreen-body'));
+  },
+
+  /**
    * Carrega bibliotecas de terceiros em segundo plano (ver libloader.js) e
    * mostra uma barrinha de progresso enquanto isso — some sozinha ao terminar.
    * A tela principal e o cadastro manual já funcionam antes disso terminar.
@@ -489,12 +791,49 @@ const App = {
    *  verdade (era exatamente o ciclo relatado pelo usuário). */
   async navigate(view, opts = {}) {
     if (!this.views[view]) return;
+    // NOVO (08/09/2026): 'workspace' (BSPLayout) agora é a raiz
+    // PERMANENTE do app inteiro (ver BSPLayout.mount(#app) em _boot()
+    // abaixo) — navegar pra ela indireta/programaticamente aninharia o
+    // Workspace dentro de si mesmo e corromperia `BSPLayout._tree`. Nada
+    // chama isto nesta rodada (o botão "Workspace" da divisão 'Botões'
+    // não chama navigate pra essa chave, de propósito), mas fica como
+    // rede de segurança.
+    if (view === 'workspace') { console.warn('[App] navigate("workspace") ignorado — o Workspace já é a raiz permanente do app.'); return; }
+    // NOVO (07/09/2026), "sistematização da pilha de retorno" -- achado da
+    // auditoria pedida pelo usuário ("faça uma auditoria exaustiva de todos
+    // os outros caminhos não-padrão do app"): 'Mapa'->'Organizar' abre a
+    // Planta baixa 2D/3D por cima de si mesmo (organizeview.js
+    // _openMapExternally) ESCONDENDO seu próprio overlay (display:none, sem
+    // remover do DOM) e deixando um botão flutuante "🗂️ Voltar ao
+    // Organizar" (#organize-return-btn) fixo em document.body -- só ELE
+    // sabia limpar essa tela escondida direito (_closeExternalScreen). Se o
+    // usuário, em vez de tocar nesse botão, usa qualquer caminho PADRÃO de
+    // navegação (aqui: barra inferior/qualquer chamada a App.navigate) pra
+    // sair da Planta baixa/3D, o overlay escondido e o botão flutuante
+    // ficavam ÓRFÃOS -- o botão continuava aparecendo por cima de QUALQUER
+    // tela seguinte, e um clique nele "sequestrava" a navegação de volta
+    // pro Organizar, mesmo o usuário já tendo seguido em frente havia
+    // tempo. Corrigido chamando OrganizeView.close() (já existente, mesmo
+    // botão "✕" de sempre usa) sempre que esse botão flutuante ainda existir
+    // na hora de navegar -- reaproveita a limpeza de verdade (remove o
+    // overlay do DOM, tira listeners, devolve o HUD de performance) E o
+    // aviso de "há alterações pendentes" já existente (close() só fecha
+    // direto se não houver nada pendente; havendo, mostra o mesmo diálogo
+    // de sempre em vez de descartar silenciosamente).
+    if (typeof OrganizeView !== 'undefined' && document.getElementById('organize-return-btn')) {
+      try { OrganizeView.close(); } catch (e) { console.warn('Falha ao limpar o Organizar órfão ao navegar:', e); }
+    }
     const prev = this.views[this.currentView];
     if (prev?.unmount) { try { prev.unmount(); } catch (e) { console.warn(`unmount("${this.currentView}") falhou:`, e); } }
 
     if (this.currentView !== view && !opts.isBack) this._navStack.push(this.currentView);
 
-    document.querySelectorAll('.bottomnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+    // NOVO (09/09/2026): inclui `.bottomnav button` no mesmo seletor —
+    // ver js/classicmode.js. A barra inferior do modo Clássico usa a MESMA
+    // convenção de sempre (`data-view` + classe `.active`), então basta
+    // acrescentá-la aqui pra ficar sincronizada com `App.navigate()` sem
+    // nenhum código especial dentro de classicmode.js.
+    document.querySelectorAll('.bsp-botoes-btn, .bottomnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
     document.getElementById('view-title').textContent = this.titles[view] || 'Catalogação de Itens';
     this._safe('App._updateConfNomeBanner', () => this._updateConfNomeBanner());
     // Na tela "Mapa", os botões de Ver lista simples/Configurações do topbar
@@ -509,8 +848,15 @@ const App = {
     this._viewScrollMemory[this.currentView] = container.scrollTop;
     container.innerHTML = '';
     this.currentView = view;
+    // NOVO (07/09/2026), pedido verbatim (debug): mede quanto tempo cada
+    // tela leva pra montar (ex.: a tela "tabela", montada logo no boot —
+    // se o catálogo tiver muitos itens, desenhar todas as linhas da tabela
+    // pode ser o que está travando, não necessariamente o servidor).
+    const _dbgInicioMount = performance.now();
+    console.log(`[NAV] views.${view}.mount(): iniciando...`);
     try {
       await this.views[view].mount(container);
+      console.log(`[NAV] views.${view}.mount(): concluído em ${(performance.now() - _dbgInicioMount).toFixed(0)}ms`);
     } catch (e) {
       // Nunca deixa a tela em branco silenciosamente: mostra o que deu errado.
       console.error(`Falha ao abrir a tela "${view}":`, e);
@@ -521,6 +867,16 @@ const App = {
           <div style="font-size:11px; color:var(--text-dim); margin-top:8px">${Utils.escapeHtml(e.message || String(e))}</div>
           <button class="btn secondary sm" style="margin-top:12px" onclick="location.reload()" title="Recarregar a página inteira">🔄 Recarregar</button>
         </div>`;
+      // NOVO (07/09/2026), pedido verbatim: "inquebrável, tudo com estrutura
+      // try{}catch(){} [...] um botão com exatamente o que apareceu no
+      // console (como copiar o que apareceu no console [...] e colar na
+      // janela desse botão de detalhes do erro)." Este try/catch já existia
+      // (a tela nunca ficava em branco sem aviso), mas o aviso era só um
+      // texto curto (`e.message`) — sem stack trace nem jeito de copiar.
+      // Chamar ModuleHost aqui ACRESCENTA o modal com "Detalhes do
+      // erro"/"Copiar" por cima do cartão acima (que continua mostrando o
+      // botão "🔄 Recarregar", ainda visível depois de fechar o modal).
+      if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError(`Tela "${this.titles[view] || view}"`, e);
     }
     container.scrollTop = this._viewScrollMemory[view] || 0;
   },
@@ -536,7 +892,13 @@ const App = {
     await this.navigate(target, { isBack: true });
   },
 
-  openView3D(ambienteId) {
+  // NOVO (07/09/2026) — virou `async` (era síncrona) pra poder dar `await`
+  // em `View3D.mount(...)` dentro do try/catch novo (ver comentário grande
+  // abaixo) — nenhum dos chamadores (mapview.js/app.js, ver grep) usa o
+  // valor de retorno nem `await`s esta função, então torná-la assíncrona é
+  // 100% compatível com todo código existente (uma Promise "solta" a mais,
+  // igual várias outras chamadas fire-and-forget já existentes no app).
+  async openView3D(ambienteId) {
     // Bug relatado pelo usuário: "Ver em 3D não está funcionando" — na
     // prática a view 3D montava normalmente por baixo, mas esta função
     // pulava por cima do desmonte da tela anterior (ao contrário de
@@ -573,9 +935,35 @@ const App = {
     if (View3D._container) View3D.unmount?.();
     container.innerHTML = '';
     document.getElementById('view-title').textContent = 'Visualização 3D';
-    View3D.mount(container, { ambienteId });
-    this.currentView = '__view3d__';
-    this.views.__view3d__ = View3D;
+    // BUG CORRIGIDO (07/09/2026), pedido verbatim: "inquebrável, tudo com
+    // estrutura try{}catch(){} para evitar o app quebrar [...] Apresentando
+    // uma mensagem como 'não consegui carregar aquele módulo'." Antes,
+    // `View3D.mount(...)` era chamado SEM try/catch nenhum (ao contrário de
+    // `navigate()`/`closeView3D()`/`closeModelos3D()`, que já tratavam
+    // falha de mount há mais tempo) — uma exceção aqui (ex.: Three.js
+    // falhando ao carregar, engine3d.js lançando ao montar a cena) ficava
+    // só no console, com a tela 3D em branco sem aviso nenhum.
+    try {
+      await View3D.mount(container, { ambienteId });
+      this.currentView = '__view3d__';
+      this.views.__view3d__ = View3D;
+    } catch (e) {
+      console.error('Falha ao abrir "Ver em 3D":', e);
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="ic">⚠️</div>
+          Não consegui abrir o "Ver em 3D".
+          <div style="font-size:11px; color:var(--text-dim); margin-top:8px">${Utils.escapeHtml(e.message || String(e))}</div>
+          <button class="btn secondary sm" style="margin-top:12px" onclick="location.reload()" title="Recarregar a página inteira">🔄 Recarregar</button>
+        </div>`;
+      if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError('Ver em 3D', e);
+      // Mesmo o mount tendo falhado, marca a view atual como o 3D (igual ao
+      // caminho de sucesso) — assim "voltar"/fechar continua funcionando
+      // normalmente a partir daqui, em vez de ficar num limbo sem view
+      // registrada.
+      this.currentView = '__view3d__';
+      this.views.__view3d__ = View3D;
+    }
   },
 
   /** Botão "✕ Sair do 3D" (view3d.js) — antes chamava App.navigate('mapa'),
@@ -589,10 +977,19 @@ const App = {
    *  (MapView.mountAfterView3D) em vez de passar por navigate('mapa'); pra
    *  qualquer outra tela de origem, comportamento idêntico a navigate(). */
   async closeView3D() {
+    // NOVO (07/09/2026) — mesmo caso do Organizar órfão documentado em
+    // App.navigate() logo acima: sair do 3D pelo próprio botão "✕ Sair do
+    // 3D" (em vez do botão flutuante "🗂️ Voltar ao Organizar") também
+    // deixava aquele botão e o overlay escondido do Organizar órfãos,
+    // quando o 3D tinha sido aberto a partir dele (organizeview.js
+    // _openMapExternally, modo '3d'). Mesma limpeza.
+    if (typeof OrganizeView !== 'undefined' && document.getElementById('organize-return-btn')) {
+      try { OrganizeView.close(); } catch (e) { console.warn('Falha ao limpar o Organizar órfão ao sair do 3D:', e); }
+    }
     const prev = this.views.__view3d__;
     if (prev?.unmount) { try { prev.unmount(); } catch (e) { console.warn('unmount(__view3d__) falhou:', e); } }
     const target = this._prevView || 'tabela';
-    document.querySelectorAll('.bottomnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === target));
+    document.querySelectorAll('.bsp-botoes-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === target));
     document.getElementById('view-title').textContent = this.titles[target] || 'Catalogação de Itens';
     document.body.classList.toggle('view-mapa', target === 'mapa');
     const container = document.getElementById('view');
@@ -610,6 +1007,8 @@ const App = {
           <div style="font-size:11px; color:var(--text-dim); margin-top:8px">${Utils.escapeHtml(e.message || String(e))}</div>
           <button class="btn secondary sm" style="margin-top:12px" onclick="location.reload()" title="Recarregar a página inteira">🔄 Recarregar</button>
         </div>`;
+      // NOVO (07/09/2026) — ver comentário grande em navigate()/openView3D().
+      if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError(`Tela "${this.titles[target] || target}"`, e);
     }
   },
 
@@ -634,7 +1033,7 @@ const App = {
     // — daqui pra baixo NUNCA passa por `navigate()`/`back()` de novo (eles
     // chamariam `unmount()` uma 2ª vez em cima do que já foi desmontado).
     const target = this._navStack.pop() || 'mapa';
-    document.querySelectorAll('.bottomnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === target));
+    document.querySelectorAll('.bsp-botoes-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === target));
     document.getElementById('view-title').textContent = this.titles[target] || 'Catalogação de Itens';
     document.body.classList.toggle('view-mapa', target === 'mapa');
     const container = document.getElementById('view');
@@ -652,6 +1051,8 @@ const App = {
           <div style="font-size:11px; color:var(--text-dim); margin-top:8px">${Utils.escapeHtml(e.message || String(e))}</div>
           <button class="btn secondary sm" style="margin-top:12px" onclick="location.reload()" title="Recarregar a página inteira">🔄 Recarregar</button>
         </div>`;
+      // NOVO (07/09/2026) — ver comentário grande em navigate()/openView3D().
+      if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError(`Tela "${this.titles[target] || target}"`, e);
     }
   },
 
@@ -1151,7 +1552,17 @@ const App = {
   async verNoMapa2D(pos) {
     if (pos.ambienteId) await DB.setSetting('ambienteAtualId', pos.ambienteId); // item 4: troca pro mapa certo, se for outro
     await this.navigate('mapa');
-    MapView.centerViewOnPoint?.(pos.x, pos.y, 150);
+    // ATUALIZADO (07/09/2026), pedido verbatim: "melhorar a busca (o
+    // deslocamento enquanto vai até o item encontrado) no 2D e 3D" -- antes
+    // usava `centerViewOnPoint` (TELEPORTE instantâneo pro destino, sem
+    // nenhuma transição). O mapa 2D já tinha, desde a busca interna dele
+    // (🔍 "Buscar no mapa", ver mapview.js MapView.flyViewTo), o efeito de
+    // 3 fases "afasta / desloca / aproxima" -- só não era usado AINDA por
+    // este funil (a busca GLOBAL da aba "Buscar"). Passa a usar o MESMO
+    // `flyViewTo`, com fallback pro comportamento antigo (`centerViewOnPoint`)
+    // só por segurança, caso `flyViewTo` não exista por algum motivo.
+    if (typeof MapView.flyViewTo === 'function') MapView.flyViewTo(pos.x, pos.y, { zoomPct: 150 });
+    else MapView.centerViewOnPoint?.(pos.x, pos.y, 150);
   },
   /** NOVO (04/09/2026), pedido verbatim: "No card de informações do
    *  patrimônio deve ter mais uma informação: 'Marcação em foto'... Quando

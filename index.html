@@ -5,6 +5,44 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <title>Catalogação de Itens</title>
 <meta name="theme-color" content="#0f1216">
+<!-- NOVO (09/09/2026), pedido verbatim: "Ao iniciar o app, mesmo estando
+     ativado, pelo botao de swap de apresentacao da interface definido para
+     o jeito antigo (nao BSP/dockable), por padrao esta carregando primeiro
+     a versao BSP/dockable e depois aparece a versao antiga [...] Implemente
+     algum jeito de carregar direto [...] sem essa 'troca ao vivo' ter de
+     acontecer." -- script inline, RODA AQUI (antes de qualquer CSS/pintura
+     da pagina) porque o motivo do "flash" e que `#app` (raiz do Workspace/
+     BSP, ver js/bsplayout.js) fica de pé (nao tem display:none por padrao)
+     e e desenhado por `App._boot()` (App.navigate(), ver js/app.js) MUITO
+     antes de `ClassicMode.restoreFromSettings()` (js/classicmode.js) saber
+     que devia esconder `#app`/mostrar `#classic-shell` no lugar -- essa
+     decisao depende de `DB.getSetting('layoutMode')`, que so responde
+     depois do IndexedDB abrir (assincrono, sempre depois do 1o paint). A
+     `.boot-bar` (ver abaixo) NAO resolve isto: e so uma tira fina no topo,
+     nao cobre a tela -- o Workspace nasce visivel por baixo dela mesmo
+     assim. Solucao: `js/classicmode.js` espelha `layoutMode` (mesmo valor
+     salvo no IndexedDB) tambem em `localStorage['catalogo_layoutMode']`
+     (sincrono, disponivel JA na 1a linha de JS, sem esperar banco nenhum)
+     -- aqui, so lemos esse espelho e, se for 'classic', marcamos
+     `<html class="catalogo-boot-classic">` ANTES da tag <link> da folha de
+     estilo (que so entao aplica a regra `html.catalogo-boot-classic #app
+     { display:none }` -- ver css/style.css, busca por
+     "catalogo-boot-classic") -- ou seja, `#app` nunca chega a ficar visivel
+     por nem 1 frame nesses casos. `ClassicMode.restoreFromSettings()`
+     remove essa classe (via `_clearBootPrefClass()`) assim que a decisao
+     REAL (vinda do banco) é confirmada -- cobre tambem o caso raro do
+     espelho estar desatualizado/ausente (1a visita com este script, ou
+     `localStorage` limpo manualmente): ai `#app` so fica escondido por um
+     instante e reaparece normal, sem nenhum efeito colateral pra quem usa
+     o modo BSP (o padrao, sem cache -> sem classe -> comportamento
+     IDENTICO a antes, nenhum atraso a mais). -->
+<script>(function(){
+  try {
+    if (localStorage.getItem('catalogo_layoutMode') === 'classic') {
+      document.documentElement.classList.add('catalogo-boot-classic');
+    }
+  } catch (e) { /* localStorage indisponivel (ex.: modo privado) -- segue sem o class, comportamento igual a antes */ }
+})();</script>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="assets/icon-192.png">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
@@ -12,6 +50,14 @@
 <!-- Modelador 3D (pedido do usuário, 28/08/2026 — rodada de modularização):
      estilos que antes ficavam inline em js/modeler3d.js, movidos pra cá. -->
 <link rel="stylesheet" href="css/modeler3d.css">
+<!-- [11/09/2026] NOVO — CodeMirror 5 VENDORIZADO (arquivos baixados e salvos
+     em lib/codemirror/, NÃO carregados de CDN em tempo de execução — pedido
+     verbatim: "vendorize para não precisar buscar em CDN toda vez que o app
+     rodar"), usado pela folha de código dos Scripts (js/mapview.js
+     `_renderScriptCodeEditor`) no lugar da <textarea> simples. CSS aqui,
+     JS (core + modo JavaScript) perto do fim do <body>, antes de
+     js/mapview.js — ver comentário lá. -->
+<link rel="stylesheet" href="lib/codemirror/lib/codemirror.css">
 </head>
 <body>
 
@@ -32,7 +78,58 @@
   <span id="lib-status-text">Carregando bibliotecas…</span>
 </div>
 
-<div id="app">
+<!-- NOVO (08/09/2026), pedido verbatim: "O 'cabecalho' e o 'rodape' do
+     app nao devem existir mais do jeito antigo (apenas HTML). Devem estar
+     dentro de uma divisao de tela sujeita ao split de tela vertical ou
+     horizontal." -- botao de emergencia, sempre visivel, FORA do sistema
+     de divisoes (proposital: se a pessoa fechar/trocar a divisao 'Info'
+     sem querer, perde a UNICA barra que tem os controles de layout
+     nomeado -- sem isto, nao haveria como voltar). So restaura a ARVORE
+     do layout ATIVO pro padrao (Info em cima, Conteudo do app no meio,
+     Botoes embaixo) -- ver BSPLayout.resetToDefault() (ja existia) e o
+     onclick em js/app.js _wireNav(). -->
+<button type="button" id="bsp-shell-reset-btn" class="bsp-shell-reset-btn"
+        title="Restaurar o layout padrao (cabecalho + conteudo + botoes) -- use se fechar alguma dessas divisoes sem querer e nao conseguir mais navegar.">↺</button>
+
+<!-- #app agora e SO o ponto de montagem do Workspace/BSPLayout, que fica
+     SEMPRE ativo (nao e mais uma tela opcional acessada por um botao de
+     rodape) -- ver App.init()/BSPLayout.mount(document.getElementById('app'))
+     em js/app.js, chamado ANTES do 1o navigate(). -->
+<div id="app"></div>
+
+<!-- NOVO (09/09/2026), pedido verbatim: "Coloque o antigo método de
+     apresentação das coisas sem o BSP splitter screen / dockable [...]
+     exatamente como v60 [...] Faça um transicionador fácil e rápido entre
+     os dois modos." — raiz do modo "Clássico" (pré-Workspace/BSP),
+     alternativa ao "#app" acima: uma tela por vez, tela cheia, com barra
+     inferior fixa (mesmo visual/estrutura de v60/js/classicmode.js).
+     Começa VAZIA e escondida (`.classic-shell` sem `.active`, ver
+     css/style.css) — `ClassicMode.enter()` monta a barra abaixo e MOVE pra
+     cá (nunca clona) o mesmo `header.topbar`/`<main id="view">`/
+     `#bottombar-mapa` que o Workspace usa (ver comentário grande em
+     js/classicmode.js). Só existe 1 destes 2 modos visível por vez — o
+     outro fica intacto, só escondido, pronto pra voltar exatamente como
+     estava. -->
+<div id="classic-shell" class="classic-shell"></div>
+
+<!-- NOVO (08/09/2026): cabecalho/conteudo principal/barra de zoom do Mapa
+     NAO sao mais filhos fixos de #app -- ficam "estacionados" aqui,
+     escondidos, ate serem movidos pra dentro de uma divisao de verdade
+     pelos tipos de editor 'info'/'conteudo' (ver EDITOR_TYPES em
+     js/bsplayout.js) -- os MESMOS elementos de sempre, com os MESMOS
+     listeners ja ligados (nenhum recriado), so trocando de PAI no DOM.
+     Se alguma divisao fechar/trocar de tipo e "soltar" um destes
+     elementos, eles voltam pra ca (nunca sao destruidos) ate uma nova
+     divisao os reivindicar. O antigo <nav class="bottomnav"> foi
+     REMOVIDO (pedido verbatim: "o rodape deve desaparecer [...] e a
+     tela 'Botoes' e que deve ficar ali em baixo") -- seu papel foi
+     assumido inteiramente por EDITOR_TYPES.botoes (js/bsplayout.js),
+     que desenha os mesmos 6 botoes com o MESMO estilo visual "colado um
+     no outro" (ver .bsp-botoes-shell/.bsp-botoes-btn em css/style.css,
+     agora um clone fiel de .bottomnav/.bottomnav button) e tambem
+     chama App.navigate() de verdade (nao so atualiza o estado
+     compartilhado com paineis 'Telas'). -->
+<div id="dom-parking" style="display:none">
 
   <header class="topbar">
     <!-- Conteúdo padrão do cabeçalho (título + atalhos) — usado em toda
@@ -41,6 +138,75 @@
          dele (ver body.view-mapa em style.css e mapview.js mount/unmount). -->
     <div id="topbar-default" class="topbar-default">
       <div class="topbar-default-row">
+        <!-- NOVO (08/09/2026), pedido verbatim: "Os títulos [...] devem ser
+             deslocados um pouco para a direita para que o dropdown dessa tela
+             seja colocado ali. Sim, será transformado em uma possibilidade de
+             tela como opção no dropdown. Será o 'Info'." Depois de pergunta
+             explícita ao usuário sobre o escopo (cabeçalho global de toda tela
+             X barra só do Workspace), a resposta escolhida foi: "O cabeçalho
+             real do app vira a barra 'Info'" — ou seja, este MESMO cabeçalho
+             (visível em toda tela do app) ganha este dropdown à esquerda do
+             título, espelhando as mesmas opções da barra inferior
+             (.bottomnav). O título (#view-title) desloca visualmente pra
+             direita por causa deste elemento novo antes dele (ver CSS
+             .topbar-info-select / margem do #view-title em style.css).
+             Sincronizado com a tela atual em 3 pontos de app.js: navigate(),
+             closeView3D(), closeModelos3D() (ver comentário lá).
+             ATUALIZADO (08/09/2026), pedido verbatim: "O nome que você
+             colocou de workspace no dropdown do cabeçalho, não deve ser
+             este, mas sim 'Info'. E deve ser mais uma tela acessível em
+             todos os dropdowns [...] não é para mudar o dropdown do 'Info'
+             [ao clicar nos botões de rodapé]. Deve permanecer a seleção
+             feita ('Info'), pois é mais uma tela independente." — a opção
+             'workspace' (que navegava pra tela Workspace) virou 'info'
+             (value="info"): escolhê-la NÃO navega o conteúdo principal (a
+             tela 'Workspace' continua acessível normalmente pelo botão
+             🧩 do rodapé, sem nenhuma mudança) — em vez disso, ativa o
+             "modo Info" do cabeçalho (App._infoMode, ver app.js), que
+             mantém a seleção 'Info' TRAVADA no dropdown mesmo clicando nos
+             botões Tabela/Cartões/Fotos/Mapa/Buscar/Workspace do rodapé
+             (App._syncTopbarInfoSelect ignora a sincronização enquanto
+             _infoMode está ativo), e mostra a barra de 4 botões de layouts
+             (#topbar-info-layoutbar abaixo) mesmo que a tela Workspace não
+             seja a que está ativa no conteúdo principal no momento (ver
+             BSPLayout.ensureInfoBarLoaded/_renderInfoBarControls). -->
+        <!-- REMOVIDO (08/09/2026), pedido verbatim: "O dropdown dentro da
+             tela de 'Info' deve ser eliminado." Este era o <select
+             id="topbar-info-select"> antigo (Tabela/Cartões/Fotos/Mapa/
+             Buscar/Info) que sobrava aqui, redundante, desde a
+             rearquitetura que moveu o cabeçalho pra dentro da folha 'Info'
+             do BSP (cada folha já tem seu PRÓPRIO dropdown de tipo de
+             editor, incluindo "ℹ️ Info" — ver .bsp-leaf-select em
+             js/bsplayout.js `_renderLeaf`). Ele também era a causa
+             confirmada de 3 bugs relatados juntos: escolher outra opção
+             aqui chamava `App._exitInfoMode()`, que 1) zerava
+             `#topbar-info-layoutbar` (o "botão quádruplo" sumia) e 2)
+             desligava `App._infoMode`, do qual `BSPLayout.
+             _renderInfoBarControls()` dependia pra desenhar aquele botão —
+             então voltar pra 'Info' por QUALQUER caminho (inclusive o
+             dropdown de cada folha) deixava a barra permanentemente vazia,
+             já que nada no novo sistema (a folha 'info' do BSP, sempre
+             presente desde a rearquitetura) voltava a ligar `_infoMode`.
+             Os botões 👁️/⚙️/❓ não dependiam disso, mas ficavam visualmente
+             "sozinhos" sem o botão quádruplo ao lado. Removido o elemento
+             e toda a lógica associada (`App._infoMode`/`_enterInfoMode`/
+             `_exitInfoMode`/`_syncTopbarInfoSelect`, ver app.js;
+             `_renderInfoBarControls()` agora desenha sempre, sem depender
+             de um "modo Info" que não existe mais — ver bsplayout.js). -->
+        <!-- NOVO (08/09/2026): host dos 4 botões de gerenciamento de layouts
+             nomeados do Workspace (ver js/bsplayout.js _renderInfoBarControls).
+             ATUALIZADO (08/09/2026): agora populado enquanto o cabeçalho
+             está no "modo Info" (dropdown acima em "ℹ️ Info"), independente
+             de qual tela está ativa no conteúdo principal — ver comentário
+             grande no <select> acima e App._infoMode em app.js. Vazio (e
+             por isso escondido via CSS ":empty") fora do modo Info.
+             REORDENADO (08/09/2026), pedido verbatim: "Na tela do Info, em
+             sua barra, deixe o botão quádruplo logo ao lado do dropdown e
+             coloque o texto dos títulos à direita dele." — antes vinha
+             DEPOIS de #view-title; agora vem logo depois do <select>
+             acima, com o título deslocado pra depois dele (ver
+             #view-title abaixo). -->
+        <div id="topbar-info-layoutbar" class="topbar-info-layoutbar"></div>
         <h1 id="view-title">Catalogação de Itens</h1>
         <div class="spacer"></div>
         <button class="icon-btn" id="btn-verlista-top" title="Ver lista simples (patrimônio/tipo/descrição/setor)">👁️</button>
@@ -55,6 +221,16 @@
              MapView (_toggleHelpMenu/_closeHelpMenu/_openChangelogModal/
              _openAboutModal, mapview.js) — ver wiring em app.js _wireNav. -->
         <button class="icon-btn" id="btn-ajuda-top" title="Ajuda">❓</button>
+        <!-- NOVO (09/09/2026), pedido verbatim: "Faça um transicionador
+             fácil e rápido entre os dois modos de visualização do app
+             BSP/dockable ou o outro jeito." Decisão via AskUserQuestion:
+             "Botão no cabeçalho 'Info'" — sempre acessível, porque viaja
+             junto com `header.topbar` pra qualquer lugar que ele esteja
+             (dentro da folha 'Info' do Workspace OU dentro de
+             `#classic-shell` no modo Clássico — é o MESMO elemento físico
+             nos dois casos, ver js/classicmode.js). Handler em app.js
+             `_wireNav` (chama `ClassicMode.toggle()`). -->
+        <button class="icon-btn" id="btn-layoutmode-top" title="Alternar entre o Workspace (blocos redimensionáveis) e o layout Clássico (tela cheia com barra inferior)">🔀</button>
       </div>
       <!-- Aviso chamativo (pedido do usuário, 26/08/2026): some quando a
            conferência de patrimônio já tem nome definido — ver
@@ -63,7 +239,7 @@
            leva direto pro campo (⚙️ Configurações → 📦 Catálogo → 🗂️
            Conferência de patrimônio), sem precisar decorar o caminho. -->
       <div id="conf-nome-banner" class="conf-nome-banner hidden" title="Toque para ir definir o nome da conferência agora">
-        <span class="conf-nome-banner-msg">⚠️ <b>Defina o nome para a conferência de patrimônio</b></span>
+        <span class="conf-nome-banner-msg">⚠️ <b>Defina o nome para a conferência de patrimônios</b></span> <!-- [10/09/2026] pedido verbatim: mensagem deve ter o 's' no final (era "patrimônio", singular) -->
         <span class="conf-nome-banner-path">⚙️ Configurações → 📦 Catálogo → 🗂️ Conferência de patrimônio</span>
       </div>
     </div>
@@ -80,14 +256,6 @@
        (ver css/style.css). Unidade/zoom%/coordenadas do cursor (linha A) + slider de
        zoom com botões -/+ (linha B). -->
   <div id="bottombar-mapa" class="bottombar-mapa"></div>
-
-  <nav class="bottomnav">
-    <button data-view="tabela" class="active" title="Ver todos os itens catalogados em tabela"><span class="ic">📋</span>Tabela</button>
-    <button data-view="flashcards" title="Ver os itens catalogados em cartões com foto"><span class="ic">🗂️</span>Cartões</button>
-    <button data-view="capturar" title="Abrir a câmera para catalogar um novo item"><span class="ic">📷</span>Fotos</button>
-    <button data-view="mapa" title="Ver/editar a planta do ambiente"><span class="ic">🗺️</span>Mapa</button>
-    <button data-view="buscar" title="Buscar um item pelo patrimônio, descrição ou setor"><span class="ic">🔎</span>Buscar</button>
-  </nav>
 </div>
 
 <!-- Templates HTML para as views (preenchidos via JS) -->
@@ -110,6 +278,21 @@
 
 <script src="js/db.js"></script>
 <script src="js/utils.js"></script>
+<!-- NOVO (07/09/2026), pedido verbatim: "Faça uma função de gerenciamento
+     de janelas para todo o app" — ver js/windowmanager.js. Carregado logo
+     depois de utils.js (Utils.bringToFront virou um wrapper fino sobre ele,
+     ver comentário grande em js/utils.js) e antes de qualquer módulo que
+     abra painéis/modais. -->
+<script src="js/windowmanager.js"></script>
+<!-- NOVO (07/09/2026), pedido verbatim: "inquebravel, tudo com estrutura
+     try{}catch(){} para evitar o app quebrar [...] Apresentando uma
+     mensagem como nao consegui carregar aquele modulo (caso de problema)."
+     Carregado logo apos db.js/utils.js, ANTES de qualquer outro modulo do
+     app, de proposito: precisa estar disponivel pra qualquer script
+     seguinte poder usar ModuleHost.safeRun/showLoadError desde a primeira
+     linha, e nao pode ele mesmo depender de nada alem do DOM (ver
+     comentario grande em js/modulehost.js). -->
+<script src="js/modulehost.js"></script>
 <!-- Pedido do usuário (28/08/2026, rodada 18): "Modularize o flip dos botões
      que é usado atualmente em 'Ver lista simples'" — js/flip.js
      (window.Flip.makeSortable) precisa vir ANTES de qualquer arquivo que o
@@ -133,6 +316,33 @@
 <script src="js/barcode.js"></script>
 <script src="js/libloader.js"></script>
 <script src="js/mapping.js"></script>
+<!-- NOVO (07/09/2026), pedido verbatim: "Assim como no Blender, há um
+     dicionário para todos os objetos em cena (bpy.data.objects[...]),
+     implemente algo semelhante no app." — window.SceneObjects (ver comentário
+     grande no topo do próprio arquivo). Precisa vir DEPOIS de mapping.js
+     (usa Mapping._allSceneNames em SceneObjects.rename). -->
+<script src="js/sceneobjects.js"></script>
+<!-- NOVO (07/09/2026), pedido verbatim: "scripts para os objetos como no
+     Unity, só que em JavaScript." — window.Scripting (ver comentário grande
+     no topo do próprio arquivo). Depois de sceneobjects.js (usa
+     window.SceneObjects). -->
+<script src="js/scripting.js"></script>
+<!-- [11/09/2026] NOVO — Arquitetura de Componentes do Inspector (estilo
+     Unity). window.Components/window.SceneEventBus (ver comentário grande
+     no topo do próprio arquivo, e claude/spec-component-inspector-
+     architecture.md no projeto). Depois de scripting.js/sceneobjects.js
+     (o executor de folhas de código reaproveita a mesma convenção de
+     parâmetros de Scripting.run — obj/SceneObjects/Scripting/map/THREE/
+     Utils/view3d) e ANTES de mapview.js/view3d.js (que chamam
+     Components.ensureComponents/tickEntity/SceneEventBus.emit).
+     [11/09/2026, mesmo dia — ATUALIZADO] pedido verbatim: "elimine tudo do
+     projeto que é legado [...] O app está em construção ainda." Removido
+     tudo que era compatibilidade com o formato antigo (o script
+     LegacyRawScript e a migração automática a partir de scriptCode/
+     scriptAtivarAoClicar/scriptAtivarAoAproximar/scriptRaioAproximacao) —
+     ScriptComponent agora guarda sua "folha de código" (`code`) direto,
+     sempre editável, nunca uma classe opaca por trás. -->
+<script src="js/components.js"></script>
 <script src="js/organizeview.js"></script>
 <script src="js/ambientephotos.js"></script>
 <!-- "Receitas" dos modelos 3D dos objetos padrão (rodada 51 — pedido do
@@ -148,6 +358,13 @@
      pra montar a legenda/símbolos), e ANTES de settings.js (que chama
      MapTxt.exportarMapa/parseTexto na tela de Exportar/Importar). -->
 <script src="js/maptxt.js"></script>
+<!-- NOVO (07/09/2026), pedido verbatim: "blocos de construção... tijolos
+     autofundíveis" — window.Tijolos (modelo de dados, snap/âncora e
+     geometria mesclada com face culling — ver comentário grande no topo
+     do próprio arquivo). Precisa vir ANTES de engine3d.js (que chama
+     Tijolos.buildAll em _rebuildTijolos) e de view3d.js (que chama
+     Tijolos.getConfig/setConfig/add/snapXZ). -->
+<script src="js/tijolos.js"></script>
 <script src="js/engine3d.js"></script>
 <!-- Modelador 3D (pedido do usuário, 28/08/2026 — rodada de modularização:
      "Modularize o Modelador para que, tudo que seja relacionado a ele, esteja
@@ -191,9 +408,41 @@
 <script src="js/capture.js"></script>
 <script src="js/mapconfig.js"></script>
 <script src="js/mapselection.js"></script>
+<!-- [10/09/2026] "📐 Camera Match" DESATIVADA por pedido verbatim do
+     usuário: "Remova o 'camera match' do projeto por enquanto." Os 2
+     scripts abaixo (window.PerspMatchMath/window.PerspMatch) foram
+     REMOVIDOS daqui pra a ferramenta não carregar/rodar mais — os arquivos
+     js/perspmatch.js e js/perspmatch-math.js continuam intactos em disco
+     (não apagados), assim como a store perspMatchSessions em js/db.js e o
+     comentário/botão correspondente em js/view3d.js (também removido de
+     lá, ver lá). Reversível: basta re-adicionar as 2 linhas abaixo (nesta
+     mesma posição, entre js/mapselection.js e js/mapview.js) e o botão em
+     js/view3d.js para reativar.
+     <script src="js/perspmatch-math.js"></script>
+     <script src="js/perspmatch.js"></script>
+-->
+<!-- [11/09/2026] CodeMirror 5 (vendorizado, ver <link> no <head>) — core
+     antes do modo, ambos antes de js/mapview.js (que instancia
+     `CodeMirror.fromTextArea` na folha de código dos Scripts). -->
+<script src="lib/codemirror/lib/codemirror.js"></script>
+<script src="lib/codemirror/mode/javascript/javascript.js"></script>
 <script src="js/mapview.js"></script>
 <script src="js/photogrid.js"></script>
 <script src="js/view3d.js"></script>
+<!-- NOVO (08/09/2026), pedido verbatim: "Será o 'Info'." — módulo novo
+     (window.InfoBar) que mostra título + botões 👁️/⚙️ dentro de uma divisão
+     do Workspace, reaproveitando os mesmos handlers do cabeçalho global (ver
+     js/infobar.js). Carregado ANTES de bsplayout.js, que referencia
+     InfoBar.mount/unmount no novo EDITOR_TYPES.info. -->
+<script src="js/infobar.js"></script>
+<!-- NOVO (07/09/2026), pedido verbatim: "Layout estilo Blender (BSP/
+     splitters) ... Implemente: Crie um layout de interface modular,
+     redimensionável e baseada em blocos (tiled workspace) inspirado no
+     sistema de janelas do Blender". Depois de view3d.js/mapview.js/
+     searchview (BSPLayout.EDITOR_TYPES referencia View3D/MapView/
+     SearchView) e antes de app.js (que referencia BSPLayout direto no
+     literal de views). Ver js/bsplayout.js. -->
+<script src="js/bsplayout.js"></script>
 <!-- NOVO (01/09/2026), item GRANDE #5 do pedido de 12 itens — tela "🛠️
      Acessar modelos" (ver js/modelos3d.js). Depois de view3d.js/modeler-
      core.js (usa Engine3D e Modeler3D) e antes de app.js (que referencia
@@ -203,8 +452,37 @@
 <script src="js/search.js"></script>
 <script src="js/verlistasimples.js"></script>
 <script src="js/exportdeps.js"></script>
+<!-- NOVO (07/09/2026), pedido verbatim do usuario: "retire as copias
+     embutidas do js/settings.js e deixe em arquivos separados em .js
+     (arquivo com apenas uma variavel com uma string de texto gigante)
+     mesmo para funcionar em 'file:///'." Precisam vir ANTES de
+     js/settings.js (que le `window.RECEIVE_PHP_BUNDLE`/
+     `RECEIVE_NODE_BUNDLE` no lugar do texto que tinha embutido antes). -->
+<script src="js/serverbundles/receive-php-bundle.js"></script>
+<script src="js/serverbundles/receive-node-bundle.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/unify.js"></script>
+<!-- NOVO (09/09/2026), pedido verbatim: "Coloque o antigo método de
+     apresentação das coisas sem o BSP splitter screen / dockable, use a
+     pasta da versão que te enviei. [...] Faça um transicionador fácil e
+     rápido entre os dois modos de visualização do app BSP/dockable ou o
+     outro jeito." — ver js/classicmode.js (window.ClassicMode). Depois de
+     bsplayout.js/settings.js (referencia BSPLayout/DB dentro de funções,
+     não no carregamento) e antes de app.js (que chama
+     ClassicMode.restoreFromSettings() no boot e liga o botão 🔀 do
+     cabeçalho). -->
+<script src="js/classicmode.js"></script>
+<!-- NOVO (09/09/2026), pedido verbatim: "Fiz atualizações no app vanishCam
+     que agora podem servir-nos aqui [...] deve abrir a tela do vanishCam
+     dentro do app 'catalogacao-itens' com código local." — versão nova do
+     vanishCam (pasta `vanishcam/`, copiada de '..\..\vanishCam\outputs',
+     ver js/mapview.js _openVanishCamScreen) já vem com uma API própria de
+     integração (js/embed-api.js, ver vanishcam/README-embed.md) — só esta
+     1 linha é necessária aqui; vanishCamMount() busca/injeta o resto
+     (HTML/CSS/demais .js) sozinho, direto da pasta vanishcam/, na hora em
+     que é chamado (nunca na carga da página) — atualizar o vanishCam
+     continua sendo só substituir os arquivos dessa pasta, sem tocar aqui. -->
+<script src="vanishcam/js/embed-api.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

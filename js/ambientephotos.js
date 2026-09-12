@@ -11,6 +11,135 @@
  * Isto é complementar ao mapa 2D/3D (posição x,y "de cima"), não substitui:
  * às vezes é mais fácil apontar "o item está bem ali nessa foto" do que
  * posicionar um ponto exato numa planta.
+ *
+ * ---------------------------------------------------------------------
+ * ÍNDICE DE FUNÇÕES (todo método top-level do objeto `AmbientePhotos`,
+ * na ordem em que aparece no arquivo) — [10/09/2026] adicionado por
+ * pedido verbatim do usuário ("evitar o que você teve de 'vasculhar todo
+ * o arquivo' [...] índice de funções [...] descrição do que faz e em
+ * qual situação é usada"). Ao mexer em algo desta tela, procure o nome
+ * aqui primeiro em vez de ler o arquivo inteiro. Mantenha este índice
+ * atualizado ao adicionar/remover/renomear um método top-level.
+ * ---------------------------------------------------------------------
+ * open() — abre a tela cheia "Mapa"→"Foto" pra um ambiente; monta todo o
+ *   HTML/overlay, liga os listeners, carrega as fotos do ambiente.
+ *   Chamada pelo botão "Foto" do rodapé/menu Mapa (app.js) e por
+ *   enterOrbPlacementForItem abaixo.
+ * close() — fecha a tela, remove o overlay, restaura o estado do MapConfig
+ *   (listeners) e chama onExit se houver.
+ * _toggleMode(mode) — liga/desliga "Adicionar orb"/"Apagar orb"
+ *   (#ambphotos-mode-orb/#ambphotos-mode-del, marcação de patrimônio
+ *   DENTRO da foto — não confundir com vincular a FOTO ao mapa).
+ * _toggleMedidaSidemenu() — abre/fecha o menu lateral direito recolhível
+ *   (botão-seta) que hospeda Medidas/Traço guia/📍/📐.
+ * _toggleMedidasVisiveis() — master switch da fileira "📏 Medidas" (botão
+ *   do menu lateral) — mostra/esconde Adicionar/Apagar/Reposicionar medida.
+ * _updateMedidaControlsVisibility() — aplica o estado do switch acima ao
+ *   DOM (classe hidden na fileira), chamada no mount e a cada troca de foto.
+ * _toggleMedidaMode(mode) — liga "Adicionar"/"Apagar" dentro da ferramenta
+ *   Medidas (rascunho de 2 pontos na foto).
+ * _toggleTracosVisiveis() / _updateTracoControlsVisibility() /
+ *   _toggleTracoMode(mode) — MESMO padrão de Medidas acima, pra "✏️ Traço
+ *   guia" (linha tracejada só de referência visual, não mede nada).
+ * _toggleMarcacoesPatrimonioVisiveis() — [10/09/2026] master switch do
+ *   botão "📍" do menu lateral — mostra/esconde os botões PRÉ-EXISTENTES
+ *   #ambphotos-mode-orb/#ambphotos-mode-del (substituiu o botão errado
+ *   "🖼️ Orb" de uma rodada anterior, que tinha criado um 2º par confuso).
+ * _updateMarcacoesPatrimonioVisibility() — aplica o switch acima ao DOM
+ *   (toggle de `hidden` nos 2 botões, individualmente — nunca no contêiner
+ *   inteiro, que também tem "⬇️ Baixar todas").
+ * _abrirVanishCamAtual() — botão "📐" do menu lateral: abre a calibração
+ *   vanishCam (linhas de referência) pra foto selecionada, via
+ *   window.MapView._openVanishCamScreen (mesmo ponto de entrada do 2D).
+ * _toggleMedidaReposicionar() / _updateMedidaReposicionarBtn() /
+ *   _toggleTracoReposicionar() / _updateTracoReposicionarBtn() — ligam o
+ *   modo "arrastar uma ponta já inserida" de cada ferramenta (botões "🎯
+ *   Reposicionar pontas" dentro de cada fileira).
+ * _placeTracoPointAt(sx, sy) — clique/toque na foto com Traço guia ativo:
+ *   registra o 1º/2º ponto do rascunho.
+ * _confirmTracoDraft() — salva o traço guia com os 2 pontos já marcados.
+ * _hitTestTracoVertex/_hitTestTracoLine(sx, sy, ...) — testes de acerto
+ *   (clique perto de uma ponta/linha) usados por arrastar/remover traço.
+ * _removeTraco(traco) / _removeTracoById / _restoreTracoById — apaga um
+ *   traço guia (com undo/redo via History).
+ * _drawTraco(traco, {draft}) — desenha um traço guia (ou o rascunho em
+ *   progresso) no canvas, chamada por render().
+ * _openMedidaValorModal() / _closeMedidaValorModal() / _confirmMedidaDraft
+ *   (valor) — modal que pede o VALOR numérico (distância real) ao terminar
+ *   de marcar os 2 pontos de uma medida; confirma e salva a medida.
+ * enterOrbPlacementForItem(map, itemId, {...}) — ponto de entrada vindo da
+ *   ficha de um item ("📍 Marcar em foto") — abre esta tela já no modo
+ *   "Adicionar orb" pendente, pra associar o item a um ponto de uma foto.
+ * _showPendingOrbBanner/_hidePendingOrbBanner/_setPendingOrbButtonsDisabled/
+ *   _cancelPendingOrbPlacement — a faixa/banner "marque o item na foto"
+ *   mostrada durante o fluxo acima.
+ * _renderStrip() — desenha a tira de miniaturas das fotos deste ambiente
+ *   (topo/lateral da tela), chamada ao abrir e após adicionar/remover foto.
+ * _onStripClick(e) — clique numa miniatura da tira: troca a foto em destaque.
+ * _syncStripOffset() / _attachStripDragScroll(strip) — rolagem por
+ *   arrasto da tira de miniaturas.
+ * _onFilesChosen(e) — callback do <input type=file>: processa 1+ fotos
+ *   escolhidas/tiradas (botão "📷 Adicionar foto").
+ * _addPhotoFromFile(file) — grava uma foto nova no banco (DB.
+ *   addAmbientePhoto) e recarrega a tira.
+ * _selectPhoto(id, {focusNorm}) — troca qual foto está em destaque/editável.
+ * _fitToScreen() — recalcula zoom/pan pra foto atual caber na tela.
+ * _updateTitle() — atualiza o nome exibido no topo (caption) da foto atual.
+ * _updateMapLinkBtn() — habilita/desabilita "🗺️"/"👁️2D"/"👁️3D" da barra de
+ *   topo conforme a foto atual já tem posição salva no mapa ou não.
+ * _openMapLinkFlow() — botão "🗺️": fecha esta tela e entra no fluxo de
+ *   cruz+"Marcar aqui" da Planta baixa pra vincular/editar a posição desta
+ *   foto no mapa (MapView.enterPhotoPlacementMode).
+ * _loadJSZip() — carrega a lib JSZip sob demanda (usada só por "Baixar
+ *   todas .zip").
+ * _photoFileName/_reencodePhotoDataUrl — nome de arquivo e reencode (jpg/png)
+ *   usados nos downloads.
+ * _downloadCurrentPhoto() / _downloadAllPhotosZip() — botões de download
+ *   (1 foto, ou todas do ambiente num .zip).
+ * _renameCurrentPhoto() — botão ✏️ na legenda: renomeia a foto atual.
+ * _persistCurrent() — grava `this._current` no banco (DB.saveAmbientePhoto).
+ * _deletePhoto(id) / _deletePhotoInternal / _restorePhotoInternal — apaga
+ *   uma foto do ambiente (com undo/redo).
+ * _resolveOrbLabels(photo) — resolve o texto (patrimônio/descrição) de cada
+ *   orb da foto, buscando o item associado no banco.
+ * refreshIfOpen() — recarrega dados (chamado de fora, ex. após editar um
+ *   item associado noutra tela, pra esta tela não ficar desatualizada).
+ * _resizeCanvas() / worldToScreen / screenToWorld — geometria do canvas
+ *   (mapeamento pixel-de-tela <-> coordenada normalizada da foto).
+ * render() — redesenha o canvas inteiro (foto + orbs + medidas + traços +
+ *   destaques), chamada após qualquer mudança de estado/pan/zoom.
+ * _drawVertexHighlightAmb/_ensureVertexHighlightLoop — animação de destaque
+ *   num vértice (medida/traço) recém-arrastado.
+ * _drawResolutionLabel() — texto de depuração com a resolução da imagem.
+ * _startOrbHighlight(orbId) — anima um orb específico piscando (vindo de
+ *   App.verMarcacaoEmFoto, "ver marcação em foto" na ficha do item).
+ * _drawOrb(orb) — desenha um orb (marcação de patrimônio) na foto.
+ * _roundRectPath — helper de desenho (retângulo de cantos arredondados).
+ * _drawMedida(medida, {draft}) / _drawSetaPontaMedida — desenha uma medida
+ *   (reta + seta + valor) ou o rascunho em progresso.
+ * _hitTestMedidaVertex/_pointSegDist/_hitTestMedidaLine/_hitTestMedidaAny —
+ *   testes de acerto de clique pra medidas (ponta/linha/qualquer parte).
+ * _placeMedidaPointAt(sx, sy) — clique na foto com Medidas ativo: registra
+ *   o 1º/2º ponto do rascunho (abre _openMedidaValorModal no 2º).
+ * _removeMedida/_removeMedidaById/_restoreMedidaById — apaga uma medida
+ *   (com undo/redo).
+ * _hitTestOrb(sx, sy) — teste de acerto de clique num orb já marcado.
+ * _onCanvasClick(e) — roteador de clique no canvas: decide entre
+ *   orb/medida/traço conforme qual ferramenta está ativa no momento.
+ * _triggerLongPress(x, y) — dispara as opções de um orb após pressionar e
+ *   segurar (toque, sem mover).
+ * _placeOrbAt(sx, sy) — clique na foto com "Adicionar orb" ativo: abre a
+ *   busca de patrimônio e associa o item escolhido a este ponto da foto.
+ * _removeOrb/_findLoadedPhoto/_removeOrbById/_restoreOrbById — apaga a
+ *   marcação de um orb (não apaga o item, só o vínculo com esta foto).
+ * _openOrbActions(orb) — toque num orb já existente: menu de ações (ver
+ *   item/trocar associação/remover).
+ * _pickItem() — abre a busca de patrimônio (usada por _placeOrbAt/
+ *   _openOrbActions).
+ * _attachPanZoom(canvas) — liga pan (arrastar)/zoom (roda/pinça) do canvas
+ *   da foto, e o long-press de orb (ver _triggerLongPress) — é o último
+ *   método top-level do arquivo (o resto dele é lógica interna desta função).
+ * ---------------------------------------------------------------------
  */
 const AmbientePhotos = {
   _map: null,
@@ -120,6 +249,9 @@ const AmbientePhotos = {
   _onKeyDown: null,
   _onResize: null,
   _topbarObserver: null,
+  // NOVO (08/09/2026), ITEM 10 (rodada de 11 itens) — ver comentário
+  // grande onde é criado, mais abaixo.
+  _canvasObserver: null,
   // true logo depois de um clique-e-arraste na faixa de fotos (ver
   // _attachStripDragScroll) — usado só pra o clique que o navegador dispara
   // ao soltar o botão não ser interpretado como "selecionar esta foto".
@@ -155,7 +287,18 @@ const AmbientePhotos = {
    *  presente, a foto abre já centralizada/aproximada ali (ver
    *  `_selectPhoto`) em vez do enquadramento padrão (`_fitToScreen`, foto
    *  inteira visível). */
-  async open(map, { onExit, startPhotoId, fromOrganizar, focusNorm, highlightOrbId, returnToLabel } = {}) {
+  // ATUALIZADO (08/09/2026), pedido verbatim: "Isso deve ser configurável
+  // em alguma seção das 'configurações do app', se ao selecionar a tela que
+  // será exibida, irá abrir em tela cheia ou não [...] por padrão, todas
+  // devem ocupar apenas o espaço da divisão, não a tela cheia (como o que
+  // está acontecendo com o 'Organizar' e o 'Foto')." Novo opt `container`
+  // (opcional): quando informado (ver js/bsplayout.js, EDITOR_TYPES.foto),
+  // o overlay é anexado DENTRO dele em vez de `document.body` — o CSS de
+  // `position:fixed; inset:0` do overlay (linha abaixo) não precisa mudar
+  // NADA, porque `.bsp-leaf-body` (container da divisão) ganhou
+  // `transform: translateZ(0)` (css/style.css), virando "containing block"
+  // de `position:fixed` pra tudo dentro dela (truque padrão do CSS).
+  async open(map, { onExit, startPhotoId, fromOrganizar, focusNorm, highlightOrbId, returnToLabel, container } = {}) {
     if (this._overlayEl) return; // já aberto
     // Guarda defensiva — na prática nunca deveria disparar: com o mapa
     // único (ver DB.getOrCreateSingleMap), quem chama open() sempre tem um
@@ -189,6 +332,19 @@ const AmbientePhotos = {
     this._deletingTraco = false;
     this._tracoDraft = null;
     this._tracoDragging = null;
+    // [10/09/2026] NOVO (correção da rodada anterior) — pedido verbatim:
+    // "coloque um botão com o ícone do 'alfinete vermelho' (📍) [...] é
+    // para ativar/desativar os 2 botões que já estão presentes nesta tela
+    // ('Mapa'->'Foto'), os botões '📍 Adicionar orb' (id=ambphotos-mode-
+    // orb) e '🗑️ Apagar orb' (id=ambphotos-mode-del)." Master switch,
+    // MESMO padrão/mesmos nomes de `_medidasVisiveis`/`_tracosVisiveis`
+    // acima (nasce `true` — mesma decisão já tomada pros outros masters em
+    // 05/09/2026: os botões ficam habilitados por padrão) — só que aqui
+    // não há fileira própria pra revelar (os 2 botões JÁ EXISTEM dentro de
+    // `#ambphotos-controls`, ver HTML mais abaixo); o switch só alterna a
+    // classe `hidden` de cada um dos 2 individualmente, ver
+    // `_toggleMarcacoesPatrimonioVisiveis`/`_updateMarcacoesPatrimonioVisibility`.
+    this._marcacoesPatrimonioVisiveis = true;
     // Defensivo: um open() "normal" (não vindo de enterOrbPlacementForItem)
     // nunca deve herdar um pedido pendente de rodadas anteriores. Quando ESTA
     // chamada de open() é a própria enterOrbPlacementForItem, ela roda ANTES
@@ -305,6 +461,32 @@ const AmbientePhotos = {
              #ambphotos-traco-controls abaixo) em vez do único botão de
              antes que já desenhava direto. -->
         <button type="button" class="icon-btn ambphotos-sidemenu-btn" id="ambphotos-traco-toggle" title="Traço guia: linha reta tracejada, só como referência visual (não mede nada)">✏️</button>
+        <!-- [10/09/2026] CORRIGIDO — o botão "🖼️ Orb" (e a fileira
+             #ambphotos-orb-controls com "Adicionar/Apagar orb" ligados a
+             _openMapLinkFlow/_removerOrbDoMapa) que morava aqui foi
+             REMOVIDO por pedido verbatim do usuário: "o novo botão que
+             você colocou ('Orb do Mapa') deve ser removido" — confusão com
+             os botões "📍 Adicionar orb"/"🗑️ Apagar orb" JÁ EXISTENTES
+             desde antes (ids #ambphotos-mode-orb/#ambphotos-mode-del, ver
+             fileira #ambphotos-controls mais abaixo — "as marcações de
+             patrimônio", um recurso totalmente diferente: marcar um
+             patrimônio DENTRO da foto, não vincular a FOTO a um lugar no
+             mapa). No lugar do botão errado, este aqui (📍, alfinete
+             vermelho) é um master switch (MESMO padrão de "📏 Medidas"/
+             "✏️ Traço guia" acima, ver _toggleMarcacoesPatrimonioVisiveis)
+             que só MOSTRA/ESCONDE aqueles 2 botões PRÉ-EXISTENTES — nenhum
+             botão/fluxo novo de vínculo ao mapa é recriado aqui. -->
+        <button type="button" class="icon-btn ambphotos-sidemenu-btn" id="ambphotos-marcpin-toggle" title="Marcações de patrimônio: mostra/esconde os botões '📍 Adicionar orb'/'🗑️ Apagar orb' da bandeja de baixo">📍</button>
+        <!-- [10/09/2026] NOVO — pedido verbatim: "um botão pra ativar a
+             calibração do vanishCam na foto selecionada." Ação direta (sem
+             fileira própria, sem estado "ligado/desligado" — mesmo espírito
+             de um botão comum, não um master switch) que reaproveita o
+             MESMO ponto de entrada já usado pelo mapa 2D (botão "📐 linhas
+             de referência" dentro do painel "📷 Definir Câmera" do orb de
+             foto/câmera) — ver MapView._openVanishCamScreen, chamada direto
+             daqui em _abrirVanishCamAtual, sem duplicar nenhuma lógica da
+             tela do vanishCam. -->
+        <button type="button" class="icon-btn ambphotos-sidemenu-btn" id="ambphotos-vanishcam-btn" title="Definir câmera por linhas de referência (vanishCam) para a foto selecionada">📐</button>
       </div>
       <div class="ambphotos-controls-wrap" id="ambphotos-controls-wrap">
         <!-- Fileira de "Medidas" (pedido do usuário, 26/08/2026) — só existe
@@ -352,6 +534,22 @@ const AmbientePhotos = {
           <button class="icon-btn" id="ambphotos-traco-del" title="Apagar traço guia: toque num traço da foto para removê-lo">🗑️ Apagar traço guia</button>
           <button class="icon-btn" id="ambphotos-traco-reposicionar" title="Reposicionar pontas: toque numa ponta de um traço já inserido pra movê-lo">🎯 Reposicionar pontas</button>
         </div>
+        <!-- [10/09/2026] REMOVIDO — a fileira "🖼️ Orb" (#ambphotos-orb-
+             controls, "Adicionar/Apagar orb" ligados a _openMapLinkFlow/
+             _removerOrbDoMapa) que morava aqui foi removida por pedido
+             verbatim do usuário (ver comentário grande no botão do menu
+             lateral, acima). Os botões PRÉ-EXISTENTES "📍 Adicionar orb"/
+             "🗑️ Apagar orb" (ids #ambphotos-mode-orb/#ambphotos-mode-del,
+             logo abaixo, dentro de #ambphotos-controls) continuam exatamente
+             como sempre foram — "as marcações de patrimônio" — só que agora
+             cada um ganhou a classe 'hidden' alternável individualmente
+             pelo novo master switch "📍" do menu lateral
+             (_toggleMarcacoesPatrimonioVisiveis/_updateMarcacoesPatrimonioVisibility,
+             mais abaixo), SEM esconder o 3º botão desta mesma fileira
+             (#ambphotos-download-all, "Baixar todas .zip" — recurso
+             totalmente à parte, que precisa continuar sempre visível; por
+             isso o toggle mexe nos 2 botões INDIVIDUALMENTE, nunca no
+             elemento pai inteiro). -->
         <div class="camera-controls" id="ambphotos-controls" style="grid-template-columns:repeat(3,1fr); display:grid; gap:6px">
           <button class="icon-btn" id="ambphotos-mode-orb" title="Adicionar orb: toque na foto onde está o item, para associá-lo a um patrimônio">📍 Adicionar orb</button>
           <button class="icon-btn" id="ambphotos-mode-del" title="Apagar orb: toque num orb da foto para removê-lo (não apaga o item, só a marcação nesta foto)">🗑️ Apagar orb</button>
@@ -360,7 +558,8 @@ const AmbientePhotos = {
       </div>
       <input type="file" id="ambphotos-file" accept="image/*" capture="environment" multiple style="display:none">
     `;
-    document.body.appendChild(overlay);
+    this._confinedContainer = container || null;
+    (container || document.body).appendChild(overlay);
     this._overlayEl = overlay;
     this._canvas = overlay.querySelector('#ambphotos-canvas');
     this._ctx = this._canvas.getContext('2d');
@@ -393,7 +592,15 @@ const AmbientePhotos = {
       // OrganizeView já preserva pan/zoom/config de antes (ver
       // organizeview.js, _hasOpenedBefore) — reabrir aqui volta pro EXATO
       // ponto de onde a miniatura foi clicada, não reenquadra do zero.
-      OrganizeView.open();
+      // NOVO (07/09/2026), pedido verbatim: "inquebrável, tudo com estrutura
+      // try{}catch(){}..." — ver mesmo tratamento em mapview.js
+      // _openOrganizeView (o outro ponto de entrada de OrganizeView.open()).
+      try {
+        OrganizeView.open();
+      } catch (err) {
+        if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError('Organizar', err);
+        else console.error('Falha ao abrir o Organizar:', err);
+      }
     };
     overlay.querySelector('#ambphotos-add').onclick = () => overlay.querySelector('#ambphotos-file').click();
     overlay.querySelector('#ambphotos-file').onchange = (e) => this._onFilesChosen(e);
@@ -411,6 +618,12 @@ const AmbientePhotos = {
     // no HTML, fileira de Medidas).
     overlay.querySelector('#ambphotos-medida-reposicionar').onclick = () => this._toggleMedidaReposicionar();
     overlay.querySelector('#ambphotos-traco-reposicionar').onclick = () => this._toggleTracoReposicionar();
+    // [10/09/2026] CORRIGIDO — master switch "📍" (ver comentário grande no
+    // HTML) — não os botões "Adicionar/Apagar orb" errados de antes (esses
+    // já têm o próprio onclick de sempre, `#ambphotos-mode-orb`/`#ambphotos-
+    // mode-del` acima, intocado).
+    overlay.querySelector('#ambphotos-marcpin-toggle').onclick = () => this._toggleMarcacoesPatrimonioVisiveis();
+    overlay.querySelector('#ambphotos-vanishcam-btn').onclick = () => this._abrirVanishCamAtual();
     // ATUALIZADO (05/09/2026), pedido verbatim: "Agora ficam sempre
     // habilitados por padrão os botões da bandeja do botão lateral." — os 2
     // masters já nascem `true` (ver this._medidasVisiveis/_tracosVisiveis
@@ -423,6 +636,10 @@ const AmbientePhotos = {
     this._updateTracoControlsVisibility();
     this._updateMedidaReposicionarBtn(); // estado inicial de cada botão (ver comentário grande no HTML)
     this._updateTracoReposicionarBtn();
+    // [10/09/2026] NOVO — mesmo tratamento de estado inicial acima, pro
+    // master switch "📍" (ver comentário grande no HTML).
+    overlay.querySelector('#ambphotos-marcpin-toggle')?.classList.toggle('active', this._marcacoesPatrimonioVisiveis);
+    this._updateMarcacoesPatrimonioVisibility();
     overlay.querySelector('#ambphotos-caption').onclick = () => this._renameCurrentPhoto();
     overlay.querySelector('#ambphotos-download-current').onclick = () => this._downloadCurrentPhoto();
     overlay.querySelector('#ambphotos-download-all').onclick = () => this._downloadAllPhotosZip();
@@ -446,6 +663,39 @@ const AmbientePhotos = {
 
     this._canvas.addEventListener('click', (e) => this._onCanvasClick(e));
     this._attachPanZoom(this._canvas);
+
+    // NOVO (08/09/2026), pedido verbatim (ITEM 10 da rodada de 11 itens):
+    // "Na tela 'Foto', ao redimensionar a foto redimensiona junto, não é
+    // para isso acontecer." CAUSA RAIZ: o único listener que resincroniza
+    // a RESOLUÇÃO do `<canvas>` (`this._onResize`, ver mais abaixo) só
+    // escuta o evento `resize` da JANELA do navegador — redimensionar uma
+    // DIVISÃO do Workspace (arrastar um divisor do BSPLayout, ver
+    // js/bsplayout.js) muda o tamanho CSS deste elemento sem a janela em
+    // si mudar de tamanho nenhuma, então esse evento nunca disparava
+    // nesse caso. Sem ninguém chamando `_resizeCanvas()` de novo, os
+    // atributos `width`/`height` do `<canvas>` (a RESOLUÇÃO real do
+    // bitmap desenhado) ficavam travados no tamanho de quando a tela
+    // abriu, enquanto o tamanho VISUAL em CSS (`width:100%; height:100%`)
+    // acompanhava a divisão — um `<canvas>` cujo atributo width/height não
+    // bate com seu tamanho CSS é ESTICADO/ACHATADO pelo navegador pra
+    // caber (mesmo comportamento de esticar um `<img>`), dando exatamente
+    // a aparência de "a foto redimensiona junto" (distorcida, não só
+    // mostrando mais/menos área). CORRIGIDO com um `ResizeObserver` de
+    // verdade no próprio `<canvas>` (mesmo padrão já usado por
+    // `_topbarObserver`, poucas linhas acima) — chama `render()` (que já
+    // resincroniza width/height ANTES de desenhar, ver `_resizeCanvas()`)
+    // toda vez que o TAMANHO REAL do elemento muda, não importa a causa
+    // (janela, divisor do Workspace, rotação de tela). `this._view.zoom`/
+    // `cx`/`cy` (o "quanto" e "onde" do zoom/pan atual) NÃO são tocados
+    // aqui — só o BUFFER do canvas é resincronizado — então redimensionar
+    // passa a só mostrar mais/menos área visível (como redimensionar uma
+    // janela sobre uma imagem com zoom fixo), nunca esticar/encolher a
+    // foto em si. Desconectado em `close()` (mesmo padrão de
+    // `_topbarObserver`).
+    if (typeof ResizeObserver !== 'undefined') {
+      this._canvasObserver = new ResizeObserver(() => this.render());
+      this._canvasObserver.observe(this._canvas);
+    }
 
     this._onKeyDown = (e) => { if (e.key === 'Escape') this.close(); };
     document.addEventListener('keydown', this._onKeyDown);
@@ -515,6 +765,7 @@ const AmbientePhotos = {
     this._onMapConfigChangeMedidas = null;
     this._overlayEl.remove();
     this._overlayEl = null;
+    this._confinedContainer = null;
     this._canvas = null;
     this._ctx = null;
     this._current = null;
@@ -525,6 +776,8 @@ const AmbientePhotos = {
     this._onResize = null;
     this._topbarObserver?.disconnect();
     this._topbarObserver = null;
+    this._canvasObserver?.disconnect();
+    this._canvasObserver = null;
     const cb = this._onExit;
     this._onExit = null;
     cb?.();
@@ -677,6 +930,78 @@ const AmbientePhotos = {
     if (this._placingTraco) Utils.toast('Adicionar traço guia: toque em 2 pontos da foto para desenhar a linha.', { duration: 3500 });
     else if (this._deletingTraco) Utils.toast('Apagar traço guia: toque num traço da foto para removê-lo.', { type: 'warn', duration: 3500 });
     this.render();
+  },
+
+  // ---------- "📍 Marcações de patrimônio" — CORRIGIDO (10/09/2026),
+  // pedido verbatim: "o novo botão que você colocou ('Orb do Mapa') deve
+  // ser removido. No lugar dele, coloque um botão com o ícone do 'alfinete
+  // vermelho' (📍) [...] é para ativar/desativar os 2 botões que já estão
+  // presentes nesta tela [...] '📍 Adicionar orb' (id=ambphotos-mode-orb) e
+  // '🗑️ Apagar orb' (id=ambphotos-mode-del)." Substitui por completo o
+  // bloco antigo desta seção (master switch "🖼️ Orb" +
+  // _removerOrbDoMapa/_setOrbPosById, ligados a _openMapLinkFlow — fluxo
+  // ERRADO, criava um 2º par de botões confuso com este aqui). Os botões
+  // de verdade (#ambphotos-mode-orb/#ambphotos-mode-del) já existiam desde
+  // muito antes desta tela, com seu próprio onclick/lógica intocados (ver
+  // _toggleMode('orb'/'del') logo acima) — este master switch NUNCA os cria
+  // nem muda o que fazem, só mostra/esconde os 2, MESMO padrão de
+  // "📏 Medidas"/"✏️ Traço guia" acima. ----------
+
+  /** Master switch do botão "📍" (menu lateral) — MESMO padrão de
+   *  _toggleMedidasVisiveis/_toggleTracosVisiveis, só que aqui não revela
+   *  uma fileira PRÓPRIA (não existe nenhuma — os 2 botões que ele
+   *  controla já vivem dentro de `#ambphotos-controls`, junto com "⬇️
+   *  Baixar todas", que PRECISA continuar sempre visível) — por isso
+   *  alterna a classe `hidden` de cada um dos 2 botões INDIVIDUALMENTE em
+   *  vez de um contêiner inteiro (ver _updateMarcacoesPatrimonioVisibility
+   *  abaixo). */
+  _toggleMarcacoesPatrimonioVisiveis() {
+    this._marcacoesPatrimonioVisiveis = !this._marcacoesPatrimonioVisiveis;
+    this._overlayEl?.querySelector('#ambphotos-marcpin-toggle')?.classList.toggle('active', this._marcacoesPatrimonioVisiveis);
+    this._updateMarcacoesPatrimonioVisibility();
+    Utils.toast(this._marcacoesPatrimonioVisiveis ? '📍 Marcações de patrimônio ativadas.' : '📍 Marcações de patrimônio desativadas.', { duration: 2000 });
+  },
+
+  /** Mostra/esconde os botões "📍 Adicionar orb"/"🗑️ Apagar orb"
+   *  (#ambphotos-mode-orb/#ambphotos-mode-del) conforme o master switch
+   *  acima — chamada tanto pelo toggle quanto por open()/_renderStrip
+   *  (mesmo padrão de _updateMedidaControlsVisibility/
+   *  _updateTracoControlsVisibility). Desligar também sai de qualquer modo
+   *  em andamento (_placingOrb/_deletingOrb, ver _toggleMode) — senão a
+   *  ferramenta continuaria ativa (ex.: tocar na foto ainda abrindo a
+   *  busca de patrimônio) com o próprio botão que a liga escondido, sem
+   *  jeito óbvio de desligar de novo. */
+  _updateMarcacoesPatrimonioVisibility() {
+    const show = this._marcacoesPatrimonioVisiveis;
+    this._overlayEl?.querySelector('#ambphotos-mode-orb')?.classList.toggle('hidden', !show);
+    this._overlayEl?.querySelector('#ambphotos-mode-del')?.classList.toggle('hidden', !show);
+    if (!show && (this._placingOrb || this._deletingOrb)) {
+      this._placingOrb = false;
+      this._deletingOrb = false;
+      this._overlayEl?.querySelector('#ambphotos-mode-orb')?.classList.remove('active');
+      this._overlayEl?.querySelector('#ambphotos-mode-del')?.classList.remove('active');
+    }
+  },
+
+  /** "📐" — ativa a calibração do vanishCam (linhas de referência) para a
+   *  foto selecionada, sem sair desta tela. Reaproveita EXATAMENTE o mesmo
+   *  ponto de entrada já usado pelo mapa 2D (botão "📐 linhas de
+   *  referência" dentro do painel "📷 Definir Câmera" do orb de foto/
+   *  câmera, ver mapview.js `_openVanishCamScreen`) — a função é
+   *  autocontida (monta seu próprio overlay em `document.body`, lê/grava
+   *  `mapaVanishCam` direto pelo `photoId` via `DB`, só usa
+   *  `this._vanishCamLastPhotoId` como estado de instância do MapView) e
+   *  não depende da Planta baixa estar aberta, então chamar direto em
+   *  `window.MapView` funciona igual de dentro desta tela — nenhuma
+   *  lógica nova de vanishCam foi criada aqui, só mais um ponto de
+   *  entrada pro mesmo fluxo. */
+  _abrirVanishCamAtual() {
+    if (!this._current) { Utils.toast('Nenhuma foto selecionada.', { type: 'warn' }); return; }
+    if (typeof window.MapView?._openVanishCamScreen !== 'function') {
+      Utils.toast('vanishCam não disponível (recarregue a página).', { type: 'danger' });
+      return;
+    }
+    window.MapView._openVanishCamScreen(this._current.id);
   },
 
   /** BUG CORRIGIDO (05/09/2026), pedido verbatim: "Acabei não conseguindo
@@ -1048,6 +1373,7 @@ const AmbientePhotos = {
     this._overlayEl?.querySelector('#ambphotos-controls')?.classList.toggle('hidden', this._photos.length === 0);
     this._updateMedidaControlsVisibility();
     this._updateTracoControlsVisibility();
+    this._updateMarcacoesPatrimonioVisibility();
   },
 
   async _onStripClick(e) {

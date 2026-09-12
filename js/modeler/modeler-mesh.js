@@ -55,6 +55,129 @@ const ModelerMesh = {
     };
   },
 
+  // [22/09/2026] NOVO — pedido verbatim: "Há um bug do objeto escada quando
+  // se vai modelá-lo [...] ao entrar no modo Modelador, a Escada acaba
+  // virando uma caixa visualmente [...] Este fenômeno [...] está
+  // acontecendo com outros objetos: Mesa, Luminária." CAUSA RAIZ: até
+  // aqui, `ensureCustomMesh` (modeler-core.js) SEMPRE semeava
+  // `obj.customMesh` com `defaultCubeMesh` (uma caixa lisa), não importa o
+  // `obj.tipo` — a correção de 03/09/2026 (ver comentário grande em
+  // `enter()`, modeler-core.js) só evitou que essa caixa seed fosse
+  // GRAVADA de volta ao SAIR sem editar nada (a escada de verdade, fora do
+  // Modelador, sempre continuou certa) — mas, DENTRO do Modelador, a
+  // pré-visualização sempre foi essa caixa seed mesmo assim, nunca a malha
+  // real (escada/mesa/luminária são só desenhadas com geometria própria
+  // por `engine3d.js` FORA do Modelador — `_buildEscadaMesh`/
+  // `_buildMesaMesh`/`_buildLuminariaMesh` — e nunca tiveram um
+  // equivalente em vértices/arestas/faces editáveis pro Modelador usar
+  // como seed). CORRIGIDO: 3 novos geradores (`stairsMesh`/`mesaMesh`/
+  // `luminariaMesh`, abaixo), cada um montando uma malha editável (caixas
+  // simples "soltas" — MESMO espírito de várias `Mesh` soltas que
+  // `_buildEscadaMesh`/`_buildMesaMesh`/`_buildLuminariaMesh` já usam, só
+  // que como vértices/faces editáveis em vez de `THREE.Mesh` prontas) que
+  // reproduz a SILHUETA da malha real (degraus empilhados; tampo+4 pernas;
+  // topo+2 tubos+2 tampas — tubos aproximados por PRISMAS retangulares,
+  // não cilindros de verdade, já que este formato de malha editável só
+  // suporta faces planas/quads — aproximação aceita, documentada, bem mais
+  // fiel que uma caixa única). Todas nascem com a BASE em y=0 (não
+  // respeitam o parâmetro `centered` de `defaultCubeMesh` — não faz
+  // sentido pra uma forma composta) — inofensivo: `modeler-render.js`
+  // `buildSceneObjects`/engine3d.js `_buildCustomMeshObject` já subtraem o
+  // Y MÍNIMO local antes de posicionar no mundo, então funcionam igual não
+  // importa onde a origem caia (mesmo mecanismo citado no comentário de
+  // `defaultCubeMesh`, acima). Chamadas por `ensureCustomMesh`
+  // (modeler-core.js), condicionadas a `obj.tipo`.
+
+  /** Um `{vertices,edges,faces}` de UMA caixa, centrada em `(cx,cy,cz)`
+   *  (mundo local do customMesh) — bloco de construção reaproveitado pelos
+   *  3 geradores abaixo (sempre juntados depois por `_mergeVF`). Mesma
+   *  topologia de `defaultCubeMesh` (8 vértices, 12 arestas, 6 faces). */
+  _boxVF(cx, cy, cz, w, h, d) {
+    const hw = w / 2, hh = h / 2, hd = d / 2;
+    return {
+      vertices: [
+        [cx - hw, cy - hh, cz - hd], [cx + hw, cy - hh, cz - hd], [cx + hw, cy - hh, cz + hd], [cx - hw, cy - hh, cz + hd],
+        [cx - hw, cy + hh, cz - hd], [cx + hw, cy + hh, cz - hd], [cx + hw, cy + hh, cz + hd], [cx - hw, cy + hh, cz + hd],
+      ],
+      edges: [
+        [0, 1], [1, 2], [2, 3], [3, 0],
+        [4, 5], [5, 6], [6, 7], [7, 4],
+        [0, 4], [1, 5], [2, 6], [3, 7],
+      ],
+      faces: [
+        [3, 2, 1, 0], [4, 5, 6, 7],
+        [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7],
+      ],
+    };
+  },
+
+  /** Junta várias `{vertices,edges,faces}` (ex.: várias `_boxVF`) numa
+   *  malha editável só — cada peça continua "solta" (sem soldar vértices
+   *  entre peças, igual às `Mesh` separadas do render real) — offset dos
+   *  índices de cada peça pelo total de vértices já acumulado. */
+  _mergeVF(parts) {
+    const vertices = [], edges = [], faces = [];
+    let base = 0;
+    parts.forEach((p) => {
+      p.vertices.forEach((v) => vertices.push(v.slice()));
+      p.edges.forEach(([a, b]) => edges.push([a + base, b + base]));
+      p.faces.forEach((f) => faces.push(f.map((i) => i + base)));
+      base += p.vertices.length;
+    });
+    return { vertices, edges, faces };
+  },
+
+  /** Escada — degraus empilhados, MESMOS parâmetros/fórmula de
+   *  `engine3d.js _buildEscadaMesh` (largura/profundidadeTotal/degraus do
+   *  objeto, altura SEMPRE 2m fixos). */
+  stairsMesh(largura, profundidadeTotal, degraus) {
+    const alturaTotal = 2.0; // fixa — mesmo valor/motivo de _buildEscadaMesh
+    const nDegraus = Math.max(1, Math.round(degraus) || 11);
+    const stepDepth = profundidadeTotal / nDegraus;
+    const stepHeight = alturaTotal / nDegraus;
+    const partes = [];
+    for (let i = 0; i < nDegraus; i++) {
+      const h = stepHeight * (i + 1);
+      const lz = -profundidadeTotal / 2 + stepDepth * (i + 0.5);
+      partes.push(this._boxVF(0, h / 2, lz, largura, h, stepDepth));
+    }
+    return this._mergeVF(partes);
+  },
+
+  /** Mesa — tampo + 4 pernas, MESMAS proporções de `engine3d.js
+   *  _buildMesaMesh`. */
+  mesaMesh(w, d, h) {
+    const tampoEsp = Math.max(0.03, Math.min(0.06, h * 0.08));
+    const pernaEsp = Math.max(0.03, Math.min(0.06, Math.min(w, d) * 0.07));
+    const margem = pernaEsp * 1.2;
+    const pernaAltura = Math.max(0.05, h - tampoEsp);
+    const partes = [this._boxVF(0, h - tampoEsp / 2, 0, w, tampoEsp, d)];
+    const cornersLocal = [
+      [w / 2 - margem, d / 2 - margem], [-(w / 2 - margem), d / 2 - margem],
+      [w / 2 - margem, -(d / 2 - margem)], [-(w / 2 - margem), -(d / 2 - margem)],
+    ];
+    cornersLocal.forEach(([lx, lz]) => partes.push(this._boxVF(lx, pernaAltura / 2, lz, pernaEsp, pernaAltura, pernaEsp)));
+    return this._mergeVF(partes);
+  },
+
+  /** Luminária — topo + 2 "tubos" + 2 tampas, MESMAS proporções de
+   *  `engine3d.js _buildLuminariaMesh`. Os tubos (cilindros de verdade na
+   *  malha real) viram PRISMAS retangulares aqui — aproximação aceita, ver
+   *  comentário grande acima do bloco desta rodada. */
+  luminariaMesh(w, d, h) {
+    const partes = [this._boxVF(0, h * 0.85, 0, w * 0.94, Math.max(0.015, h * 0.3), d)];
+    const raioTubo = Math.max(0.014, d * 0.11);
+    [-1, 1].forEach((lado) => {
+      const lz = lado * d * 0.24;
+      partes.push(this._boxVF(0, h * 0.35, lz, w * 0.88, raioTubo * 2, raioTubo * 2));
+    });
+    [-1, 1].forEach((lado) => {
+      const lx = lado * (w / 2 - w * 0.035);
+      partes.push(this._boxVF(lx, h / 2, 0, w * 0.07, h, d * 1.08));
+    });
+    return this._mergeVF(partes);
+  },
+
   localBBox(vertices) {
     let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     vertices.forEach(([x, y, z]) => {

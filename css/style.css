@@ -84,6 +84,62 @@ label, select,
   width: 100%;
 }
 
+/* NOVO (09/09/2026), pedido verbatim: "Coloque o antigo método de
+   apresentação das coisas sem o BSP splitter screen / dockable [...]
+   Faça um transicionador fácil e rápido entre os dois modos." — raiz do
+   modo "Clássico" (ver js/classicmode.js), MESMA estrutura flex/altura
+   que `#app` usava sozinho antes do Workspace existir (header.topbar +
+   main#view + bottombar-mapa + .bottomnav, cada um `flex:0 0 auto` ou
+   `flex:1 1 auto` já definidos mais abaixo, sem precisar repetir nada
+   aqui). Escondida por padrão (`display:none`) — só um dos dois modos
+   (#app OU #classic-shell) fica visível por vez, nunca os dois juntos. */
+.classic-shell {
+  display: none;
+}
+.classic-shell.active {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  width: 100%;
+}
+
+/* [09/09/2026] Ajuste solicitado pelo usuário: modal de escolha de modo de
+   operação ("Conferência de patrimônio" x "Mapeamento de ambientes").
+   [10/09/2026] Virou a splash screen ("Tela de Abertura") — ver
+   `openSplashScreen`/`_showSplashScreenModal` em js/classicmode.js.
+   Reaproveita `.modal-backdrop`/`.modal-sheet` genéricos (mesmo
+   "esqueleto" de qualquer folha modal do app); só os 2 botões de escolha
+   grandes e o botão "✕" de fechar são específicos daqui.
+   `.classicmode-opmode-nome` (campo "Nome desta conferência" + input)
+   foi REMOVIDO daqui — pedido verbatim: "Na splash screen, o texto 'Nome
+   desta conferência' e a entrada de texto logo abaixo devem ser
+   removidas" — quem escolhe "Conferência de patrimônios" não digita mais
+   o nome nesta tela (ver `#conf-nome-banner`/`App._updateConfNomeBanner`
+   em app.js pra onde esse nome passa a ser pedido). */
+.classicmode-opmode-choices { display: flex; flex-direction: column; gap: 10px; }
+.classicmode-opmode-choice {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; text-align: left; background: var(--bg-elev-2);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px; cursor: pointer; color: var(--text);
+}
+.classicmode-opmode-choice:hover { background: var(--bg-elev); border-color: var(--accent, #6ea8fe); }
+.classicmode-opmode-choice .ic { font-size: 18px; }
+.classicmode-opmode-choice .lbl { font-size: 14.5px; font-weight: 600; }
+.classicmode-opmode-choice .desc { font-size: 12px; color: var(--text-dim); }
+/* [10/09/2026] Botão "✕" de fechar a splash screen — pedido verbatim:
+   "esta janela apareça com um botão de 'fechar'". Fica ancorado no canto
+   superior direito da folha (`.modal-sheet` já é `position` implícito
+   dentro do fluxo normal; usamos `position:absolute` relativo à folha,
+   que já tem padding suficiente pra não colidir com o título). */
+.classicmode-splash-close {
+  position: absolute; top: 10px; right: 10px; z-index: 1;
+  width: 30px; height: 30px; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+}
+.classicmode-opmode-sheet { position: relative; }
+
 .topbar {
   padding: 8px 14px;
   background: var(--bg-elev);
@@ -222,6 +278,268 @@ body:not(.view-mapa-planta) .topbar-mapa { display: none; }
 
 .topbar .spacer { flex: 1; }
 
+/* ---------- Dropdown "Info" do cabeçalho global + barra de layouts do
+   Workspace (NOVO, 08/09/2026) ----------
+   Pedido verbatim: "Os títulos [...] devem ser deslocados um pouco para a
+   direita para que o dropdown dessa tela seja colocado ali [...] Será o
+   'Info'." — depois de pergunta explícita ao usuário sobre o escopo, a
+   resposta escolhida foi "O cabeçalho real do app vira a barra 'Info'":
+   este MESMO cabeçalho (#topbar-default, visível em TODA tela do app)
+   ganha o dropdown #topbar-info-select ANTES do título — o título
+   (#topbar h1) já tem `white-space:nowrap; overflow:hidden; text-overflow:
+   ellipsis` (ver acima), então basta ele vir DEPOIS do select no markup
+   (ver index.html) pra "deslocar pra direita" sem precisar de margin
+   manual: o próprio fluxo flex da .topbar-default-row já faz isso. */
+/* REMOVIDA (08/09/2026), pedido verbatim: "O dropdown dentro da tela de
+   'Info' deve ser eliminado." — regra da antiga <select id="topbar-info-
+   select"> (removida de index.html); era redundante com o dropdown
+   próprio de cada folha do BSP (.bsp-leaf-select) e era a causa raiz de
+   3 bugs relatados juntos (ver comentário grande em index.html, no lugar
+   onde o <select> ficava). Classe `.topbar-info-select` não é mais usada
+   em nenhum HTML — mantida fora do CSS de propósito, não só comentada. */
+/* "Os botões [...] devem ficar na barra do 'Info' (tudo na mesma barra,
+   que, na verdade, é a barra da tela 'Info')." — populada por
+   js/bsplayout.js (_renderInfoBarControls) sempre que há uma folha 'Info'
+   ativa no BSP (arquitetura permanente desde 08/09/2026: SEMPRE há uma);
+   nas demais telas fica vazia e some sozinha (:empty). ATUALIZADO
+   (08/09/2026): deixou de depender de um "modo Info" avulso do cabeçalho
+   (App._infoMode, removido junto com o dropdown acima) — ver bsplayout.js. */
+/* NOVO (09/09/2026) — ver js/classicmode.js. A barra de 4 botões de
+   layouts NOMEADOS só faz sentido pro Workspace/BSP (nomear/trocar entre
+   árvores de divisões salvas) — o modo Clássico não tem divisões pra
+   nomear. `header.topbar` viaja inteiro pro modo Clássico (é o MESMO
+   elemento físico, ver `_moveSingletonsInto`), então esta barra viria
+   junto com qualquer conteúdo que tivesse ficado nela da última vez que
+   o Workspace esteve visível — escondida aqui pra ficar "exatamente como
+   v60" (que nunca teve isto), sem precisar esvaziá-la/recriá-la à toa. */
+body.classic-mode-active #topbar-info-layoutbar { display: none; }
+.topbar-info-layoutbar {
+  display: flex;
+  align-items: stretch;
+  flex: none;
+}
+.topbar-info-layoutbar:empty { display: none; }
+
+/* "quatro botões que operam em grupo. Ficam juntos lado a lado [...] o
+   arredondamento dos cantos ficam na parte externa dos botões de
+   extremidade" (pedido verbatim) — grupo "conectado": sem gap entre os
+   botões, bordas internas compartilhadas (margin-left:-1px pra não
+   dobrar a espessura), cantos arredondados só no 1º (esquerda) e no
+   último (direita). */
+.topbar-info-wfbtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 6px 9px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  min-width: 30px;
+  height: 32px;
+  box-sizing: border-box;
+}
+.topbar-info-wfbtn + .topbar-info-wfbtn { margin-left: -1px; }
+.topbar-info-wfbtn:hover { background: var(--bg-elev); }
+.topbar-info-wfbtn:disabled { opacity: .35; cursor: default; }
+/* Botão de extremidade ESQUERDA do grupo (1º — lista de layouts). */
+.topbar-info-wfbtn-list {
+  border-top-left-radius: var(--radius);
+  border-bottom-left-radius: var(--radius);
+  gap: 4px;
+}
+.topbar-info-wfbtn-list .wf-ic { font-size: 13px; }
+/* Duas setinhas empilhadas (▲ em cima, ▼ embaixo), bem pequenas — "do lado
+   direito (ainda dentro do botão) uma setinha apontando para cima e outra
+   setinha apontando para baixo uma em cima da outra" (pedido verbatim). */
+.topbar-info-wfbtn-list .wf-carets {
+  display: flex; flex-direction: column; line-height: .6; font-size: 8px;
+}
+/* Botão 2 — nome do layout ativo, editável ao clicar. CORRIGIDO
+   (08/09/2026), pedido verbatim: "Aumente o tamanho do botão de nome do
+   layout e faça-o ficar com tamanho fixo." — antes usava `max-width`
+   (o botão variava de tamanho conforme o nome, só limitado por cima), o
+   que fazia o resto do cabeçalho "pular" de posição a cada troca/edição
+   de nome; agora `width` FIXO (maior que antes: 140px -> 180px), sempre
+   do MESMO tamanho não importa o nome — texto comprido corta com
+   reticências (`text-overflow:ellipsis`) em vez de espremer o botão. */
+/* CORRIGIDO (09/09/2026), pedido verbatim: "o nome, dentro do box de
+   nome, deve ficar alinhado à esquerda. Atualmente está alinhado ao
+   centro." — `.topbar-info-wfbtn` (regra genérica, mais acima) usa
+   `justify-content:center`, certo pros outros 3 botões (ícones/símbolos
+   centralizados), mas errado pro nome (texto, que deve alinhar à
+   esquerda como qualquer campo de texto). */
+/* [09/09/2026] Ajuste solicitado pelo usuário: "Em 'Info', no botão do nome
+   de layout, aumente-o em 50px." — largura fixa +50px (180px -> 230px; a
+   largura REALMENTE visível, dentro da folha 'Info', é a versão encolhida
+   mais abaixo neste arquivo, `.bsp-leaf-header ... .topbar-info-wfbtn-name`,
+   também ajustada +50px lá). */
+.topbar-info-wfbtn-name {
+  width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  justify-content: flex-start;
+  text-align: left;
+}
+/* BUG CORRIGIDO (08/09/2026), pedido verbatim: "Ao clicar no botão de nome
+   de layout o retângulo que representa o nome deve permanecer com suas
+   dimensões [...] O input que surge acaba expandindo as dimensões daquele
+   retângulo. Isso não pode acontecer [...] se estava com 180x32, então,
+   deve permanecer com este valor." CAUSA RAIZ: esta regra tinha a MESMA
+   especificidade CSS (0,1,0 — uma classe) da regra genérica de campos de
+   texto do app inteiro, `input[type=text], input[type=search], ...`
+   (também 0,1,0 — um seletor de atributo), que vem DEPOIS dela no arquivo
+   (mais abaixo) — em empate de especificidade, quem vem depois no
+   arquivo VENCE, então aquela regra genérica (width:100%; padding:10px
+   11px; font-size:14.5px; border-radius:var(--radius)) sobrescrevia
+   width/padding/etc. deste input, mesmo ele já tendo sua PRÓPRIA classe
+   — culpa de o botão virar `<input type="text">` (ver
+   js/bsplayout.js `_startEditLayoutName`), que bate no seletor
+   `input[type=text]` também. CORRIGIDO: junta as duas classes que o
+   próprio elemento já carrega (`topbar-info-wfbtn` + o modificador) num
+   só seletor encadeado (`.a.b`, especificidade 0,2,0 — SEMPRE maior que
+   0,1,0, não depende mais de ordem no arquivo) e repete TODAS as
+   propriedades de tamanho/caixa explicitamente (não só width) — a caixa
+   fica idêntica ao botão que ela substitui em qualquer ordem futura de
+   regras no CSS. */
+/* [09/09/2026] Ajuste solicitado pelo usuário: "Em 'Info', no botão do nome
+   de layout, aumente-o em 50px. Ao clicar nele, deve ficar o cursor
+   'inserir texto'." — largura +50px (180px -> 230px, acompanhando o botão
+   acima) + `cursor:text` explícito: sem isso, a regra genérica
+   `.topbar-info-wfbtn` (cursor:pointer) vencia, já que este `<input>`
+   também carrega essa classe (ver `_startEditLayoutName` em
+   js/bsplayout.js) — o cursor ficava de "mãozinha" em vez do cursor de
+   texto normal de um campo editável. */
+.topbar-info-wfbtn.topbar-info-wfbtn-name-input {
+  width: 230px;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  outline: none;
+  text-align: left;
+  cursor: text;
+}
+.topbar-info-wfbtn-add, .topbar-info-wfbtn-del {
+  font-weight: 700;
+  font-size: 15px;
+}
+/* Botão de extremidade DIREITA do grupo (4º — excluir). */
+.topbar-info-wfbtn-del {
+  border-top-right-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+}
+
+/* Popover da lista de layouts (botão 1) — "A box da lista deve ter altura
+   fixa podendo caber 4 nomes visíveis e, logo abaixo dos nomes, deve haver
+   uma entrada para busca (com uma lupinha à esquerda) para destacar, pela
+   busca, os nomes 'encontrados'" (pedido verbatim). `position:fixed`
+   porque é anexado direto no `<body>` (mesmo padrão de `.history-panel`
+   acima), posicionado em JS logo abaixo do botão que o abriu. */
+.topbar-info-layoutpop {
+  position: fixed;
+  z-index: 961;
+  display: flex;
+  flex-direction: column;
+  width: 200px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+/* Altura fixa cabendo ~4 itens visíveis (cada item ~34px) + rolagem pro
+   resto, "Caso hajam muitos nomes isso será útil" (pedido verbatim). */
+/* [09/09/2026] Ajuste solicitado pelo usuário: "Ao clicar no botão do lado
+   ('layouts salvos'), aumente o tamanho vertical para que caiba 5 nomes. O
+   tamanho de 5 nomes, em altura, deve ser fixo, ou seja, se tiver apenas 1
+   nome, ainda sim continua com a altura que cabe 5 nomes." — cada item mede
+   ~34px (padding 8px 10px + font-size 13px + borda), então 5 itens = 170px;
+   trocado de `max-height` (encolhia com poucos itens) para `height` FIXO
+   (não encolhe nunca, mesmo com 1 item só só) + rolagem interna quando
+   passar de 5. */
+.topbar-info-layoutpop-list {
+  display: flex;
+  flex-direction: column;
+  height: 170px;
+  flex: none;
+  overflow-y: auto;
+}
+.topbar-info-layoutpop-item {
+  flex: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar-info-layoutpop-item:last-child { border-bottom: none; }
+.topbar-info-layoutpop-item:hover { background: var(--bg-elev-2); }
+.topbar-info-layoutpop-item.active { font-weight: 700; color: var(--accent, #6ea8fe); }
+/* Nomes "encontrados" pela busca (highlight, não filtro — a lista inteira
+   continua visível, só destaca os que baterem, pedido verbatim: "para
+   destacar, pela busca, os nomes 'encontrados'"). */
+.topbar-info-layoutpop-item.match { background: var(--bg-elev-2); box-shadow: inset 3px 0 0 var(--accent, #6ea8fe); }
+.topbar-info-layoutpop-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev-2);
+}
+.topbar-info-layoutpop-search .ic { font-size: 12px; flex: none; }
+.topbar-info-layoutpop-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+/* ---------- js/infobar.js (InfoBar) — painel "Info" dentro de uma divisão
+   do Workspace (EDITOR_TYPES.info, ver bsplayout.js) — título + atalhos
+   👁️/⚙️, mesmo espírito visual do cabeçalho padrão, só que confinado numa
+   divisão em vez de fixo no topo do app. ---------- */
+.infobar-shell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.infobar-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .icon-btn {
   background: transparent;
   border: 1px solid var(--border);
@@ -289,6 +607,14 @@ main#view {
   -webkit-overflow-scrolling: touch;
 }
 
+/* ATUALIZADO (09/09/2026): o <nav class="bottomnav"> voltou a existir no
+   DOM — não mais dentro de `#app` (que agora é só o Workspace/BSP), mas
+   dentro de `#classic-shell` (ver js/classicmode.js), construído toda vez
+   que o modo Clássico é ativado. Estas regras (que tinham ficado como
+   "legado" desde 08/09/2026, quando o <nav> físico foi removido em favor
+   de `.bsp-botoes-shell`/`.bsp-botoes-btn` — clones visuais delas, ver
+   mais abaixo) voltam a valer de verdade, sem nenhuma mudança necessária
+   aqui. */
 .bottomnav {
   display: flex;
   border-top: 1px solid var(--border);
@@ -523,8 +849,30 @@ body:not(.view-mapa-planta) .bottombar-mapa { display: none; }
   padding: 2px 0 6px; margin-bottom: 14px;
 }
 
+/* [09/09/2026] Bug relatado pelo usuário: "Nas 'configurações do app', o
+   botão 'fechar', ao lado de 'Redefinir padrões do app', não está
+   funcionando." Causa raiz: a Miniatura 3D (`.map2d-minimap3d`, ver
+   css/style.css) é um painel PERSISTENTE de nível de app — pedido do
+   usuário documentado em mapview.js `_unmountPlanta`: "continua aberta ao
+   sair do Mapa" (por padrão NÃO fecha sozinha ao trocar de aba) — fica
+   ancorada em `position:fixed; top:10px; right:10px; z-index:500`, o
+   MESMO canto (superior direito) onde `justify-content:flex-end` aqui
+   coloca o botão "✕ Fechar" (o ÚLTIMO/mais à direita dos 2 botões desta
+   barra — "↩️ Redefinir padrões do app", à esquerda dele, fica fora da
+   área que a miniatura cobre, por isso só "Fechar" parecia quebrado).
+   Com `z-index:6` (bem menor que os 500 da miniatura), sempre que ela
+   estivesse aberta por cima da tela de Configurações, sua caixa capturava
+   o clique/toque antes de chegar no botão "✕ Fechar" por baixo — mesmo
+   diagnóstico já documentado em mapview.js pra outros painéis flutuantes
+   (".map2d-toolsidebar"/miniatura vs. cabeçalho do Mapa, ver comentário
+   grande lá: "um z-index MENOR... intercepta o clique"). Corrigido
+   subindo pra 510 (> 500 da miniatura, ainda bem abaixo dos 900+ de
+   modais/telas-cheias de verdade) — a barra de fechar da tela de
+   Configurações passa a ficar SEMPRE acima de painéis flutuantes
+   utilitários como a Miniatura 3D, do jeito que uma tela navegada de
+   verdade deveria. */
 .settings-close-bar {
-  position: sticky; top: 0; z-index: 6; display: flex; justify-content: flex-end;
+  position: sticky; top: 0; z-index: 510; display: flex; justify-content: flex-end;
   margin: -12px -14px 10px; padding: 8px 14px;
   background: linear-gradient(to bottom, var(--bg, #0f1216) 70%, transparent);
 }
@@ -1140,11 +1488,75 @@ datalist {}
    inteira — exatamente o pedido ("da grade, não da tela"). Semitransparente
    (fundo com alpha baixo) pra não esconder o mapa por baixo. */
 .map2d-fotopin-wheel { position: absolute; right: 18px; bottom: 18px; z-index: 40; display: flex; flex-direction: column; align-items: flex-start; pointer-events: none; }
-/* NOVO (05/09/2026) — wrapper em ROW só com o botão de modo (o toggle de
-   snap que morava aqui ao lado mudou de lugar — ver comentário grande em
-   `.map2d-fotopin-wheel-snap-compact`, 06/09/2026) — o pai
-   `.map2d-fotopin-wheel` é uma coluna, então sem este wrapper este botão
-   não ficaria na posição/margem certas. */
+/* [10/09/2026] Bloco "Definir Câmera"/vanishCam RESTAURADO — pedido verbatim
+   do usuário: "tinha um novo botão no canto inferior direito chamado
+   definir câmera, faça-o voltar [...] Eu disse para você ler os arquivos
+   para não perder nada." Estas regras existiam num backup do projeto
+   (C:\Users\PC\Desktop\catalogacao-itens\outputs) que tinha mais
+   modificações do que a cópia em que as sessões recentes vinham
+   trabalhando (C:\Users\PC\Desktop\projetos\catalogacao-itens\outputs) e
+   haviam se perdido nesta última — copiadas de volta sem alterações, junto
+   com o JS correspondente em js/mapview.js/js/view3d.js. */
+/* NOVO (09/09/2026), pedido verbatim: botão "‹" no toprow da roda pra
+   voltar ao botão "📷 Definir Câmera" (ver mapview.js _openFotoPinWheel,
+   `backBtn`) — mesmo tamanho/estilo circular de `.map2d-fotopin-wheel-mode`. */
+.map2d-fotopin-wheel-back {
+  pointer-events: auto; width: 34px; height: 34px; border-radius: 50%;
+  background: rgba(20, 26, 34, .78); border: 1px solid rgba(255, 255, 255, .22); color: #fff; font-size: 18px; line-height: 1;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
+}
+.map2d-fotopin-wheel-back:hover { background: rgba(35, 43, 54, .9); }
+
+/* NOVO (09/09/2026), pedido verbatim: "Na posição que atualmente está esse
+   grupo de botões [Modo de rotação/snap/Definir rotações/ângulo atual], na
+   parte inferior direita da grade do mapa 2D, deve ficar um único botão.
+   Esse botão é o 'Definir Câmera' [...] Ao clicar nesse botão, é que os
+   outros dois botões [...] aparecem dentro deste botão." — MESMO canto que
+   `.map2d-fotopin-wheel` sempre ocupou (cópia de right/bottom/z-index) —
+   os dois nunca ficam visíveis ao mesmo tempo (ver mapview.js
+   _openFotoPinWheel: um sempre tem `.hidden` enquanto o outro não tem). */
+.map2d-fotopin-camera-root { position: absolute; right: 18px; bottom: 18px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+/* "Seu tamanho deve ser o mesmo tamanho do disco e com um ícone de
+   câmera." — mesmas medidas/visual de `.map2d-fotopin-wheel-dial` (104px,
+   círculo semitransparente). */
+.map2d-fotopin-camera-btn {
+  pointer-events: auto; cursor: pointer; width: 104px; height: 104px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, rgba(30, 38, 48, .55) 0%, rgba(20, 26, 34, .72) 70%, rgba(20, 26, 34, .85) 100%);
+  border: 1px solid rgba(255, 255, 255, .28); box-shadow: 0 2px 10px rgba(0, 0, 0, .4);
+  font-size: 40px; display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
+}
+.map2d-fotopin-camera-btn:hover { border-color: rgba(255, 209, 102, .8); }
+/* "aparecem dentro deste botão [...] 'Definição da câmera por' [...] os
+   dois botões: 'rotações manuais' e 'linhas de referência'." — painel que
+   se abre ACIMA do botão (mesma coluna, ordem no DOM: painel antes do
+   botão — ver mapview.js). */
+.map2d-fotopin-camera-panel {
+  pointer-events: auto; width: 220px; padding: 10px 12px; border-radius: 12px;
+  background: rgba(20, 26, 34, .92); border: 1px solid rgba(255, 255, 255, .22); box-shadow: 0 4px 16px rgba(0, 0, 0, .45);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.map2d-fotopin-camera-panel-title { font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, .85); text-align: center; }
+.map2d-fotopin-camera-panel-item { display: flex; flex-direction: column; gap: 5px; }
+/* "Logo acima do botão 'rotações manuais', deve ter 'definir giro e
+   inclinação relativos à câmera'. Logo acima do botão 'linhas de
+   referência', 'definir rotações e posição relativas à câmera'." */
+.map2d-fotopin-camera-panel-label { font-size: 10.5px; color: rgba(255, 255, 255, .6); line-height: 1.3; }
+.map2d-fotopin-camera-panel-btn {
+  cursor: pointer; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; text-align: center;
+  background: rgba(35, 43, 54, .85); border: 1px solid rgba(255, 255, 255, .22); color: #fff;
+}
+.map2d-fotopin-camera-panel-btn:hover { border-color: rgba(255, 209, 102, .8); }
+.map2d-fotopin-camera-panel-vanishcam { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .14); }
+.map2d-fotopin-camera-panel-status { font-size: 10.5px; color: rgba(255, 255, 255, .75); }
+
+/* ATUALIZADO (06/09/2026) — wrapper em ROW com os TRÊS botões de cima da
+   roda: modo "🔄", toggle de snap "🧲" (ver `.map2d-fotopin-wheel-snap-
+   compact`) e, agora também, "🎯 Definir rotações" (ver `.map2d-fotopin-
+   wheel-definir` — movido de dentro do `.dial` pra cá, pedido verbatim: "do
+   mesmo exato jeito que ficou o botão de ativação do snap, coloque-o ao
+   lado do botão de troca dos modos de medida"). O pai `.map2d-fotopin-
+   wheel` é uma coluna, então sem este wrapper estes botões não ficariam na
+   posição/margem certas. */
 .map2d-fotopin-wheel-toprow { pointer-events: none; display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 0 0 6px 2px; }
 .map2d-fotopin-wheel-mode {
   pointer-events: auto; width: 34px; height: 34px; border-radius: 50%;
@@ -1152,34 +1564,26 @@ datalist {}
   display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
 }
 .map2d-fotopin-wheel-mode:hover { background: rgba(35, 43, 54, .9); }
-/* ATUALIZADO (06/09/2026), pedido verbatim: "deixe o snap como estava antes
-   (apenas o valor ali unido ao ícone). A configuração dele, deve ficar junto
-   com os outros dois botões: 'Direção (giro em Y)' e 'Inclinação
-   (perpendicular)'." — as regras antigas `.map2d-fotopin-wheel-snap15`/
-   `-snap-valor`/`-snap-graus` (rodada 05/09, um botão-toggle E um campo
-   numérico como DOIS elementos visualmente separados, flutuando ao lado do
-   botão de modo) saem daqui — o controle mudou de lugar (agora dentro do
-   recorte `.map2d-fotopin-wheel-cutout`, junto dos outros dois campos, ver
-   mapview.js _openFotoPinWheel) e virou ESTE único elemento compacto: ícone
-   e valor fundidos visualmente numa mesma "pílula" (sem parecer um toggle
-   separado do campo) — `.active` (LIGADO, padrão) destaca em verde, mesma
-   cor da seta de Inclinação (marker-tilt), igual antes. */
+/* ATUALIZADO (06/09/2026), pedido verbatim: "O botão de snap deve ficar ao
+   lado do botão que seleciona o modo de rotação [...]. O botão deve ser um
+   toggle de ativação composto pelo ícone de ímã e o valor de snap do lado
+   (dentro do botão e não editável)." — antes (rodada anterior, mesmo dia),
+   este elemento era um `<span>` WRAPPER com um `<button>` (liga/desliga) +
+   um `<input type="number">` editável DENTRO dele — dava pra digitar o
+   valor direto aqui, o que não é mais o pedido. Agora `.map2d-fotopin-
+   wheel-snap-compact` é o PRÓPRIO `<button>` (ver mapview.js
+   _openFotoPinWheel) — ícone+valor como TEXTO simples (não mais um campo
+   editável), clicar em qualquer parte dele só liga/desliga o snap. `.active`
+   (LIGADO, padrão) destaca em verde, mesma cor da seta de Inclinação
+   (marker-tilt), igual antes. */
 .map2d-fotopin-wheel-snap-compact {
-  pointer-events: auto; display: inline-flex; align-items: center; height: 28px; border-radius: 8px;
+  pointer-events: auto; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  height: 28px; padding: 0 9px; border-radius: 8px; font-size: 13px;
   background: rgba(20, 26, 34, .6); border: 1px solid rgba(255, 255, 255, .22); color: rgba(255, 255, 255, .7);
-  overflow: hidden;
+  cursor: pointer;
 }
+.map2d-fotopin-wheel-snap-compact:hover { background: rgba(35, 43, 54, .8); }
 .map2d-fotopin-wheel-snap-compact.active { border-color: #7cffb2; color: #7cffb2; }
-.map2d-fotopin-wheel-snap-compact button {
-  pointer-events: auto; width: 28px; height: 100%; border: none; background: transparent; color: inherit;
-  font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none;
-}
-.map2d-fotopin-wheel-snap-compact button:hover { background: rgba(255, 255, 255, .1); }
-.map2d-fotopin-wheel-snap-compact input {
-  pointer-events: auto; width: 34px; height: 100%; border: none; border-left: 1px solid rgba(255, 255, 255, .22);
-  background: transparent; color: #fff; font-size: 12.5px; text-align: center;
-}
-.map2d-fotopin-wheel-snap-compact .deg { pointer-events: none; padding-right: 7px; font-size: 12px; }
 /* NOVO (05/09/2026) — MESMO par toggle+valor acima, só que dentro do painel
    grande de propriedades do orb de foto (ver mapview.js
    _openFotoPinPopover) — aqui dentro de um `.map-panel-field` comum (fundo
@@ -1249,19 +1653,27 @@ datalist {}
   color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .8); pointer-events: none; user-select: none;
   background: rgba(10, 14, 20, .55); padding: 1px 6px; border-radius: 8px;
 }
-/* NOVO (05/09/2026) — botão "🎯 Definir rotações" (pedido verbatim: "deve
-   ter um botão 'definir rotações', onde está atualmente o botão de preview
-   que você colocou (substitua-o)") — mesma posição central da roda que
-   antes era ocupada pela miniatura de preview circular; agora liga/desliga
-   o modo de arrastar NA TELA DO MAPA pra girar (ver mapview.js
-   _openFotoPinWheel, ativarDefinir/desativarDefinir). Fica destacado
-   (`.active`) enquanto ativo. */
+/* ATUALIZADO (06/09/2026), pedido verbatim: "No botão de definição das
+   rotações, do mesmo exato jeito que ficou o botão de ativação do snap,
+   coloque-o ao lado do botão de troca dos modos de medida." — o botão
+   "🎯 Definir rotações" (antes centralizado DENTRO de `.map2d-fotopin-
+   wheel-dial`, `position:absolute` — comentário original abaixo) MUDOU de
+   lugar: agora vive no `.map2d-fotopin-wheel-toprow` junto do botão de
+   modo "🔄" e do toggle de snap "🧲" (ver mapview.js _openFotoPinWheel) —
+   por isso troca de um círculo grande (58px) posicionado absolutamente
+   pra um botão compacto no FLUXO normal do flex-row, MESMO tamanho/estilo
+   base do botão de modo (`.map2d-fotopin-wheel-mode`, 34px, círculo), só
+   com sua própria cor de destaque (`.active`, mesmo verde já usado por
+   toda a ferramenta) preservada.
+   NOVO (05/09/2026), pedido original (mantido): "deve ter um botão
+   'definir rotações'... agora liga/desliga o modo de arrastar NA TELA DO
+   MAPA pra girar (ver mapview.js _openFotoPinWheel, ativarDefinir/
+   desativarDefinir). */
 .map2d-fotopin-wheel-definir {
-  pointer-events: auto; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: 58px; height: 58px; border-radius: 50%; cursor: pointer; font-size: 20px;
+  pointer-events: auto; width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 15px;
   display: flex; align-items: center; justify-content: center;
   background: rgba(20, 26, 34, .78); color: #fff;
-  border: 2px solid rgba(255, 255, 255, .5); box-shadow: 0 1px 6px rgba(0, 0, 0, .5);
+  border: 1px solid rgba(255, 255, 255, .5); box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
 }
 .map2d-fotopin-wheel-definir:hover { border-color: rgba(255, 209, 102, .8); }
 .map2d-fotopin-wheel-definir.active {
@@ -1490,11 +1902,81 @@ datalist {}
    largos; altura segue proporção 4:3 (mesma do enquadramento comum de
    câmera, suficiente pra uma prévia). */
 .map2d-minimap3d {
-  position: absolute; top: 10px; right: 10px; z-index: 9;
+  /* BUG CORRIGIDO (07/09/2026), pedido verbatim: "Ao clicar na janelinha da
+     miniatura, a janelinha 'salta', em vez de ficar onde foi clicada com o
+     mouse." — causa raiz: este painel era o ÚNICO dos painéis arrastáveis
+     do Mapa 2D (Ferramentas/Camadas/Cores/Histórico/Debug, todos
+     `position:fixed` — ver `.map2d-toolsidebar` logo abaixo, mudado de
+     `absolute` pra `fixed` em 25/08/2026 exatamente por causa desta mesma
+     classe de bug) que continuava `position: absolute` (relativo ao
+     `.map2d-wrap` mais próximo posicionado, NÃO à janela do navegador).
+     `_makePanelDraggable` (js/mapview.js) sempre assumiu `position:fixed`
+     pra todos os painéis que arrasta: ao começar a arrastar, ele lê
+     `panel.getBoundingClientRect()` (que devolve coordenadas relativas À
+     JANELA, sempre, não importa o `position` do elemento) e copia esses
+     valores DIRETO pra `panel.style.left/top` — pra um elemento
+     `position:fixed` isso bate exatamente (left/top de `fixed` TAMBÉM são
+     relativos à janela); pra um elemento `position:absolute` (este,
+     antes), o MESMO valor numérico é interpretado como relativo ao
+     `.map2d-wrap` (seu ancestral posicionado mais próximo) em vez da
+     janela — como `.map2d-wrap` não começa no canto (0,0) da janela (fica
+     abaixo do cabeçalho do Mapa), o painel "pulava" pela diferença entre
+     os dois pontos de referência assim que o usuário clicava (mesmo sem
+     arrastar ainda — o pulo já acontece no 1º `pointerdown`, antes de
+     qualquer `pointermove`). Corrigido trocando pra `position: fixed`,
+     igual a todos os outros painéis arrastáveis da mesma família — mesmo
+     `top`/`right` de ancoramento inicial continuam válidos (fixed também
+     aceita top/right), e `.dragged { right: auto }` (mais abaixo) continua
+     funcionando sem mudança nenhuma.
+     BUG CORRIGIDO (07/09/2026), 2ª rodada, pedido verbatim: "a janelinha de
+     miniatura ficou atrás no cabeçalho do app e não está dando para movê-la
+     com o mouse." — efeito colateral da correção acima: virar
+     `position:fixed` fez este painel "alcançar" de verdade a área de tela
+     do cabeçalho/rodapé do Mapa (`.topbar-mapa`/`.bottombar-mapa`, ambos
+     `z-index:30`) pela primeira vez — antes (`absolute`, preso dentro de
+     `.map2d-wrap`), nunca chegava lá, então o `z-index:9` baixo nunca
+     importava visualmente nem pra clique. MESMO diagnóstico/mesma correção
+     já aplicada a `.map2d-toolsidebar` em 25/08/2026 por este EXATO motivo
+     (ver comentário grande logo abaixo, "z-index:500... as janelas todas
+     devem ficar a frente do cabeçalho e do rodapé") — só não tinha sido
+     replicada aqui ainda. Um z-index MENOR que o cabeçalho/rodapé não só
+     esconde o painel visualmente atrás deles como TAMBÉM intercepta o
+     clique: o cabeçalho (z-index maior, cobrindo a mesma área de tela)
+     "rouba" o `pointerdown` antes que ele chegue no `.map-panel-head` da
+     miniatura — por isso também não dava pra arrastar (o handler de
+     `_makePanelDraggable` nunca era nem chamado). Corrigido igualando ao
+     resto da família: `z-index:500` (>30, abaixo de modais/telas-cheias
+     900+ e do Histórico 960 — mesma hierarquia). `Utils.bringToFront` (ver
+     `_makePanelDraggable`) continua elevando pra 961+ ao clicar/arrastar,
+     sem mudança. */
+  position: fixed; top: 10px; right: 10px; z-index: 500;
   width: clamp(150px, 10vw, 260px);
-  background: rgba(23,27,33,.85); backdrop-filter: blur(4px);
   border: 1px solid var(--border); border-radius: 12px; padding: 4px;
   overflow: hidden;
+  /* Changelog da versão anterior (canvas global compartilhado via
+     setViewport/setScissor), preservado abaixo:
+     NOVO (07/09/2026) — ver engine3d.js, comentário grande "MODO EYE":
+     o fundo escuro semi-opaco (`rgba(23,27,33,.85)`) que este painel tinha
+     ANTES morava aqui, cobrindo a caixa inteira — inclusive por trás do
+     `<canvas>` da miniatura. Isso funcionava enquanto a miniatura tinha seu
+     PRÓPRIO WebGLRenderer desenhando direto nela; agora que ela é um "olho"
+     (renderiza no <canvas> GLOBAL do app inteiro, por baixo deste painel —
+     ver z-index em `_ensureGlobalCanvas`, engine3d.js — e este `<canvas>`
+     daqui virou só uma moldura transparente — ver mapview.js
+     _mountMinimap3D), aquele fundo escuro ficaria por CIMA
+     do <canvas> (pintado antes dele na mesma pilha), escondendo a cena 3D
+     de verdade atrás de uma cortina cinza-escura. Movido pra
+     `.map-panel-head` abaixo (só a barra de título) — a área do
+     `<canvas>` agora fica sem fundo nenhum aqui no painel, só com o dele
+     próprio (ver `.map2d-minimap3d canvas`, mais abaixo).
+
+     REESCRITO (07/09/2026), arquitetura WebGLRenderTarget: não existe mais
+     nenhum "canvas global" nem "moldura transparente" — o `<canvas>` da
+     miniatura voltou a ser a TELA final de verdade (contexto 2D, recebe o
+     resultado do render target próprio desta instância via
+     `_presentToCanvas`, ver engine3d.js). O fundo continua só na barra de
+     título por um motivo puramente estético (mesmo visual de antes), não
+     mais por necessidade técnica de deixar a cena 3D "aparecer por trás". */
 }
 .map2d-minimap3d.hidden { display: none; }
 /* Ao ser arrastada (ver mapview.js _makePanelDraggable), passa a ter
@@ -1503,11 +1985,38 @@ datalist {}
 .map2d-minimap3d.dragged { right: auto; }
 .map2d-minimap3d .map-panel-head {
   padding: 2px 4px; margin: 0 0 4px; min-height: auto; font-size: 12px; font-weight: 700;
+  /* NOVO (07/09/2026) — ver comentário grande logo acima em
+     `.map2d-minimap3d`: o fundo semi-opaco que cobria o painel inteiro
+     mudou pra só a barra de título, que nunca fica em cima do <canvas>. */
+  background: rgba(23,27,33,.85); backdrop-filter: blur(4px); border-radius: 6px;
 }
 .map2d-minimap3d .map-panel-head span:first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map2d-minimap3d canvas {
   display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 8px;
-  background: #0a0d11; pointer-events: none; /* só uma prévia — nenhuma interação própria, evita "roubar" gestos de pan/zoom da grade por baixo */
+  /* Changelog da versão anterior (canvas global compartilhado), preservado
+     abaixo:
+     BUG CORRIGIDO (07/09/2026) — ver engine3d.js "MODO EYE": era
+     `background: #0a0d11` (uma cor de fundo sólida, fazia sentido quando
+     este <canvas> tinha seu PRÓPRIO WebGLRenderer desenhando nele direto).
+     Agora este elemento é só uma "moldura" — o desenho de verdade acontece
+     no <canvas> GLOBAL do app (Engine3D._globalCanvas), atrás de tudo, e
+     precisa aparecer exatamente no retângulo deste elemento aqui — um
+     fundo sólido aqui esconderia a cena 3D inteira atrás de uma caixa
+     cinza-escura. transparent deixa o canvas global "aparecer" por trás.
+
+     REESCRITO (07/09/2026), arquitetura WebGLRenderTarget: este <canvas>
+     voltou a ser a tela final de verdade (contexto 2D próprio, ver
+     engine3d.js `_presentToCanvas`) — `transparent` deixou de ser
+     necessário por si só (não há mais nada "por trás" pra revelar), mas foi
+     mantido porque não atrapalha (o `drawImage` de cada frame cobre o
+     canvas inteiro de qualquer forma) e evita uma cor sólida aparecendo
+     por 1 frame antes do 1º render. `image-rendering: pixelated` é o que
+     faz a miniatura parecer "de baixa resolução" de propósito — o
+     `<canvas>` tem poucos pixels de verdade (dpr baixo, ver
+     `RESOLUCAO_DPR.baixa` em engine3d.js) esticados pelo CSS pro tamanho
+     visual do painel. */
+  background: transparent; pointer-events: none; /* só uma prévia — nenhuma interação própria, evita "roubar" gestos de pan/zoom da grade por baixo */
+  image-rendering: pixelated;
 }
 
 /* Faixa persistente "Toque no mapa para posicionar esta foto — Cancelar"
@@ -1538,6 +2047,28 @@ datalist {}
 }
 .map-photo-placement-crosshair-v { left: -1px; top: -18px; width: 2px; height: 36px; }
 .map-photo-placement-crosshair-h { top: -1px; left: -18px; height: 2px; width: 36px; }
+
+/* NOVO (07/09/2026) — cruz fixa no CENTRO da tela enquanto "🔄 Girar
+   arrastando" (mapview.js #map-rotate-drag/_toggleMapDragRotate) estiver
+   ativo — pedido verbatim: "A cruz pode aparecer no centro de rotação para
+   melhor identificação". Mesma técnica/posicionamento de
+   .map-photo-placement-crosshair (elemento fixo no meio de .map2d-wrap,
+   independente de pan/zoom — é o próprio centro de ROTAÇÃO usado pelo
+   arrasto, ver _attachPanZoom), cor ciano (mesma família do destaque do
+   "🧭 Modo Navegação", ver .map2d-modelabel.is-nav) pra não se confundir
+   com a cruz amarela de posicionar foto/item (que nunca aparecem ao mesmo
+   tempo na prática, mas usam classes/elementos totalmente separados).
+   `[hidden]` (atributo, não classe) controla a visibilidade — alternado por
+   `_toggleMapDragRotate` via `toggleAttribute('hidden', ...)`. */
+.map-rotate-center-crosshair {
+  position: absolute; top: 50%; left: 50%; width: 0; height: 0;
+  pointer-events: none; z-index: 10;
+}
+.map-rotate-center-crosshair-v, .map-rotate-center-crosshair-h {
+  position: absolute; background: #4fd1ff; box-shadow: 0 0 0 1px rgba(0,0,0,.55);
+}
+.map-rotate-center-crosshair-v { left: -1px; top: -18px; width: 2px; height: 36px; }
+.map-rotate-center-crosshair-h { top: -1px; left: -18px; height: 2px; width: 36px; }
 
 /* Barra lateral de ferramentas estilo Paint.NET (ver mapview.js PTOOLS/
    _setPTool) — fase 1: Selecionar/Mover selecionados/Mão, uma coluna só;
@@ -1764,6 +2295,11 @@ datalist {}
 .map2d-formactx-popitem:hover { background: var(--bg-elev-2); }
 .map2d-formactx-popitem.active { background: rgba(0,229,255,0.18); border-color: #00e5ff; color: #00e5ff; }
 .map2d-formactx-popitem .t { overflow: hidden; text-overflow: ellipsis; }
+/* [10/09/2026] Traço horizontal dentro do popover de Ajuda ('?'), entre
+   "Sobre" e "Tela de Abertura" — pedido verbatim: "coloque um traço
+   horizontal depois de 'Sobre'". Genérico o bastante pra qualquer outro
+   popover `.map2d-formactx-popover` que precise separar itens no futuro. */
+.map2d-formactx-popover-sep { border: none; border-top: 1px solid var(--border); margin: 4px 2px; }
 /* Botão "Qualidade de seleção" (pedido do usuário, 25/08/2026 — imagem do Paint.NET) — SPLIT
    de verdade (dois <button> lado a lado, coladas), ao contrário dos outros .map2d-formactx-
    split do app: a metade do ícone alterna direto (toggle) entre os 2 valores, a metade da
@@ -1824,7 +2360,27 @@ datalist {}
   max-height: 34vh;
   overflow-y: auto;
 }
-.map-obj-picker-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 13px; cursor: grab; }
+/* [09/09/2026] Ajuste solicitado pelo usuário: "No mapa 2D, todas as
+   janelas, agora, devem ficar com os seus títulos fixos no topo. O scroll
+   (se precisar) só servirá para o seu conteúdo. Atualmente o scroll acaba
+   por esconder o título quando rola para baixo o scroll." `.map-obj-picker-
+   panel` (base de Camadas/Cores/catálogo de Objetos/Depuração) tem
+   `overflow-y:auto` no painel INTEIRO (ver regra acima) — sem nada fixando
+   o cabeçalho, ele rolava junto com a lista, exatamente como reportado.
+   `position:sticky` gruda o cabeçalho no topo da área de rolagem (que é o
+   próprio painel) sem precisar reestruturar o HTML/JS (mapview.js só cria
+   `.map-obj-picker-head` como 1º filho de `.map-obj-picker-panel`, então
+   sticky com `top:0` já funciona direto). Fundo opaco igual ao do painel
+   (mesma cor/blur de `.map-obj-picker-panel`) pra cobrir o conteúdo que
+   passa por baixo ao rolar; margem negativa igual ao padding do painel
+   (10px 12px) pra ocupar a largura toda (sem faixas transparentes nas
+   bordas) e reaplicada como padding própria. */
+.map-obj-picker-head {
+  display: flex; align-items: center; justify-content: space-between; margin: -10px -12px 8px; font-size: 13px; cursor: grab;
+  position: sticky; top: -10px; z-index: 2;
+  padding: 10px 12px 6px; background: rgba(17,20,25,.94); backdrop-filter: blur(6px);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
 /* Arrastável (pedido do usuário) — mesmo padrão de .map-layers-panel.dragged/
    .map2d-props-panel.dragged logo abaixo: uma vez arrastado (ver mapview.js
    _makePanelDraggable), left/top passam a ser pixels explícitos, então o
@@ -1832,6 +2388,31 @@ datalist {}
 .map-obj-picker-panel.dragged { right: auto; margin: 0; }
 .map-obj-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
 .map-obj-picker-grid .map-obj-pick-item.active { border-color: #ffd166; background: rgba(255,209,102,0.14); }
+
+/* NOVO (06/09/2026) — janela "🐞 Depuração do Mapa 2D" (ver mapview.js
+   _openDebugWindow/_renderDebugWindow) — reaproveita a base de
+   .map-obj-picker-panel (mesmo estilo/arraste de Ferramentas/Camadas/
+   Cores), só um pouco mais larga/alta (tem tabelas, precisa de mais
+   espaço) — ferramenta de debug, estética simples de propósito (pedido:
+   "não precisa ser elaborado visualmente"). */
+.map-debug-panel { max-width: 560px; max-height: 70vh; }
+.map-debug-body details { margin-bottom: 8px; }
+.map-debug-body summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 4px 0; }
+.map-debug-tablewrap { overflow-x: auto; max-height: 220px; overflow-y: auto; margin-top: 4px; }
+.map-debug-table { width: 100%; border-collapse: collapse; font-size: 11.5px; white-space: nowrap; }
+.map-debug-table th, .map-debug-table td { padding: 3px 6px; border-bottom: 1px solid rgba(255,255,255,.08); text-align: left; }
+.map-debug-table th { color: var(--text-dim); font-weight: 600; position: sticky; top: 0; background: rgba(17,20,25,.94); }
+/* NOVO (06/09/2026), pedido verbatim: "Deve ser possível mudar as posições
+   das coisas que aparecem ali com botões triplos. Deve ser possível dar
+   toggle em visível/invisível/estado normal." — controle "◄ valor ►" por
+   coordenada (X/Y) de cada janela conhecida (ver _renderDebugWindow em
+   mapview.js, célula `.map-debug-win-x`/`.map-debug-win-y`) e o botão de
+   3 estados de visibilidade (`.map-debug-vis-btn`) — substituem o antigo
+   botão único "🎯 Centralizar" (`.map-debug-center-btn`, removido). */
+.map-debug-pos { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.map-debug-pos-btn { padding: 0 4px; line-height: 1.4; }
+.map-debug-pos-val { min-width: 34px; text-align: right; display: inline-block; font-variant-numeric: tabular-nums; }
+.map-debug-vis-btn { padding: 2px 8px; font-size: 11px; white-space: nowrap; }
 
 /* Janela "🎨 Cores" (botão novo, geral, barra do Mapa 2D — ver mapview.js
    _openCoresPanel/_renderCoresPanel). Reaproveita o container base
@@ -1864,7 +2445,15 @@ datalist {}
 .map-layers-panel {
   display: flex; flex-direction: column;
   left: 10px; right: auto; margin: 0; /* sobrescreve left/right/margin do .map-obj-picker-panel — aqui a largura já é fixa (abaixo), não precisa centralizar */
-  width: 300px; height: 340px;
+  /* [10/09/2026] width/height base 300×340 -> 220×340 — pedido verbatim:
+     "por padrão, no app (de fábrica), ela vem com a mínima largura dela."
+     220px é a MESMA largura mínima passada a `_makePanelResizable`
+     (mapview.js, ver `onResizeEnd`/`minWidth`) — o `style.width` inline
+     que o JS aplica ao abrir (com o tamanho salvo, ou este mínimo de
+     fábrica se nada foi salvo ainda) sempre sobrescreve isto de qualquer
+     forma; só aqui como o valor-base "antes do JS rodar" (1º pintura), pra
+     nunca mostrar 300px por 1 quadro antes do JS aplicar 220px. */
+  width: 220px; height: 340px;
   max-height: none; /* sobrescreve o max-height:34vh do .map-obj-picker-panel — o tamanho aqui é controlado pela própria caixa (arrastável/redimensionável), não pela viewport */
   /* `visible` (não `hidden`/o `overflow-y:auto` herdado do .map-obj-picker-
      panel) — as alças de redimensionar (.map-panel-resize-handle) agora
@@ -1924,8 +2513,60 @@ datalist {}
    baixo da caixa (pedido explícito do usuário) — agem sobre a camada
    SELECIONADA (linha .active), nunca sobre uma escolhida ali na hora. */
 .map-layers-toolbar {
-  flex: none; display: flex; gap: 4px; flex-wrap: wrap;
-  justify-content: flex-start;
+  /* [11/09/2026] `width: 100%` ADICIONADO explicitamente (2ª tentativa
+     deste bug, pedido com diagnóstico bem mais preciso do usuário — ver
+     comentário grande logo abaixo sobre a CAUSA RAIZ DE VERDADE). Por
+     herança de `.map-panel-clip` (flex-direction:column, align-items no
+     valor padrão `normal`/stretch) esta div já deveria ocupar 100% da
+     largura do painel mesmo sem esta linha — investigação nesta rodada não
+     achou NENHUMA regra CSS (nem aqui, nem em `.map-panel-clip`/
+     `.map-obj-picker-panel`/`.map-layers-panel`) que force uma largura fixa
+     ou um `align-items` diferente de stretch nesta cadeia de pais; também
+     não há nenhum `style.width` aplicado via JS nesta div
+     (`_makePanelResizable` só mexe no `panel` = `.map-layers-panel`, nunca
+     num filho). Mesmo assim, `width: 100%` explícito é adicionado agora —
+     não muda nada no comportamento HOJE (só reforça algo que já deveria
+     valer por herança), mas remove qualquer ambiguidade/dependência frágil
+     de herança de `align-items` pra próximas rodadas. */
+  width: 100%;
+  flex: none; display: flex; gap: 2px; flex-wrap: wrap;
+  /* [11/09/2026] `flex-start` -> `space-between` — pedido verbatim: "os 7
+     botões devem ser distribuídos de forma uniforme (quando estão na
+     largura mínima). Atualmente, na largura mínima, estão mais para a
+     esquerda." Com `flex-start`, os botões (194px de conteúdo, ver
+     comentário grande abaixo) ficavam agrupados à esquerda dentro dos
+     ~214px disponíveis na largura mínima, sobrando ~20px de vão só do lado
+     direito. `space-between` distribui esse vão IGUALMENTE entre os 7
+     botões (6 espaços entre eles, sem nenhum de sobra fora do grupo) —
+     regra simples que vale em QUALQUER largura (não só a mínima): ao
+     redimensionar o painel pra maior, o vão extra continua se distribuindo
+     por igual entre os botões em vez de empurrá-los todos pra esquerda
+     (dispensa qualquer CSS condicional de largura, que o próprio pedido do
+     usuário descartou implicitamente ao comparar os 2 comportamentos).
+     `flex-wrap: wrap` continua como rede de segurança numa largura ainda
+     menor que a mínima (ex. zoom do navegador) — nesse caso cada linha
+     resultante também fica distribuída por `space-between`. */
+  justify-content: space-between;
+  /* [11/09/2026] ADENDO — CAUSA RAIZ DE VERDADE deste bug ter "voltado":
+     esta regra `space-between` (linha acima) JÁ EXISTIA, escrita numa
+     rodada anterior — a lógica CSS sempre esteve correta (confirmado de
+     novo nesta rodada, lendo toda a cadeia de pais em busca de alguma
+     largura fixa/align-items diferente de stretch — nada encontrado, ver
+     comentário grande do `width: 100%` logo acima). O que realmente
+     impedia o usuário de VER o efeito: `sw.js` (Service Worker, cacheia o
+     app pra funcionar offline) NUNCA teve seu `CACHE_VERSION` incrementado
+     na rodada que escreveu esta regra `space-between` — só os arquivos
+     `css/style.css`/`js/view3d.js`/`js/engine3d.js`/etc. foram alterados,
+     `sw.js` ficou intocado. Como o navegador só reinstala o Service
+     Worker (e portanto só re-executa `cache.addAll(APP_SHELL)`, que
+     re-baixa `css/style.css` de verdade) quando o PRÓPRIO ARQUIVO `sw.js`
+     muda de bytes — e ele não mudou —, o navegador do usuário continuou
+     servindo, do cache antigo, o `style.css` de ANTES da correção
+     (`flex-start`) indefinidamente, mesmo com o arquivo certo já salvo em
+     disco. Corrigido nesta rodada incrementando `CACHE_VERSION` (ver
+     topo do arquivo `sw.js`) — o que força a reinstalação do Service
+     Worker e a busca de uma cópia nova de TODOS os arquivos do "app
+     shell" (incluindo este CSS) na próxima vez que o app carregar. */
   /* 3px dos 3 lados (esquerda/direita/baixo) do grupo INTEIRO até a borda da
      janela — pedido explícito do usuário. O topo (8px) é só o respiro do
      divisor (border-top) com a lista de camadas, acima. */
@@ -1933,11 +2574,21 @@ datalist {}
   margin: 0 3px 3px;
   border-top: 1px solid var(--border);
 }
+/* [10/09/2026] 32px/gap 4px -> 26px/gap 2px — pedido verbatim: "ajuste o
+   espaçamento entre os 7 botões para que consigam ficar na 'mesma linha',
+   quando ficar na largura mínima." Na largura mínima de fábrica (220px, ver
+   .map-layers-panel acima), sobram ~214px de conteúdo (220 − 3px de margem
+   de cada lado) pro grupo de 7 botões — nos 32px/gap 4px antigos, isso dava
+   7×32 + 6×4 = 248px, MAIOR que os 214px disponíveis, então o `flex-wrap`
+   acima jogava o 7º botão (⚙️ Propriedades) pra uma 2ª linha sozinho. Com
+   26px/gap 2px: 7×26 + 6×2 = 194px — cabe com folga mesmo na largura
+   mínima, sem precisar remover o `flex-wrap` (continua servindo de rede de
+   segurança numa largura ainda menor que isso, ex. zoom do navegador). */
 .map-layers-tbtn {
-  width: 32px; height: 32px; flex: none;
+  width: 26px; height: 26px; flex: none;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(10,12,16,.6); border: 1px solid var(--border); border-radius: 7px;
-  color: var(--text); font-size: 14px; cursor: pointer; padding: 0;
+  background: rgba(10,12,16,.6); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font-size: 12px; cursor: pointer; padding: 0;
 }
 .map-layers-tbtn:hover { background: var(--bg-elev-2); }
 .map-layers-tbtn:active { transform: scale(0.94); }
@@ -2004,9 +2655,45 @@ datalist {}
   box-shadow: var(--shadow);
   padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0));
   backdrop-filter: blur(6px);
-  z-index: 12;
+  /* [10/09/2026] AUMENTADO de 12 para 45 — pedido verbatim: "A janela de
+     propriedades quando ganhar o foco, quando for ativa, deve vir para a
+     frente, de modo que fique por cima do cabeçalho também e dos botões do
+     rodapé." Antes, 12 ficava ABAIXO do cabeçalho/rodapé (header.topbar/
+     .bottomnav/.bottombar-mapa, todos z-index:30) e até da barra de
+     Ferramentas (.map2d-toolsidebar, z-index:50) — partes do painel
+     ficavam escondidas atrás deles. 45 é só o valor inicial (também usado
+     quando o JS ainda não rodou o "trazer pra frente" nenhuma vez); ao
+     ganhar foco de verdade (criar ou clicar no painel), `_bringPanelToFront`
+     (mapview.js `_openPanel`/`_makePanelDraggable`) sobe o z-index dele
+     acima de QUALQUER outra coisa flutuante (inclusive a própria barra de
+     Ferramentas), num contador crescente compartilhado. */
+  z-index: 45;
   max-height: 62vh;
   overflow-y: auto;
+}
+/* [09/09/2026] Ajuste solicitado pelo usuário: "No mapa 2D, todas as
+   janelas, agora, devem ficar com os seus títulos fixos no topo. O scroll
+   (se precisar) só servirá para o seu conteúdo. Atualmente o scroll acaba
+   por esconder o título quando rola para baixo o scroll." `.map2d-props-
+   panel` é a base de TODA janela de propriedades de objeto do mapa 2D
+   (parede/porta/janela/câmera/objeto/imagem/pino/texto/retículo/etc — ver
+   comentário grande acima) e tem `overflow-y:auto` no painel INTEIRO —
+   igual ao caso de `.map-obj-picker-head` (ver ali o mesmo raciocínio):
+   sem nada fixando o cabeçalho (`.map-panel-head`, o mesmo elemento
+   arrastável de sempre), ele desaparecia rolando junto com os campos do
+   formulário. `position:sticky` gruda só o título no topo da área de
+   rolagem; margem/padding recalculados pra ocupar a largura cheia do
+   painel (cancela o padding 12px/14px de `.map2d-props-panel`) com um
+   fundo opaco igual ao do painel, cobrindo o conteúdo que passa por baixo
+   ao rolar. Não afeta `.map2d-toolsidebar`/`.map-layers-panel`/
+   `.history-panel`/`.map2d-minimap3d` (seletores mais específicos, cada um
+   já resolvido à parte — ver comentários deles) nem outras janelas que já
+   não tinham este bug (cabeçalho fora da área rolável). */
+.map2d-props-panel > .map-panel-head {
+  position: sticky; top: -12px; z-index: 2;
+  margin: -12px -14px 6px; padding: 4px 14px; min-height: 32px;
+  background: rgba(17,20,25,.94); backdrop-filter: blur(6px);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 .map-panel-head {
   display: flex; align-items: center; gap: 6px;
@@ -2076,17 +2763,134 @@ datalist {}
 .map-panel-toggle { font-size: 11px; }
 .map-panel-field {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--text-dim);
+  gap: 6px 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--text-dim);
+  /* [10/09/2026] Reorganização pedida pelo usuário (ver comentário grande
+     em `.map-panel-fieldset` acima, mesma rodada): 2ª camada de defesa,
+     pro caso de uma etiqueta MESMO ASSIM não caber ao lado do campo na
+     largura estreita do painel (ex.: celular) — em vez de forçar rolagem
+     horizontal (flex-nowrap, o padrão), agora quebra e o campo desce pra
+     uma 2ª linha, aproveitando a largura toda do painel (pedido verbatim:
+     "é só reorganizar para aproveitar a área da janela"), sem cortar
+     nada. `flex-wrap:nowrap` (o padrão) exigiria a etiqueta E o campo
+     cabendo os dois na MESMA linha sempre — a causa raiz de verdade já é
+     o fieldset (corrigida acima), mas isto evita qualquer resíduo do
+     mesmo sintoma em painéis SEM fieldset (parede/porta/janela sem
+     Scripts aberto, etc.). */
+  flex-wrap: wrap;
 }
+.map-panel-field > span:first-child { min-width: 0; flex: 1 1 120px; }
+/* [09/09/2026] Ajuste solicitado pelo usuário: "Organize a apresentação dos
+   botões de script que, atualmente, ficam no final da janela de
+   propriedades." — moldura própria (`<fieldset>`/`<legend>`) pra agrupar
+   visualmente o bloco de script (código + gatilhos + "Executar") em toda
+   janela de propriedades do mapa 2D que tiver a opção (objeto/porta/
+   janela/parede/câmera/texto — ver `_openObjectPanel`/`_openDoorPanel`/
+   `_openWindowPanel`/`_openWallPanel`/`_openCameraPanel`/`_openTextPanel`
+   em mapview.js), em vez de ficar solto misturado com os outros campos ou
+   junto da barra de ações do fim do painel. */
+.map-panel-fieldset {
+  border: 1px solid var(--border); border-radius: 10px;
+  margin: 10px 0; padding: 10px 10px 8px;
+  /* [10/09/2026] Corrige o scroll horizontal indesejado relatado pelo
+     usuário em TODA janela de propriedades do mapa 2D ("Clicando em
+     outros objetos isso também está acontecendo... É para gerar apenas
+     scroll vertical, sem clipar"). Causa raiz: `<fieldset>` recebe do
+     navegador, por padrão, `min-width: min-content` (diferente de
+     qualquer outro elemento de bloco comum, que nasce com min-width: 0) —
+     ou seja, mesmo com `.map2d-props-panel` limitado a max-width:360px e
+     todo o conteúdo interno reorganizável, o PRÓPRIO fieldset se recusava
+     a encolher além da largura mínima do seu conteúdo mais largo,
+     forçando o painel inteiro (e com ele `overflow-y:auto` virando
+     também `overflow-x:auto` — regra do CSS: eixo "visible" ao lado de
+     um eixo "auto" também vira "auto") a ganhar barra de rolagem
+     horizontal. Isso afeta TODO objeto (parede/porta/janela/câmera/
+     objeto/texto/orb de foto/retículo) porque TODOS usam fieldset (ao
+     menos o de Scripts, `_scriptFieldsetHtml` — câmera/orb de foto
+     ganharam um 2º fieldset ainda maior nesta rodada, o que deixou o
+     problema mais visível/frequente, mas a causa já valia pra qualquer
+     um). Zerar aqui não clipa nada — só permite o fieldset encolher como
+     um bloco normal; o conteúdo interno continua quebrando linha
+     normalmente (ver `.map-panel-field` logo abaixo). */
+  min-width: 0;
+}
+.map-panel-fieldset > legend {
+  padding: 0 6px; font-size: 12px; font-weight: 700; color: var(--text-dim);
+}
+.map-panel-fieldset .map-panel-field:last-child { margin-bottom: 0; }
+/* [11/09/2026] NOVO — Arquitetura de Componentes do Inspector (ver
+   js/components.js/mapview.js `_scriptFieldsetHtml`/
+   `_renderComponentsEditor`). `.map-panel-comp-row` é o resumo compacto
+   (não-interativo) mostrado dentro do painel de propriedades comum;
+   `.comp-event-row select`/`.comp-action-row select` são os dropdowns do
+   editor tela-cheia (evento/ação) — largura flexível pra não estourar em
+   telas estreitas (mesmo espírito responsivo do resto do app). */
+.map-panel-comp-row { font-size: 12.5px; padding: 3px 0; color: var(--text); }
+.map-panel-comp-row em { color: var(--text-dim); font-style: normal; }
+.comp-event-row select, .comp-action-row select { flex: 1 1 auto; min-width: 0; }
+/* [11/09/2026] NOVO — pivot pra "folha de código" (js/components.js/
+   mapview.js `_renderComponentsEditor`/`_renderScriptCodeEditor`): pedido
+   verbatim "todas aquelas opções clicáveis geram um código por trás. Deve
+   ser possível acessar a 'folha' de códigos." `.comp-code-preview` é a
+   1ª linha de código de verdade mostrada dentro do bloco Script da lista
+   (não-interativa, monoespaçada, cortada com reticências se passar da
+   largura — só um resumo, a folha completa abre em `.comp-code-textarea`).
+   `.comp-code-textarea` é a folha completa em si — MESMO espírito visual
+   (monoespaçada, fundo escuro) do campo de código bruto que existia antes
+   do pivot desta rodada; este app não tem bundler pra puxar um editor de
+   código de verdade (CodeMirror/Monaco) de um CDN que o runtime não
+   alcança, então uma textarea grande e bem estilizada é a escolha honesta. */
+.comp-code-preview {
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace; font-size: 11.5px;
+  color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; margin-top: 4px;
+}
+.comp-code-textarea {
+  width: 100%; min-height: 420px; resize: vertical; box-sizing: border-box;
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace; font-size: 12.5px; line-height: 1.5;
+  background: #0d1117; color: #d6e0ea; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  tab-size: 2;
+}
+/* [11/09/2026] NOVO — tema `catalogo-dark` do CodeMirror (js/mapview.js
+   `_renderScriptCodeEditor`, `CodeMirror.fromTextArea(ta, {theme:
+   'catalogo-dark', ...})`), MESMA paleta de `.comp-code-textarea` acima
+   (que ele substitui visualmente) — pra não destoar do resto da UI escura
+   do app. CodeMirror 5 (vendorizado em lib/codemirror/, lib/codemirror.css
+   já carregado em index.html) resolve a classe `cm-s-catalogo-dark` pelo
+   nome do tema; regras específicas de sintaxe JS (`cm-keyword`/`cm-string`/
+   `cm-number`/`cm-comment`/`cm-def`/`cm-variable`/`cm-atom`) ganham cores
+   inspiradas no esquema "Ocean-ish" comum a editores escuros, mantendo
+   contraste confortável sobre o fundo #0d1117 do app. */
+.cm-s-catalogo-dark.CodeMirror {
+  background: #0d1117; color: #d6e0ea; border: 1px solid var(--border); border-radius: 8px;
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace; font-size: 12.5px; line-height: 1.5;
+  height: auto; min-height: 420px;
+}
+.cm-s-catalogo-dark .CodeMirror-gutters { background: #0a0d11; border-right: 1px solid var(--border); }
+.cm-s-catalogo-dark .CodeMirror-linenumber { color: var(--text-dim); }
+.cm-s-catalogo-dark .CodeMirror-cursor { border-left: 1.5px solid #d6e0ea; }
+.cm-s-catalogo-dark .CodeMirror-selected { background: rgba(90, 200, 250, .18); }
+.cm-s-catalogo-dark .CodeMirror-matchingbracket { color: #5ac8fa !important; text-decoration: underline; }
+.cm-s-catalogo-dark .cm-keyword { color: #ff9d6f; }
+.cm-s-catalogo-dark .cm-atom { color: #5ac8fa; }
+.cm-s-catalogo-dark .cm-number { color: #b3e07a; }
+.cm-s-catalogo-dark .cm-def { color: #82d3ff; }
+.cm-s-catalogo-dark .cm-variable { color: #d6e0ea; }
+.cm-s-catalogo-dark .cm-variable-2 { color: #82d3ff; }
+.cm-s-catalogo-dark .cm-property { color: #82d3ff; }
+.cm-s-catalogo-dark .cm-operator { color: #d6e0ea; }
+.cm-s-catalogo-dark .cm-string { color: #f2c94c; }
+.cm-s-catalogo-dark .cm-comment { color: var(--text-dim); font-style: italic; }
+.cm-s-catalogo-dark .cm-meta { color: var(--text-dim); }
 .map-panel-field input[type="number"] {
-  width: 100px; background: var(--bg-elev-2); border: 1px solid var(--border);
+  width: 100px; min-width: 0; background: var(--bg-elev-2); border: 1px solid var(--border);
   border-radius: 8px; color: var(--text); padding: 6px 8px; font-size: 13px; text-align: right;
 }
+.map-panel-field input[type="text"] { min-width: 0; }
 .map-panel-field input[type="color"] {
   width: 44px; height: 30px; padding: 2px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elev-2);
 }
 .map-panel-field select {
-  max-width: 160px; background: var(--bg-elev-2); border: 1px solid var(--border);
+  max-width: 160px; min-width: 0; background: var(--bg-elev-2); border: 1px solid var(--border);
   border-radius: 8px; color: var(--text); padding: 6px 8px; font-size: 12.5px;
 }
 /* Painel do orb de foto no mapa (03/09/2026, ver mapview.js
@@ -2173,8 +2977,13 @@ datalist {}
    visualizador orbital "cru" de um único molde (ver _abrirEditor/
    _abrirVisualizador em js/modelos3d.js). MESMO espírito de tela-cheia-por-
    cima-de-tudo do 3D normal (#view3d-root, ver app.js openView3D). */
+/* BUG CORRIGIDO (07/09/2026) — ver engine3d.js "MODO EYE": era
+   `background: #05070a` (sólido) — este overlay embrulha um `.view3d-wrap`
+   com um Engine3D "eye" dentro (ver js/modelos3d.js, prévia/editor de
+   molde) desde esta mesma rodada; um fundo sólido aqui, em cima de tudo
+   (z-index:900), escondia o <canvas> GLOBAL do app por trás por completo. */
 .modelos3d-overlay {
-  position: fixed; inset: 0; z-index: 900; background: #05070a;
+  position: fixed; inset: 0; z-index: 900; background: transparent;
 }
 .modelos3d-overlay .view3d-wrap { width: 100%; height: 100%; }
 .modelos3d-editor-bar {
@@ -2184,7 +2993,12 @@ datalist {}
 /* NOVO (02/09/2026) — "criar novo modelo" / "trocar o nome" / "representação
    2D (SVG)" (itens 3, 4 e 5 do pedido verbatim, ver comentário grande em
    js/modelos3d.js acima de `ensureCustomTypesRegistered`). */
-.modelos3d-toolbar { display: flex; justify-content: flex-end; margin: 0 0 12px; }
+.modelos3d-toolbar { display: flex; justify-content: flex-end; gap: 8px; margin: 0 0 12px; }
+/* NOVO (07/09/2026) — botão "📥 Importar .obj" (pedido verbatim: "poder
+   carregar modelos 3D externos") — mesmo padrão de .v3d-objcat-import-btn
+   (view3d.js), um <label> "btn" comum escondendo um <input type=file> por
+   cima, pra reaproveitar o próprio texto do botão como área clicável. */
+.modelos3d-import-btn { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .modelos3d-row-head-actions { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
 /* Editor 2D de SVG — modal em tela cheia por cima da lista (mesmo espírito
    de .modelos3d-overlay, mas mais simples: sem view3d embaixo, só o próprio
@@ -2227,7 +3041,76 @@ datalist {}
 }
 
 /* ---------- 3D viewer ---------- */
-.view3d-wrap { position: relative; width: 100%; height: 100%; background: #05070a; overflow: hidden; }
+/* Changelog da versão anterior (`#engine3d-global-canvas`, um único
+   `<canvas>` WebGL fixo cobrindo a janela inteira, compartilhado por todos
+   os "olhos" via `renderer.setViewport`/`setScissor`/`setScissorTest`, com
+   z-index/posicionamento reforçados aqui via `!important` — incluindo a
+   correção do bug em que `display:block !important` nesta regra vencia o
+   `display:none` inline que o JS tentava aplicar ao fechar o último "olho"),
+   preservado só como registro histórico — a regra INTEIRA foi REMOVIDA:
+   REESCRITO (07/09/2026), arquitetura WebGLRenderTarget — pedido verbatim
+   do usuário: "Sim, parta para a integração do WebGLRenderTarget e
+   abandonando setViewport/setScissor." Não existe mais nenhum `<canvas>`
+   global compartilhado — cada "olho" (Miniatura 3D, "Ver em 3D", prévia de
+   molde em modelos3d.js) volta a ser a TELA final de verdade do SEU PRÓPRIO
+   `<canvas>` (contexto 2D, recebe o resultado do render target próprio via
+   `Engine3D._presentToCanvas`, ver engine3d.js) — sem canvas
+   intermediário/compartilhado, sem z-index especial pra "revelar" nada por
+   trás, sem `!important` nenhum. `#v3d-canvas`/`.view3d-wrap canvas` voltam
+   a ser um `<canvas>` comum, como no modo não-eye de sempre. */
+/* [12/09/2026] CORRIGIDO — pedido verbatim: "Agora, em 'Trás', está tudo
+   preto (a região da foto) e algum objetos estão rosa choque." CAUSA RAIZ
+   (achada com Playwright, autorizado pelo usuário pra esta investigação):
+   `.view3d-wrap` tinha `position:relative` mas NENHUM `z-index` próprio —
+   isso NÃO cria um novo contexto de empilhamento (regra do CSS: só
+   `position` + `z-index` numérico juntos criam). O ambiente real desta
+   tela (`.bsp-leaf-body`, bsplayout) tem um `transform` (mesmo que a
+   matriz identidade) num ancestral, o que JÁ cria um contexto de
+   empilhamento ali em cima — e como `.view3d-wrap` não cria o SEU
+   próprio, o fundo sólido dela (`#05070a`, quase preto) conta como
+   conteúdo "normal" (não indexado) DAQUELE contexto do ancestral, pintado
+   DEPOIS de qualquer descendente com z-index negativo (regra de pintura
+   CSS: fundo do contexto → filhos com z-index negativo → conteúdo normal
+   → filhos com z-index positivo). Resultado: o fundo quase-preto de
+   `.view3d-wrap` (não o dela mesma, mas como conteúdo comum do contexto do
+   ancestral) pintava POR CIMA do `#v3d-fotocam-photo-canvas`
+   (`z-index:-1`, ver `_updateFotoCamOverlayZoomScale`, view3d.js), mesmo
+   este estando corretamente "furado" (alfa=0) pela máscara de profundidade
+   — confirmado com Playwright: o `<canvas>` da foto tinha o pixel certo
+   desenhado (RGBA correto no meio da foto) E o `#v3d-canvas` WebGL tinha o
+   pixel certo com alfa=0 (buraco real) no retângulo do quadro — mas a
+   COMPOSIÇÃO FINAL da página ainda mostrava preto ali, porque o fundo de
+   `.view3d-wrap` "vazava" pra cima da foto por não estar contido no
+   contexto de empilhamento certo. CORRIGIDO: `z-index:0` adicionado aqui —
+   junto com `position:relative` já existente, isso cria um contexto de
+   empilhamento PRÓPRIO em `.view3d-wrap`, isolando toda a pilha
+   `#v3d-camzoom-wrap`/`#v3d-canvas`/`#v3d-fotocam-photo-canvas` do que
+   acontece em ancestrais (como o `transform` de `.bsp-leaf-body`) — agora
+   o fundo de `.view3d-wrap` pinta como o PRIMEIRO passo do SEU PRÓPRIO
+   contexto (antes de qualquer z-index negativo dela pra baixo), nunca mais
+   por cima da foto. */
+.view3d-wrap { position: relative; z-index: 0; width: 100%; height: 100%; background: #05070a; overflow: hidden; }
+/* [10/09/2026] ATUALIZADO — embrulho só do <canvas> (+ overlay da
+   foto-guia, anexado AQUI DENTRO — ver js/view3d.js _renderFotoCamOverlay).
+   Pedido verbatim (correção do usuário): "Ao dar zoom, não deve dar uma
+   mera ampliação da imagem. Deve sim preservar a perspectiva, mas
+   reconstruindo o desenho da cena (para que as coisas fiquem nítidas)."
+   Por isso este wrapper NUNCA recebe transform/scale nenhum — é só um
+   contêiner de agrupamento inerte. O zoom ao "ver através" de uma câmera
+   calibrada (_fotoCamMode/_orbCamMode, ver onWheel em
+   _bindDesktopControls) é feito mudando o FOV real da câmera 3D via
+   Engine3D.setFov (cfg.zoomFov, entre _CAMVIEW_ZOOM_FOV_MIN=5 e
+   _CAMVIEW_ZOOM_FOV_MAX=140) — a cena inteira é RE-RENDERIZADA a cada
+   frame com o novo FOV, então o desenho continua nítido em qualquer
+   nível de zoom (nada de "lupa"/CSS scale sobre um frame já pronto). O
+   overlay <img> da foto-guia (imagem plana, não reprojetada) recebe sua
+   PRÓPRIA compensação via CSS scale() em _updateFotoCamOverlayZoomScale,
+   calculada pela razão óptica tan(fovCalibrado/2)/tan(fovAtual/2), só
+   para continuar alinhada visualmente com a cena 3D (que já se
+   reprojeta sozinha). O resto da UI solta dentro de .view3d-wrap
+   (HUD/botões/painéis) fica FORA deste wrapper e nunca é afetado pelo
+   zoom. */
+.v3d-camzoom-wrap { position: absolute; inset: 0; }
 .view3d-wrap canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 /* Pedido do usuário: os 3 botões da barra superior do 3D ("✕ Sair do 3D",
    "Sólido" — o <select> de modo de renderização — e "⚙️") lado a lado no
@@ -2238,6 +3121,18 @@ datalist {}
    `.search-stage.mode-3d .map2d-toolbar`). Escopado a `.view3d-wrap` (só a
    barra do 3D) pra não mexer nesses outros usos da mesma classe. */
 .view3d-wrap .camera-topbar {
+  /* [11/09/2026] NOVO — pedido verbatim: "O 'Escurecer ao entorno' [...]
+     não deve afetar nenhum dos botões de controle da interface do 'Ver em
+     3D'." `.camera-topbar` (base) tem `z-index:5` — bem menor que
+     `.v3d-fotocam-overlay` (z-index:30, ver acima), que cria seu PRÓPRIO
+     contexto de empilhamento (`.camera-topbar` fica FORA dele, é irmão de
+     `#v3d-camzoom-wrap` dentro de `.view3d-wrap`, não descendente) —
+     mesmo removendo o z-index do vignette (ver `.v3d-fotocam-vignette`
+     acima), a barra inteira continuaria atrás do overlay/vignette.
+     Sobrescrito aqui (escopado só à barra do 3D, não mexe nos outros usos
+     de `.camera-topbar` noutras telas) pra sempre ficar por CIMA de
+     qualquer overlay/vignette do "Ver através desta câmera". */
+  z-index: 33;
   justify-content: flex-start;
   /* `flex-wrap: wrap` (herdado de .camera-topbar) deixava os 3 itens
      empilharem um embaixo do outro sempre que a soma das larguras (o
@@ -2340,8 +3235,21 @@ datalist {}
    não pro cenário). TRAVADO (`.locked`): a faixa/dica somem e o contorno
    vira uma linha fina e sólida verde discreta (interagindo direto com o
    cenário 3D) — só um cantinho, não incomoda a visão do jogo. */
+/* [11/09/2026] CORRIGIDO — pedido verbatim: "Ao entrar no 'Ver em 3D', a
+   splash screen com a mensagem 'Clique para interagir com o cenário 3D'
+   (id='v3d-lockstate') deve ter um z-index mais elevado, 40 por exemplo,
+   para que fique acima do sombreamento do bloco de botões de cabeçalho
+   (div class='camera-topbar')." Tinha `z-index:30` — menor que
+   `.view3d-wrap .camera-topbar` (z-index:33, ver acima), então a faixa
+   amarela/contorno tracejado desta splash ficava por BAIXO da barra
+   superior (e de qualquer sombra/gradiente que ela desenhe), o oposto do
+   pedido. Subido pra 40 (> 33) — continua menor que `.v3d-fotocam-overlay`
+   (z-index:30... na verdade igual; ver comentário lá) — na prática esta
+   splash já só aparece ANTES do Pointer Lock ser ativado (fora de "Ver
+   através de uma câmera"), então não compete visualmente com o overlay de
+   foto (30) de toda forma; o valor 40 só precisa vencer a barra (33). */
 .v3d-lockstate {
-  position: absolute; inset: 0; pointer-events: none; z-index: 30;
+  position: absolute; inset: 0; pointer-events: none; z-index: 40;
   border: 2px dashed rgba(255,209,0,.55);
 }
 /* Pedido do usuário: a dica "Clique para interagir..." não faz sentido no
@@ -2379,6 +3287,30 @@ datalist {}
 .v3d-lockstate.locked { border: 1px solid rgba(70,220,140,.4); }
 .v3d-lockstate.locked .v3d-lockstate-hint { display: none; }
 @keyframes v3dLockHintPulse { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
+/* [15/09/2026] NOVO -- pedido verbatim (Parte B, ver Modelador/view3d.js
+   `_renderFotoCamOverlay`/`_renderCameraOrbOverlay`): "Sair da câmera" que
+   antes vivia dentro da bandeja `.v3d-fotocam-overlay-controls (removida
+   nesta rodada) agora é um botão solto, ancorado no topo/centro do canvas,
+   logo abaixo da faixa amarela `.v3d-lockstate-hint` acima. */
+.v3d-fotocam-sair-topcenter {
+  position: absolute; top: 30px; left: 50%; transform: translateX(-50%);
+  z-index: 31; pointer-events: auto;
+}
+/* [12/09/2026] CORRIGIDO — pedido verbatim: "No 'Ver em 3D', ao clicar em
+   'Ver através desta câmera', o botão de 'Sair da câmera', tem uma
+   animação que o move para o lado quando é clicado. Remova esta
+   animação." CAUSA RAIZ: `.btn:active { transform: scale(0.98); }` (o
+   efeito padrão de "pressionar" de QUALQUER botão) tem mais
+   especificidade CSS que o `transform: translateX(-50%)` acima (que
+   centraliza este botão específico horizontalmente) — como CSS não SOMA
+   propriedades `transform` de regras diferentes (a de maior
+   especificidade SUBSTITUI a outra inteira), ao clicar (`:active`) o
+   botão perdia a centralização e "pulava" pro lado, dando a impressão de
+   uma animação de movimento. CORRIGIDO: anula o `scale(0.98)` só pra este
+   botão, mantendo sempre a mesma centralização (sem efeito de pressionar
+   nenhum, como pedido). */
+.v3d-fotocam-sair-topcenter:active { transform: translateX(-50%); }
+
 .hud3d {
   position: absolute; bottom: 14px; left: 14px; right: 14px;
   display: flex; justify-content: space-between; align-items: flex-end;
@@ -2394,6 +3326,21 @@ datalist {}
   display: flex; gap: 6px; pointer-events: auto;
   max-width: calc(100% - 28px); flex-wrap: wrap; justify-content: center;
 }
+/* [11/09/2026] CORRIGIDO/REVERTIDO — a rodada anterior tinha dado
+   `z-index:33` fixo pra esta hotbar (pra não ficar atrás do "Escurecer ao
+   entorno"), mas isso a jogava por CIMA dos controles do overlay de "Ver
+   através desta câmera" (`.v3d-fotocam-overlay-controls`, z-index:30) —
+   pedido verbatim: "Os botões de controle do 'Ver através desta câmera'
+   acabaram ficando atrás dos botões de rodapé ('Mirar', ...)." CORRIGIDO
+   na raiz: a hotbar (ferramentas de construção — Objeto/Item/Parede/
+   Câmera/Mirar) não faz sentido nenhum enquanto "vendo através" de uma
+   câmera travada (não dá pra trocar de ferramenta nesse modo, ver
+   `_selectBuildTool`/`_camMode` em view3d.js) — em vez de arbitrar
+   z-index entre as duas barras, a hotbar agora fica ESCONDIDA enquanto
+   `_fotoCamMode`/`_orbCamMode` está ativo (ver `_renderHotbar`), então as
+   duas nunca mais disputam a mesma área da tela. z-index removido (volta
+   ao padrão/auto) — não é mais necessário. */
+.v3d-hotbar.hidden { display: none; }
 .v3d-hotbar-slot {
   display: flex; flex-direction: column; align-items: center; gap: 1px;
   min-width: 46px; padding: 5px 7px; border-radius: var(--radius);
@@ -2475,6 +3422,201 @@ datalist {}
 @keyframes v3d-orb-hud-win-pulse {
   0%, 100% { opacity: 1; } 50% { opacity: .55; }
 }
+/* [10/09/2026] Bloco "ver através desta câmera"/vanishCam RESTAURADO — ver
+   comentário grande igual em .map2d-fotopin-wheel-back acima (mesmo pedido
+   do usuário, mesma origem: backup do projeto que tinha mais modificações
+   do que a cópia de trabalho recente). */
+/* NOVO (09/09/2026), pedido verbatim: "ver através desta câmera" de um orb
+   de foto no 3D — imagem semitransparente "na frente" do cenário
+   renderizado, com controles de opacidade e um painel de edição do JSON do
+   vanishCam (ver js/view3d.js _enterFotoCameraView/_renderFotoCamOverlay). */
+.v3d-fotocam-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 30; }
+/* [16/09/2026 — RODADA SEGUINTE] SUBSTITUÍDO (superou a nota de
+   11/09/2026 sobre `overflow:hidden`/`.v3d-fotocam-clip` pra evitar
+   clipagem ao rotacionar — aquela técnica de DOM foi toda trocada pelo
+   canvas único abaixo, que resolve o mesmo problema desenhando a margem
+   de segurança direto nos pixels, ver `_fotoCamCoverBoxSize`/
+   `_drawFotoCamPhoto` em view3d.js) — pedido verbatim: "Remova
+   o retângulo amarelo feito por CSS. É só uma ordem de impressão no
+   canvas, pegue uma imagem e use o drawImage do canvas antes ou depois de
+   todos os objetos no cenário." O antigo par `.v3d-fotocam-clip`
+   (`overflow:hidden`) + `.v3d-fotocam-overlay-img` (`<img>` DOM,
+   posicionado/transformado via CSS) + `.v3d-fotocam-frame` (cópia DOM,
+   CSS, do retângulo amarelo, criada só pra "furar" o z-index do <img> e
+   aparecer por cima dele) foi todo removido e substituído por um único
+   `<canvas id="v3d-fotocam-photo-canvas">` (ver `_renderFotoCamOverlay`/
+   `_updateFotoCamOverlayZoomScale` em view3d.js): a foto é desenhada nele
+   via `ctx.drawImage` (2D, puro — translate/rotate/scale, sem nenhuma
+   transformação/`object-fit` CSS) e, por cima dela, na MESMA chamada,
+   logo em seguida (ordem de desenho no canvas, não mais camadas/z-index de
+   CSS), o retângulo amarelo é desenhado com `ctx.strokeRect` quando o
+   enquadramento estiver visível — sempre por cima da foto, sem precisar de
+   nenhum elemento DOM extra nem de recorte via `overflow:hidden` (o
+   próprio limite do canvas já recorta nativamente qualquer desenho fora
+   dos seus limites, o que também elimina a antiga caixa "maior que o
+   quadro" do `<img>`/`.v3d-fotocam-clip`). */
+.v3d-fotocam-photo-canvas {
+  position: absolute; pointer-events: none;
+}
+/* [12/09/2026 — RODADA "mesma imagem"] NOVO — canvas separado só pro
+   retângulo amarelo/guia + gizmo do Modelador (ver comentário grande em
+   `_renderFotoCamOverlay`/`_updateFotoCamOverlayZoomScale`, view3d.js) —
+   sempre visível por cima de tudo, independente do canvas da foto (que
+   fica escondido em 'Trás'). Mesmo posicionamento simples do canvas da
+   foto. */
+.v3d-fotocam-frame-canvas {
+  position: absolute; pointer-events: none;
+}
+/* [11/09/2026] Pedido verbatim: "Deve ter outro opção, ao lado de
+   'Enquadramento' chamada 'Escurecer ao entorno' (ativado por padrão)."
+   Div do tamanho exato do retângulo amarelo (posicionado via JS em
+   _updateFotoCamOverlayZoomScale -> _activeCamFrameRectPx), usando o
+   truque de box-shadow com espalhamento gigante pra escurecer só o que
+   fica FORA do retângulo, sem precisar de 4 retângulos manuais. */
+.v3d-fotocam-vignette {
+  /* [11/09/2026] CORRIGIDO — pedido verbatim: "O 'Escurecer ao entorno'
+     deve ser aplicado apenas no canvas e ao redor da foto não deve afetar
+     nenhum dos botões de controle da interface do 'Ver em 3D' nem do 'app'
+     inteiro." Tinha `z-index:29` (positivo, explícito) — isso jogava este
+     `<div>` pra cima de QUALQUER irmão sem z-index próprio na MESMA ordem
+     de empilhamento (`.v3d-fotocam-overlay-controls`/`-info-panel`/
+     `-backdrop-panel`, todos sem z-index — "camada 0"/auto — mesmo estando
+     DEPOIS no DOM), cobrindo os botões com o `box-shadow` gigante.
+     CORRIGIDO: sem z-index próprio (nem `position` cria contexto de
+     empilhamento novo aqui) — a ordem de pintura passa a seguir a ordem do
+     DOM (regra padrão do CSS pra irmãos "auto"): a `<img>` primeiro, este
+     vignette em seguida (cobre a foto, como deve), e os botões/painéis por
+     ÚLTIMO no HTML (ver `_renderFotoCamOverlay`) sempre por CIMA dele,
+     nunca escurecidos. Ver também `.view3d-wrap .camera-topbar`/
+     `.view3d-wrap .v3d-hotbar` abaixo — a barra de cima ("✕ Sair do 3D"
+     etc.) e a hotbar de baixo ficam FORA de `.v3d-fotocam-overlay`
+     (z-index:30 — cria seu próprio contexto de empilhamento acima delas,
+     ver `.v3d-fotocam-overlay` logo acima), então SÓ tirar o z-index deste
+     vignette não bastava pra elas — precisaram de um z-index próprio maior
+     que 30. */
+  position: absolute; pointer-events: none;
+  box-shadow: 0 0 0 2000px rgba(0, 0, 0, .6);
+}
+.v3d-fotocam-vignette.hidden { display: none; }
+/* [11/09/2026] Destaque visual pros 2 novos botões-toggle ("Escurecer ao
+   entorno"/"Escurecer imagem") quando ativos — mesmo padrão de cor já usado
+   noutros toggles .btn.active do app (ex.: .map2d-ptool-btn.active). */
+#v3d-fotocam-vignette-toggle.active,
+#v3d-fotocam-darkimg-toggle.active {
+  background: rgba(0, 229, 255, 0.18); border-color: #00e5ff; color: #00e5ff;
+}
+.v3d-fotocam-overlay-controls {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
+  pointer-events: auto; background: rgba(20,26,34,.82); border: 1px solid rgba(255,255,255,.2);
+  border-radius: 10px; padding: 8px 12px; max-width: 92vw;
+}
+.v3d-fotocam-opacidade-label { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: rgba(255,255,255,.8); }
+.v3d-fotocam-opacidade-label input[type="range"] { width: 110px; }
+.v3d-fotocam-info-panel {
+  position: absolute; right: 18px; top: 18px; width: min(320px, 88vw);
+  pointer-events: auto; background: rgba(20,26,34,.94); border: 1px solid rgba(255,255,255,.2);
+  border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;
+}
+.v3d-fotocam-info-panel textarea {
+  width: 100%; height: 220px; resize: vertical; font-family: monospace; font-size: 11px;
+  background: rgba(0,0,0,.35); color: #fff; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; padding: 6px;
+}
+.v3d-fotocam-info-actions { display: flex; align-items: center; gap: 8px; }
+.v3d-fotocam-info-status { font-size: 11px; color: rgba(255,255,255,.75); }
+
+/* [12/09/2026 — ITEM D] Novo painel "🖼️ Imagem" (opções da imagem de
+   referência/backdrop além da opacidade — ver view3d.js
+   `_renderFotoCamOverlay`/`_getFotoCamBackdropConfig`/
+   `_setFotoCamBackdropConfig`). Ancorado à ESQUERDA (o painel de
+   Informações do vanishCam já usa a direita, ver `.v3d-fotocam-info-panel`
+   acima) pra não sobrepor. */
+.v3d-fotocam-backdrop-panel {
+  /* [11/09/2026] CORRIGIDO — pedido verbatim: "Faça a janela de 'Imagem'
+     aparecer um pouco abaixo de modo que seja possível acessar os botões
+     do cabeçalho do 'Ver em 3D' que ficaram atrás." `top:18px` colocava o
+     painel bem em cima da `.camera-topbar` (os botões "✕ Sair do 3D"/
+     modo de renderização/"🧊 Novo Cubo"/"🔍 Buscar"/"⚙️" — ver view3d.js,
+     `.camera-topbar` acima em style.css), tampando-os por trás do painel
+     (`pointer-events:auto`). `top:104px` é a MESMA referência já usada por
+     `.ocr-readout` (acima) pra ficar por baixo dessa barra, com folga.
+     Também deixa espaço pra "Deve ser possível acessar a janela de
+     propriedades da câmera [...] na mesma posição em que aparece
+     'Imagem'" (ver `.v3d-cam-props-panel`, mais abaixo) — as duas ficam
+     lado a lado/empilhadas nessa mesma área, nunca sob a topbar. */
+  position: absolute; left: 18px; top: 104px; width: min(280px, 88vw);
+  max-height: calc(100% - 130px); overflow-y: auto;
+  pointer-events: auto; background: rgba(20,26,34,.94); border: 1px solid rgba(255,255,255,.2);
+  border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 10px;
+  font-size: 12px; color: rgba(255,255,255,.85);
+}
+.v3d-backdrop-row { display: flex; flex-direction: column; gap: 4px; }
+.v3d-backdrop-row-label { font-size: 11.5px; color: rgba(255,255,255,.65); }
+/* "2/3 botões colados, cantos externos arredondados, internos retos" —
+   pedido verbatim do usuário, tanto pro par Trás/Frente quanto pro trio
+   Esticar/Caber/Cortar — mesma classe serve pros dois (2 ou 3 filhos). */
+.v3d-backdrop-seg-group { display: flex; }
+.v3d-backdrop-seg-btn {
+  flex: 1 1 0; background: rgba(255,255,255,.06); color: rgba(255,255,255,.85);
+  border: 1px solid rgba(255,255,255,.25); border-right-width: 0;
+  padding: 5px 6px; font-size: 11.5px; cursor: pointer; border-radius: 0;
+  white-space: nowrap;
+}
+.v3d-backdrop-seg-btn:last-child { border-right-width: 1px; }
+.v3d-backdrop-seg-btn:first-child { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+.v3d-backdrop-seg-btn:last-child { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+.v3d-backdrop-seg-btn.active { background: var(--accent, #3b82f6); color: #fff; border-color: var(--accent, #3b82f6); }
+.v3d-backdrop-seg-btn:hover:not(.active) { background: rgba(255,255,255,.14); }
+.v3d-backdrop-checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.v3d-backdrop-checkbox-row input[type="checkbox"] { margin: 0; }
+
+/* NOVO (09/09/2026), pedido verbatim: "O vanishCam deve ser uma tela do
+   app 'catalogacao-itens'" — overlay em tela cheia (sobre TUDO, inclusive o
+   Workspace/BSP e o modo Clássico) com o vanishCam local dentro de um
+   <iframe> (ver mapview.js _openVanishCamScreen). */
+.vanishcam-screen-overlay {
+  position: fixed; inset: 0; z-index: 5000; background: #0f1216;
+  display: flex; flex-direction: column;
+}
+.vanishcam-screen-topbar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; background: rgba(20,26,34,.96); border-bottom: 1px solid rgba(255,255,255,.14);
+}
+.vanishcam-screen-title { font-size: 13px; color: rgba(255,255,255,.9); font-weight: 600; }
+/* NOVO (09/09/2026) — mensagens de status ("Carregando…", avisos de
+   calibração inválida ao clicar "Concluir", ver mapview.js
+   _openVanishCamScreen) ficam entre o título e os botões, empurrados pro
+   fim da barra pela margem automática abaixo. */
+.vanishcam-screen-status { font-size: 12px; color: rgba(255,255,255,.75); }
+.vanishcam-screen-topbar #vanishcam-screen-concluir { margin-left: auto; }
+/* "No contêiner dela (a janela) deve ter uma botão para concluir" — o
+   vanishCam (vanishCamMount, ver vanishcam/js/embed-api.js) é montado
+   DENTRO deste elemento, ocupando 100% da largura/altura dele (pedido do
+   próprio guia de integração do vanishCam, README-embed.md). */
+.vanishcam-screen-container { flex: 1 1 auto; width: 100%; min-height: 0; position: relative; background: #000; }
+
+/* [12/09/2026] NOVO — pedido verbatim: "faça trazer a ideia de que o
+   conteúdo que aparece pertence ao botão 'Propriedades da câmera'
+   visualmente." Antes, o botão "⚙️ Propriedades da câmera" (#v3d-cam-props-
+   toggle/#v3d-foto-props-toggle) e o fieldset que ele abre logo abaixo
+   (#v3d-cam-props/#v3d-foto-props, HTML de `_camPropsFieldsetHtml`,
+   mapview.js) eram 2 caixas visualmente soltas (botão com cantos
+   arredondados nos 4 lados + `margin:10px 0` padrão do
+   `.map-panel-fieldset` embaixo, sem nenhuma conexão) — agora, enquanto
+   aberto, o botão perde o arredondamento de baixo e ganha destaque (mesma
+   cor de "ativo" já usada em `.v3d-objcat-tab.active`) e o fieldset colado
+   logo abaixo perde o arredondamento de cima + a borda de cima (funde com a
+   borda de baixo do botão), formando uma ÚNICA caixa contínua "botão + seu
+   conteúdo" em vez de 2 blocos soltos. Classe alternada em JS
+   (`.v3d-camprops-toggle-active`) em `_showCameraCard3D`/
+   `_showFotoPinCard3D` (view3d.js). */
+.v3d-camprops-toggle-active { border-radius: 8px 8px 0 0 !important; background: rgba(80,220,255,.22) !important; color: #fff !important; }
+#v3d-cam-props:not(.hidden), #v3d-foto-props:not(.hidden) { margin-top: -6px; }
+#v3d-cam-props:not(.hidden) > .map-panel-fieldset,
+#v3d-foto-props:not(.hidden) > .map-panel-fieldset {
+  margin-top: 0; border-radius: 0 0 10px 10px; border-top: none;
+}
+
 .flashcard3d-overlay {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: min(320px, 82vw);
@@ -2484,6 +3626,35 @@ datalist {}
   padding: 14px;
   box-shadow: var(--shadow);
   pointer-events: auto;
+  /* [11/09/2026] CORRIGIDO — bug relatado: no modo "Ver através desta
+     câmera", ao clicar num objeto, o cartão (ex.: "🔧 Modelar em 3D" /
+     "Fechar", ver _showObjectCard3D) aparecia ATRÁS da foto. CAUSA RAIZ:
+     esta classe nunca teve `z-index` próprio (ficava em "camada 0"/auto),
+     enquanto `.v3d-fotocam-overlay` (a camada da foto/vinheta, mesmo
+     `this._container`) tem `z-index:30` e cria seu PRÓPRIO contexto de
+     empilhamento — um `z-index:auto` nunca fica por cima de um `z-index`
+     explícito do MESMO pai, não importa a ordem no DOM. Mesma família de
+     bug já corrigida antes pra `.camera-topbar`/`.v3d-hotbar` (bumpados pra
+     `z-index:33`) e pro badge de câmera travada (`z-index:40`). CORRIGIDO:
+     `z-index:45` — acima de todas as camadas da foto/vinheta/controles
+     (30/31/33/34/40) já usadas dentro do mesmo `this._container`. */
+  z-index: 45;
+  /* [10/09/2026] CORRIGIDO — bug relatado: "no 'Ver em 3D', ao clicar em
+     'Propriedades da câmera', a janela [...] não deve ocupar toda a altura
+     da tela [...] o scroll vertical deve aparecer para a rolagem." O
+     fieldset "🎥 Propriedades da câmera (Blender)" (`#v3d-cam-props`, ver
+     _showCameraCard3D/_camPropsFieldsetHtml em mapview.js) é bem mais alto
+     que o resto do cartão — sem limite, o cartão inteiro (que já nasce
+     centralizado na tela) crescia além da altura da viewport, cortando
+     botões/campos do fundo sem nenhum jeito de rolar até eles. Aplicado na
+     classe genérica (não só no cartão de câmera) porque TODO cartão 3D
+     (.flashcard3d-overlay — objeto/item/câmera/foto, ver _showObjectCard3D/
+     _showCameraCard3D/_showFotoPinCard3D) corre o mesmo risco em telas
+     baixas; `overflow-y:auto` só entra em ação quando o conteúdo realmente
+     excede 80vh, então cartões pequenos (a maioria) continuam do tamanho
+     natural de sempre, sem barra de rolagem nenhuma. */
+  max-height: 80vh;
+  overflow-y: auto;
 }
 /* Popup de confirmação de exclusão no 3D (tecla DEL/Backspace), estilo
    Blender (pedido do usuário, rodada 52, com screenshot do Blender em
@@ -2503,6 +3674,11 @@ datalist {}
   padding: 6px;
   pointer-events: auto;
   font-size: 12.5px;
+  /* [11/09/2026] Mesma correção de `.flashcard3d-overlay` logo acima
+     (mesmo `this._container`, mesmo risco de ficar atrás da foto no modo
+     "Ver através desta câmera") — `z-index` próprio, acima da foto/
+     vinheta/controles. */
+  z-index: 45;
 }
 .v3d-del-confirm-title {
   text-align: center; font-weight: 700; color: var(--text-dim);
@@ -2583,6 +3759,30 @@ datalist {}
   flex: 1 1 auto; min-width: 0;
   display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px;
 }
+/* [09/09/2026] Ajuste solicitado pelo usuário: "Em Mapa-Foto, ao fazer
+   medidas em cima da imagem e tentar reposicionar suas pontas, se uma
+   ponta ficar em baixo da div (class='camera-topbar ambphotos-topbar'),
+   não dá para clicar, pois a div fica na frente. Transforme em botões
+   posicionados de forma avulsa, mas que mantenha o mesmo aspecto visual
+   de modo que se a ponta de uma seta de algum jeito ficar, mesmo que,
+   entre os botões, dê para clicar e não tenha uma box na frente." Causa
+   raiz: `.camera-topbar` (base) é `position:absolute; left:0; right:0`
+   (ocupa a LARGURA INTEIRA do topo) sem `pointer-events` nenhum — então
+   TODO o retângulo da faixa (inclusive os vãos/gaps ENTRE os botões, onde
+   só aparece o degradê de fundo) intercepta cliques/toques, tampando
+   qualquer ponta de medida do canvas por baixo (`#ambphotos-canvas`) que
+   caia ali. `pointer-events:none` na faixa inteira (só aqui, contexto
+   `.ambphotos-topbar` — NÃO mexe na base `.camera-topbar` genérica nem em
+   `.view3d-wrap .camera-topbar`, usadas por outras telas de câmera/pelo
+   3D) deixa cliques atravessarem direto pro canvas por trás; `auto` de
+   volta só nos filhos DIRETOS de `.ambphotos-topbar-row` (cada botão + o
+   grupo central `.ambphotos-topbar-center`, que também recebe `auto` pra
+   seus 2 botões internos funcionarem, ver regra dela acima) — nenhuma
+   mudança visual (o degradê de fundo continua desenhando normalmente,
+   `pointer-events` não afeta pintura), só os VÃOS entre os botões param de
+   bloquear clique, exatamente como pedido. */
+.ambphotos-topbar { pointer-events: none; }
+.ambphotos-topbar-row > * { pointer-events: auto; }
 /* Botão "Fechar" um pouco mais alto que os outros ícone-botões do topo.
    Seletor por ID (além da classe) de propósito: existe uma regra de toque
    grosso (@media (pointer: coarse) .icon-btn { padding: 9px 12px }) mais
@@ -2611,10 +3811,25 @@ datalist {}
   /* top: 56px é só o valor inicial/fallback — ambientephotos.js mede a
      altura real do cabeçalho (que pode ter 1 ou 2 linhas) e ajusta este
      "top" via style inline, pra faixa nunca ficar em cima de um botão. */
-  position: absolute; top: 56px; left: 0; right: 0; z-index: 5;
+  position: absolute; top: 56px; left: 0; z-index: 5;
   display: flex; gap: 8px; overflow-x: auto; padding: 8px 10px;
   -webkit-overflow-scrolling: touch;
   user-select: none;
+  /* [09/09/2026] Bug relatado pelo usuário: "as fotos tiradas ficam numa
+     div que ocupa toda a largura da região, impedindo cliques nas
+     extremidades de medidas da 'Trena' ou 'Traço guia' [...] A caixa deve
+     crescer apenas conforme fotos são inseridas, só ocupando a largura
+     total quando houver fotos suficientes para preenchê-la." Antes,
+     `right: 0` (junto com `left: 0`) forçava esta div a cobrir a largura
+     INTEIRA da tela sempre, mesmo com só 1-2 fotos (poucas miniaturas de
+     72px lá na esquerda, e o resto do retângulo — vazio visualmente, mas
+     ainda `position:absolute`/`z-index:5` — continuava capturando clique
+     por cima do canvas, bloqueando pontas de medida perto da borda
+     direita). Trocado por `width: fit-content` (cresce só até caber o
+     conteúdo real) com `max-width` (nunca passa da tela — a partir daí
+     volta a ocupar a largura toda e `overflow-x:auto` rola, comportamento
+     de sempre quando há fotos o bastante pra preencher). */
+  width: fit-content; max-width: 100%;
 }
 .ambphotos-strip.hidden { display: none; }
 /* Botão de retorno pro Organizar (ver ambientephotos.js, _voltarParaOrganizar)
@@ -2784,7 +3999,30 @@ datalist {}
    simples o bastante pra não precisar medir `#perf-hud.offsetHeight` em JS
    toda vez que ele muda de conteúdo. */
 .v3d-objcat-toggle {
-  position: absolute; top: 76px; right: 0; z-index: 8;
+  /* [11/09/2026] Pedido verbatim: "A janela 'Objetos' (na janela
+     'Ferramentas') deve aparecer um pouco mais abaixo na tela." — `top`
+     empurrado de 76px pra 110px (mesma escala de ajuste ~20-40px já usada
+     em rodadas anteriores deste projeto), tanto no botão "+" quanto no
+     painel que ele abre logo abaixo (`.v3d-objcat-panel`, mesmo `top`,
+     precisam ficar alinhados).
+     [10/09/2026] UNIFICADO — pedido verbatim: "unifique os 2 botões
+     expansíveis da lateral direita. Fica só o '+'". O antigo botão/painel
+     irmão "🧱" (`.v3d-tijolo-toggle`) foi removido — este "+" agora é o
+     ÚNICO botão da lateral direita, abrindo um painel com abas ("Objetos"/
+     "Tijolos", ver `.v3d-objcat-tabs` mais abaixo) em vez de 2 painéis
+     flutuantes empilhados. */
+  /* [15/09/2026] NOVO — pedido verbatim: "Os botões de controle devem
+     sempre ficar mais a frente. Atualmente o botão '+' da lateral direita
+     acaba ficando escurecido também (pelo apertar do 'Escurecer o
+     entorno')." CAUSA RAIZ: `.v3d-fotocam-overlay` (a camada que contém a
+     vinheta de "Escurecer o entorno") tem `z-index: 30` e cria seu PRÓPRIO
+     contexto de empilhamento — este botão "+" ficava em `z-index: 8`, bem
+     abaixo, então a vinheta o cobria visualmente. MESMO padrão de correção
+     já aplicado a `.view3d-wrap .camera-topbar` (bumpado pra `z-index: 33`
+     numa rodada anterior, por este EXATO motivo) — `z-index` bumpado de 8
+     pra 34 (acima da vinheta E do painel `.v3d-objcat-panel` logo abaixo,
+     que sobe pra 33, mantendo o botão acima do painel que ele abre). */
+  position: absolute; top: 110px; right: 0; z-index: 34;
   background: rgba(20,22,26,.35); border: 1px solid rgba(255,255,255,.14);
   border-right: none; border-radius: 10px 0 0 10px;
   color: rgba(255,255,255,.8);
@@ -2794,27 +4032,92 @@ datalist {}
   transition: right .2s ease, background .15s ease;
 }
 .v3d-objcat-toggle:hover { background: rgba(20,22,26,.6); color: #fff; }
-.v3d-objcat-toggle.open { right: 200px; }
+/* [12/09/2026] NOVO — pedido verbatim: "No 'botão lateral direito (+)' a
+   seta de retorno (que aponta para a direita para recolher a barra
+   lateral) está em cima do botão 'Transformação'. Coloque-o mais à
+   esquerda e acima." Antes, aberto, o botão ficava em `right:230px` —
+   DENTRO da área do painel (que vai de `right:0` até `right:260px`, ver
+   `.v3d-objcat-panel` abaixo), a só 30px da borda esquerda dele, bem em
+   cima do topo do conteúdo da aba "Propriedades" (cabeçalho
+   "▼ Transformacao", 1ª seção, mesmo `top:110px` do painel). Agora:
+   `right:260px` (encostado exatamente na borda esquerda do painel, sem
+   mais entrar por cima do conteúdo) + `top:78px` (32px mais acima, acima
+   também do topo do painel). */
+.v3d-objcat-toggle.open { right: 260px; top: 78px; }
 /* REMOVIDO (02/09/2026) — `.v3d-modelar-toggle` (CSS de um botão "+" NOVO
    que eu tinha criado por engano em js/view3d.js). Ver comentário grande no
    HTML de view3d.js `mount()`, onde o botão ficava, pra explicação. */
+/* [10/09/2026] UNIFICADO — antes este painel só tinha a tabela de
+   "Objetos padrão" (`.v3d-objcat-panel-list`); agora é uma bandeja com 2
+   abas verticais (`.v3d-objcat-tabs`, uma pra cada lado — "Objetos"/
+   "Tijolos", ver _setV3dRightTab em view3d.js), MESMA técnica de escrita
+   vertical "de baixo para cima" já usada nas abas do Modelador
+   (`.m3d-sidebar-tabs`/`.m3d-sidebar-tab` acima neste mesmo arquivo,
+   `writing-mode:vertical-rl` + `rotate(180deg)`) — só espelhada: aqui as
+   abas ficam do lado DIREITO (perto do botão "+"/borda da tela), o
+   conteúdo rolável fica à esquerda delas. Largura cresceu de 200px pra
+   260px (200 do conteúdo antigo + ~a largura da faixa de abas) pra caber
+   as duas coisas lado a lado sem espremer; altura máxima também cresceu
+   (340px/50vh -> 420px/62vh, o mesmo teto que `.v3d-tijolo-panel` já usava
+   sozinho) já que agora este painel único também hospeda o conteúdo de
+   "Tijolos", mais alto que a tabela de objetos. */
 .v3d-objcat-panel {
-  position: absolute; top: 76px; right: 0; z-index: 7;
-  width: 200px; max-height: min(340px, 50vh);
-  background: rgba(20,22,26,.88); border: 1px solid rgba(255,255,255,.16);
+  /* Ver comentário grande em `.v3d-objcat-toggle` acima — mesmo `top`,
+     pra continuar alinhado ao botão que o abre. */
+  /* [15/09/2026] NOVO — MESMO motivo/pedido do `.v3d-objcat-toggle` acima
+     (ver comentário grande lá): `z-index` bumpado de 7 pra 33 — acima da
+     vinheta de "Escurecer o entorno" (`.v3d-fotocam-overlay`, z-index 30),
+     continuando abaixo do próprio botão "+" (34) que o abre/fecha. */
+  position: absolute; top: 110px; right: 0; z-index: 33;
+  /* [12/09/2026] MUDADO — pedido verbatim: "No 'Ver em 3D', no botão
+     lateral direito ('+'), a altura dessa barra lateral deve permanecer
+     fixa." CAUSA: só `max-height` era definido — a altura REAL do painel
+     (um flex-row sem altura própria) seguia a altura do conteúdo (que muda
+     o tempo todo: seções "Fundo"/"Câmera"/"Transformação" abrem/fecham,
+     Transformação ganha/perde campos ao trocar de objeto) até bater nesse
+     teto, fazendo o painel inteiro crescer/encolher (e pular de lugar,
+     preso a `top`/`right` fixos) a cada mudança de conteúdo. CORRIGIDO:
+     `height` fixo (igual ao teto que já existia) — o conteúdo que agora
+     rola dentro dele (`.v3d-objcat-tabcontent`, já `overflow-y:auto`) em
+     vez do painel mudar de tamanho. */
+  width: 260px; height: min(420px, 62vh); max-height: min(420px, 62vh);
+  background: rgba(20,22,26,.9); border: 1px solid rgba(255,255,255,.16);
   border-radius: 10px 0 0 10px;
-  padding: 6px; display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: row;
   box-shadow: -2px 0 10px rgba(0,0,0,.35);
   transform: translateX(100%);
   transition: transform .2s ease;
   overflow: hidden;
 }
 .v3d-objcat-panel.open { transform: translateX(0); }
+.v3d-objcat-tabcontent {
+  flex: 1; min-width: 0; overflow-y: auto;
+  padding: 6px; display: flex; flex-direction: column; gap: 4px;
+  font-size: 12.5px; color: rgba(255,255,255,.85);
+}
 .v3d-objcat-panel-title {
   font-size: 11px; color: rgba(255,255,255,.55); padding: 2px 6px 4px;
   text-transform: uppercase; letter-spacing: .04em;
 }
-.v3d-objcat-panel-list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.v3d-objcat-panel-list { display: flex; flex-direction: column; gap: 2px; }
+/* Abas verticais do painel unificado — ver comentário grande em
+   `.v3d-objcat-panel` acima. Ficam à DIREITA (perto do botão "+"), por
+   isso `border-left` (não `border-right`, que é o que a versão irmã do
+   Modelador — `.m3d-sidebar-tabs`, à esquerda da tela — usa). */
+.v3d-objcat-tabs {
+  display: flex; flex-direction: column; flex-shrink: 0;
+  width: 26px; border-left: 1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.18);
+}
+.v3d-objcat-tab {
+  flex: 1;
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  background: none; border: none; color: #9fb3c8;
+  padding: 8px 5px; font-size: 11.5px; letter-spacing: .02em;
+  cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.v3d-objcat-tab:hover { background: rgba(255,255,255,.08); color: #e8ecf2; }
+.v3d-objcat-tab.active { background: rgba(80,220,255,.35); color: #fff; }
 .v3d-objcat-row {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px; border-radius: 6px; cursor: pointer;
@@ -2834,6 +4137,82 @@ datalist {}
   color: rgba(255,255,255,.75); font-size: 12.5px;
 }
 .v3d-objcat-import-btn { display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer; }
+
+/* [15/09/2026] NOVO -- ver comentário grande em `#v3d-objcat-tab-
+   propriedades`/`_renderPropriedadesPanel` (view3d.js). Mesmo padrão visual
+   de `.m3d-npanel`/`.m3d-npanel-head`/`.m3d-npanel-body` (modeler3d.css) --
+   o painel flutuante próprio que isto substitui -- adaptado pra viver
+   dentro do fluxo do painel "+" unificado (sem position/top/right/width
+   próprios, que agora vêm de `.v3d-objcat-panel`/`.v3d-objcat-tabcontent`). */
+.v3d-proppanel-section {
+  border-bottom: 1px solid rgba(255,255,255,.1);
+}
+.v3d-proppanel-section:last-child { border-bottom: none; }
+.v3d-proppanel-section.collapsed .v3d-proppanel-body { display: none; }
+.v3d-proppanel-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 4px; font-weight: 700; color: #e8ecf2; font-size: 12.5px;
+  cursor: pointer;
+}
+.v3d-proppanel-head:hover { background: rgba(255,255,255,.06); }
+/* [12/09/2026] NOVO — pedido verbatim: "Ajeite a setinha dos 3 botões de
+   Propriedades parecem tortas." CAUSA: o `<i class="v3d-proppanel-
+   chevron">` (view3d.js, ▼/▶ dos 3 cabeçalhos "Fundo"/"Câmera"/
+   "Transformação") nunca teve regra CSS própria — a tag `<i>`, usada aqui
+   só como contêiner (nunca como ícone de biblioteca), herda o
+   `font-style: italic` padrão do navegador pra esse elemento, inclinando o
+   caractere do triângulo (▼/▶) e deixando-o com aparência torta.
+   CORRIGIDO: reseta o itálico. */
+.v3d-proppanel-chevron { font-style: normal; display: inline-block; }
+.v3d-proppanel-body { padding: 2px 4px 10px; display: flex; flex-direction: column; gap: 8px; }
+.v3d-proppanel-empty { font-size: 11.5px; color: rgba(255,255,255,.5); padding: 4px 0; }
+.v3d-proppanel-camera-buttons { display: flex; flex-direction: column; gap: 6px; }
+.v3d-proppanel-camera-fields { display: flex; flex-direction: column; gap: 8px; }
+/* O painel "🖼️ Imagem" (`.v3d-fotocam-backdrop-panel`, HTML reaproveitado
+   de `_fotoCamBackdropPanelHtml` sem nenhuma mudança -- ver
+   `_renderPropriedadesPanel` em view3d.js) era FLUTUANTE
+   (position:absolute, ancorado no canvas) -- agora, dentro de "Fundo"
+   deste painel, vira conteúdo NORMAL (estático), fluindo junto com o
+   resto da seção. O fieldset "⚙️ Propriedades" (FOV/Resolução, dentro de
+   "Câmera") nunca teve classe/posicionamento próprios (sempre foi só
+   `innerHTML` cru de `_camPropsFieldsetHtml`, ver `_wireLiveCamPropsPanel`
+   /`.v3d-proppanel-camera-fields` acima), então não precisa de override. */
+.v3d-proppanel-body .v3d-fotocam-backdrop-panel {
+  position: static; width: auto; max-height: none; left: auto; top: auto;
+  background: none; border: none; padding: 0;
+}
+
+/* NOVO (07/09/2026), pedido verbatim: "blocos de construção [...] um menu
+   especial que aparece no canto direito da tela (como o '+' que já tem
+   ali, mas vai ser outro '+' independente para esta nova funcionalidade)."
+   MESMO padrão visual/estrutural de .v3d-objcat-toggle/.v3d-objcat-panel
+   logo acima (canto direito, desliza pra fora ao abrir) — só empurrado
+   pra BAIXO (top:114px em vez de 76px) pra não sobrepor o botão "+" que já
+   existia ali, ficando claramente um segundo/independente. */
+/* [10/09/2026] `.v3d-tijolo-toggle` (botão "🧱" independente) REMOVIDO —
+   ver comentário grande em `.v3d-objcat-toggle`/`.v3d-objcat-panel` acima:
+   unificado num único botão "+" com abas. `.v3d-tijolo-panel` deixou de
+   ser um painel FLUTUANTE próprio (tinha `position:absolute`/`top`/
+   `right`/`transform`/`box-shadow` iguais ao `.v3d-objcat-panel` de antes)
+   e virou só o CONTEÚDO da aba "Tijolos" dentro do painel único —
+   `_renderTijoloPanel` (view3d.js) continua escrevendo dentro dele sem
+   nenhuma mudança, só o elemento em si ficou "normal" (estático, dentro do
+   fluxo de `.v3d-objcat-tabcontent`, que já cuida do fundo/rolagem/
+   transição de abrir-fechar do painel como um todo). */
+.v3d-tijolo-panel { display: flex; flex-direction: column; gap: 8px; }
+.v3d-tijolo-panel h5 { margin: 0 0 2px; font-size: 11px; color: rgba(255,255,255,.55); text-transform: uppercase; letter-spacing: .04em; }
+.v3d-tijolo-dims { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
+.v3d-tijolo-dims input[type="number"] { width: 100%; box-sizing: border-box; font-size: 12px; padding: 4px; }
+.v3d-tijolo-anchor-gizmo { position: relative; width: 90px; height: 90px; margin: 4px auto; border: 1.5px solid rgba(255,255,255,.35); border-radius: 6px; }
+.v3d-tijolo-anchor-pt {
+  position: absolute; width: 16px; height: 16px; border-radius: 50%;
+  border: 1.5px solid rgba(255,255,255,.6); background: rgba(255,255,255,.12);
+  cursor: pointer; transform: translate(-50%, -50%);
+}
+.v3d-tijolo-anchor-pt:hover { background: rgba(255,255,255,.3); }
+.v3d-tijolo-anchor-pt.active { background: rgba(80,220,255,.85); border-color: #fff; }
+.v3d-tijolo-facecolors { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.v3d-tijolo-facecolors label { display: flex; align-items: center; gap: 4px; font-size: 11px; }
 
 /* Animação do "óculos de raio X" (rodada 48, ver view3d.js
    _playXRayGlassesAnimation/_toggleGlobalXRay) — some por padrão
@@ -5073,6 +6452,26 @@ datalist {}
 .spin { animation: spin 1s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* [10/09/2026] RESTAURADO — regra achada ausente daqui numa reconciliação
+   exaustiva com o backup do projeto (C:\Users\PC\Desktop\catalogacao-itens\
+   outputs), pedido do usuário "verifique mais". Toda a maquinaria que
+   DEPENDE desta regra continuava intacta e em uso (o script inline em
+   index.html <head>, ANTES do <link> desta folha de estilo, que marca
+   `<html class="catalogo-boot-classic">`, e `ClassicMode._clearBootPrefClass`/
+   `_syncLSCache` em js/classicmode.js, que a remove assim que a decisão real
+   do modo chega) — só esta regra em si, o CSS que faz `#app` (raiz do
+   Workspace/BSP) ficar escondido enquanto a classe está presente, tinha
+   sumido, quebrando silenciosamente a correção original (NOVO 09/09/2026,
+   pedido verbatim: evitar o "flash" do Workspace/BSP antes de trocar pro
+   modo Clássico ao iniciar o app — ver comentário grande em index.html).
+   Enquanto a classe estiver presente, `#app` some SEM depender de nenhum JS
+   ter rodado ainda -- só CSS, já vale no 1º frame. Some pouco depois de
+   `ClassicMode.restoreFromSettings()` confirmar o modo real (classic: fica
+   escondido do mesmo jeito, só que agora por `#app.style.display='none'`
+   inline, ver `ClassicMode.enter()`; bsp/divergência de cache: a classe é
+   removida e `#app` reaparece normal). */
+html.catalogo-boot-classic #app { display: none; }
+
 /* ---------- Boot bar (carregamento inicial) ---------- */
 .boot-bar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 2000;
@@ -5244,6 +6643,21 @@ body.view-mapa .history-widget { display: none; }
 /* Um único painel usado tanto pelo mapa 2D quanto pela visualização 3D — ver
    comentário no topo de mapconfig.js. */
 .mapconfig-sheet { max-width: 480px; }
+/* [09/09/2026] Ajuste solicitado pelo usuário: "Em 'Configurações 2D', todos
+   os textos devem ser selecionáveis" — a regra genérica de `user-select:
+   none` lá no topo deste arquivo (aplicada a `label`, `.settings-cats` etc.,
+   pro "cromo" da interface) também pegava os textos/descrições desta folha.
+   `.mapconfig-sheet--2d` só é adicionada quando o modal abre com
+   `opts.context === '2d'` (ver mapconfig.js `open()`) — "Configurações 3D"
+   continua com o comportamento de sempre (mesmo template/CSS
+   `.mapconfig-sheet`, sem a classe extra). `!important` necessário pra
+   vencer a regra genérica acima, que é mais específica só por listar vários
+   seletores mas tem a mesma especificidade de uma classe. */
+.mapconfig-sheet--2d, .mapconfig-sheet--2d * {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+}
 .mapconfig-section { margin-bottom: 16px; }
 /* Fundo mais claro no título de cada seção (pedido do usuário, 26/08/2026):
    "Para destacar que, dali até um outro destaque do mesmo tipo, trata-se de
@@ -5565,3 +6979,275 @@ body.view-mapa .history-widget { display: none; }
   background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 8px 10px; font-size: 13px;
 }
+
+/* NOVO (07/09/2026), pedido verbatim: "layout estilo Blender [...]
+   Estilo Visual: Tema escuro minimalista, com bordas limpas, fontes
+   legíveis e estados de cursor interativos (col-resize e row-resize) nos
+   divisores." — ver js/bsplayout.js (window.BSPLayout, a tela "Workspace"
+   do rodapé) pra estrutura de estado/árvore comentada. */
+.bsp-loading { display:flex; align-items:center; justify-content:center; height:100%; color:var(--text-dim); font-size:13px; }
+/* `.bsp-workspace-wrap`/`.bsp-toolbar` (barra de ferramentas própria do
+   Workspace + wrapper que a hospedava) foram REMOVIDAS (08/09/2026) — a
+   barra de layouts nomeados foi pro cabeçalho GLOBAL do app
+   (`#topbar-info-layoutbar`, ver js/bsplayout.js `_renderInfoBarControls`),
+   então `_render()` monta `.bsp-root` DIRETO dentro do container recebido
+   por `mount()` (`main#view`), sem wrapper próprio nenhum.
+   CORRIGIDO (08/09/2026), pedido verbatim: "A divisões de tela devem
+   ocupar toda a área disponível da tela. Não ficar espaços vazios [...]
+   Fiz o mesmo teste. E [...] as alturas é que estão sendo mexidas, quando
+   não deveriam." — CAUSA RAIZ de AMBOS os relatos: `.bsp-root` tinha só
+   `flex:1 1 auto` (útil SÓ dentro de um PAI que seja `display:flex`) mas
+   seu pai de verdade (`main#view`, ver regra acima) NÃO é flex (é um
+   container de rolagem normal) — sem um `height` explícito, `.bsp-root`
+   encolhia pro tamanho de CONTEÚDO mínimo da árvore de painéis em vez de
+   preencher a altura toda disponível, deixando espaço vazio embaixo E
+   fazendo a altura "balançar" (parecer mudar sozinha) a cada
+   redimensionamento/reflow de conteúdo dentro dela. CORRIGIDO: `height:
+   100%` explícito (o `main#view` já tem uma altura RESOLVIDA de verdade,
+   como item flex do `#app` vertical — só faltava `.bsp-root` de fato usar
+   essa altura em vez de flex-grow, que não tem pai flex pra valer). */
+.bsp-root { display:flex; width:100%; height:100%; min-height:0; background:#16181c; overflow:hidden; }
+.bsp-split { display:flex; min-width:0; min-height:0; }
+.bsp-split-row { flex-direction:row; }
+.bsp-split-col { flex-direction:column; }
+.bsp-split-child { display:flex; min-width:0; min-height:0; overflow:hidden; }
+.bsp-gutter { flex:none; background:#0d0e10; transition:background .12s ease; }
+.bsp-gutter-row { width:6px; cursor:col-resize; }
+.bsp-gutter-col { height:6px; cursor:row-resize; }
+.bsp-gutter:hover, .bsp-gutter:active { background:#4aa8ff; }
+body.bsp-resizing-col, body.bsp-resizing-col * { cursor:col-resize !important; user-select:none !important; }
+body.bsp-resizing-row, body.bsp-resizing-row * { cursor:row-resize !important; user-select:none !important; }
+.bsp-leaf { display:flex; flex-direction:column; min-width:0; min-height:0; background:#1b1d21; border:1px solid #2a2d33; overflow:hidden; }
+.bsp-leaf-header {
+  display:flex; align-items:center; gap:6px; flex:none;
+  height:30px; padding:0 6px; background:#202329; border-bottom:1px solid #2a2d33;
+}
+.bsp-leaf-select {
+  background:#282b31; color:#e4e6eb; border:1px solid #383c44; border-radius:5px;
+  font-size:11.5px; padding:3px 6px; max-width:150px;
+}
+.bsp-hdr-btn {
+  background:transparent; border:1px solid transparent; color:#9aa0ab;
+  width:22px; height:22px; border-radius:5px; font-size:12px; line-height:1;
+  cursor:pointer; display:flex; align-items:center; justify-content:center;
+  transition:background .12s ease, color .12s ease;
+}
+.bsp-hdr-btn:hover { background:#33373f; color:#fff; }
+.bsp-hdr-btn-close:hover { background:#5a2530; color:#ff8080; }
+/* NOVO (08/09/2026), pedido verbatim (ITEM 1 da rodada de 11 itens): "o
+   botão quádruplo [...] o campo de texto para os títulos e [...] os
+   botões 'Ver lista simples', 'configurações do app' e '?' [...] devem
+   sair de dentro da tela 'Info' e ficar na sua barra." — os 2 wraps que
+   `js/bsplayout.js` (`_buildInfoControlsWraps`) monta em torno dos 5
+   elementos SINGLETON de sempre (movidos, não clonados, de dentro de
+   `#topbar-default-row`), agora hóspedes de `.bsp-leaf-header` (30px de
+   altura) em vez do cabeçalho global (que tinha mais espaço). Todos os
+   tamanhos/fontes aqui são versões ENCOLHIDAS das regras originais
+   (`.topbar-info-wfbtn`/`.topbar h1`/`.icon-btn`, ver mais acima neste
+   arquivo) só quando esses elementos estão DENTRO de `.bsp-leaf-header`
+   — fora daqui (cabeçalho global de sempre, quando nenhuma divisão
+   'Info' existe/ainda não montou) continuam do tamanho normal. */
+.bsp-leaf-header-spacer { flex:1; }
+.bsp-leaf-header .bsp-info-hdr-left,
+.bsp-leaf-header .bsp-info-hdr-right {
+  display:flex; align-items:center; gap:4px; flex:none; height:100%; overflow:hidden;
+}
+/* [09/09/2026] Ajuste solicitado pelo usuário: "A parte textual ao lado do
+   botão quádruplo deve ser selecionável e ficar um pouco mais para a
+   direita." — `#view-title` é esse texto (ver comentário grande em
+   `_buildInfoControlsWraps`, js/bsplayout.js: "botão quádruplo" +
+   `#view-title` no wrap ESQUERDO). `user-select:text` sobrescreve a regra
+   genérica `user-select:none` do "cromo" da interface (topo deste
+   arquivo), que deixava este título não-selecionável; `margin-left`
+   (antes 0) afasta o texto um pouco do grupo de botões à esquerda dele. */
+.bsp-leaf-header .bsp-info-hdr-left #view-title {
+  font-size:11.5px; max-width:160px; margin:0 0 0 8px;
+  user-select: text; -webkit-user-select: text; -moz-user-select: text;
+}
+.bsp-leaf-header .bsp-info-hdr-left .topbar-info-layoutbar,
+.bsp-leaf-header .bsp-info-hdr-left .topbar-info-wfbtn { height:22px; }
+.bsp-leaf-header .bsp-info-hdr-left .topbar-info-wfbtn {
+  padding:2px 6px; font-size:10.5px;
+}
+/* [09/09/2026] Ajuste solicitado pelo usuário: "Em 'Info', no botão do nome
+   de layout, aumente-o em 50px." — esta é a largura REALMENTE visível
+   (dentro da folha 'Info' de verdade, versão encolhida do botão): 110px ->
+   160px (+50px). */
+.bsp-leaf-header .bsp-info-hdr-left .topbar-info-wfbtn-name { width:160px; }
+/* CORRIGIDO (09/09/2026), bug relatado: "ao clicar no nome do layout o
+   box que guarda o seu nome deve ter tamanho fixo" — a regra acima só
+   bate na classe `.topbar-info-wfbtn-name` (o BOTÃO); ao clicar pra
+   editar, o elemento vira um `<input>` com classes
+   `.topbar-info-wfbtn.topbar-info-wfbtn-name-input` (ver
+   `_startEditLayoutName` em js/bsplayout.js) — SEM equivalente encolhido
+   aqui, então caía na regra genérica de 180px (mais abaixo neste
+   arquivo), maior que os 110px do botão — a caixa "pulava" de tamanho ao
+   entrar em modo de edição. Repete as MESMAS dimensões encolhidas do
+   botão pro input, igual já era feito pro grupo todo (ver comentário
+   grande acima, "Todos os tamanhos/fontes aqui são versões ENCOLHIDAS"). */
+/* [09/09/2026] Ajuste solicitado pelo usuário: "Em 'Info', no botão do nome
+   de layout, aumente-o em 50px. Ao clicar nele, deve ficar o cursor
+   'inserir texto'." — largura +50px acompanhando o botão (110px ->
+   160px) + `cursor:text` explícito (senão herdava `cursor:pointer` da
+   regra encolhida genérica `.bsp-leaf-header ... .topbar-info-wfbtn` logo
+   acima, que também bate neste input por ele carregar a classe
+   `.topbar-info-wfbtn`). */
+.bsp-leaf-header .bsp-info-hdr-left .topbar-info-wfbtn.topbar-info-wfbtn-name-input {
+  width:160px; height:22px; padding:2px 6px; font-size:10.5px; cursor:text;
+}
+.bsp-leaf-header .bsp-info-hdr-right .icon-btn {
+  width:22px; height:22px; min-width:0; padding:0; font-size:12px;
+  display:flex; align-items:center; justify-content:center;
+}
+/* ITEM 2 da mesma rodada: placeholder neutro/vazio de uma divisão 'Info'
+   que NÃO é a dona do `header.topbar` físico (ver EDITOR_TYPES.info em
+   js/bsplayout.js) — antes mostrava um aviso "já está aberta em outra
+   divisão"; agora fica visualmente igual à divisão dona na maioria dos
+   casos (sem nenhum aviso a mais). */
+.bsp-info-body-empty { height:100%; }
+/* NOVO (08/09/2026): `transform: translateZ(0)` faz esta caixa virar o
+   "containing block" (spec do CSS) de qualquer `position:fixed` dentro
+   dela — truque usado pra confinar os overlays de tela cheia do 🖼️ Foto
+   (ambientephotos.js) e do 🗂️ Organizar (organizeview.js) dentro da
+   própria divisão de tela do "🧩 Workspace", SEM precisar mudar nada no
+   `position:fixed; inset:0` que os dois já usam — só passam a receber um
+   `container` (ver js/bsplayout.js, EDITOR_TYPES.foto/organizar) e o
+   próprio CSS deles resolve sozinho, confinado por este ancestral. */
+.bsp-leaf-body { flex:1; min-height:0; min-width:0; position:relative; overflow:auto; background:#141517; transform:translateZ(0); }
+.bsp-empty { display:flex; align-items:center; justify-content:center; height:100%; color:#5a6070; font-size:12.5px; text-align:center; padding:16px; }
+/* NOVO (08/09/2026): botao de emergencia sempre visivel (index.html
+   #bsp-shell-reset-btn) -- restaura o layout padrao (Info/Conteudo/
+   Botoes) se a pessoa fechar a divisao 'Info' sem querer e perder a
+   barra de controles de layout. Pequeno, canto inferior direito, acima
+   de qualquer outra coisa (z-index alto, mesmo espirito do
+   #save-status-host). */
+.bsp-shell-reset-btn {
+  position: fixed; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0));
+  z-index: 9998; width: 30px; height: 30px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--text-dim);
+  font-size: 16px; line-height: 1; cursor: pointer; opacity: .55;
+  transition: opacity .15s ease, color .15s ease;
+}
+.bsp-shell-reset-btn:hover { opacity: 1; color: var(--text); }
+/* NOVO (09/09/2026) — ver js/classicmode.js. Este botão só faz sentido
+   dentro do Workspace/BSP (restaura a ÁRVORE de divisões dele) — no modo
+   Clássico (sem nenhuma divisão) ficaria só confuso/sem efeito visível
+   nenhum, então some enquanto `body.classic-mode-active` estiver presente
+   (classe ligada/desligada por ClassicMode.enter()/exit()). */
+body.classic-mode-active .bsp-shell-reset-btn { display: none; }
+
+/* NOVO (08/09/2026), pedido verbatim: telas 'Botões' (réplica dos botões
+   do rodapé, dockável) e 'Telas' (mostra o que foi escolhido em
+   'Botões') — ver EDITOR_TYPES.botoes/.telas em js/bsplayout.js. Botões
+   empilhados verticalmente, preenchendo o painel — mesmo espírito visual
+   do .bottomnav original (ícone+texto), só que dispostos como lista, já
+   que o painel tende a ser mais estreito/alto que a barra inferior. */
+/* ATUALIZADO (08/09/2026), pedido verbatim: "Agora o rodape deve
+   desaparecer (mantenham so o estilo de um botao colado no outro) e a
+   tela 'Botoes' e que deve ficar ali em baixo." -- de lista vertical
+   (rodada anterior) pra LINHA HORIZONTAL colada (sem gap, sem
+   arredondamento), clone fiel de .bottomnav/.bottomnav button (ver
+   acima) -- mesmo flex:1 por botao, mesmo icone+texto empilhados, mesma
+   cor ativa. Continua sendo uma tela dockavel normal (pode ser
+   redimensionada/dividida como qualquer outra), so o visual que virou
+   idêntico ao antigo rodape fixo. */
+.bsp-botoes-shell {
+  display:flex; flex-direction:row; height:100%; box-sizing:border-box;
+  overflow:auto; background:var(--bg-elev);
+}
+.bsp-botoes-btn {
+  flex:1; background:transparent; border:none; border-right:1px solid var(--border);
+  color:var(--text-dim); padding:8px 2px 10px; font-size:10.5px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  cursor:pointer; transition:color .15s ease, background .15s ease;
+}
+.bsp-botoes-btn:last-child { border-right:none; }
+.bsp-botoes-btn .bsp-botoes-ic { font-size:19px; }
+.bsp-botoes-btn:hover { background:var(--bg-elev-2); }
+.bsp-botoes-btn.active { color:var(--accent); background:var(--accent-dim); }
+.bsp-botoes-btn.active:hover { background:var(--accent-dim); }
+
+
+/* NOVO (08/09/2026), pedido verbatim: "Verticalmente, a divisão de tela
+   pode ser reduzida até o tamanho da altura da barra de seleção de tela.
+   Visualmente, fica 'botão de x', 'divisão de tela' e 'botão de x',
+   colados um acima do outro." — quando `.bsp-leaf-body` chega em altura 0
+   (arrastando o divisor horizontal até o limite, ver HEADER_HEIGHT_PX em
+   js/bsplayout.js), só sobra o `.bsp-leaf-header` (30px, com os botões de
+   fechar/trocar) visível — min-height:0 acima já permite isso, aqui só
+   evita que o overflow:auto mostre uma barra de rolagem vazia enquanto
+   colapsado. */
+.bsp-leaf-body:empty,
+.bsp-leaf-body[style*="height: 0"] { overflow:hidden; }
+
+/* NOVO (08/09/2026), pedido verbatim: "No 'Mapa 2D', [...] fica dentro
+   dela [da divisão de tela]." — wrapper criado por mapview.js
+   (_mountPlanta) só quando embutido numa divisão do Workspace, hospedando
+   também #topbar-mapa/#bottombar-mapa quando movidos pra dentro (ver
+   _mountTopbarMapa/_mountBottombarMapa/_unmountTopbarMapa/
+   _unmountBottombarMapa em js/mapview.js — bug relatado pelo usuário:
+   "a barra de rodapé do 'Mapa 2D' está surgindo fora da tela dele" /
+   "o cabeçalho continua aparecendo [...] fora de sua divisão de tela"). */
+.mapa2d-embedded-wrap { display:flex; flex-direction:column; width:100%; height:100%; overflow:hidden; }
+.mapa2d-embedded-wrap > .map2d-wrap { flex:1 1 auto; min-height:0; width:100%; height:auto; }
+/* `!important` necessário: `body:not(.view-mapa-planta) .topbar-mapa` e
+   `body:not(.view-mapa-planta) .bottombar-mapa` (ver acima/mais abaixo
+   neste arquivo) têm especificidade MAIOR que um seletor de classe simples
+   — e embutido, `body.view-mapa-planta` fica sempre DESLIGADA de propósito
+   (não pode ligar globalmente, escondería o cabeçalho padrão do app fora
+   do Mapa — ver comentário grande em js/mapview.js `_showScreen`).
+   REVISADO (08/09/2026), pedido verbatim (ITEM 4 da rodada de 11 itens):
+   "Na tela 'Mapa 2D' (Planta baixa) os botões do cabeçalho interno dele
+   devem aparecer." Uma rodada anterior (mesma data) investigou isto por
+   análise estática e não achou a causa raiz (registrado aqui mesmo, texto
+   removido agora que a causa foi encontrada). CAUSA RAIZ REAL, achada
+   numa rodada seguinte (09/09/2026, bug relatado de novo pelo usuário, confirmando
+   "nenhum dos botões [...] estão aparecendo"): não era CSS — era
+   `BSPLayout._render()` (js/bsplayout.js) reconstruindo a árvore inteira
+   via `this._root.innerHTML = ''` SEM desmontar as folhas antigas
+   primeiro. Isso desconectava `#topbar-mapa`/`#bottombar-mapa` (movidos
+   pra DENTRO de `.mapa2d-embedded-wrap` por `_mountTopbarMapa`) do
+   documento de vez (sem devolvê-los pro `#dom-parking`) — depois disso,
+   `document.getElementById('topbar-mapa')` não encontrava mais nada, e
+   `_mountTopbarMapa()` desistia cedo, deixando a folha sem cabeçalho
+   nenhum. Corrigido em `_render()` (ver comentário grande lá) — este CSS
+   `!important` continua necessário e correto (mantido, ver explicação
+   acima), só não era, sozinho, suficiente. */
+.mapa2d-embedded-wrap .topbar-mapa,
+.mapa2d-embedded-wrap .bottombar-mapa { display:flex !important; flex:0 0 auto; }
+
+/* NOVO (08/09/2026), pedido verbatim: "No 'Ver em 3D', como o Modelador
+   pertence a tela 'Ver em 3D', então, fica dentro dela, configurável na
+   seção destinada a isso nas 'configurações do app'." — classe ligada/
+   desligada por js/view3d.js `_syncModeladorFullscreen()` só quando
+   `workspaceFullscreenConfig.modelador === true` (padrão é confinado,
+   sem esta classe — o Modelador já desenha dentro do próprio container
+   de View3D nesse caso, ver wrapEl em modeler-core.js). `!important` no
+   z-index não é necessário aqui (zIndex já vem certo via WindowManager.register). */
+.view3d-modelador-fullscreen { position:fixed !important; inset:0 !important; width:100vw !important; height:100vh !important; }
+
+/* NOVO (09/09/2026), pedido verbatim: "Em 'Info', ao clicar em
+   'Configurações do app' (o ícone) a tela de 'configurações do app' não
+   está abrindo, deve abrir em tela cheia." — sobreposição fixa cobrindo a
+   janela inteira, criada por App._openSettingsFullscreen() (js/app.js) e
+   removida do DOM ao fechar. Mesmo princípio/estrutura de
+   `.organize-overlay` (fixed inset:0 + cabeçalho flex:0 0 auto + corpo
+   flex:1 1 auto rolável), mas com z-index:950 — acima de 900 (fotos/
+   organizar) e do próprio BSPLayout (que não usa z-index especial, corre
+   no fluxo normal do documento), abaixo apenas de toasts/popups globais
+   (900-999, ver #toast-host z-index:999 acima). */
+.settings-fullscreen-overlay {
+  position: fixed; inset: 0; z-index: 950;
+  background: var(--bg, #0b0d10);
+  display: flex; flex-direction: column;
+  animation: organizeFadeIn .2s ease; /* reaproveita a mesma keyframe já definida acima (organizeview) */
+}
+.settings-fullscreen-topbar {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 14px calc(8px + env(safe-area-inset-top, 0));
+  background: linear-gradient(to bottom, rgba(0,0,0,.75), rgba(0,0,0,.4));
+  border-bottom: 1px solid var(--border);
+}
+.settings-fullscreen-title { font-weight: 700; font-size: 14.5px; }
+.settings-fullscreen-body { flex: 1 1 auto; overflow: auto; }

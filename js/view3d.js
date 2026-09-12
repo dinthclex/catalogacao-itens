@@ -7,6 +7,244 @@
  *
  * Física simples (gravidade/pulo) e colisão básica contra as paredes do mapa,
  * no mesmo espírito matemático do motor (engine3d.js) — tudo sem bibliotecas.
+ *
+ * ---------------------------------------------------------------------
+ * [11/09/2026] CABEÇALHO COM ÍNDICE DE FUNÇÕES (pedido recorrente do
+ * usuário, "evitar buscas exaustivas") — arquivo grande (~420KB): índice
+ * pragmático, agrupado por assunto, cobrindo todo método de `const
+ * View3D = {...}`. Reaproveita muito de `js/engine3d.js` por baixo (o
+ * motor de render/raycasting em si).
+ *
+ * Ciclo de vida da tela:
+ * - mount(container,{ambienteId})/unmount() — entra/sai do "Ver em 3D"
+ *   (cria o Engine3D, liga controles, inicia o loop; desliga tudo ao
+ *   sair).
+ * - _rebuildScene() — reconstrói a cena 3D a partir do mapa atual (após
+ *   uma mutação relevante).
+ * - _openMapConfig() — abre o painel ⚙️ (MapConfig, compartilhado com o
+ *   mapa 2D).
+ * - _update(delta)/_loop(t) — passo de física/lógica e o loop principal
+ *   (rAF) que chama tudo a cada quadro.
+ * - _syncModeladorFullscreen() — sincroniza o estado tela-cheia do
+ *   Modelador (BSP Workspace) com o "Ver em 3D".
+ *
+ * Hotbar/roleta de ferramentas de construção (rodapé "Objeto"):
+ * - _initBuildHotbar()/_renderHotbar()/_selectBuildTool(tool)/
+ *   _cycleHotbarList(dir) — monta e controla a barra de ferramentas
+ *   (Objeto/Item/Câmera/Orb de foto/Tijolo/etc.) e a navegação por ela.
+ * - _showRoulette()/_hideRoulette()/_renderRoulette({wake}) — a "roleta"
+ *   circular de escolha rápida de item da hotbar (roda do mouse).
+ * - _toggleObjectCatalogPanel()/_refreshObjectCatalog()/
+ *   _renderObjectCatalogPanel()/_renderTijoloPanel()/_setV3dRightTab() —
+ *   [10/09/2026, UNIFICADO] painel lateral único "+" com 2 abas verticais
+ *   ("Objetos": catálogo de objetos/câmera nova/orb de foto novo;
+ *   "Tijolos": construção livre por blocos) — ver comentário grande no
+ *   HTML de `mount()` e em `_toggleObjectCatalogPanel`.
+ *
+ * Alinhamento/snap ao posicionar (paredes/objetos):
+ * - _applyBussola3DVisibilidade(ativo)/_giroBussola3DParaDirecao(bearingRad)
+ *   — bússola 3D (visibilidade/giro pra apontar uma direção).
+ * - _layerIdParaNovosItens() — qual camada 2D um objeto novo criado no 3D
+ *   deve usar (config "camada3DNovosItens").
+ * - _isWallFreeModeNow()/_isDoorSnapActiveNow()/
+ *   _isObjectGridSnapActiveNow()/_applyObjectGridSnap(x,z)/
+ *   _isDebugTransferidorAtivo()/_isDebugProlongamentoAtivo() — flags/
+ *   aplicação de cada modo de snap (parede livre, encaixe de porta, grade
+ *   de objeto) lidas da config.
+ * - _alignmentModeAtual()/_isCardinalAlignmentActiveNow()/
+ *   _isAnyFixedAlignmentActiveNow()/_cardinalAngleAtual()/
+ *   _nearestCardinalIndex(ang)/_nearestCardinalAngle(ang)/
+ *   _resolveFreeAlignmentAngle(baseRaw) — alinhamento cardinal (N/S/L/O)
+ *   ao girar objetos/paredes livremente.
+ * - _resolveWallSnap(rawX,rawZ,chainStart)/
+ *   _findWallContainingPoint(px,pz,excludeIds)/
+ *   _resolveObjectWallSnap(x,z,w,d,angulo,preferredWall) — encaixe de
+ *   parede nova numa existente / de porta-janela-objeto numa parede.
+ * - _captureFreeRotatePivot() — pivô usado ao girar livremente um objeto
+ *   já colocado.
+ *
+ * Modos de câmera especiais ("assistir"/"ver através"/"Camera Match"):
+ * - _enterCameraView(camId)/_exitCameraView()/_computeWatchCameraPose() —
+ *   modo ESPECTADOR assistindo uma câmera de segurança fixa (pan/tilt/
+ *   zoom por cima; jogador anda sozinho por trás, ver _updateAutopilot).
+ * - _cameraExitViewMode() — [12/09/2026, NOVO; FUNDIDA NESTA RODADA] lê a
+ *   config "Configurações 3D" seção única "Ver através desta câmera"
+ *   (MapConfig.cameraExitViewMode) que decide o que "Sair da câmera" faz:
+ *   manter o ponto de vista travado (padrão) ou voltar ao ponto de vista
+ *   original do personagem — usada por `_exitCameraOrbView` E por
+ *   `_exitFotoCameraView` (via `_fotoOrbExitViewMode()` logo abaixo, que só
+ *   delega). Histórico: chegou a ser 1 chave única, depois 2 chaves
+ *   independentes (correção por "orb de câmera" ser sinônimo de "orb de
+ *   foto", não de "Câmeras"), e voltou a ser 1 chave única nesta rodada por
+ *   pedido explícito do usuário — ver nota grande em mapconfig.js
+ *   DEFAULTS.cameraExitViewMode para os detalhes completos, incluindo a
+ *   investigação desta rodada que NÃO encontrou unificação real dos 2 tipos
+ *   de objeto no código-fonte.
+ * - _fotoOrbExitViewMode() — [12/09/2026, FUNDIDA NESTA RODADA] irmã de
+ *   `_cameraExitViewMode()`, agora só delega pra ela (chave única) — usada
+ *   só por `_exitFotoCameraView`.
+ * - _enterFotoCameraView(fotoId)/_exitFotoCameraView()/
+ *   _computeFotoCamPose()/_fotoCamFovFor(foto) — modo ESPECTADOR "ver
+ *   através desta foto" (vanishCam/orb de foto — TAMBÉM chamado de "orb de
+ *   câmera" na fala do usuário), mesmo espírito do anterior. [12/09/2026:
+ *   entrada esconde a malha esfera+cone(+placa) do próprio orb de foto
+ *   vista através — `setFotoMeshVisible`; saída posiciona `this._camera`
+ *   na pose travada OU na pose original, conforme `_fotoOrbExitViewMode()`
+ *   — antes desta rodada não tocava `this._camera` nenhuma, deixando-o
+ *   onde o passeio automático de fundo tivesse levado.]
+ * - _getFotoCamOpacidade()/_setFotoCamOpacidade(v) — opacidade do guia
+ *   visual (foto sobreposta) nos 2 modos de foto/orb acima.
+ * - [12/09/2026, NOVO — ITEM D; 19/09/2026 SIMPLIFICADO; 22/09/2026
+ *   RODADA SEGUINTE — RESTAURADO, ver nota abaixo]
+ *   _getFotoCamBackdropConfig()/_setFotoCamBackdropConfig(patch) — config
+ *   (GLOBAL, mesmo storage da opacidade) do painel "🖼️ Imagem":
+ *   profundidade (Trás/Frente), ajuste (Esticar/Caber/Cortar), offset X/Y,
+ *   flip H/V, rotação. 'Frente' continua desenhando direto no `<canvas>`
+ *   de overlay 2D (`#v3d-fotocam-photo-canvas`, sempre por cima do
+ *   cenário 3D) via `_updateFotoCamOverlayZoomScale`/`_drawFotoCamPhoto`.
+ *   [19/09/2026] 'Trás' tinha sido SIMPLIFICADO pra usar o MESMO mecanismo
+ *   de 'Frente' (canvas 2D de overlay) — trocava só a ORDEM de impressão,
+ *   nunca oclusão real por objetos 3D verdadeiros (limitação aceita à
+ *   época). [22/09/2026 — RODADA SEGUINTE] REVERTIDO — pedido verbatim do
+ *   usuário testando aquilo: "Volte a colocar a imagem lá no fundo, pois
+ *   os objetos que deveriam estar à frente da imagem não estão." 'Trás'
+ *   voltou a usar um PLANO 3D REAL (`_ensureFotoCamBackdropPlane`/
+ *   `_redrawFotoCamBackdropCanvas`/`_updateFotoCamBackdropPlane`, NOVAS/
+ *   RESTAURADAS — `THREE.Mesh`+`PlaneGeometry`+`CanvasTexture` dentro de
+ *   `engine.scene`, `depthTest:true`/`depthWrite:false`), que participa do
+ *   z-buffer normalmente — oclusão real por objetos 3D de verdade nos 2
+ *   sentidos. Pra EVITAR o bug de cache que a arquitetura antiga deste
+ *   mesmo plano tinha (textura dessincronizada da Resolução/FOV até algo
+ *   forçar redesenho, ver CHANGELOG 11/09/2026), a textura é redesenhada
+ *   INCONDICIONALMENTE a cada quadro (`View3D._loop`/
+ *   `Modeler3D._renderFrame`, nunca só em handlers de config) enquanto
+ *   'Trás' estiver ativo. 'Frente' não mudou em nada.
+ * - [14/09/2026, NOVO — bug do "retângulo amarelo vs. foto muito maior"]
+ *   _activeCamPropsVFovRad() — FOV VERTICAL calibrado (radianos), derivado
+ *   de `camProps.focalLengthMm/sensorWidthMm/sensorHeightMm`, EXTRAÍDA como
+ *   função compartilhada porque essa MESMA fórmula já existia duplicada em
+ *   `js/engine3d.js` (construção do "retângulo amarelo"/frustum,
+ *   `_fotoFrustumMeshesById`) — era a fonte da divergência de tamanho entre
+ *   a foto e o retângulo amarelo (ver `_activeCamFrameRectPx`, logo abaixo,
+ *   e o comentário grande nela — usada hoje pelo `<canvas>` de overlay 2D
+ *   ('Frente') e pelo plano 3D real ('Trás', `_updateFotoCamBackdropPlane`).
+ *   `_activeCamFrameAspect()`/`_activeCamFrameRectPx()` — MESMAS
+ *   de antes, mas `_activeCamFrameRectPx` agora usa
+ *   `_activeCamPropsVFovRad()` (não mais "encaixar por proporção no
+ *   canvas") pra bater com o retângulo amarelo de verdade.
+ * - _renderFotoCamOverlay(foto,onExit)/_removeFotoCamOverlay() — overlay
+ *   compartilhado (guia visual + botão sair) reaproveitado pelos 3 modos
+ *   de câmera (watch/foto/orb).
+ * - _enterCameraOrbView(camId)/_exitCameraOrbView()/_camOrbFovDeg(cam)/
+ *   _renderCameraOrbOverlay(cam) — objeto "Câmeras"/Camera Match: TRAVA a
+ *   câmera de verdade do jogador (não é espectador) na pose calibrada de
+ *   uma câmera "Câmeras", permitindo selecionar/posicionar objetos
+ *   alinhados com a foto de referência. [11/09/2026: entrada esconde a
+ *   malha caixa+cone da própria câmera vista através —
+ *   `setCameraMeshVisible`; saída copia a pose travada exata pra dentro
+ *   da câmera livre. 12/09/2026: saída agora respeita
+ *   `_cameraExitViewMode()` — pose travada (padrão) OU pose original
+ *   salva na entrada.]
+ * - _toggleGlobalXRay(flags)/_playXRayGlassesAnimation() — "óculos de
+ *   raio-X" (ver através de paredes, global).
+ *
+ * Voos de câmera (transições automáticas):
+ * - _startSceneFlythrough()/_yawPitchToward(pos,alvo)/
+ *   _computeFlythroughPose()/_finishFlythrough(pose)/
+ *   _cancelFlythrough()/_updateFlythrough(delta) — sobrevoo automático de
+ *   apresentação da cena inteira.
+ * - _computeBuildBoundsInfo()/_computeVantagePoint(alvo)/_smoothstep(t)/
+ *   flyCameraTo(worldX,worldZ,worldY,opts)/
+ *   flyCameraToArc(worldX,worldZ,worldY,opts)/_computeFlyToPose()/
+ *   _finishFlyTo(pose)/_updateFlyTo(delta) — voo direcionado até um
+ *   ponto/objeto (usado por "👁️ Ver no mapa 3D" da busca/itens/fotos —
+ *   3 modos: direto/décima/órbita, ver mapconfig.js `modoVoo3D`).
+ * - _openView3DSearch() — abre a busca (search.js) de dentro do 3D.
+ *
+ * Movimento do jogador/autopilot:
+ * - _updateAutopilot(delta) — movimento automático do "boneco" quando a
+ *   câmera de render está presa a um modo espectador (watch/foto).
+ * - _resolveCollision(nx,nz,feetY)/_surfaceHeightAt(x,z,feetY) — colisão
+ *   básica contra paredes e altura de piso/superfície sob os pés.
+ * - _jump() — física de pulo.
+ *
+ * Colocar/remover no mapa (ferramenta ativa da hotbar):
+ * - _placeWithBuildTool() — MÉTODO PRINCIPAL de colocação, despacha
+ *   conforme `this._buildTool` (objeto/item/parede/porta/janela/
+ *   câmera-novo/orbfoto-novo/tijolo) — sempre lê `this._camera` de
+ *   verdade (por isso o "orb de câmera" acima funciona sem duplicar
+ *   nada).
+ * - _removeWithTool()/_openDeleteConfirmPopup()/_confirmDeleteHit(hit) —
+ *   ferramenta de apagar (raio-X de mira + confirmação).
+ * - _addOrbWithTool()/_refreshOrbHud() — colocação de "orb" (pino de
+ *   item) e o HUD dele.
+ * - _updateBuildGhost() — atualiza o fantasma/guia (engine3d.js
+ *   showGhost*) conforme a ferramenta/mira atual, a cada quadro.
+ * - _createAndEnterNewCube3D()/_createPrimitiveObjectAndEnter(entry) —
+ *   atalhos de criar um objeto primitivo (cubo/etc.) já "na mão".
+ * - _bindDesktopControls(canvas)/_bindMobileControls(container) — liga
+ *   todos os listeners de teclado/mouse/pointer-lock (desktop) ou
+ *   toque/joystick virtual (mobile).
+ * - _isVirtualCursorOverAddObjBtn() — evita conflito entre o cursor
+ *   virtual (mobile) e o botão "+" flutuante.
+ *
+ * Seleção/cartões 3D (clicar/mirar um alvo):
+ * - _tryPick() — raycast de seleção a partir de `this._camera` (mira
+ *   central), despacha pro cartão certo conforme o tipo do alvo.
+ * - _showTijoloAglomeradoCard3D()/_showObjectCard3D(obj)/
+ *   _showCameraCard3D(cam)/_showFotoPinCard3D(foto)/
+ *   _showOrphanPatrimonioCard3D(obj)/_showFlashcard3D(itemRef)/
+ *   _showMultiFlashcard3D(itemIds) — um cartão 3D por TIPO de alvo
+ *   selecionado (aglomerado de tijolos, objeto genérico, câmera, orb de
+ *   foto, patrimônio órfão, item único, múltiplos itens no mesmo ponto).
+ *
+ * Scripts/componentes (ciclo de vida automático, ver components.js):
+ * - _updateScriptProximityTriggers() — dispara `onProximity` dos
+ *   EventTrigger quando o jogador se aproxima/afasta de uma entidade.
+ * - _updateScriptLifecycle(dt) — chama `Components.tickEntity`
+ *   (Start/Update automáticos) pra toda entidade do mapa, todo quadro.
+ *
+ * Construção livre por "tijolos" (blocos, ferramenta própria):
+ * - _tijoloAimTarget(cfgPreCarregada)/_tijoloPlaceAt(alvo)/
+ *   _placeTijoloClick()/_updateTijoloDrag()/_tijoloUndo()/_tijoloRedo()/
+ *   _paintTijoloClick()/_fillTijoloVolume() — mira/coloca/arrasta/
+ *   desfaz/pinta/preenche tijolos.
+ * - _salvarCarimboTijolos()/_aplicarCarimboTijolos()/
+ *   _excluirCarimboTijolos() — "carimbos" (padrões salvos de tijolos
+ *   reaplicáveis).
+ * - _tijoloAglomeradoVirarObjeto() — converte um aglomerado de tijolos
+ *   num objeto único do mapa.
+ * - _importarConstrucaoTijolos(file) — importa uma construção de tijolos
+ *   de um arquivo.
+ *
+ * Sincronização de dados com o mapa:
+ * - _buildFotosNoMapa()/_buildItensNoMapa() — (re)carrega fotos/itens
+ *   vinculados ao mapa pra cena 3D.
+ * - _afterMapMutated({reloadItems})/_afterObjectAddedIncremental(obj) —
+ *   reage a uma mutação do mapa (reconstrução parcial/incremental em vez
+ *   de reconstruir a cena inteira sempre que possível).
+ * ---------------------------------------------------------------------
+ *
+ * [11/09/2026] RESSALVA — "neblina de distância" (`scene.fog`, ver
+ * engine3d.js) some com QUALQUER material Three.js que não marque
+ * `fog:false` explicitamente, desde que ele fique perto/depois do plano
+ * far configurado (`_fogNear(rd)` até `rd` metros — `rd` pode ser tão
+ * pequeno quanto a distância de renderização escolhida no ⚙️). Isso já
+ * pegou o Sol/Lua (engine3d.js `_buildCelestialBodies`, corrigido antes) e,
+ * nesta rodada, o plano 3D do backdrop 'Trás' da foto de referência
+ * (`_ensureFotoCamBackdropPlane`, abaixo — ele fica de propósito perto do
+ * plano far, a `camera3.far*0.9`), que estava "sumindo" (virando a cor do
+ * céu, já que `scene.fog.color` é sempre igual à cor do céu do momento) —
+ * ver o comentário grande na criação do material daquele plano pra a
+ * investigação completa (incluiu um teste ao vivo, pedido pelo usuário,
+ * desenhando a foto crua sem nenhum fit/offset/rotação, que confirmou que
+ * o problema nunca esteve na composição da imagem, e sim no material).
+ * LIÇÃO: qualquer objeto 3D novo posicionado deliberadamente longe da
+ * câmera (perto ou além do plano far) — HUD 3D, marcador, "coisa colada"
+ * que não deve desbotar com a distância — precisa de `fog:false` explícito
+ * no material, ou vira invisível/lavado na cor do céu sem nenhum erro no
+ * Console pra avisar (o material continua "funcionando" normalmente, só
+ * que o fragment final já sai quase 100% misturado com a cor do fog).
  */
 
 const View3D = {
@@ -49,6 +287,19 @@ const View3D = {
 
   async mount(container, { ambienteId } = {}) {
     this._container = container;
+    // NOVO (08/09/2026), pedido verbatim: "No 'Ver em 3D', como o
+    // Modelador pertence a tela 'Ver em 3D', então, fica dentro dela,
+    // configurável na seção destinada a isso nas 'configurações do app'."
+    // Lido 1x aqui (não a cada quadro — `_update` roda por frame, uma
+    // leitura assíncrona no meio dele seria custosa/complicada) e cacheado
+    // em `this._wsFullscreenCfg`; usado por `_update`/`_syncModeladorFullscreen`
+    // abaixo. Arquiteturalmente o Modelador JÁ é confinado por padrão —
+    // suas telas montam dentro de `view3d._container.querySelector('.view3d-wrap')`
+    // (ver js/modeler/modeler-core.js, `wrapEl`) — este toggle só adiciona
+    // o modo OPT-IN "tela cheia" (cobrindo tudo, como era antes de
+    // qualquer conceito de Workspace/divisão de tela existir).
+    this._wsFullscreenCfg = (typeof DB !== 'undefined') ? await DB.getSetting('workspaceFullscreenConfig', {}) : {};
+    this._modeladorFullscreenActive = false;
     // NOVO (02/09/2026) — garante que tipos de objeto CUSTOMIZADOS (criados
     // via "➕ Criar novo modelo" em Modelos3DView, ver js/modelos3d.js) já
     // apareçam corretamente aqui (perfil/ícone registrados em
@@ -59,7 +310,21 @@ const View3D = {
     if (typeof Modelos3DView !== 'undefined') { await Modelos3DView.ensureCustomTypesRegistered(); }
     container.innerHTML = `
       <div class="view3d-wrap">
-        <canvas id="v3d-canvas"></canvas>
+        <!-- [10/09/2026] NOVO — embrulho só do <canvas> (não do resto da UI
+             solta dentro de .view3d-wrap: HUD/botões/painéis continuam
+             FORA, tamanho normal) pro zoom "lupa" da roda do mouse em
+             _fotoCamMode/_orbCamMode (ver onWheel em _bindDesktopControls,
+             mais abaixo) — CSS transform:scale aplicado aqui por JS.
+             _renderFotoCamOverlay/_renderCameraOrbOverlay anexam o
+             overlay da foto DENTRO deste mesmo elemento (em vez de
+             this._container) — hoje só como agrupador estável, sem
+             nenhum transform: o zoom "lupa" original (CSS scale) foi
+             substituído por FOV real (ver onWheel/_resetCamZoom,
+             pedido do usuário: "não deve dar uma mera ampliação da
+             imagem [...] reconstruindo o desenho da cena"). -->
+        <div class="v3d-camzoom-wrap" id="v3d-camzoom-wrap">
+          <canvas id="v3d-canvas"></canvas>
+        </div>
         <div class="crosshair"></div>
         <!-- Pedido do usuário (03/09/2026): anel de bússola 3D — anel grosso
              branco transparente com os pontos cardeais/colaterais, centrado
@@ -121,6 +386,28 @@ const View3D = {
                arco para o destino e pousa no destino." Ver
                _openView3DSearch/flyCameraToArc. -->
           <button class="icon-btn" id="v3d-search" title="Buscar patrimônio, objeto ou coordenada (x,y) e viajar até lá em arco">🔍 Buscar</button>
+          <!-- [10/09/2026] NOVO — pedido verbatim: "Deve aparecer um
+               retangulo amarelo representado o enquadramento da camera
+               [...] O retangulo amarelo pode ser habilitado e desabilitado
+               por um botao em algum lugar." [10/09/2026, CORRIGIDO na
+               mesma rodada] pedido verbatim: "O botao de enquadramento
+               deve ser so para a camera atual, deve aparecer junto na
+               barra em baixo (onde tem o botao 'Sair da camera')." O
+               botao GLOBAL que existia aqui (ligava/desligava o
+               enquadramento de TODAS as cameras de uma vez) foi removido
+               — o botao agora e por camera, no rodape de "Ver atraves
+               desta camera" (ver o botao de enquadramento em
+               _renderFotoCamOverlay/Engine3D.setCameraFrustumVisible,
+               sem crase aqui de proposito -- risco documentado de crase
+               dentro de comentario HTML dentro de template literal). -->
+          <!-- [10/09/2026] Botão "📐 Camera Match" REMOVIDO por pedido
+               verbatim do usuário: "Remova o 'camera match' do projeto por
+               enquanto." O script que definia PerspMatch não carrega mais
+               (ver index.html), e o listener correspondente também foi
+               removido logo abaixo (procurar por "v3d-perspmatch" no
+               histórico/backup se precisar reverter) — js/perspmatch.js/
+               js/perspmatch-math.js continuam intactos em disco, só não são
+               mais chamados daqui. -->
           <button class="icon-btn icon-btn-corner" id="v3d-config" title="Configurações do 3D (raycasting/destaque)">⚙️<span class="icon-btn-corner-badge">3D</span></button>
         </div>
         <div class="hud3d">
@@ -257,9 +544,101 @@ const View3D = {
           <div class="m3d-sidebar-tabs" id="m3d-sidebar-tabs"></div>
           <div class="m3d-sidebar-content" id="m3d-sidebar-content"></div>
         </div>
+        <!-- [10/09/2026] UNIFICADO, pedido verbatim: "No 'Ver em 3D',
+             unifique os 2 botoes expansiveis da lateral direita. Fica so o
+             '+' para acessar o menu, ao ser aberto, a direita colado a
+             tela, deve ter duas abas: 'Objetos' e 'Tijolos'. Ambas abas
+             devem ser escritas de baixo para cima. Ao clicar em uma aba
+             [...] todo o menu correspondente dela deve aparecer na bandeja
+             do botao lateral direito." ANTES existiam DOIS botoes/paineis
+             de verdade nesta lateral (o '+' de #v3d-objcat-toggle acima, e
+             o antigo botao "tijolo" independente, cada um com seu proprio
+             painel deslizante empurrado um abaixo do outro, top:110px/
+             114px). Agora ha um UNICO painel (#v3d-objcat-panel) com abas
+             verticais (mesma tecnica ja usada no botao ESQUERDO do
+             Modelador, .m3d-sidebar-tabs/.m3d-sidebar-tab em
+             css/modeler3d.css: 'writing-mode:vertical-rl' + 'rotate(180deg)'
+             escreve o texto de baixo para cima, exatamente como pedido) —
+             so espelhada pro lado direito (abas ficam do lado do botao "+",
+             a direita; conteudo rolavel a esquerda delas). '_renderTijoloPanel'
+             (js/view3d.js) continua escrevendo dentro de #v3d-tijolo-panel
+             sem nenhuma mudanca interna — so o elemento deixou de ter seu
+             proprio botao/posicionamento flutuante (ver CSS
+             .v3d-tijolo-panel, style.css) e virou o conteudo da aba
+             "Tijolos". Ver _toggleObjectCatalogPanel (agora unico ponto de
+             abrir/fechar o painel inteiro) e _setV3dRightTab (nova, troca
+             de aba) em view3d.js. -->
         <div class="v3d-objcat-panel hidden" id="v3d-objcat-panel">
-          <div class="v3d-objcat-panel-title">Objetos padrão</div>
-          <div class="v3d-objcat-panel-list" id="v3d-objcat-panel-list"></div>
+          <div class="v3d-objcat-tabcontent">
+            <div id="v3d-objcat-tab-content-objetos">
+              <div class="v3d-objcat-panel-title">Objetos padrão</div>
+              <div class="v3d-objcat-panel-list" id="v3d-objcat-panel-list"></div>
+            </div>
+            <div class="v3d-tijolo-panel hidden" id="v3d-tijolo-panel"></div>
+            <!-- [15/09/2026] NOVO -- pedido verbatim (Parte B): "o botao
+                 dropdown 'Propriedades' [...] deve ficar dentro do botao
+                 '+' [...] Ficando vertical junto com os botoes verticais:
+                 'Objetos' e 'Tijolos'." 3a aba do painel unificado da
+                 lateral direita -- MESMO padrao de "Objetos"/"Tijolos"
+                 acima (aba vertical + conteudo na mesma bandeja rolavel),
+                 so que o conteudo aqui sao 3 secoes recolhiveis empilhadas
+                 (mesmo padrao visual de .m3d-npanel/.m3d-npanel-head/
+                 .m3d-npanel-body do Modelador, ver modeler3d.css -- CSS
+                 nova .v3d-proppanel-* espelha o mesmo estilo) em vez de
+                 uma lista/tabela: "Transformacao" (preenchida por
+                 ModelerUI.updateNPanel quando o Modelador esta ativo -- ver
+                 modeler-ui.js, substituindo o antigo painel flutuante
+                 proprio que existia antes so pra isso), "Fundo" (NOVO --
+                 pedido verbatim: "mostra o que hoje esta em 'Ver atraves
+                 desta camera'->Imagem [...] ainda, coloque o botao
+                 'Escurecer imagem'") e "Camera" (NOVO -- pedido verbatim:
+                 "os botoes 'Enquadramento', 'Escurecer o entorno' e o
+                 conteudo [...] de 'Propriedades'"). Construido/populado
+                 por _renderPropriedadesPanel (view3d.js). -->
+            <div class="v3d-objcat-tab-content-propriedades hidden" id="v3d-objcat-tab-content-propriedades">
+              <!-- [12/09/2026] NOVO -- pedido verbatim: "a seta que aponta
+                   para a direita deve apontar para baixo quando o submenu
+                   [...] estiver aberto." A seta (▶/▼) virou um <i
+                   class="v3d-proppanel-chevron"> à parte (em vez de texto
+                   fixo dentro do <span> do título), pra poder ser trocada
+                   em JS toda vez que a seção abre/fecha -- ver o handler de
+                   clique logo abaixo desta função (mount()), que agora
+                   também atualiza o chevron. Estado inicial de cada seção
+                   já reflete se ela nasce aberta (▼, "Transformação", sem
+                   ".collapsed") ou fechada (▶, "Fundo"/"Câmera", com
+                   ".collapsed").
+                   [13/09/2026] CORRIGIDO -- pedido verbatim: "em
+                   'Transformação' [...], 'Fundo' e 'Câmera' há uma
+                   setinha à direita apontando para baixo em cada um dos 3
+                   botões. Remova-a, nos 3 botões." Existia uma 2ª seta,
+                   SEPARADA da chevron acima (dinâmica ▶/▼, adicionada nesta
+                   MESMA função na rodada anterior) -- um <span>&#9662;</span>
+                   ESTÁTICO à direita de cada cabeçalho (nunca mudava,
+                   sempre apontando pra baixo, mesmo com a seção fechada),
+                   sobra de antes da chevron dinâmica existir. REMOVIDO (a
+                   chevron à esquerda do título, dinâmica, continua sendo a
+                   única seta de cada cabeçalho). Também corrigido
+                   "Transformacao" (sem acento) -> "Transformação" (pedido
+                   verbatim, mesma mensagem). -->
+              <div class="v3d-proppanel-section" id="v3d-proppanel-transformacao">
+                <div class="v3d-proppanel-head" id="v3d-proppanel-transformacao-head"><span><i class="v3d-proppanel-chevron">&#9662;</i> Transformação</span></div>
+                <div class="v3d-proppanel-body" id="v3d-proppanel-transformacao-body"><div class="v3d-proppanel-empty">Nenhuma edicao em andamento (abra o Modelador).</div></div>
+              </div>
+              <div class="v3d-proppanel-section collapsed" id="v3d-proppanel-fundo">
+                <div class="v3d-proppanel-head" id="v3d-proppanel-fundo-head"><span><i class="v3d-proppanel-chevron">&#9656;</i> Fundo</span></div>
+                <div class="v3d-proppanel-body" id="v3d-proppanel-fundo-body"><div class="v3d-proppanel-empty">Disponivel dentro de "Ver atraves desta camera".</div></div>
+              </div>
+              <div class="v3d-proppanel-section collapsed" id="v3d-proppanel-camera">
+                <div class="v3d-proppanel-head" id="v3d-proppanel-camera-head"><span><i class="v3d-proppanel-chevron">&#9656;</i> C&acirc;mera</span></div>
+                <div class="v3d-proppanel-body" id="v3d-proppanel-camera-body"><div class="v3d-proppanel-empty">Disponivel dentro de "Ver atraves desta camera".</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="v3d-objcat-tabs" id="v3d-objcat-tabs">
+            <button type="button" class="v3d-objcat-tab active" id="v3d-objcat-tab-objetos" data-tab="objetos">Objetos</button>
+            <button type="button" class="v3d-objcat-tab" id="v3d-objcat-tab-tijolos" data-tab="tijolos">Tijolos</button>
+            <button type="button" class="v3d-objcat-tab" id="v3d-objcat-tab-propriedades" data-tab="propriedades">Propriedades</button>
+          </div>
         </div>
         <!-- Pedido do usuário (rodada 48): "Deve haver uma animação de um
              óculos sendo colocado na câmera. Apenas um óculos 3D, com lentes
@@ -289,7 +668,29 @@ const View3D = {
     // fixos, corrigindo só a partir da 2ª troca de configuração.
     const cfgInicial = (typeof MapConfig !== 'undefined') ? await MapConfig.get() : null;
     const canvas = container.querySelector('#v3d-canvas');
-    this._engine = new Engine3D(canvas, cfgInicial);
+    // NOVO (07/09/2026), pedido verbatim: "Use este arquivo [exemplo de
+    // múltiplas câmeras com renderer.setViewport/setScissor] para fazer as
+    // várias câmeras, tanto o 'Ver em 3D' quanto a miniatura e, também,
+    // qualquer outro retângulo que possa ser colocado um 'olho' para ver a
+    // cena." — `{ eye: true }` faz este Engine3D (o "Ver em 3D" em tela
+    // cheia — e o Modelador 3D, que reaproveita esta MESMA instância, ver
+    // js/modeler/modeler-render.js) desenhar através do ÚNICO contexto
+    // WebGL compartilhado do app (ver comentário grande "MODO EYE" em
+    // engine3d.js), em vez de um contexto próprio — `#v3d-canvas` vira só
+    // a "moldura" que define ONDE esta instância desenha (seu retângulo na
+    // tela), preservando 100% do comportamento de física/raycasting/
+    // controles já existente (`hoverPick`/`centerRay` sempre miram o
+    // CENTRO da câmera, não uma posição de mouse na tela — funcionam
+    // idênticos não importa o tamanho/posição do retângulo). Ver CSS em
+    // style.css (`.view3d-wrap`) — o fundo sólido que existia ali precisou
+    // virar transparente, senão cobriria o canvas global por trás.
+    this._engine = new Engine3D(canvas, cfgInicial, { eye: true });
+    // [10/09/2026, CORRIGIDO na mesma rodada] a preferência GLOBAL de
+    // enquadramento foi removida (virou um botão por câmera, no rodapé —
+    // ver comentário grande junto ao HTML de `#v3d-frustum-toggle`, agora
+    // removido). Cada gizmo já nasce OCULTO por padrão (`Engine3D`
+    // constructor, `this._frustumGizmosEnabled = false`) — visível só
+    // enquanto o usuário liga o botão desta câmera especificamente.
 
     // Modo de renderização padrão (Configurações › 🧊 Visualização 3D —
     // st-rendermode/render3dModo): aplica ANTES da primeira montagem da cena
@@ -353,6 +754,44 @@ const View3D = {
         // Configurações 3D: aplica ao vivo se o usuário mudar enquanto o 3D
         // já está aberto (ver _applyBussola3DVisibilidade).
         this._applyBussola3DVisibilidade(c.bussola3DAtiva);
+        // [13/09/2026] NOVO, [14/09/2026] AMPLIADO — pedido verbatim
+        // (13/09): "mesmo ativando o debug, não está dando efeito. Por
+        // exemplo, deixei marcada a opção 'Enquadramento de câmera', porém
+        // o retângulo amarelo e todo o aramado da câmera não apareceram.";
+        // pedido verbatim (14/09, mesmo problema persistindo): "se 'Ativar
+        // modo Debug' e 'Enquadramento de câmera' estiverem marcados,
+        // então, o aramado amarelo da câmera [...] deve começar a ser
+        // renderizado. Atualmente, não está sendo renderizado." CAUSA RAIZ
+        // COMPLETA (só achada na 2ª investigação): diferente das outras
+        // opções de Debug (transferidor/prolongamento/alvo-orbital, lidas a
+        // cada QUADRO via `_isDebugXAtivo()` dentro do loop de render —
+        // essas já reagiam ao vivo), a visibilidade do gizmo "retângulo
+        // amarelo"/aramado SEMPRE nasceu ESCONDIDA por padrão (ver
+        // `_frustumGizmosEnabled=false`, comentário grande no `mount()`) e
+        // só ficava visível DEPOIS de entrar em "Ver através desta câmera"
+        // — momento em que não dá pra ver o aramado DA PRÓPRIA câmera
+        // (olhando de DENTRO dela). O pedido descreve olhar PRA a câmera de
+        // FORA, andando pela cena normalmente — por isso a correção de
+        // 13/09 (só reaplicava a câmera "ativa" no momento, dentro do modo
+        // câmera) não resolvia de verdade. CORRIGIDO: reaplica agora,
+        // GLOBALMENTE, em TODAS as câmeras/fotos com frustum de uma vez
+        // (`setCameraFrustumsVisible`, o método plural — ver também a
+        // aplicação equivalente logo após `setScene()`, em
+        // `_rebuildScene()`, que cobre a abertura inicial/qualquer rebuild
+        // da cena).
+        const novoAtivo = this._isDebugEnquadramentoCameraAtivo();
+        this._engine?.setCameraFrustumsVisible?.(novoAtivo);
+        // Se além disso a pessoa estiver DENTRO de "Ver através desta
+        // câmera" agora mesmo, também redesenha o traço-guia do canvas 2D
+        // (`_updateFotoCamOverlayZoomScale`) e sincroniza o botão "🟨
+        // Enquadramento" da aba Propriedades (que reflete só a câmera
+        // ATUAL, não o estado global).
+        const fotoIdAtivo = this._fotoCamMode?.fotoId
+          ?? (this._orbCamMode ? (this._map?.cameras || []).find((cm) => cm.id === this._orbCamMode.camId)?.fotoId : null);
+        if (fotoIdAtivo != null && this._engine?.hasCameraFrustum?.(fotoIdAtivo)) {
+          this._updateFotoCamOverlayZoomScale?.(); // redesenha o traço no canvas 2D (ver comentário grande em _renderPropriedadesPanel, botão "🟨 Enquadramento")
+          this._container?.querySelector('#v3d-proppanel-frustum-toggle')?.classList.toggle('active', novoAtivo);
+        }
       };
       MapConfig.onChange(this._onMapConfigChange);
     }
@@ -372,6 +811,10 @@ const View3D = {
       // com todas as camadas desligadas. Ver Mapping.ensureAllElementsLayered.
       if (Mapping.ensureAllElementsLayered(this._map)) await DB.saveMap(this._map);
       await this._buildItensNoMapa();
+      // [09/09/2026] Ver comentário grande em _buildFotosNoMapa — sem isto,
+      // "orb de foto" nunca aparecia na cena 3D (this._map.fotos nunca era
+      // preenchido aqui, só no editor 2D).
+      await this._buildFotosNoMapa();
       await this._rebuildScene();
     }
     // Camada que estava ativa no 2D no momento em que "Ver em 3D" foi
@@ -437,6 +880,30 @@ const View3D = {
       const yaw = (p2d.angulo || 0) - Math.PI / 2;
       this._camera = { x: p2d.x, y: this.EYE_HEIGHT, z: p2d.y, yaw, pitch: 0 };
     }
+    // [10/09/2026] NOVO — consumo do pedido de entrada direta na visão de um
+    // "orb de câmera" (ver `this._pendingEnterCamOrbId`, campo declarado
+    // acima, e o botão que o seta em mapview.js `_openCameraPanel`). Feito
+    // aqui (mount() já terminando de montar `this._map`/`this._camera`
+    // "normais"), mas a entrada de verdade (`_enterCameraOrbView`, que
+    // também precisa de `this._engine`, criado mais abaixo neste mesmo
+    // mount()) só roda no fim da função — guarda só o id aqui pra não
+    // perdê-lo entre os `await`s deste método.
+    const pendingCamOrbId = this._pendingEnterCamOrbId;
+    this._pendingEnterCamOrbId = null;
+    if (pendingCamOrbId) {
+      // `this._engine` só existe depois do resto deste mount() terminar —
+      // em vez de caçar o ponto exato do `return` (função enorme, alto
+      // risco de editar no lugar errado), espera em pequenos passos até o
+      // engine existir (normalmente 1-2 tentativas) antes de entrar de
+      // verdade — mesmo padrão defensivo de outros "espera X ficar pronto"
+      // já usados no app (ex. _afterObjectAddedIncremental).
+      const tentarEntrarNoOrb = (tentativas) => {
+        if (!this._container) return; // tela fechada/trocada antes de terminar
+        if (this._engine && this._map) { this._enterCameraOrbView(pendingCamOrbId); return; }
+        if (tentativas > 0) setTimeout(() => tentarEntrarNoOrb(tentativas - 1), 80);
+      };
+      setTimeout(() => tentarEntrarNoOrb(40), 0);
+    }
 
     // App.closeView3D (não App.navigate('mapa')) — volta pra Planta baixa
     // direto, de onde "Ver em 3D" foi clicado, em vez de reiniciar a pilha
@@ -459,9 +926,43 @@ const View3D = {
     // Modelador e não cria mais cubo nenhum, só abre o catálogo).
     container.querySelector('#v3d-newcube3d').onclick = () => this._createAndEnterNewCube3D();
     container.querySelector('#v3d-search').onclick = () => this._openView3DSearch();
+    // [10/09/2026] Listener do botão "📐 Camera Match" REMOVIDO junto com o
+    // botão em si (ver comentário grande no HTML dele acima) — pedido
+    // verbatim: "Remova o 'camera match' do projeto por enquanto." O
+    // elemento '#v3d-perspmatch' não existe mais no HTML, então este
+    // listener ficaria sem efeito de qualquer forma; removido por clareza.
+    // js/perspmatch.js/js/perspmatch-math.js continuam intactos em disco,
+    // só não carregam mais (ver index.html) — reversível re-adicionando os
+    // 2 scripts, o botão e este listener.
 
     await this._initBuildHotbar();
     container.querySelector('#v3d-objcat-toggle').onclick = () => this._toggleObjectCatalogPanel();
+    // [10/09/2026] Botão "🧱" independente REMOVIDO (ver comentário grande
+    // no HTML do painel unificado) — as duas abas agora vivem dentro do
+    // mesmo painel/botão "+" acima; ver _setV3dRightTab.
+    container.querySelector('#v3d-objcat-tab-objetos').onclick = () => this._setV3dRightTab('objetos');
+    container.querySelector('#v3d-objcat-tab-tijolos').onclick = () => this._setV3dRightTab('tijolos');
+    // [15/09/2026] NOVO -- 3ª aba "Propriedades" (ver HTML/comentário
+    // grande acima) + os 3 cabeçalhos recolhíveis (Transformação/Fundo/
+    // Câmera) dentro dela -- mesmo padrão de clique-pra-recolher já usado
+    // em `#m3d-npanel-head` (modeler-ui.js), aqui construído 1x aqui
+    // (sobrevive a entrar/sair do Modelador, igual ao resto desta bandeja
+    // unificada) em vez de a cada `build()` do Modelador.
+    container.querySelector('#v3d-objcat-tab-propriedades').onclick = () => this._setV3dRightTab('propriedades');
+    // [12/09/2026] NOVO -- pedido verbatim: "a seta que aponta para a
+    // direita deve apontar para baixo quando o submenu [...] estiver
+    // aberto." Além de alternar ".collapsed", agora também troca o
+    // caractere do ".v3d-proppanel-chevron" (▶ fechado / ▼ aberto) -- ver
+    // comentário grande junto ao HTML destas 3 seções, acima.
+    ['transformacao', 'fundo', 'camera'].forEach((secao) => {
+      const head = container.querySelector(`#v3d-proppanel-${secao}-head`);
+      const sec = container.querySelector(`#v3d-proppanel-${secao}`);
+      const chevron = head?.querySelector('.v3d-proppanel-chevron');
+      if (head && sec) head.onclick = () => {
+        sec.classList.toggle('collapsed');
+        if (chevron) chevron.innerHTML = sec.classList.contains('collapsed') ? '&#9656;' : '&#9662;';
+      };
+    });
     // CORRIGIDO/UNIFICADO (03/09/2026), pedido verbatim: "no botão '+' da
     // lateral esquerda, deve ter os botões que tinha antes. Não é para
     // abrir o mesmo menu que o botão direito abre" + (rodada seguinte,
@@ -503,7 +1004,20 @@ const View3D = {
       const pid = window.__modelerPendingObjectId;
       window.__modelerPendingObjectId = null;
       const alvo = (this._map.objects || []).find((o) => o.id === pid);
-      if (alvo && window.Modeler3D) setTimeout(() => window.Modeler3D.enter(this, alvo), 0);
+      // NOVO (07/09/2026), pedido verbatim: "inquebrável, tudo com estrutura
+      // try{}catch(){} [...]" — `Modeler3D.enter` rodando dentro de um
+      // `setTimeout` significa que uma exceção aqui vira uma rejeição/erro
+      // NÃO capturável por quem chamou `mount()` (o `try/catch` de
+      // `App.openView3D`, ver app.js, já retornou muito antes deste
+      // callback disparar) — sem proteção própria, isso ficava só no
+      // console, sem nenhum aviso na tela.
+      if (alvo && window.Modeler3D) setTimeout(() => {
+        try { window.Modeler3D.enter(this, alvo, { enterOrbital: !(this._orbCamMode || this._fotoCamMode) }); } // [12/09/2026 — ITEM C]
+        catch (err) {
+          if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError('Modelador 3D', err);
+          else console.error('Falha ao entrar no Modelador 3D:', err);
+        }
+      }, 0);
     }
   },
 
@@ -517,6 +1031,33 @@ const View3D = {
     // antigo (o mesmo tipo de vazamento que os outros unbinds desta função já
     // evitam para os controles do próprio View3D).
     if (window.Modeler3D?.isActive?.()) window.Modeler3D.exit({ skipRebuild: true });
+    // [13/09/2026] NOVO — pedido verbatim (pilha de "Sair", ver comentário
+    // grande em `_exitModeladorSeAtivo`/`_exitCameraView`): "Ao clicar em
+    // 'Sair do 3D', estando no modo 'Ver através desta câmera' [...] a
+    // posição em que o personagem estava ao se entrar no modo 'Ver através
+    // de uma câmera' deve ser preservada." CAUSA RAIZ do bug relatado: sair
+    // "de uma vez" pelo "✕ Sair do 3D" nunca passava por
+    // `_exitFotoCameraView`/`_exitCameraOrbView`/`_exitCameraView` (só por
+    // este `unmount()`, direto) — são essas 3 funções (ver cada uma) que
+    // reposicionam `this._camera` de volta pra pose travada da câmera OU
+    // pra pose original de antes de entrar (conforme a preferência em
+    // Configurações), desfazendo o passeio do "piloto automático" que roda
+    // por baixo o tempo todo enquanto um desses modos está ativo (ver
+    // `_updateAutopilot`, chamado a cada quadro por `_loop` enquanto
+    // `_camMode`/`_fotoCamMode`/`_fotoCamMode` estiver setado). Sem chamar
+    // a função de saída certa primeiro, a sincronização abaixo (`this.
+    // _camera.x/y/z` -> `MapView._personagem2D`) gravava a posição ATUAL do
+    // piloto automático (podendo estar "mais longe" do que o personagent
+    // deveria) em vez da pose corrigida. Chamado ANTES da sincronização,
+    // igual ao Sobrevoo automático logo abaixo (mesmo motivo/mesmo
+    // padrão) — cada função já cuida de zerar o próprio modo (`_camMode`/
+    // `_fotoCamMode`/`_orbCamMode`) e, por sua vez, chama
+    // `_exitModeladorSeAtivo()` de novo no próprio topo (idempotente, já
+    // não há mais nada pra sair a essa altura — Modelador já foi encerrado
+    // na linha acima).
+    if (this._camMode) this._exitCameraView();
+    if (this._fotoCamMode) this._exitFotoCameraView();
+    if (this._orbCamMode) this._exitCameraOrbView();
     // Sobrevoo automático (rodada 48) ainda rodando ao sair do 3D — encerra
     // AGORA (grava a pose atual em `this._camera`) antes da sincronização
     // com `MapView._personagem2D` logo abaixo, senão ela gravaria a posição
@@ -566,8 +1107,54 @@ const View3D = {
     // vezes esgotaria o limite de contextos WebGL simultâneos do navegador.
     this._engine?.dispose?.();
     this._engine = null;
+    // [12/09/2026] CORRIGIDO — bug real reportado: "No 'Trás', a imagem não
+    // está aparecendo. No 'Frente' está funcionando tudo." CAUSA RAIZ
+    // ENCONTRADA: `this._fotoCamBackdropMesh`/`_fotoCamBackdropCanvas`/
+    // `_fotoCamBackdropCtx`/`_fotoCamBackdropTexture` (plano 3D real do
+    // backdrop 'Trás', restaurado na rodada anterior — ver
+    // `_ensureFotoCamBackdropPlane`) são guardados como campos DESTE objeto
+    // `this` (o módulo View3D, um singleton reaproveitado por toda a vida da
+    // página — nunca uma instância nova por sessão), mas NUNCA eram
+    // resetados aqui, em `unmount()`. `mount()` (logo acima nesta mesma
+    // classe) SEMPRE cria um `new Engine3D(...)` do zero a cada vez que "Ver
+    // em 3D" é aberto (`this._engine = new Engine3D(...)`), com uma
+    // `THREE.Scene` NOVA por baixo (`engine3d.js` construtor, `this.scene =
+    // new THREE.Scene()`) — mas `_ensureFotoCamBackdropPlane()` tem uma
+    // guarda de "criar só uma vez" (`if (this._fotoCamBackdropMesh) return
+    // this._fotoCamBackdropMesh;`) que, sem este reset, devolvia o mesh
+    // ÓRFÃO da cena ANTERIOR (já descartada por `this._engine.dispose()`
+    // acima) sem NUNCA adicioná-lo à cena NOVA (`engine.scene.add(mesh)` só
+    // roda dentro do `if (!this._fotoCamBackdropMesh)`, pulado sempre que já
+    // havia um valor salvo de uma sessão 3D anterior). Resultado exato do
+    // bug relatado: a 1ª vez que se abre "Ver em 3D" numa aba do navegador e
+    // entra em "Ver através desta câmera" → "Trás", o plano aparece
+    // normalmente (campo ainda `undefined`, criado do zero, adicionado à
+    // única cena que existe); a partir da 2ª vez que "Ver em 3D" é fechado e
+    // reaberto NA MESMA aba (recarregar a página não conta — os campos deste
+    // módulo voltam a `undefined`), o plano nunca mais aparece, porque
+    // continua sendo reposicionado/redesenhado todo quadro (sem erro
+    // nenhum — daí não haver nenhuma exceção no console) DENTRO de uma cena
+    // que já não existe mais/não é mais renderizada. O `<img>`/canvas 2D do
+    // modo 'Frente' nunca teve este problema porque é recriado do zero a
+    // cada `_renderFotoCamOverlay()` (elemento DOM novo, nunca reaproveitado
+    // entre sessões) — só o plano 3D 'Trás' guardava estado entre sessões.
+    // CORRIGIDO: reseta os 4 campos aqui, em `unmount()` (chamado sempre que
+    // "Ver em 3D" fecha, ANTES do próximo `mount()` poder rodar) — na
+    // próxima vez que `_ensureFotoCamBackdropPlane()` for chamado, o guard
+    // `if (this._fotoCamBackdropMesh)` vê `null` de novo e recria tudo
+    // (canvas/textura/material/mesh) do zero, adicionado à cena NOVA de
+    // verdade.
+    this._fotoCamBackdropMesh = null;
+    this._fotoCamBackdropTexture = null;
     if (this._onMapConfigChange && typeof MapConfig !== 'undefined') MapConfig.offChange(this._onMapConfigChange);
     this._onMapConfigChange = null;
+    // NOVO (08/09/2026): desfaz o popup "tela cheia" do Modelador, se
+    // estava ativo, e libera o registro no WindowManager — senão o
+    // container antigo (prestes a ser esquecido) ficaria com a classe CSS
+    // presa e o WindowManager com uma entrada órfã.
+    if (this._modeladorFullscreenActive && this._container) this._container.classList.remove('view3d-modelador-fullscreen');
+    if (typeof WindowManager !== 'undefined') WindowManager.unregister('view3d-modelador-fullscreen');
+    this._modeladorFullscreenActive = false;
     this._container = null;
   },
 
@@ -596,6 +1183,62 @@ const View3D = {
     const walls = Mapping.analyzeWalls(mapaVisivel, { cornerJoinDist });
     this._analyzedWalls = walls;
     this._engine.setScene({ ...mapaVisivel, walls });
+    // [14/09/2026] CORRIGIDO — pedido verbatim: "ao clicar em uma câmera e
+    // selecionar 'Ver através desta câmera', no Modelador, ao entrar e sair
+    // do Modelador, o cone da câmera selecionada acaba voltando a parecer e
+    // fica na frente da tela." BUG CONFIRMADO: `Engine3D.setScene` (linha
+    // acima) reconstrói `_cameraMeshesById`/`_fotoMeshesById` DO ZERO a
+    // cada chamada (ver comentário grande no topo desses índices, em
+    // engine3d.js) — toda malha nasce visível por padrão, sem nenhuma
+    // memória de que `_enterCameraOrbView`/`_enterFotoCameraView` já tinha
+    // escondido a malha da câmera/orb ATUAL (o "olho" de render fica bem
+    // no ponto dela, então a malha dela mesma cobre a tela inteira "na
+    // frente da câmera" — exatamente o sintoma relatado). `Modeler3D.exit()`
+    // chama `view3d._rebuildScene?.()` (aqui) sempre que sai do Modelador
+    // (skipRebuild não usado nesse caminho) — antes desta correção, sair do
+    // Modelador enquanto ainda em `_orbCamMode`/`_fotoCamMode` sempre
+    // perdia esse esconder. CORRIGIDO: reaplica o mesmo esconder, agora
+    // DEPOIS do `setScene`, sempre que ainda estiver num desses 2 modos —
+    // mesmo par de chamadas usado em `_enterCameraOrbView`/
+    // `_enterFotoCameraView` (inclusive a foto VINCULADA de uma câmera
+    // "Câmeras", `cam.fotoId` — mesma causa raiz do bug "duas fotos" já
+    // corrigido antes, ver `_enterCameraOrbView`).
+    if (this._orbCamMode) {
+      const cam = (this._map.cameras || []).find((c) => c.id === this._orbCamMode.camId);
+      this._engine?.setCameraMeshVisible?.(this._orbCamMode.camId, false);
+      if (cam?.fotoId != null) this._engine?.setFotoMeshVisible?.(cam.fotoId, false);
+    }
+    if (this._fotoCamMode) {
+      this._engine?.setFotoMeshVisible?.(this._fotoCamMode.fotoId, false);
+    }
+    // [14/09/2026] NOVO — pedido verbatim: "na seção 'Debug', se 'Ativar
+    // modo Debug' e 'Enquadramento de câmera' estiverem marcados, então, o
+    // aramado amarelo da câmera que produz o retângulo amarelo na
+    // perspectiva dela deve começar a ser renderizado. Atualmente, não está
+    // sendo renderizado." CAUSA RAIZ: o gizmo (retângulo amarelo + linhas
+    // até os cantos, `Engine3D._fotoFrustumMeshesById`) sempre nasceu
+    // ESCONDIDO por padrão em `setScene` (`m.visible =
+    // this._frustumGizmosEnabled`, engine3d.js — esse flag interno nunca
+    // muda mais, virou vestigial desde que o botão GLOBAL de enquadramento
+    // foi trocado por um por-câmera, ver comentário grande no `mount()`
+    // acima) — e só ficava visível DEPOIS de entrar em "Ver através desta
+    // câmera" daquela câmera especificamente (`_renderFotoCamOverlay`, mais
+    // abaixo), momento em que a pessoa está OLHANDO A PARTIR da própria
+    // câmera (não dá pra ver o aramado da própria câmera de dentro dela).
+    // Pra ver o "aramado"/retângulo amarelo de verdade (olhando PRA a
+    // câmera, de fora, andando pela cena normalmente — o que o pedido
+    // descreve), a opção de Debug precisa ligar TODOS os gizmos de uma vez,
+    // não só o da câmera "ativa" no momento. CORRIGIDO: reaplica aqui,
+    // GLOBALMENTE (todas as câmeras/fotos com frustum de uma vez, via
+    // `setCameraFrustumsVisible` — o método plural, que também grava o
+    // novo padrão em `_frustumGizmosEnabled` pra sobreviver a um próximo
+    // `setScene`/troca de andar), toda vez que a cena é (re)montada — cobre
+    // tanto a 1ª abertura do "Ver em 3D" quanto qualquer rebuild posterior
+    // (edição de parede/objeto, troca de camadas, etc.). A reação AO VIVO a
+    // mudanças de configuração feitas com o 3D já aberto (sem precisar
+    // fechar/reabrir) é tratada à parte, no handler `_onMapConfigChange`
+    // (ver `mount()`, mais acima).
+    this._engine?.setCameraFrustumsVisible?.(this._isDebugEnquadramentoCameraAtivo());
   },
 
   /** Painel único de configurações do mapa 2D/3D (ver mapconfig.js), aberto
@@ -770,6 +1413,79 @@ const View3D = {
     // busca assíncrona (já faz parte do mapa carregado).
     this._cameraIndex = 0;
     this._camMode = null; // { camId, pan, tilt, zoomFov } quando "assistindo" uma câmera fixa — ver _enterCameraView
+    // [10/09/2026] RESTAURADO — todo o recurso "ver através desta câmera"/
+    // vanishCam (este campo + _enterFotoCameraView/_exitFotoCameraView/
+    // _computeFotoCamPose/_fotoCamFovFor/_renderFotoCamOverlay mais abaixo,
+    // e o botão "👁️ Ver através desta câmera" em _showFotoPinCard3D) tinha
+    // se perdido nesta cópia de trabalho — existia num backup do projeto
+    // mais completo (ver comentário grande em js/mapview.js
+    // _openFotoPinWheel). Pedido verbatim original (09/09/2026): "No 'Ver
+    // em 3D', deve ser possível clicar na câmera do orb de câmera e 'entrar
+    // nela' [...] assim como no blender é possível 'ver através da câmera'
+    // [...]" — MESMO padrão arquitetural de `_camMode`/
+    // `_computeWatchCameraPose` acima (câmeras de segurança fixas), só que
+    // pra fotos vinculadas ao mapa (orbs de foto/câmera, ver mapview.js/
+    // engine3d.js). Nunca ativo ao mesmo tempo que `_camMode` (um sempre
+    // sai do outro antes de entrar — ver _enterFotoCameraView).
+    this._fotoCamMode = null; // { fotoId } quando "vendo através" de um orb de foto/câmera
+    // [10/09/2026] NOVO — pedido verbatim: "Com o shift+b deve ser possível
+    // mover panoramicamente, quando se está no 'Ver através desta
+    // câmera'." CORRIGIDO 2x na mesma rodada: (a) usuário esclareceu que o
+    // gatilho era Shift + BOTÃO DO MEIO DO MOUSE, não a tecla "B"; (b)
+    // usuário então rejeitou a técnica em si, com 2 capturas do Blender:
+    // "O shift+ botão do meio do mouse não pode mudar a perspectiva. A
+    // perspectiva deve ser preservada [...] É como pegar uma foto e só
+    // movê-la para o lado, a foto não muda, mas a posição sim." Por isso
+    // `x`/`y` aqui NÃO são mais um deslocamento de POSIÇÃO no mundo (isso
+    // mudaria a perspectiva de verdade — paralaxe) — são frações
+    // ADIMENSIONAIS (da largura/altura do quadro) de um deslocamento de
+    // "lente"/janela de projeção (`Engine3D.setCamPanFrac`, ver
+    // engine3d.js): a câmera/orb calibrada NUNCA muda de posição/pose/FOV
+    // real, só a JANELA do frustum desloca dentro do quadro — exatamente
+    // como arrastar uma foto por baixo de uma máscara fixa. Acumulado a
+    // partir do movimento do mouse (ver onMouseMove) enquanto Shift +
+    // botão do meio do mouse estiver segurado; `_resetCamZoom` zera isto
+    // (e o offset de verdade em `camera3` via `setCamPanFrac(0,0)`) ao
+    // entrar/sair de `_fotoCamMode`/`_orbCamMode`.
+    this._camViewPanOffset = { x: 0, y: 0 };
+    this._fotoCamSavedPose = null; // [12/09/2026] pose livre de `this._camera` no instante de `_enterFotoCameraView` — restaurada em _exitFotoCameraView se "Sair da câmera" estiver configurado como "voltar ao ponto de vista original" (ver _fotoOrbExitViewMode)
+    // [12/09/2026 — ITEM A] FOV do personagem capturado no instante de
+    // `_enterFotoCameraView`/`_enterCameraOrbView` (ANTES de aplicar o FOV
+    // calibrado da câmera/foto) — pedido verbatim: "o FOV [...] do
+    // personagem deve voltar a ser o que era antes de clicar em 'Ver
+    // através desta câmera' [...] deve ser preservado e não ficar o FOV da
+    // câmera em que ele está vendo através", mesmo com "Permanece com o
+    // ponto de vista da câmera" marcada. Diferente de `_fotoCamSavedPose`/
+    // `_orbCamSavedPose` (só usados quando a opção é "voltar ao original"),
+    // o FOV salvo aqui é restaurado SEMPRE em `_exitFotoCameraView`/
+    // `_exitCameraOrbView`, independente da opção "Sair da câmera"
+    // escolhida — só posição/orientação seguem a opção configurada, o FOV
+    // nunca fica sendo o da câmera vista através.
+    this._fotoCamSavedFov = null;
+    this._orbCamSavedFov = null;
+    // [10/09/2026] NOVO — redesenho do "Camera Match" pedido verbatim: "não
+    // deve ser uma tela a parte [...] deve ser no próprio cenário 3D [...]
+    // com um 'orb de câmera' deve dar para ver através dele. Com a câmera do
+    // personagem fixa pela visão do 'orb de câmera' deve ser possível
+    // continuar interagindo com o mapa do mesmo jeito que antes." Diferente
+    // de `_camMode`/`_fotoCamMode` acima (que são modos de ESPECTADOR: só
+    // sobrescrevem a pose RENDERIZADA — ver `renderCam` em `_loop` — enquanto
+    // `this._camera`, usado por TODO o raycasting de seleção/posicionamento
+    // de objetos, continua livre/andando sozinho por trás), este modo trava
+    // `this._camera` DE VERDADE na pose calibrada da câmera — é por isso que
+    // toda a interação (raycastFloor/raycastWall/seleção, todas em cima de
+    // `this._camera`) continua funcionando sem duplicar nenhuma lógica: elas
+    // já usam a câmera "de verdade", que agora É a do orb. Ver
+    // _enterCameraOrbView/_exitCameraOrbView mais abaixo (perto de
+    // _enterFotoCameraView, mesma vizinhança) e o re-trava-a-cada-quadro em
+    // `_loop` (busca por "_orbCamLockedPose" lá).
+    this._orbCamMode = null; // { camId } quando travado na visão de um objeto "Câmeras" (orb de câmera)
+    this._orbCamLockedPose = null; // pose {x,y,z,yaw,pitch} travada — reaplicada todo quadro em _loop
+    this._orbCamSavedPose = null; // pose livre de antes de entrar, restaurada ao sair
+    // Setado pelo painel 2D da câmera (mapview.js _openCameraPanel, botão
+    // "👁️ Ver em 3D através desta câmera") ANTES de navegar pra cá — ver uso
+    // logo depois de `camAtiva`/`p2d` acima neste mesmo mount().
+    if (this._pendingEnterCamOrbId === undefined) this._pendingEnterCamOrbId = null;
     this._renderHotbar();
   },
 
@@ -805,6 +1521,21 @@ const View3D = {
   _renderHotbar() {
     const bar = this._container?.querySelector('#v3d-hotbar');
     if (!bar) return;
+    // [11/09/2026] NOVO — pedido verbatim: "Os botões de controle do 'Ver
+    // através desta câmera' acabaram ficando atrás dos botões de rodapé
+    // ('Mirar', ...)." Em vez de arbitrar z-index entre a hotbar de
+    // construção e a barra de controles do overlay de câmera (ver
+    // css/style.css `.v3d-hotbar`/`.v3d-fotocam-overlay-controls`), a
+    // hotbar simplesmente não faz sentido nenhum durante `_fotoCamMode`/
+    // `_orbCamMode` (não dá pra trocar de ferramenta de construção
+    // enquanto "vendo através" de uma câmera travada) — escondida aqui,
+    // as duas barras nunca mais disputam a mesma área da tela. Chamada de
+    // novo automaticamente ao entrar/sair desses modos (`_renderHotbar()`
+    // já é chamada em `_enterCameraOrbView`/`_exitCameraOrbView`/
+    // `_enterFotoCameraView`/`_exitFotoCameraView`).
+    const escondida = !!(this._fotoCamMode || this._orbCamMode);
+    bar.classList.toggle('hidden', escondida);
+    if (escondida) { bar.innerHTML = ''; return; }
     const objEntry = this._objectCatalog[this._objectIndex];
     const itemEntry = this._unsortedItems[this._itemIndex];
     const camEntry = (this._map?.cameras || [])[this._cameraIndex];
@@ -866,7 +1597,7 @@ const View3D = {
     // HUD "estilo jogo" da ferramenta "📍 Adicionar orb" — mostra/esconde e
     // recalcula os números ao entrar/sair da ferramenta (ver _refreshOrbHud).
     this._refreshOrbHud();
-    const nomes = { parede: 'Parede — clique no chão pra marcar o 1º ponto, de novo pro 2º (e segue encadeando); botão do meio, Enter ou clicar em 🧱 de novo conclui', porta: 'Porta — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', janela: 'Janela — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', objeto: 'Objeto — role o mouse pra escolher o tipo, clique pra colocar', item: 'Item — role o mouse pra escolher o patrimônio sem lugar, clique pra colocar', camera: 'Câmeras — role o mouse pra escolher qual câmera fixa, clique pra "assistir" por ela (mova o mouse pra olhar em volta, limitado; role pra zoom); clique em 📷 de novo pra sair', remover: 'Remover — mire em item/câmera/objeto/parede/porta/janela e clique pra remover da cena', orb: 'Adicionar orb — mire num objeto e clique pra abrir a busca de patrimônio e associá-lo a ele' };
+    const nomes = { parede: 'Parede — clique no chão pra marcar o 1º ponto, de novo pro 2º (e segue encadeando); botão do meio, Enter ou clicar em 🧱 de novo conclui', porta: 'Porta — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', janela: 'Janela — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', objeto: 'Objeto — role o mouse pra escolher o tipo, clique pra colocar', item: 'Item — role o mouse pra escolher o patrimônio sem lugar, clique pra colocar', camera: 'Câmeras — role o mouse pra escolher qual câmera fixa, clique pra "assistir" por ela (mova o mouse pra olhar em volta, limitado; role pra zoom); clique em 📷 de novo pra sair', 'camera-novo': 'Câmera — clique no chão pra criar uma câmera nesse ponto; pode ir clicando pra colocar várias seguidas (mesma câmera/orb usada no mapa 2D)', 'orbfoto-novo': 'Orb de foto — clique no chão, escolha uma foto sem vínculo pra colocar ali; pode ir clicando pra colocar várias seguidas', remover: 'Remover — mire em item/câmera/objeto/parede/porta/janela e clique pra remover da cena', orb: 'Adicionar orb — mire num objeto e clique pra abrir a busca de patrimônio e associá-lo a ele', tijolo: 'Blocos de construção — clique pra colocar 1 tijolo em cima da superfície mirada; segure Ctrl + botão esquerdo pra ir colocando vários seguidos no mesmo nível', 'tijolo-pintar': '🎨 Pintar tijolos — mire num tijolo já colocado e clique pra aplicar a cor/textura atual do menu nele' };
     if (tool) Utils.toast(nomes[tool] || tool, { duration: 2600 });
   },
 
@@ -995,6 +1726,16 @@ const View3D = {
   // modeler-ui.js) — ver comentário grande junto ao HTML do botão "+"
   // (`#m3d-sidebar-toggle`), no topo de `mount()`.
 
+  /** [10/09/2026] UNIFICADO — pedido verbatim: "unifique os 2 botões
+   *  expansíveis da lateral direita. Fica só o '+' [...] deve ter duas
+   *  abas: 'Objetos' e 'Tijolos' [...] Ao clicar em uma aba [...] todo o
+   *  menu correspondente dela deve aparecer na bandeja do botão lateral
+   *  direito." ANTES eram 2 funções quase idênticas (`_toggleObjectCatalogPanel`
+   *  e `_toggleTijoloPanel`, uma pra cada botão/painel independente) — agora
+   *  só esta, controlando o ÚNICO botão/painel que sobrou (#v3d-objcat-
+   *  toggle/#v3d-objcat-panel). Abrir sempre mostra a aba lembrada da
+   *  última vez nesta sessão (`this._v3dRightTab`, ver `_setV3dRightTab`
+   *  logo abaixo — começa em 'objetos' por padrão). */
   _toggleObjectCatalogPanel() {
     const toggle = this._container?.querySelector('#v3d-objcat-toggle');
     const panel = this._container?.querySelector('#v3d-objcat-panel');
@@ -1017,13 +1758,450 @@ const View3D = {
       // clicando ali, a janela se recolhe)."
       toggle.textContent = '➜';
       requestAnimationFrame(() => { panel.classList.add('open'); });
-      this._renderObjectCatalogPanel();
+      this._setV3dRightTab(this._v3dRightTab || 'objetos');
     } else {
       toggle.classList.remove('open');
       toggle.textContent = '+';
       panel.classList.remove('open');
       setTimeout(() => panel.classList.add('hidden'), 220); // espera a transição (.2s, ver CSS) antes de sumir de vez
     }
+  },
+
+  /** [10/09/2026] NOVA — troca a aba ativa dentro do painel unificado da
+   *  lateral direita ('objetos'/'tijolos'), mostrando só o conteúdo
+   *  daquela aba na bandeja ("todo o menu correspondente dela deve
+   *  aparecer na bandeja do botão lateral direito", pedido verbatim) e
+   *  chamando a função de renderização certa (a mesma de sempre, cada uma
+   *  já existia antes da unificação — só passaram a dividir a mesma
+   *  bandeja em vez de 2 painéis flutuantes separados). Lembrada em
+   *  `this._v3dRightTab` pra reabrir na mesma aba depois. */
+  _setV3dRightTab(tab) {
+    // [15/09/2026] CORRIGIDO -- pedido verbatim (Parte B): nova 3ª aba
+    // "Propriedades" (ver HTML/comentário grande em mount()) -- MESMO
+    // padrão das outras 2, só mais um valor possível pra
+    // `this._v3dRightTab`/mais um par de classList.toggle.
+    this._v3dRightTab = tab === 'tijolos' ? 'tijolos' : (tab === 'propriedades' ? 'propriedades' : 'objetos');
+    const container = this._container;
+    if (!container) return;
+    container.querySelector('#v3d-objcat-tab-objetos')?.classList.toggle('active', this._v3dRightTab === 'objetos');
+    container.querySelector('#v3d-objcat-tab-tijolos')?.classList.toggle('active', this._v3dRightTab === 'tijolos');
+    container.querySelector('#v3d-objcat-tab-propriedades')?.classList.toggle('active', this._v3dRightTab === 'propriedades');
+    container.querySelector('#v3d-objcat-tab-content-objetos')?.classList.toggle('hidden', this._v3dRightTab !== 'objetos');
+    container.querySelector('#v3d-tijolo-panel')?.classList.toggle('hidden', this._v3dRightTab !== 'tijolos');
+    container.querySelector('#v3d-objcat-tab-content-propriedades')?.classList.toggle('hidden', this._v3dRightTab !== 'propriedades');
+    if (this._v3dRightTab === 'objetos') this._renderObjectCatalogPanel();
+    else if (this._v3dRightTab === 'tijolos') this._renderTijoloPanel();
+    else this._renderPropriedadesPanel();
+  },
+
+  /** [15/09/2026] NOVO -- pedido verbatim (Parte B, ver CHANGELOG do
+   *  projeto pra citação completa): monta/atualiza o conteúdo das seções
+   *  "Fundo" e "Câmera" da aba lateral direita "Propriedades" (a 3ª seção,
+   *  "Transformação", é preenchida à parte por `ModelerUI.updateNPanel`,
+   *  modeler-ui.js -- só faz sentido dentro de uma sessão do Modelador,
+   *  nada a ver com "Ver através desta câmera").
+   *  "Fundo" reaproveita a MESMA HTML/wiring que antes vivia no botão/
+   *  painel flutuante "🖼️ Imagem" (`_fotoCamBackdropPanelHtml`/
+   *  `_wireFotoCamBackdropPanel`, sem nenhuma mudança nelas -- só passam a
+   *  ser montadas AQUI em vez de dentro do `wrap` de `_renderFotoCamOverlay`)
+   *  + o botão "🌒 Escurecer imagem" (antes na barra debaixo). "Câmera"
+   *  reaproveita os botões "🟨 Enquadramento"/"🌑 Escurecer o entorno"/
+   *  "ℹ️ Informações do vanishCam" (idem, mesma lógica, só realocados) + o
+   *  fieldset "⚙️ Propriedades" de verdade (`_wireLiveCamPropsPanel`,
+   *  idem). Chamada (a) com `opts.rebuild:true` ao entrar em "Ver através
+   *  desta câmera" (`_renderFotoCamOverlay`/`_renderCameraOrbOverlay`) --
+   *  reconstrói do zero pra câmera/foto nova -- e (b) sem forçar
+   *  reconstrução ao clicar na aba (`_setV3dRightTab`) ou ao sair
+   *  (`_removeFotoCamOverlay`) -- nesse caso só é reconstruído se ainda não
+   *  tinha sido (`dataset.built`) ou se saiu de "Ver através desta
+   *  câmera" (mostra o aviso "Disponível dentro de..."). Fora deste modo,
+   *  as 2 seções mostram esse aviso; `foto`/`temFrustum`/`hasImage` ficam
+   *  cacheados em `this._fotoCamActiveFoto`/etc. pra funcionar mesmo
+   *  quando chamada sem args (clique na aba). */
+  _renderPropriedadesPanel(opts) {
+    const container = this._container;
+    if (!container) return;
+    const fundoBody = container.querySelector('#v3d-proppanel-fundo-body');
+    const cameraBody = container.querySelector('#v3d-proppanel-camera-body');
+    if (!fundoBody || !cameraBody) return;
+    const rebuild = !!opts?.rebuild;
+    if (opts?.foto !== undefined) this._fotoCamActiveFoto = opts.foto;
+    if (opts?.temFrustum !== undefined) this._fotoCamActiveTemFrustum = opts.temFrustum;
+    if (opts?.hasImage !== undefined) this._fotoCamActiveHasImage = opts.hasImage;
+    const foto = this._fotoCamActiveFoto;
+    const emCameraView = !!(this._fotoCamMode || this._orbCamMode) && !!foto && !!this._fotoCamOverlayEl;
+    if (!emCameraView) {
+      fundoBody.innerHTML = '<div class="v3d-proppanel-empty">Disponível dentro de "Ver através desta câmera".</div>';
+      cameraBody.innerHTML = '<div class="v3d-proppanel-empty">Disponível dentro de "Ver através desta câmera".</div>';
+      delete fundoBody.dataset.built;
+      delete cameraBody.dataset.built;
+      return;
+    }
+    const wrap = this._fotoCamOverlayEl;
+    const temFrustum = this._fotoCamActiveTemFrustum;
+    const hasImage = this._fotoCamActiveHasImage !== false;
+    if (rebuild || !fundoBody.dataset.built) {
+      if (!hasImage) {
+        fundoBody.innerHTML = '<div class="v3d-proppanel-empty">Sem imagem de referência associada a esta câmera.</div>';
+      } else {
+        fundoBody.innerHTML = this._fotoCamBackdropPanelHtml()
+          + '<button type="button" class="btn secondary sm" id="v3d-proppanel-darkimg-toggle" title="Escurece a imagem de referência (facilita comparar com o cenário 3D por baixo)">🌒 Escurecer imagem</button>';
+        const backdropPanel = fundoBody.querySelector('#v3d-fotocam-backdrop-panel');
+        backdropPanel?.classList.remove('hidden');
+        this._wireFotoCamBackdropPanel(backdropPanel);
+        const range = fundoBody.querySelector('#v3d-fotocam-opacidade');
+        if (range) {
+          range.oninput = () => {
+            const v = parseFloat(range.value);
+            // [16/09/2026 — RODADA SEGUINTE] `#v3d-fotocam-overlay-img`
+            // (antigo `<img>` DOM) virou `#v3d-fotocam-photo-canvas` — a
+            // opacidade continua sendo aplicada via CSS (`style.opacity`
+            // funciona em `<canvas>` igual a `<img>`), sem precisar
+            // redesenhar o conteúdo (o `<canvas>` inteiro fica translúcido).
+            // [12/09/2026 — RODADA "buffer de verdade"] CORRIGIDO —
+            // `wrap.querySelector` trocado por `container.querySelector`:
+            // `#v3d-fotocam-photo-canvas` deixou de ser descendente de
+            // `wrap` (agora é irmão de `#v3d-canvas`, ver
+            // `_renderFotoCamOverlay`), então `wrap.querySelector` não o
+            // encontraria mais. Também REMOVIDO o espelhamento manual em
+            // `this._fotoCamBackdropMesh.material.opacity` (comentário
+            // antigo preservado abaixo) — o plano 3D do backdrop 'Trás'
+            // deixou de ter qualquer material/textura visível (agora é só
+            // um oclusor de profundidade, ver `_ensureFotoCamBackdropPlane`)
+            // — a opacidade do slider já se aplica corretamente nos 2 modos
+            // só com a linha abaixo, já que este MESMO `<canvas>` (nunca
+            // mais escondido) é usado em 'Frente' E 'Trás' agora.
+            // [13/09/2026] NOVO — ver comentário grande em
+            // `_drawFotoCamPhoto` (causa raiz completa do "opacidade vira
+            // preto" em 'Trás'): `style.opacity` do ELEMENTO agora é
+            // decidido lá dentro (fonte única, sempre '1' em 'Trás' — só o
+            // `ctx.globalAlpha` interno muda, sobre um fundo de céu — e
+            // reflete o slider normalmente em 'Frente'); só precisa
+            // acionar o redesenho aqui.
+            this._setFotoCamOpacidade(v);
+            this._updateFotoCamOverlayZoomScale();
+          };
+        }
+        const darkimgBtn = fundoBody.querySelector('#v3d-proppanel-darkimg-toggle');
+        const aplicarEscurecerImagem = (ativo) => {
+          // [16/09/2026 — RODADA SEGUINTE] mesma troca de `#v3d-fotocam-overlay-img`
+          // por `#v3d-fotocam-photo-canvas` — `filter` (CSS) também funciona
+          // em `<canvas>` normalmente.
+          // [12/09/2026 — RODADA "buffer de verdade"] CORRIGIDO — mesmo
+          // motivo do handler de opacidade acima: `wrap.querySelector` →
+          // `container.querySelector` (o canvas não é mais descendente de
+          // `wrap`). Efeito colateral bem-vindo: "Escurecer imagem" agora
+          // também funciona em 'Trás' (antes só valia pra 'Frente' — o
+          // canvas ficava escondido em 'Trás', o filtro CSS nunca era
+          // visto).
+          const canvasEl2 = container.querySelector('#v3d-fotocam-photo-canvas');
+          if (canvasEl2) canvasEl2.style.filter = ativo ? 'brightness(0.45)' : '';
+          darkimgBtn?.classList.toggle('active', ativo);
+        };
+        aplicarEscurecerImagem(this._getEscurecerImagemAtivo());
+        if (darkimgBtn) {
+          darkimgBtn.onclick = () => {
+            const novo = !this._getEscurecerImagemAtivo();
+            this._setEscurecerImagemAtivo(novo);
+            aplicarEscurecerImagem(novo);
+          };
+        }
+      }
+      fundoBody.dataset.built = '1';
+    }
+    if (rebuild || !cameraBody.dataset.built) {
+      cameraBody.innerHTML = `
+        <div class="v3d-proppanel-camera-buttons">
+          ${temFrustum ? '<button type="button" class="btn secondary sm" id="v3d-proppanel-frustum-toggle" title="Mostrar/ocultar o enquadramento (retângulo amarelo) desta câmera">🟨 Enquadramento</button>' : ''}
+          <button type="button" class="btn secondary sm" id="v3d-proppanel-vignette-toggle" title="Escurece tudo fora do retângulo amarelo (enquadramento)">🌑 Escurecer o entorno</button>
+          <button type="button" class="btn secondary sm" id="v3d-proppanel-info-toggle" title="Mostrar/editar as informações do vanishCam desta câmera">ℹ️ Informações do vanishCam</button>
+        </div>
+        <!-- [11/09/2026] NOVO — pedido verbatim: "Lado abaixo deste botão
+             [Escurecer o entorno], deve ter um botão triplo para definir o
+             valor da opacidade do preto aplicado pelo botão 'Escurecer o
+             entorno'. Por padrão é 0.5." Slot vazio — o "botão triplo" é
+             montado via JS logo abaixo (ModelerUI._createNumField, o MESMO
+             widget de 3 partes -/valor/+ já usado em Offset X/Y/Rotação,
+             ver _wireFotoCamBackdropPanel), nunca dá pra desenhar só com
+             HTML (tem listeners próprios de arraste/clique). -->
+        <div class="v3d-proppanel-vignette-opacity-wrap" id="v3d-proppanel-vignette-opacity-wrap"></div>
+        <div class="v3d-proppanel-camera-fields" id="v3d-proppanel-camera-fields"></div>
+      `;
+      const frustumBtn = cameraBody.querySelector('#v3d-proppanel-frustum-toggle');
+      // [16/09/2026 — RODADA SEGUINTE] SUBSTITUÍDO — não existe mais
+      // nenhuma cópia DOM/CSS do retângulo amarelo (`#v3d-fotocam-frame`
+      // foi removido, ver css/style.css e `_renderFotoCamOverlay`) — o
+      // retângulo é desenhado DIRETO no `#v3d-fotocam-photo-canvas` via
+      // `ctx.strokeRect`, dentro de `_updateFotoCamOverlayZoomScale`, que
+      // já lê `Engine3D.isCameraFrustumVisible` sozinha a cada chamada —
+      // então só precisa chamá-la de novo pra redesenhar o canvas
+      // refletindo o novo estado (mostrar/esconder o traço).
+      if (frustumBtn && foto?.id != null) {
+        const frustumAtivo0 = this._engine.isCameraFrustumVisible(foto.id);
+        frustumBtn.classList.toggle('active', frustumAtivo0);
+        frustumBtn.onclick = () => {
+          const novo = !this._engine.isCameraFrustumVisible(foto.id);
+          this._engine.setCameraFrustumVisible(foto.id, novo);
+          frustumBtn.classList.toggle('active', novo);
+          this._updateFotoCamOverlayZoomScale();
+        };
+      }
+      const vignetteBtn = cameraBody.querySelector('#v3d-proppanel-vignette-toggle');
+      const vignetteEl = wrap.querySelector('#v3d-fotocam-vignette');
+      // [11/09/2026] NOVO — aplica o ALFA salvo (`_getEscurecerEntornoOpacidade`,
+      // padrão 0.5) no `box-shadow` do vignette — ver comentário grande
+      // no getter/setter (view3d.js) e em css/style.css `.v3d-fotocam-vignette`
+      // (só o espalhamento `0 0 0 2000px` ficou fixo lá; a cor/alfa é
+      // sempre reaplicada aqui, inline, sobrescrevendo o CSS).
+      const aplicarVignetteOpacidade = (op) => {
+        if (vignetteEl) vignetteEl.style.boxShadow = `0 0 0 2000px rgba(0, 0, 0, ${op})`;
+      };
+      const aplicarVignette = (ativo) => {
+        vignetteEl?.classList.toggle('hidden', !ativo);
+        vignetteBtn?.classList.toggle('active', ativo);
+      };
+      aplicarVignette(this._getEscurecerEntornoAtivo());
+      aplicarVignetteOpacidade(this._getEscurecerEntornoOpacidade());
+      if (vignetteBtn) {
+        vignetteBtn.onclick = () => {
+          const novo = !this._getEscurecerEntornoAtivo();
+          this._setEscurecerEntornoAtivo(novo);
+          aplicarVignette(novo);
+        };
+      }
+      // [11/09/2026] NOVO — pedido verbatim: "Lado abaixo deste botão
+      // [Escurecer o entorno], deve ter um botão triplo para definir o
+      // valor da opacidade do preto aplicado [...]. Por padrão é 0.5."
+      // Mesmo widget -/valor/+ de sempre (`ModelerUI._createNumField`),
+      // faixa [0,1] (mesma do slider "Opacidade da foto", ver
+      // `_fotoCamBackdropPanelHtml`), passo 0.05 — fino o bastante pra
+      // ajustar sem precisar digitar.
+      const vignetteOpWrap = cameraBody.querySelector('#v3d-proppanel-vignette-opacity-wrap');
+      if (vignetteOpWrap && window.ModelerUI) {
+        const vignetteOpApi = ModelerUI._createNumField({
+          label: 'Opacidade do escurecimento: ', value: this._getEscurecerEntornoOpacidade(),
+          step: 0.05, minDecimals: 2, suffix: '',
+          onCommit: (v) => {
+            const clamped = this._setEscurecerEntornoOpacidade(v);
+            vignetteOpApi?.setValue(clamped);
+            aplicarVignetteOpacidade(clamped);
+          },
+        });
+        vignetteOpWrap.appendChild(vignetteOpApi.el);
+      }
+      const infoToggle = cameraBody.querySelector('#v3d-proppanel-info-toggle');
+      if (infoToggle) {
+        infoToggle.onclick = () => { wrap.querySelector('#v3d-fotocam-info-panel')?.classList.toggle('hidden'); };
+      }
+      this._wireLiveCamPropsPanel(cameraBody.querySelector('#v3d-proppanel-camera-fields'));
+      cameraBody.dataset.built = '1';
+    }
+  },
+
+  /** [15/09/2026] NOVO -- reseta a seção "Transformação" (aba lateral
+   *  "Propriedades") pro aviso padrão -- chamada por `Modeler3D.exit()`
+   *  (modeler-core.js), já que `ModelerUI.updateNPanel` só é chamado
+   *  ENQUANTO uma sessão está ativa (nunca ao sair) -- sem isto, o último
+   *  conteúdo editado ficaria "congelado" ali (clicável/desatualizado)
+   *  depois de sair do Modelador. */
+  _resetPropriedadesTransformacaoPlaceholder() {
+    const body = this._container?.querySelector('#v3d-proppanel-transformacao-body');
+    if (body) body.innerHTML = '<div class="v3d-proppanel-empty">Nenhuma edição em andamento (abra o Modelador).</div>';
+  },
+
+  /** Monta o conteúdo do painel "🧱 Blocos de construção" — dimensões,
+   *  âncora de snap (gizmo de 5 pontos, pedido verbatim do bloco "grade de
+   *  snap variável"), cor (6 faces de uma vez OU 1 de cada, pedido
+   *  verbatim), textura, e o botão que ativa/desativa a ferramenta de
+   *  colocar tijolo (`this._buildTool = 'tijolo'`, ver onClick/_selectBuildTool). */
+  async _renderTijoloPanel() {
+    const panel = this._container?.querySelector('#v3d-tijolo-panel');
+    if (!panel) return;
+    const cfg = await Tijolos.getConfig();
+    this._tijoloGhostCfg = cfg; // NOVO (08/09/2026, 38a rodada) — ver _updateBuildGhost, ramo 'tijolo'
+    const carimbos = await Tijolos.listStamps();
+    const ativo = this._buildTool === 'tijolo';
+    const ANCORAS = [
+      { key: 'sup-esq', top: '0%', left: '0%' },
+      { key: 'sup-dir', top: '0%', left: '100%' },
+      { key: 'centro', top: '50%', left: '50%' },
+      { key: 'inf-esq', top: '100%', left: '0%' },
+      { key: 'inf-dir', top: '100%', left: '100%' },
+    ];
+    const pintando = this._buildTool === 'tijolo-pintar';
+    const nUndo = (this._tijoloUndoStack || []).length;
+    const nRedo = (this._tijoloRedoStack || []).length;
+    panel.innerHTML = `
+      <h5>🧱 Blocos de construção</h5>
+      <button type="button" class="btn ${ativo ? '' : 'secondary'} sm block" id="tj-ativar" title="Clique esquerdo: 1 tijolo por clique, em cima da superfície mirada. Segurando Ctrl + clique: continua colocando (mesmo nível), enquanto a mira variar de alvo.">${ativo ? '✅ Ferramenta ativa' : '▶️ Ativar ferramenta'}</button>
+      <button type="button" class="btn ${pintando ? '' : 'secondary'} sm block" id="tj-pintar" title="Mire num tijolo já colocado e clique pra aplicar a cor/textura atual do menu nele.">${pintando ? '✅ Pintura ativa' : '🎨 Pintar tijolos existentes'}</button>
+      <div style="display:flex; gap:4px">
+        <button type="button" class="btn secondary sm" id="tj-undo" ${nUndo ? '' : 'disabled'} style="flex:1" title="Desfaz a última colocação (1 clique ou 1 preenchimento de volume inteiros)">↩️ Desfazer${nUndo ? ` (${nUndo})` : ''}</button>
+        <button type="button" class="btn secondary sm" id="tj-redo" ${nRedo ? '' : 'disabled'} style="flex:1" title="Refaz a última colocação desfeita">↪️ Refazer${nRedo ? ` (${nRedo})` : ''}</button>
+      </div>
+      ${pintando ? '' : `
+      <h5>Dimensões (m)</h5>
+      <div class="v3d-tijolo-dims">
+        <input type="number" id="tj-sx" min="0.01" max="5" step="0.01" value="${cfg.sx}" title="Largura (X)">
+        <input type="number" id="tj-sy" min="0.01" max="5" step="0.01" value="${cfg.sy}" title="Altura (Y)">
+        <input type="number" id="tj-sz" min="0.01" max="5" step="0.01" value="${cfg.sz}" title="Profundidade (Z)">
+      </div>
+      <h5>Grade de encaixe (snap, m)</h5>
+      <input type="number" id="tj-snap" min="0.01" max="5" step="0.01" value="${cfg.snapMeters}" title="Distância da grade de encaixe no mundo — igual à dimensão do tijolo garante um exatamente do lado do outro">
+      <h5>Âncora do snap</h5>
+      <div class="v3d-tijolo-anchor-gizmo" id="tj-anchor-gizmo">
+        ${ANCORAS.map((a) => `<span class="v3d-tijolo-anchor-pt ${cfg.ancora === a.key ? 'active' : ''}" data-ancora="${a.key}" style="top:${a.top};left:${a.left}" title="${a.key}"></span>`).join('')}
+      </div>
+      <h5>Formato</h5>
+      <select id="tj-formato" title="Cunha/rampa NÃO participa da fusão de faces com vizinhos (ver decisão de escopo em tijolos.js) — cada cunha é sempre um mesh próprio.">
+        <option value="caixa" ${cfg.formato !== 'cunha' ? 'selected' : ''}>📦 Caixa (funde com vizinhos)</option>
+        <option value="cunha" ${cfg.formato === 'cunha' ? 'selected' : ''}>◺ Cunha / rampa (não funde)</option>
+      </select>
+      ${cfg.formato === 'cunha' ? `
+        <h5>Rotação da rampa</h5>
+        <select id="tj-rotY">
+          <option value="0" ${(cfg.rotY || 0) === 0 ? 'selected' : ''}>0°</option>
+          <option value="90" ${cfg.rotY === 90 ? 'selected' : ''}>90°</option>
+          <option value="180" ${cfg.rotY === 180 ? 'selected' : ''}>180°</option>
+          <option value="270" ${cfg.rotY === 270 ? 'selected' : ''}>270°</option>
+        </select>
+        <div style="font-size:11px; color:var(--text-dim)">Dica: com a ferramenta ativa, clique do meio do mouse gira 90° a cada clique (reseta ao trocar pra "Caixa").</div>
+      ` : ''}
+      <h5>Espelho / simetria</h5>
+      <label style="display:flex; align-items:center; gap:6px">
+        <input type="checkbox" id="tj-espelho-ativo" ${cfg.espelhoAtivo ? 'checked' : ''}>
+        <span>Colocar também uma cópia espelhada</span>
+      </label>
+      ${cfg.espelhoAtivo ? `
+        <div style="display:flex; gap:4px">
+          <select id="tj-espelho-eixo" style="flex:1">
+            <option value="x" ${cfg.espelhoEixo === 'x' ? 'selected' : ''}>Plano X (espelha esquerda/direita)</option>
+            <option value="z" ${cfg.espelhoEixo === 'z' ? 'selected' : ''}>Plano Z (espelha frente/trás)</option>
+          </select>
+          <input type="number" id="tj-espelho-pos" step="0.1" value="${cfg.espelhoPos || 0}" style="width:64px" title="Posição do plano de espelho, em metros">
+        </div>
+      ` : ''}
+      `}
+      <h5>Cor${pintando ? ' (aplicada ao clicar num tijolo já colocado)' : ''}</h5>
+      <label style="display:flex; align-items:center; gap:6px">
+        <input type="checkbox" id="tj-corporface" ${cfg.corPorFace ? 'checked' : ''}>
+        <span>Uma cor por face (em vez de 1 cor pras 6)</span>
+      </label>
+      ${cfg.corPorFace ? `
+        <div class="v3d-tijolo-facecolors">
+          <label>+X <input type="color" id="tj-cor-px" value="${(cfg.corFaces && cfg.corFaces[0]) || cfg.corPadrao}"></label>
+          <label>-X <input type="color" id="tj-cor-nx" value="${(cfg.corFaces && cfg.corFaces[1]) || cfg.corPadrao}"></label>
+          <label>+Y <input type="color" id="tj-cor-py" value="${(cfg.corFaces && cfg.corFaces[2]) || cfg.corPadrao}"></label>
+          <label>-Y <input type="color" id="tj-cor-ny" value="${(cfg.corFaces && cfg.corFaces[3]) || cfg.corPadrao}"></label>
+          <label>+Z <input type="color" id="tj-cor-pz" value="${(cfg.corFaces && cfg.corFaces[4]) || cfg.corPadrao}"></label>
+          <label>-Z <input type="color" id="tj-cor-nz" value="${(cfg.corFaces && cfg.corFaces[5]) || cfg.corPadrao}"></label>
+        </div>
+      ` : `<input type="color" id="tj-cor-unica" value="${cfg.corPadrao}">`}
+      <h5>Textura</h5>
+      <input type="file" id="tj-textura-input" accept="image/*" style="font-size:11px">
+      ${cfg.texturaUrl ? '<button type="button" class="btn secondary sm" id="tj-textura-remover">✕ Remover textura</button>' : ''}
+      ${pintando ? '' : `
+      <h5>📦 Preencher volume</h5>
+      <div class="v3d-tijolo-dims" title="Quantidade de tijolos em cada eixo, a partir do ponto mirado (mesma superfície usada pra colocar 1 tijolo)">
+        <input type="number" id="tj-fill-x" min="1" max="50" step="1" value="${this._tijoloFillX || 1}" title="Quantidade em X (largura)">
+        <input type="number" id="tj-fill-y" min="1" max="50" step="1" value="${this._tijoloFillY || 1}" title="Quantidade em Y (altura)">
+        <input type="number" id="tj-fill-z" min="1" max="50" step="1" value="${this._tijoloFillZ || 1}" title="Quantidade em Z (profundidade)">
+      </div>
+      <button type="button" class="btn sm block" id="tj-fill-btn" title="Mire numa superfície e clique — preenche um bloco retangular de tijolos a partir dali">Preencher a partir da mira</button>
+      <h5>📑 Carimbos (conjuntos reutilizáveis)</h5>
+      <div style="display:flex; gap:4px">
+        <input type="text" id="tj-carimbo-nome" placeholder="nome do carimbo" style="flex:1">
+        <button type="button" class="btn secondary sm" id="tj-carimbo-salvar" title="Salva TODOS os tijolos do mapa atual como um carimbo reutilizável (posições relativas ao ponto mirado agora)">💾</button>
+      </div>
+      ${carimbos.length ? `
+        <div style="display:flex; gap:4px; margin-top:4px">
+          <select id="tj-carimbo-select" style="flex:1">${carimbos.map((c) => `<option value="${Utils.escapeHtml(c.nome)}">${Utils.escapeHtml(c.nome)} (${c.tijolos.length})</option>`).join('')}</select>
+          <button type="button" class="btn sm" id="tj-carimbo-aplicar" title="Aplica o carimbo escolhido a partir do ponto mirado">📌</button>
+          <button type="button" class="btn secondary sm" id="tj-carimbo-excluir" title="Exclui este carimbo">🗑️</button>
+        </div>
+      ` : '<div style="font-size:11.5px; color:var(--text-dim)">Nenhum carimbo salvo ainda</div>'}
+      <h5>🧊 Aglomerado</h5>
+      <button type="button" class="btn secondary sm block" id="tj-virar-objeto" title="Funde TODOS os tijolos 'Caixa' sem textura do mapa atual num unico objeto modelavel (abre no Modelador 3D) e excluivel -- as cunhas e tijolos com textura NAO entram (continuam soltos, ver decisao de escopo em tijolos.js)">🧊 Transformar aglomerado em objeto modelavel</button>
+      <h5>⇅ Exportar / importar construção</h5>
+      <button type="button" class="btn secondary sm block" id="tj-exportar" title="Baixa TODOS os tijolos do mapa atual como um arquivo .json (modelo reutilizável, dá pra levar pra outro mapa)">⬇️ Exportar tudo (.json)</button>
+      <input type="file" id="tj-importar-input" accept="application/json" style="font-size:11px" title="Escolhe um .json exportado daqui e aplica a partir do ponto mirado">
+      `}
+    `;
+
+    const salvar = async (patch) => { await Tijolos.setConfig(patch); };
+    panel.querySelector('#tj-ativar').onclick = () => {
+      this._selectBuildTool(this._buildTool === 'tijolo' ? null : 'tijolo');
+      this._renderTijoloPanel();
+    };
+    panel.querySelector('#tj-pintar').onclick = () => {
+      this._selectBuildTool(this._buildTool === 'tijolo-pintar' ? null : 'tijolo-pintar');
+      this._renderTijoloPanel();
+    };
+    panel.querySelector('#tj-undo').onclick = () => this._tijoloUndo();
+    panel.querySelector('#tj-redo').onclick = () => this._tijoloRedo();
+    // CORRIGIDO (08/09/2026, 38a rodada): estas seções agora ficam
+    // ESCONDIDAS enquanto `pintando` (ver template acima) — todo
+    // `querySelector` correspondente devolve `null` nesse modo, então
+    // TODOS os handlers abaixo precisam de encadeamento opcional (`?.`)
+    // pra não quebrar (`Cannot read properties of null`).
+    panel.querySelector('#tj-fill-x')?.addEventListener('change', (e) => { this._tijoloFillX = Utils.clamp(parseInt(e.target.value, 10) || 1, 1, 50); });
+    panel.querySelector('#tj-fill-y')?.addEventListener('change', (e) => { this._tijoloFillY = Utils.clamp(parseInt(e.target.value, 10) || 1, 1, 50); });
+    panel.querySelector('#tj-fill-z')?.addEventListener('change', (e) => { this._tijoloFillZ = Utils.clamp(parseInt(e.target.value, 10) || 1, 1, 50); });
+    panel.querySelector('#tj-fill-btn')?.addEventListener('click', () => this._fillTijoloVolume());
+    // NOVO (07/09/2026) — "novas ideias": formato/rotação/espelho.
+    panel.querySelector('#tj-formato')?.addEventListener('change', async (e) => {
+      // CORRIGIDO (08/09/2026, 38a rodada), pedido verbatim: "Ao
+      // selecionar 'Cunha / rampa' e clicar com o botão do meio do mouse
+      // a cunha deve girar 90 graus a cada clique. Resetando apenas
+      // quando troca para 'Caixa'." — troca EXPLÍCITA pra 'caixa' reseta
+      // `rotY` pra 0 (a rotação só faz sentido/é visível em 'cunha' — ver
+      // Tijolos.buildWedgeGeometry); trocar PRA 'cunha' preserva o último
+      // `rotY` salvo (não reseta ao entrar em cunha, só ao SAIR dela).
+      const patch = { formato: e.target.value };
+      if (e.target.value === 'caixa') patch.rotY = 0;
+      await salvar(patch);
+      this._renderTijoloPanel();
+    });
+    panel.querySelector('#tj-rotY')?.addEventListener('change', (e) => salvar({ rotY: parseInt(e.target.value, 10) || 0 }));
+    panel.querySelector('#tj-espelho-ativo')?.addEventListener('change', async (e) => { await salvar({ espelhoAtivo: e.target.checked }); this._renderTijoloPanel(); });
+    panel.querySelector('#tj-espelho-eixo')?.addEventListener('change', (e) => salvar({ espelhoEixo: e.target.value }));
+    panel.querySelector('#tj-espelho-pos')?.addEventListener('change', (e) => salvar({ espelhoPos: parseFloat(e.target.value) || 0 }));
+    // NOVO (07/09/2026) — "novas ideias": carimbos (salvar/aplicar/excluir).
+    panel.querySelector('#tj-carimbo-salvar')?.addEventListener('click', () => this._salvarCarimboTijolos());
+    panel.querySelector('#tj-carimbo-aplicar')?.addEventListener('click', () => this._aplicarCarimboTijolos());
+    panel.querySelector('#tj-carimbo-excluir')?.addEventListener('click', () => this._excluirCarimboTijolos());
+    // NOVO (07/09/2026) — "novas ideias": exportar/importar construção.
+    panel.querySelector('#tj-virar-objeto')?.addEventListener('click', () => this._tijoloAglomeradoVirarObjeto());
+    panel.querySelector('#tj-exportar')?.addEventListener('click', () => this._exportarConstrucaoTijolos());
+    panel.querySelector('#tj-importar-input')?.addEventListener('change', (e) => this._importarConstrucaoTijolos(e.target.files?.[0]));
+    panel.querySelector('#tj-sx')?.addEventListener('change', (e) => salvar({ sx: Utils.clamp(parseFloat(e.target.value) || 0.1, 0.01, 5) }));
+    panel.querySelector('#tj-sy')?.addEventListener('change', (e) => salvar({ sy: Utils.clamp(parseFloat(e.target.value) || 0.1, 0.01, 5) }));
+    panel.querySelector('#tj-sz')?.addEventListener('change', (e) => salvar({ sz: Utils.clamp(parseFloat(e.target.value) || 0.1, 0.01, 5) }));
+    panel.querySelector('#tj-snap')?.addEventListener('change', (e) => salvar({ snapMeters: Utils.clamp(parseFloat(e.target.value) || 0.1, 0.01, 5) }));
+    panel.querySelectorAll('.v3d-tijolo-anchor-pt').forEach((pt) => {
+      pt.onclick = async () => { await salvar({ ancora: pt.dataset.ancora }); this._renderTijoloPanel(); };
+    });
+    panel.querySelector('#tj-corporface')?.addEventListener('change', async (e) => { await salvar({ corPorFace: e.target.checked }); this._renderTijoloPanel(); });
+    if (cfg.corPorFace) {
+      const ids = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
+      ids.forEach((k, i) => {
+        panel.querySelector(`#tj-cor-${k}`).oninput = async (e) => {
+          const atual = (await Tijolos.getConfig()).corFaces || [cfg.corPadrao, cfg.corPadrao, cfg.corPadrao, cfg.corPadrao, cfg.corPadrao, cfg.corPadrao];
+          const novo = [...atual]; novo[i] = e.target.value;
+          await salvar({ corFaces: novo });
+        };
+      });
+    } else {
+      panel.querySelector('#tj-cor-unica').oninput = (e) => salvar({ corPadrao: e.target.value });
+    }
+    panel.querySelector('#tj-textura-input').onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async () => { await salvar({ texturaUrl: reader.result }); this._renderTijoloPanel(); };
+      reader.readAsDataURL(file);
+    };
+    panel.querySelector('#tj-textura-remover')?.addEventListener('click', async () => { await salvar({ texturaUrl: null }); this._renderTijoloPanel(); });
   },
 
   /** Recalcula `this._objectCatalog` juntando o catálogo padrão
@@ -1083,6 +2261,34 @@ const View3D = {
       });
       list.innerHTML = html;
     }
+    // [10/09/2026] DUPLICATA CORRIGIDA — bug relatado pelo usuário: "no
+    // botão lateral direito, nos objetos, ainda estão coexistindo o 'Orb
+    // de foto' e a 'Câmera'." Causa raiz: esta lista (aparentemente escrita
+    // por outra sessão nesta mesma data) tinha 2 linhas fixas separadas —
+    // uma chamando a ferramenta ANTIGA `'camera-novo'` (cria um registro no
+    // array legado `map.cameras[]`, o sistema "Câmeras" que uma rodada
+    // ANTERIOR desta mesma base já tinha unificado com o "Orb de foto" e
+    // pedido explicitamente pra remover do projeto — "Depois das trocas
+    // todas, então o 'Orb de foto' passa a se chamar 'Câmera' e o objeto
+    // 'Câmeras' [...] deve ser removido do projeto"), e outra chamando a
+    // ferramenta ATUAL `'orbfoto-novo'` (cria a entrada unificada de
+    // verdade, em `map.fotos[]`, com nome/scripts/camProps — ver
+    // `_openFotoPinPopover` em mapview.js). Ou seja: a unificação pedida
+    // antes tinha sido desfeita sem querer, voltando a expor os 2 sistemas
+    // lado a lado de novo. CORRIGIDO removendo a linha "Câmera"/
+    // `'camera-novo'` (legada) e deixando só UMA linha — a de
+    // `'orbfoto-novo'` — agora com ícone 📷 e rótulo "Câmera" (pedido
+    // original: "Fica o ícone de 'Câmeras', mas fica a janela de
+    // propriedades do 'Orb de foto'"). `_placeWithBuildTool`'s ramo
+    // `'camera-novo'` foi deixado intocado (código morto/inalcançável por
+    // este painel agora — mesma decisão de escopo já registrada quando o
+    // botão "Câmeras" saiu da barra de Ferramentas do Mapa 2D: risco maior
+    // remover a fundo do que deixar inerte).
+    html += `<div class="v3d-objcat-row v3d-objcat-camera-row ${this._buildTool === 'orbfoto-novo' ? 'active' : ''}" id="v3d-objcat-neworbfoto">
+      <span class="v3d-objcat-ic">📷</span>
+      <span class="v3d-objcat-label">Câmera</span>
+    </div>`;
+    list.innerHTML = html;
     list.querySelectorAll('.v3d-objcat-row[data-idx]').forEach((row) => {
       row.onclick = () => {
         this._objectIndex = parseInt(row.dataset.idx, 10) || 0;
@@ -1095,6 +2301,17 @@ const View3D = {
         this._toggleObjectCatalogPanel();
       };
     });
+    // [10/09/2026] Linha "#v3d-objcat-newcam" (ferramenta legada
+    // 'camera-novo') REMOVIDA — ver comentário grande acima, no HTML desta
+    // lista.
+    const newOrbFotoRow = list.querySelector('#v3d-objcat-neworbfoto');
+    if (newOrbFotoRow) {
+      newOrbFotoRow.onclick = () => {
+        this._selectBuildTool('orbfoto-novo');
+        this._renderObjectCatalogPanel();
+        this._toggleObjectCatalogPanel();
+      };
+    }
     const fileInput = list.querySelector('#v3d-objcat-obj-input');
     if (fileInput) {
       fileInput.onchange = async () => {
@@ -1250,11 +2467,47 @@ const View3D = {
    *  existente no banco de quem já usava o app antes desta opção existir).
    *  Ver mapconfig.js DEFAULTS.debugTransferidorAtivo/
    *  debugProlongamentoAtivo. */
+  // [12/09/2026] NOVO — pedido verbatim: "Em 'configurações 3D', na seção
+  // 'Debug', coloque um botão para ativar o debug. Ativando o debug, todas
+  // as suas opções entram em execução." Interruptor MESTRE da seção inteira
+  // — só quando `debugModoAtivo` está explicitamente `true` (padrão é
+  // `false`, ver mapconfig.js DEFAULTS) é que as opções individuais abaixo
+  // (que continuam decidindo QUAIS guias visuais aparecem) chegam a
+  // executar de verdade. Usado por `_isDebugTransferidorAtivo`/
+  // `_isDebugProlongamentoAtivo`/`_isDebugEnquadramentoCameraAtivo` abaixo e
+  // por `_drawOrbitTargetDot` (modeler-render.js).
+  _isDebugAtivo() {
+    return (this._paredeConfig || {}).debugModoAtivo === true;
+  },
+
+  /** Seção "🐞 Debug" de ⚙️ Configurações (pedido do usuário, 25/08/2026:
+   *  "deve haver uma seção nas 'configurações 3D' para opções de debug. O
+   *  'transferidor' e o 'prolongamento de linhas tracejadas do objeto'
+   *  devem ser opcionais cada um. Marcados por padrão") — os dois só
+   *  DESLIGAM quando o valor salvo é explicitamente `false`
+   *  (`!== false`, mesmo padrão de "ligado por padrão" já usado em
+   *  `_isDoorSnapActiveNow`/config nunca carregada ainda/chave ainda não
+   *  existente no banco de quem já usava o app antes desta opção existir).
+   *  Ver mapconfig.js DEFAULTS.debugTransferidorAtivo/
+   *  debugProlongamentoAtivo.
+   *  [12/09/2026] Agora também exige `_isDebugAtivo()` (interruptor
+   *  mestre) — ver comentário acima. */
   _isDebugTransferidorAtivo() {
-    return (this._paredeConfig || {}).debugTransferidorAtivo !== false;
+    return this._isDebugAtivo() && (this._paredeConfig || {}).debugTransferidorAtivo !== false;
   },
   _isDebugProlongamentoAtivo() {
-    return (this._paredeConfig || {}).debugProlongamentoAtivo !== false;
+    return this._isDebugAtivo() && (this._paredeConfig || {}).debugProlongamentoAtivo !== false;
+  },
+  // [11/09/2026] NOVO — pedido verbatim: "Ao 'Sair da câmera', o
+  // enquadramento ainda fica ativado. Nas 'configurações 3D', na seção
+  // 'debug', coloque mais uma opção na lista de ativações deste modo que é
+  // o 'Enquadramento de câmera'. Ativo, por padrão." Decide o estado INICIAL
+  // do "retângulo amarelo" (Engine3D.setCameraFrustumVisible) toda vez que
+  // se entra em "Ver através desta câmera" — ver `_renderFotoCamOverlay`,
+  // mesmo padrão `!== false` dos outros 2 interruptores desta seção acima.
+  // [12/09/2026] Agora também exige `_isDebugAtivo()` (interruptor mestre).
+  _isDebugEnquadramentoCameraAtivo() {
+    return this._isDebugAtivo() && (this._paredeConfig || {}).debugEnquadramentoCameraAtivo !== false;
   },
 
   /** Modo de alinhamento ATUAL pra ferramenta ATUAL (`this._buildTool`) —
@@ -2098,6 +3351,92 @@ const View3D = {
       else this._enterCameraView(camEntry.id);
       return;
     }
+
+    // [10/09/2026] NOVO — pedido verbatim: "dá para selecionar um objeto a
+    // ser inserido pelo menu do botão lateral direito '+'... Faça o que
+    // ficou pendente" (item 1-4 do redesenho de Camera Match, deixado
+    // explicitamente "NÃO IMPLEMENTADO" na rodada anterior — ver
+    // comentário grande logo acima de `_renderObjectCatalogPanel` e a
+    // entrada "📷 Câmeras" adicionada lá). Ferramenta dedicada
+    // `'camera-novo'` (DIFERENTE de `'camera'` acima, que só assiste uma
+    // câmera JÁ existente via roleta) — clique único no chão, mesmo
+    // espírito das ferramentas "📍 Adicionar orb"/"🗑️ Remover" (sem
+    // roleta própria, ver `_HOTBAR_SLOTS`/`_selectBuildTool`): cria uma
+    // câmera NOVA pelo MESMO caminho canônico que o mapa 2D usa
+    // (`Mapping.addCamera`, ver `mapview.js` `_mode === 'camera'`) — nenhum
+    // 2º jeito de criar câmera foi inventado aqui, só mais um PONTO DE
+    // ENTRADA pro mesmo `Mapping.addCamera`. Ângulo inicial = pra onde o
+    // jogador está olhando no momento do clique (mais útil que o padrão 0°
+    // fixo do 2D, já que aqui existe uma direção de câmera de verdade pra
+    // usar) — FOV/focal/sensor nascem dos MESMOS padrões Blender que
+    // `Mapping.addCamera` já aplica sozinho (50mm/sensor 36mm, ver
+    // `mapping.js`), sem precisar repetir esses valores aqui.
+    if (tool === 'camera-novo') {
+      const hit = this._engine.raycastFloor(ray.origin, ray.dir);
+      if (!hit) return;
+      Mapping.addCamera(this._map, hit.x, hit.z, { angulo: this._camera.yaw, piso: 0, layerId: this._layerIdParaNovosItens() });
+      await this._afterMapMutated();
+      Utils.toast('Câmera adicionada ✓ — mire nela para ver, editar ou "ver através" (Camera Match).', { type: 'ok' });
+      // [10/09/2026] CORRIGIDO — bug relatado: "só está sendo colada uma
+      // câmera e depois não funciona mais [...] deve ser possível ir
+      // colocando quantas câmeras quanto possível (a cada clique)." A
+      // versão anterior voltava pro modo Mirar (`this._buildTool = null`)
+      // depois de UMA câmera — pedido explícito do usuário agora é o
+      // OPOSTO: manter a ferramenta ativa entre cliques, MESMO
+      // comportamento contínuo que "Objeto"/"Item" já têm (eles nunca
+      // resetam `_buildTool` depois de colocar uma peça — ver o ramo `tool
+      // === 'objeto'` acima). Só re-renderiza a hotbar (o rótulo/estado
+      // continuam mostrando "Câmera" ativa) — nenhum reset de ferramenta.
+      this._renderHotbar();
+      return;
+    }
+
+    // [10/09/2026→11/09/2026] "orb de foto" na lista do "+", MESMO padrão
+    // de colocação contínua da Câmera logo acima.
+    // [11/09/2026] REESCRITO — pedido verbatim do usuário: "A inserção de
+    // objetos no 'Ver em 3D' deve ser como no mapa 2D [...] deve ser
+    // possível adicioná-lo à cena, mesmo que ele não tenha foto vinculada.
+    // Não deve aparecer uma janela para selecionar a foto. É só inserir
+    // direto o elemento no cenário 3D." A versão anterior (comentário
+    // removido, ver histórico) abria `window.MapView._pickPhotoFromList`
+    // pra escolher uma foto JÁ existente sem vínculo — o que, além de
+    // contrariar o pedido direto, também travava a "colocação contínua"
+    // pedida no mesmo item (o modal interrompia o fluxo de cliques
+    // seguidos). Agora: cada clique no chão cria um registro NOVO de
+    // AmbientePhoto direto via `DB.addAmbientePhoto`, SEM `dataUrl`/
+    // `thumbDataUrl` (campo já opcional no schema — ver db.js
+    // `addAmbientePhoto`, `dataUrl: data.dataUrl || null` — um "orb de
+    // foto sem foto ainda" já é um estado válido e suportado no banco,
+    // só nunca tinha um caminho de criação direto por aqui) — mesmos
+    // campos/mesmos valores-padrão que o fluxo 2D `_placePhotoPinAtWorld`
+    // (mapview.js) usa pra uma foto NOVA: `tipo:'ambiente'`,
+    // `mapaAltura` 1,6m (mesma altura-padrão da câmera), `mapaLayerId` da
+    // camada ativa. O usuário pode depois abrir o cartão 3D do orb
+    // (`_showFotoPinCard3D`, agora sempre acessível — ver correção
+    // irmã em engine3d.js `setScene`, bloco "fotos vinculadas ao mapa")
+    // e vincular uma foto de verdade a qualquer momento, como qualquer
+    // outra propriedade. Ferramenta continua ativa entre cliques (mesmo
+    // espírito contínuo de Câmera/Objeto/Item) — cada clique cria mais um
+    // orb sem foto, no ponto clicado.
+    if (tool === 'orbfoto-novo') {
+      const hit = this._engine.raycastFloor(ray.origin, ray.dir);
+      if (!hit) return;
+      await DB.addAmbientePhoto({
+        ambienteId: this._map.id,
+        tipo: 'ambiente',
+        mapaX: hit.x,
+        mapaY: hit.z,
+        mapaPiso: 0,
+        mapaAuto: false,
+        mapaAltura: 1.6,
+        mapaLayerId: this._layerIdParaNovosItens(),
+      });
+      await this._buildFotosNoMapa(); // sincroniza this._map.fotos com o novo orb (não vem de _afterMapMutated)
+      await this._afterMapMutated();
+      Utils.toast('Orb de foto adicionado (sem foto vinculada ainda) ✓', { type: 'ok' });
+      this._renderHotbar();
+      return;
+    }
   },
 
   // ---------- "Assistir" uma câmera fixa (pedido do usuário: "deve ser
@@ -2130,7 +3469,38 @@ const View3D = {
     this._renderHotbar();
   },
 
+  // [13/09/2026] NOVO — pedido verbatim: "Deve haver uma pilha de 'Sair',
+  // para não gerar inconsistências na estrutura do projeto. Por exemplo,
+  // ao entrar no 'Ver em 3D', deve ser um nível da pilha, ao entrar no
+  // modo 'Ver através desta câmera' [...] deve ser mais um nível na pilha.
+  // Depois, estando no modo 'Ver através desta câmera', entra-se no
+  // Modelador, então, deve ser mais um nível na pilha. [...] Se clicar em
+  // 'Sair do 3D' (nível 1 da pilha), então, deve-se ser executado 3
+  // saídas: 'Sair do Modelador', depois, 'Sair da câmera' e, depois,
+  // 'Sair do 3D'. Implemente isto para todo o 'Ver em 3D'." Em vez de uma
+  // estrutura de pilha literal (array de níveis), a "pilha" já existe
+  // IMPLICITAMENTE no encadeamento normal do app — `Modeler3D.isActive()`
+  // (nível mais interno possível) só pode estar `true` DENTRO de um dos
+  // modos de câmera (`_camMode`/`_fotoCamMode`/`_orbCamMode`, ver
+  // `Modeler3D.enter`, chamado só a partir daqui) ou direto do "Ver em 3D"
+  // sem câmera nenhuma — então o helper abaixo, chamado no TOPO de CADA
+  // função de saída de nível (`_exitCameraView`/`_exitFotoCameraView`/
+  // `_exitCameraOrbView`, logo abaixo, e também em `unmount()`, "Sair do
+  // 3D"), garante que o nível mais interno (Modelador) SEMPRE sai
+  // primeiro, evitando a inconsistência relatada (posição do personagem
+  // gravada ANTES da câmera "assentar" de volta na pose certa — ver
+  // também o item da posição do personagem, mesma rodada). Chamar isto
+  // sempre ANTES de zerar `_camMode`/`_fotoCamMode`/`_orbCamMode` de cada
+  // função — sair do Modelador PRIMEIRO, com a câmera ainda travada no
+  // modo de visualização, é o que garante a pose final correta (o
+  // Modelador usa a pose travada como referência pra sua própria
+  // transição de saída, ver comentário grande em `Modeler3D.exit`).
+  _exitModeladorSeAtivo() {
+    if (window.Modeler3D?.isActive?.()) window.Modeler3D.exit();
+  },
+
   _exitCameraView() {
+    this._exitModeladorSeAtivo(); // [13/09/2026] pilha de "Sair" — ver comentário grande acima
     this._camMode = null;
     this._engine?.setPlayerFigureVisible?.(false);
     this._engine?.setFov?.(72); // FOV padrão do jogador em 1ª pessoa (ver Engine3D._initThree)
@@ -2143,15 +3513,2848 @@ const View3D = {
    *  pra desenhar a malha da câmera (engine3d.js setScene, ALTURA_CAMERA),
    *  pra a projeção bater exatamente com o que a malha mostra no mapa —
    *  pedido do usuário. `pan`/`tilt` (ambos limitados, ver constantes acima)
-   *  só deslocam a partir dessa base, nunca saem do intervalo permitido. */
+   *  só deslocam a partir dessa base, nunca saem do intervalo permitido.
+   *
+   *  [11/09/2026] CORRIGIDO — pedido verbatim, com repro exato: "crie um
+   *  câmera, então o desenho 2D dela tem uma seta que aponta para norte.
+   *  Depois, vou para o 'Ver em 3D' e a câmera (modelo 3D) e também o 'Ver
+   *  através dessa câmera' estão apontando para o sul." O mapa 2D
+   *  (`Map2DRenderer._drawCameraShape`, mapview.js) desenha o leque/seta
+   *  usando `cam.angulo` puro, sem NENHUM offset — essa é a referência
+   *  "verdadeira" (nunca foi trocada, é o que o usuário vê primeiro e
+   *  espera que o 3D acompanhe). Este `yaw` (e o mesmo cálculo em
+   *  `_enterCameraOrbView`/engine3d.js `setScene`, ver comentários lá)
+   *  usava `angulo - π/2` — virou `angulo + π/2` (equivalente a somar +π/
+   *  180° em cima do offset antigo): os 3 consumidores de `cam.angulo`
+   *  (mapa 2D, malha 3D da câmera, pose de "assistir"/"ver através")
+   *  precisam concordar entre si, e o mapa 2D é quem NÃO muda — os outros
+   *  dois (aqui e a malha em engine3d.js) é que giram 180° pra bater com
+   *  ele. */
   _computeWatchCameraPose() {
     const cfg = this._camMode;
     const cam = (this._map?.cameras || []).find((c) => c.id === cfg.camId);
     if (!cam) return this._camera;
     const ALTURA_CAMERA = 1.6; // mesmo valor de engine3d.js setScene
     const baseY = (cam.piso || 0) * 2.8;
-    const yaw = (cam.angulo || 0) - Math.PI / 2 + cfg.pan;
+    const yaw = (cam.angulo || 0) + Math.PI / 2 + cfg.pan;
     return { x: cam.x, y: baseY + ALTURA_CAMERA, z: cam.y, yaw, pitch: cfg.tilt };
+  },
+
+  // [10/09/2026] Bloco "ver através desta câmera"/vanishCam RESTAURADO — ver
+  // comentário grande em this._fotoCamMode (mount(), acima) sobre a origem
+  // (backup do projeto mais completo) e o pedido verbatim do usuário.
+  // NOVO (09/09/2026), pedido verbatim: "No 'Ver em 3D', deve ser possível
+  // clicar na câmera do orb de câmera e 'entrar nela'. Uma opção como 'ver
+  // através desta câmera' [...] assim como no blender é possível 'ver
+  // através da câmera' [...] o cenário 3D continua sendo renderizado
+  // normalmente, só que agora pela perspectiva da câmera do 'orb de câmera'
+  // e a imagem que o 'orb de câmera' tem aparece transparente 'na frente'
+  // [...] As informações do vanishCam devem aparecer ali por meio de um
+  // botão de toggle [...] Deve dar para editar as informações do vanishCam
+  // por ali. Deve ser possível controlar a opacidade da imagem [...] Por
+  // padrão, a opacidade é 0.5. Ao ser alterado, o valor permanece [...]
+  // mesmo recarregando a página." — chamado por `_showFotoPinCard3D`
+  // (botão "👁️ Ver através desta câmera"). `foto` aqui é a entrada
+  // achatada de `this._map.fotos` (ver mapview.js _refreshFotosNoMapa, que
+  // agora também inclui `dataUrl`/`thumbDataUrl`/`vanishCam` — ver lá).
+  _LS_KEY_FOTOCAM_OPACIDADE: 'catalogo_camview_opacidade_foto',
+
+  /** [12/09/2026, FUNDIDA NESTA RODADA — ver nota grande em
+   *  mapconfig.js DEFAULTS.cameraExitViewMode para o histórico completo]
+   *  Lê a config "Configurações 3D" → seção única "Ver através desta
+   *  câmera" (`MapConfig.DEFAULTS.cameraExitViewMode`) que decide o que
+   *  acontece ao clicar "Sair da câmera", tanto num objeto "Câmeras" quanto
+   *  num "orb de foto": `'lockedView'` (padrão) — o personagem PERMANECE
+   *  com o ponto de vista da câmera que estava sendo vista (posição/
+   *  orientação; o FOV é tratado à parte, sempre restaurado — ver ITEM A/
+   *  `_orbCamSavedFov`/`_fotoCamSavedFov`); `'originalView'` — volta pro
+   *  ponto de vista que o personagem tinha ANTES de "Ver através desta
+   *  câmera". Usada por `_exitCameraOrbView` E por `_exitFotoCameraView`
+   *  (via `_fotoOrbExitViewMode()` logo abaixo, que agora só delega pra
+   *  esta). Leitura SÍNCRONA de `MapConfig._cache` (mesmo padrão já usado em
+   *  outros pontos do app — o cache já está preenchido desde `mount()`, que
+   *  faz `await MapConfig.get()` antes de qualquer uma destas telas poder
+   *  ser aberta). */
+  _cameraExitViewMode() {
+    return (typeof MapConfig !== 'undefined' && MapConfig._cache && MapConfig._cache.cameraExitViewMode) || 'lockedView';
+  },
+
+  /** [12/09/2026, FUNDIDA NESTA RODADA] Existia como função irmã com chave
+   *  PRÓPRIA (`fotoOrbExitViewMode`, 2 seções de UI independentes) numa
+   *  rodada anterior — o usuário pediu explicitamente pra fundir as 2
+   *  seções de "Configurações 3D" numa só (ver nota grande em
+   *  mapconfig.js DEFAULTS.cameraExitViewMode: investigação desta rodada
+   *  não encontrou, no código atual, nenhuma unificação real dos tipos de
+   *  objeto "Câmeras"/"orb de foto" — continuam 2 code-paths distintos —
+   *  mas a fusão da UI/config foi aplicada mesmo assim, por instrução
+   *  direta do usuário). Mantida como função separada (em vez de apagada e
+   *  `_exitFotoCameraView` chamar `_cameraExitViewMode()` direto) só pra não
+   *  precisar mexer no corpo de `_exitFotoCameraView` — delega 100% pra
+   *  `_cameraExitViewMode()`, mesmo valor, mesma chave única
+   *  `cameraExitViewMode`. */
+  _fotoOrbExitViewMode() {
+    return this._cameraExitViewMode();
+  },
+
+  // [10/09/2026] REESCRITO — pedido verbatim: "ao dar zoom, não deve dar
+  // uma mera ampliação da imagem. Deve sim preservar a perspectiva, mas
+  // reconstruindo o desenho da cena (para que as coisas fiquem nítidas)."
+  // A 1ª versão desta feature (rodada anterior, mesmo dia) escalava o
+  // <canvas> inteiro por CSS (`transform:scale()`, um "efeito lupa" sobre
+  // o quadro já desenhado) — o usuário corrigiu: isso amplia pixels sem
+  // recalcular NADA, ficando borrado, e (bug relatado à parte) também
+  // ampliava os BOTÕES de controle junto (estavam dentro do mesmo
+  // elemento escalado). Reescrito pra usar zoom de VERDADE — muda o FOV
+  // real da câmera Three.js (`Engine3D.setFov`, o MESMO mecanismo já usado
+  // pelo `_camMode` legado) a cada "tick" da roda do mouse: o motor
+  // RECALCULA a projeção e redesenha a cena inteira nesse FOV novo, sempre
+  // nítida (nenhum pixel é esticado). Os botões de controle nunca foram
+  // reafetados por isto (nunca estiveram dentro de nenhum elemento
+  // escalado nem antes nem agora) — só a foto-guia semitransparente
+  // (`.v3d-fotocam-overlay-img`), que é uma imagem PLANA sobreposta à
+  // tela (não reprojetada em 3D), precisa de uma compensação PRÓPRIA (ver
+  // `_updateFotoCamOverlayZoomScale` logo abaixo) pra continuar alinhada
+  // com a cena por trás dela conforme o FOV muda.
+  //
+  // Faixa de zoom (pedido verbatim: "O zoom in deve ser maior. O zoom out
+  // deve estender para além do enquadramento da câmera [...] Deve ser
+  // possível afastar mais ainda, além do normal"): limites BEM mais
+  // abertos que o FOV calibrado de qualquer câmera individual — zoom in
+  // pode chegar bem apertado (5°) e zoom out pode ir bem além de qualquer
+  // enquadramento normal, nos dois sentidos a partir do FOV calibrado da
+  // câmera/orb (não de 0).
+  // [11/09/2026] AJUSTADO — pedido verbatim: "Diminua um pouco o limite de
+  // zoom out." Era 140° (bem perto do limite físico de FOV que o Three.js
+  // ainda desenha de forma utilizável, quase um "olho de peixe" extremo) —
+  // reduzido pra 110°, ainda bem além de qualquer enquadramento calibrado
+  // normal, mas sem chegar na distorção mais extrema de antes.
+  _CAMVIEW_ZOOM_FOV_MIN: 5,
+  _CAMVIEW_ZOOM_FOV_MAX: 110,
+
+  /** Config ativa de zoom (`{calibFov, zoomFov}`) — `_fotoCamMode`/
+   *  `_orbCamMode` ganham esses 2 campos ao entrar (ver
+   *  `_enterFotoCameraView`/`_enterCameraOrbView`); nunca os dois ativos
+   *  ao mesmo tempo, então basta devolver o que existir. */
+  _activeCamZoomCfg() {
+    return this._fotoCamMode || this._orbCamMode || null;
+  },
+
+  /** [13/09/2026 — ITEM D] Proporção (largura/altura) do enquadramento
+   *  calibrado da câmera ativa (`_fotoCamMode`/`_orbCamMode`) — 16/9 se não
+   *  houver `camProps`/`Resolução` salva ainda. `_fotoCamMode` só guarda
+   *  `fotoId` (ver `_enterFotoCameraView`), então precisa buscar o registro
+   *  em `this._map.fotos`; `_orbCamMode` só guarda `camId`
+   *  (`_enterCameraOrbView`), busca em `this._map.cameras` — os campos
+   *  ficam SOLTOS no próprio objeto câmera (não aninhados em `camProps`,
+   *  diferente do orb de foto — ver `Mapping.addCamera`).
+   *  [11/09/2026] REESCRITO — pedido verbatim: "apague todas as
+   *  propriedades [da câmera]. Deixe apenas FOV. [...] uma seção de
+   *  'Resolução' [...] Estes [...] valores influenciam no tamanho do
+   *  retângulo amarelo." O fieldset "Propriedades da câmera" (Blender —
+   *  distância focal/sensor mm, ver `_camPropsFieldsetHtml`/
+   *  `_wireCamPropsFieldset` em mapview.js) SUMIU — a proporção do
+   *  enquadramento agora vem direto de `camProps.resolutionX/resolutionY`
+   *  (pixels da "Resolução", já que "ao carregar uma foto, a câmera deve
+   *  assumir a resolução da foto" — ver o mesmo `_wireCamPropsFieldset`,
+   *  que também sincroniza isso). MESMA correção espelhada em
+   *  `_activeCamPropsVFovRad` (abaixo) e no retângulo amarelo de verdade em
+   *  engine3d.js (`_fotoFrustumMeshesById` — busque por "resolutionX" lá
+   *  pra conferir que bate 100%, mesma exigência de sempre). */
+  // [18/09/2026] REVERTIDO — pedido verbatim: "Fiz um teste [...] a
+  // imagem 1280x720 [...] Em Propriedades->Câmera, coloquei a resolução da
+  // câmera para 500x500. Ao clicar no botão 'Esticar' (tanto com 'Trás'
+  // quanto com 'Frente' marcado), a imagem acaba não cobrindo todo o
+  // retângulo amarelo. Não deveria ser assim." CAUSA RAIZ: a correção de
+  // 15/09/2026 (comentário abaixo, preservado) congelou `resX`/`resY`
+  // (`calibResX/calibResY`, capturados só uma vez ao ENTRAR neste modo) —
+  // só a malha 3D do retângulo amarelo (`Engine3D.updateCameraFrustumGeometry`)
+  // continuava reagindo AO VIVO à Resolução editada em "Propriedades" →
+  // "Câmera", enquanto esta função (usada por `_activeCamFrameRectPx`,
+  // que dimensiona tanto a vinheta quanto o novo
+  // `#v3d-fotocam-photo-canvas`, ver v446) continuava devolvendo a
+  // proporção CONGELADA — os dois (retângulo amarelo real x
+  // caixa/canvas da foto) divergiam depois de qualquer edição de
+  // Resolução feita DENTRO da sessão de "Ver através desta câmera", e
+  // "Esticar" (que preenche exatamente a caixa/canvas, por definição)
+  // passava a não cobrir o retângulo amarelo DE VERDADE, que já tinha
+  // outra forma/tamanho. RELENDO o pedido original de 15/09/2026 com mais
+  // cuidado: "ao alterá-los, O ENQUADRAMENTO É QUE MUDA [...] a foto não
+  // deve ser mexida" — ou seja, o pedido de fato queria o ENQUADRAMENTO
+  // (a caixa/retângulo) reagindo ao vivo (exatamente como a malha 3D já
+  // fazia) — "a foto não deve ser mexida" se referia aos VALORES salvos
+  // de offset/rotação/fit da foto (que continuam intocados, nunca são
+  // resetados por esta mudança), não ao TAMANHO da caixa contra a qual
+  // Esticar/Caber/Cortar são calculados a cada redesenho (que sempre
+  // deveria mesmo mudar, já que os 3 fits são "em relação ao retângulo
+  // amarelo", pedido de rodadas ainda mais antigas). A correção de
+  // 15/09/2026 resolveu o sintoma errado (congelando a caixa inteira em
+  // vez de só preservar os valores salvos da foto) — CORRIGIDO agora:
+  // volta a ler `resolutionX/resolutionY` AO VIVO do `camProps`/`cam`
+  // (mesmo objeto editado em `_activeCamPropsEditTarget`), igual à malha
+  // 3D — os 2 (retângulo amarelo real e a caixa/canvas da foto) voltam a
+  // bater SEMPRE, em qualquer resolução, editada a qualquer momento.
+  _activeCamFrameAspect() {
+    let resX = 1920, resY = 1080;
+    if (this._fotoCamMode) {
+      const foto = (this._map?.fotos || []).find((f) => f.id === this._fotoCamMode.fotoId);
+      resX = foto?.camProps?.resolutionX ?? resX;
+      resY = foto?.camProps?.resolutionY ?? resY;
+    } else if (this._orbCamMode) {
+      const cam = (this._map?.cameras || []).find((c) => c.id === this._orbCamMode.camId);
+      resX = cam?.resolutionX ?? resX;
+      resY = cam?.resolutionY ?? resY;
+    }
+    return resX / Math.max(1, resY);
+  },
+
+  /** [14/09/2026 — NOVO] FOV VERTICAL calibrado (radianos), derivado de
+   *  `camProps.focalLengthMm/sensorWidthMm/sensorHeightMm` — EXATAMENTE a
+   *  mesma fórmula (mesma ordem de contas: FOV horizontal a partir do
+   *  sensor/focal, depois FOV vertical a partir do horizontal + proporção)
+   *  já usada por `js/engine3d.js` pra construir o "retângulo amarelo"
+   *  (`_fotoFrustumMeshesById`, ver bloco `matAmarelo`/`linhaRet` — busque
+   *  por "hFovRad = 2 * Math.atan" lá pra conferir que bate 100%). Extraída
+   *  pra cá como função COMPARTILHADA porque essa duplicação (a mesma conta
+   *  escrita 2 vezes, uma em cada arquivo) era exatamente a causa raiz do
+   *  bug "foto muito maior que o retângulo amarelo": nada em view3d.js
+   *  calculava este FOV antes desta correção — `_activeCamFrameRectPx`
+   *  (modo 'front') só "encaixava por proporção" no canvas (ignorando FOV
+   *  de vez), e `_updateFotoCamBackdropPlane` (modo 'back') usava
+   *  `cam3.fov` (o FOV do RENDER, `zcfg.zoomFov` — um valor totalmente
+   *  diferente, vindo de `_fotoCamFovFor`/vanishCam ou do padrão fixo 60°)
+   *  em vez do FOV calibrado do `camProps` que o retângulo amarelo
+   *  realmente usa. Câmera "Câmeras" sem `camProps.focalLengthMm` salvo
+   *  ainda cai nos mesmos padrões de fábrica do fieldset "Propriedades da
+   *  câmera" (50mm, sensor 36x24mm) — igual ao engine3d.js. */
+  /** [11/09/2026] REESCRITO — ver comentário grande em `_activeCamFrameAspect`
+   *  (pedido verbatim: "apague todas as propriedades. Deixe apenas FOV.").
+   *  Antes derivava o FOV vertical de `focalLengthMm`/`sensorWidthMm`/
+   *  `sensorHeightMm` (estilo Blender) — esses campos SUMIRAM do fieldset;
+   *  `camProps.fov` (radianos) agora é a ÚNICA fonte, editada DIRETO pelo
+   *  usuário (sem conversão foco<->FOV nenhuma) — já é o valor VERTICAL
+   *  (mesma convenção de sempre, direto pra `Engine3D.setFov`/
+   *  `THREE.PerspectiveCamera.fov`), então esta função só devolve
+   *  `camProps.fov` com um padrão de fábrica (60°) se ainda não tiver sido
+   *  calibrado. */
+  // [18/09/2026] REVERTIDO — ver comentário grande em `_activeCamFrameAspect`
+  // (mesmo pedido/causa raiz: "Esticar [...] não cobrindo todo o
+  // retângulo amarelo" depois de editar a Resolução). `resX`/`resY`
+  // voltam a ler `camProps.resolutionX/Y` AO VIVO (não mais
+  // `calibResX/calibResY` congelados) — igual ao `cp?.fov`, que já lia ao
+  // vivo. Mantém `Cam3DMath.camPropsVFovRad` (comentário abaixo,
+  // preservado) — mesma função usada pelo retângulo amarelo de verdade em
+  // engine3d.js `setScene`, garantindo que os dois batam sempre, agora em
+  // QUALQUER momento (não só na entrada deste modo).
+  _activeCamPropsVFovRad() {
+    let cp = null;
+    let resX = 1920, resY = 1080;
+    if (this._fotoCamMode) {
+      const foto = (this._map?.fotos || []).find((f) => f.id === this._fotoCamMode.fotoId);
+      cp = foto?.camProps || null;
+      resX = cp?.resolutionX ?? resX;
+      resY = cp?.resolutionY ?? resY;
+    } else if (this._orbCamMode) {
+      const cam = (this._map?.cameras || []).find((c) => c.id === this._orbCamMode.camId) || null;
+      cp = cam;
+      resX = cam?.resolutionX ?? resX;
+      resY = cam?.resolutionY ?? resY;
+    }
+    // [11/09/2026] CORRIGIDO — pedido verbatim: "O enquadramento deve ter
+    // medidas limite que são a forma do quadrado (assim como no Blender)
+    // [...]" — `camProps.fov` deixou de ser devolvido direto como o FOV
+    // VERTICAL (que ignorava se a resolução é paisagem ou retrato); agora
+    // passa por `Cam3DMath.camPropsVFovRad` (engine3d.js, comentário
+    // grande lá com a explicação completa da convenção "Sensor Fit: Auto"
+    // do Blender) — MESMA função usada pelo retângulo amarelo de verdade
+    // em engine3d.js `setScene`, garantindo que os dois batam sempre.
+    return window.Cam3DMath.camPropsVFovRad(cp?.fov, resX, resY);
+  },
+
+  /** [13/09/2026 — ITEM D] pedido verbatim: "Os botões 'Esticar', 'Caber' e
+   *  'Cortar' são em relação ao retângulo amarelo que representa os
+   *  limites da câmera selecionada. Você está colocando como se a
+   *  referência fosse o tamanho do canvas do 'Ver em 3D'." BUG CONFIRMADO
+   *  — antes desta correção, `.v3d-fotocam-overlay-img` usava `inset:0;
+   *  width:100%; height:100%` (CSS, ver style.css) — literalmente o
+   *  CANVAS/viewport inteiro — e o plano 3D do modo 'back'
+   *  (`_updateFotoCamBackdropPlane`) usava `cam3.aspect` (idem, a
+   *  proporção do VIEWPORT) em vez da proporção do SENSOR da câmera
+   *  calibrada (`_activeCamFrameAspect` acima). Esta função devolve o
+   *  retângulo em pixels de TELA (`left/top/width/height`, relativo ao
+   *  `<canvas>`/overlay) que o "retângulo amarelo" ocupa — MESMO
+   *  letterbox/pillarbox de um `object-fit:contain` encaixando um box de
+   *  proporção `_activeCamFrameAspect()` dentro do canvas: como a câmera
+   *  de render usa FOV VERTICAL (convenção padrão do
+   *  `THREE.PerspectiveCamera`, ver `Engine3D.setFov`) e `camera3.aspect`
+   *  sempre = proporção do viewport (nunca a do sensor), o enquadramento
+   *  calibrado (ângulo vertical = FOV calibrado, ângulo horizontal
+   *  derivado da proporção do SENSOR, não do viewport) projeta como
+   *  EXATAMENTE esse retângulo "contido" — sem precisar projetar os 4
+   *  cantos 3D de verdade (`_fotoFrustumMeshesById`, engine3d.js) pra
+   *  chegar no mesmo resultado, já que a vertical dos dois (frame
+   *  calibrado x viewport) sempre bate quando `zoomFov === calibFov`
+   *  (a compensação de zoom, `escalaZoom` em `_updateFotoCamOverlayZoomScale`,
+   *  é aplicada por CIMA deste retângulo via `transform:scale`, não
+   *  precisa entrar nesta conta). */
+  /** [14/09/2026] CORRIGIDO — causa raiz do bug "foto muito maior que o
+   *  retângulo amarelo" (modo 'Trás' a 100% de opacidade "vazava" pra cor
+   *  do céu): esta função "encaixava" o quadro por PROPORÇÃO dentro do
+   *  canvas inteiro (`if (frameAspect > containerAspect) {w=cw;...}` —
+   *  sempre tocando uma borda do canvas), IGNORANDO o FOV de verdade —
+   *  bateria com o retângulo amarelo só por coincidência (só se o FOV do
+   *  render, `zcfg.calibFov`/`_fotoCamFovFor`, por acaso fosse igual ao FOV
+   *  calibrado do `camProps`/Blender, `_activeCamPropsVFovRad()` — 2
+   *  valores de fontes TOTALMENTE diferentes, ver comentário grande dessa
+   *  função acima). CORRIGIDO: agora calcula a fração real da ALTURA do
+   *  canvas que o retângulo amarelo ocupa, pela mesma ótica de câmera usada
+   *  em todo o resto do arquivo (`tan(fov/2)`), comparando o FOV vertical
+   *  CALIBRADO do `camProps` (`_activeCamPropsVFovRad`, o que o retângulo
+   *  amarelo REALMENTE usa) contra o FOV "zero-zoom" do render
+   *  (`zcfg.calibFov` — a referência que `_updateFotoCamOverlayZoomScale`
+   *  já usa pra `escalaZoom`, ver abaixo): na baseline (zoom 1:1,
+   *  `zoomFov===calibFov`, `escalaZoom=1`), o resultado desta função JÁ é o
+   *  tamanho final; em qualquer outro zoom, o `scale(escalaZoom)`
+   *  (CSS, aplicado por CIMA deste retângulo) multiplica
+   *  `tan(calibFov/2)/tan(zoomFov/2)` — o produto dos dois dá exatamente
+   *  `tan(camPropsVFov/2)/tan(zoomFov/2)`, a MESMA razão ótica que faz o
+   *  retângulo amarelo (objeto 3D real, tamanho fixo no mundo) crescer/
+   *  encolher na tela conforme o FOV do render muda — batendo o retângulo
+   *  amarelo em QUALQUER nível de zoom, não só na entrada. Largura segue a
+   *  MESMA fração, escalada pela proporção sensor/canvas (`frameAspect /
+   *  containerAspect`) — pode resultar num retângulo MAIOR que o canvas
+   *  (quando o FOV calibrado é mais aberto que o FOV do render) — correto:
+   *  o retângulo amarelo também "vaza" pra fora da tela nesse caso, a foto
+   *  deve acompanhar. */
+  // [17/09/2026] CORRIGIDO — pedido verbatim: "O escurecer deve ser
+  // recalculado a cada variação de zoom. Pois o retângulo amarelo muda de
+  // tamanho e o escurecido é feito apenas fora dele." CAUSA RAIZ: esta
+  // função usava `zcfg.calibFov` (o FOV "zero-zoom", fixo — só muda ao
+  // entrar numa câmera/recalibrar) como referência do `tan(fov/2)`, NUNCA
+  // `zcfg.zoomFov` (o FOV de verdade, que a roda do mouse altera a cada
+  // "tick", ver `onWheel`) — ou seja, o retângulo devolvido por esta
+  // função é SEMPRE do tamanho "parado" (zoom 1:1), mesmo depois de girar
+  // a roda do mouse. Um comentário de uma rodada anterior (11/09/2026,
+  // "Escurecer ao entorno") já dizia "Já reagia ao ZOOM (via
+  // baselineFovRad...)" — afirmação ERRADA: `baselineFovRad` vinha de
+  // `calibFov`, que não muda com o zoom, então na prática NUNCA reagia. O
+  // retângulo amarelo DE VERDADE (`linhaRet`, malha 3D real em
+  // engine3d.js) SEMPRE reagiu ao zoom de verdade (FOV real da câmera de
+  // render, `Engine3D.setFov`) — crescendo/encolhendo na tela como
+  // qualquer objeto 3D sob uma câmera de perspectiva com FOV mutável.
+  // Resultado: a vinheta "Escurecer o entorno" (posicionada por esta
+  // função, ver `_updateFotoCamOverlayZoomScale`) ficava com tamanho FIXO
+  // enquanto o retângulo amarelo real crescia/encolhia por baixo dela ao
+  // dar zoom — descasando os dois (a área escurecida deixava de bater com
+  // "tudo fora do retângulo amarelo"). CORRIGIDO: troca `calibFov` por
+  // `zoomFov` na conta do `tan(fov/2)` — o retângulo devolvido passa a
+  // ser o tamanho de tela REAL do enquadramento calibrado NO ZOOM ATUAL
+  // (a MESMA ótica que faz o `linhaRet` 3D crescer/encolher), sempre
+  // recalculado a cada chamada — chamada já acontecia a cada "tick" da
+  // roda do mouse (`onWheel` → `_updateFotoCamOverlayZoomScale`), só a
+  // fórmula em si estava presa na referência errada. Como consequência, a
+  // compensação de zoom que antes era aplicada "por CIMA" via
+  // `escalaZoom`/`ctx.scale` (`_updateFotoCamOverlayZoomScale`) deixou de
+  // ser necessária — o retângulo/canvas em si já nasce do tamanho certo a
+  // cada zoom, então a foto (ajustada por Esticar/Caber/Cortar contra
+  // ESTE tamanho) já sai correta sem nenhuma escala extra.
+  _activeCamFrameRectPx() {
+    const canvas = this._container?.querySelector('#v3d-canvas');
+    const cw = canvas?.clientWidth || this._container?.clientWidth || 1;
+    const ch = canvas?.clientHeight || this._container?.clientHeight || 1;
+    const frameAspect = this._activeCamFrameAspect();
+    const containerAspect = cw / Math.max(1, ch);
+    const zcfg = this._activeCamZoomCfg();
+    const zoomFovDeg = zcfg?.zoomFov ?? zcfg?.calibFov ?? this._CAM_VIEW_DEFAULT_FOV;
+    const zoomFovRad = (zoomFovDeg * Math.PI) / 180;
+    const camPropsVFovRad = this._activeCamPropsVFovRad();
+    const fracH = Math.tan(camPropsVFovRad / 2) / Math.max(0.0001, Math.tan(zoomFovRad / 2));
+    const fracW = fracH * (frameAspect / Math.max(0.0001, containerAspect));
+    const w = cw * fracW, h = ch * fracH;
+    const rawLeft = (cw - w) / 2, rawTop = (ch - h) / 2;
+    // [12/09/2026 — RODADA "faixa de 1px"] NOVO — pedido verbatim: "Quando
+    // está marcado 'Trás', em algum nível de zoom, aparece uma tira vertical
+    // de 1 pixel de largura [...] com a cor rgb: 127, 0, 127 [...] No zoom
+    // out máximo [...] uma tira vertical preta aparece do lado esquerdo da
+    // imagem [...] O retângulo amarelo [...] deve ser sempre centralizado em
+    // relação à imagem. Atualmente no zoom out máximo, ele fica 1 pixel para
+    // a esquerda. E o 'Escurecer o entorno' deve ir até o pixel do lado da
+    // imagem [...] não pintou o escurecimento até ali faltando 1 pixel." (e,
+    // na mesma rodada: "variando o nível de zoom [...] a tira preta aparece
+    // no lado de cima da imagem" — mesmo bug, eixo vertical). CAUSA RAIZ:
+    // este método sempre devolveu `left`/`top`/`width`/`height` em ponto
+    // flutuante CRU (nunca arredondados) — cada consumidor arredondava por
+    // conta própria, de um jeito DIFERENTE: `_computeFotoCamMaskRawRect`
+    // (engine3d.js, o "buraco" real no canvas WebGL) arredonda os 2 CANTOS
+    // de cada eixo (esquerda E direita) já em pixels do render target;
+    // `_updateFotoCamFrameGuide` arredonda só `width`/`height` (via
+    // `Math.round`) mas usa `frame.left`/`frame.top` CRUS pro `style.left`/
+    // `style.top`; a vinheta (`_updateFotoCamOverlayZoomScale`) usa os 4
+    // valores crus direto no `style`. Em zooms "redondos" a parte
+    // fracionária de `rawLeft`/`rawTop`/`w`/`h` é ~0 e todo mundo bate por
+    // coincidência — mas em outros níveis de zoom (sobretudo nos extremos,
+    // onde o erro acumulado de ponto flutuante da cadeia de tangentes é
+    // maior) cada um arredonda pra um pixel de CSS diferente, deixando uma
+    // faixa de 1px "órfã" (sem foto por baixo alinhada com o buraco no
+    // WebGL — a cor-marcadora ou o preto do fundo do canvas aparecem crus)
+    // e o retângulo amarelo/a vinheta 1px fora de posição em relação a ela.
+    // CORRIGIDO: arredonda AQUI, na fonte única (Armadilha #4 do projeto) —
+    // arredondando os 2 CANTOS de cada eixo (esquerda+direita, topo+fundo)
+    // independentemente e derivando `width`/`height` da DIFERENÇA entre eles
+    // (mesma técnica já usada em `_computeFotoCamMaskRawRect`), nunca
+    // arredondando canto e tamanho por separado — isso garante que TODO
+    // consumidor (guia amarela, vinheta, `_fotoCamDrawnRectPx`->máscara
+    // WebGL) receba os MESMOS 4 números inteiros (em pixels de CSS),
+    // eliminando a divergência de arredondamento entre eles.
+    const left = Math.round(rawLeft), top = Math.round(rawTop);
+    const right = Math.round(rawLeft + w), bottom = Math.round(rawTop + h);
+    return { left, top, width: right - left, height: bottom - top, cw, ch };
+  },
+
+  /** Escala compensatória da foto-guia (`.v3d-fotocam-overlay-img`) —
+   *  puramente ótica: se o FOV atual (`cfg.zoomFov`) for MENOR que o
+   *  calibrado (`cfg.calibFov`, zoom IN), a cena parece maior — a foto
+   *  precisa crescer na MESMA proporção pra continuar "encaixada" sobre
+   *  ela; FOV MAIOR (zoom OUT) encolhe a foto. Fórmula padrão de óptica de
+   *  câmera: razão de ampliação ∝ tan(FOV calibrado/2) / tan(FOV atual/2)
+   *  (ambos verticais, mesma convenção de `Engine3D.setFov`).
+   *  [10/09/2026] NOVO — pedido verbatim: "A foto é para ser carregada
+   *  dentro do enquadramento e deve permanecer dentro do enquadramento,
+   *  com o shift+botão do meio do mouse." Antes desta correção, o pan
+   *  (`this._camViewPanOffset`/`Engine3D.setCamPanFrac`, ver onMouseMove)
+   *  só deslocava a CENA 3D (via lens-shift, ver setCamPanFrac) — a
+   *  foto-guia (imagem plana, não reprojetada) ficava PARADA, saindo do
+   *  enquadramento/desalinhando da cena atrás dela. Corrigido somando um
+   *  `translate()` (em `%`, resolvido contra o próprio tamanho do `<img>`
+   *  — que preenche o quadro 1:1, então a MESMA fração `off.x`/`off.y` usada
+   *  pro lens-shift da cena serve direto aqui, sem conversão nenhuma) ANTES
+   *  do `scale()` na mesma propriedade `transform` — percentuais de
+   *  `translate` resolvem contra a caixa de layout ORIGINAL (não afetada
+   *  pelo `scale` que vem depois na mesma lista), então pan e zoom não
+   *  interferem um no cálculo do outro. Chamada tanto pelo zoom (`onWheel`)
+   *  quanto pelo pan (`onMouseMove`, Shift+botão-do-meio) — qualquer um dos
+   *  dois reaplica os DOIS componentes juntos (lê `this._camViewPanOffset`
+   *  de novo aqui, não recebe por parâmetro). */
+  /** [12/09/2026 — ITEM D] pedido verbatim: "Sobre a imagem deve ter mais
+   *  opções, além da opacidade" — 7 sub-itens (Trás/Frente, Esticar/Caber/
+   *  Cortar, Offset X/Y, Virar Horizontalmente/Verticalmente, Rotação).
+   *  Config persistida (GLOBAL, mesmo padrão de armazenamento já usado por
+   *  `_getFotoCamOpacidade`/`_LS_KEY_FOTOCAM_OPACIDADE` — o pedido dizia
+   *  "persistir junto de onde a opacidade já é guardada", que hoje é um
+   *  único valor global em localStorage, não por câmera/foto individual;
+   *  documentado aqui pra não ser confundido com "por câmera" numa rodada
+   *  futura). `depth`: 'front' (padrão, imagem na frente de TUDO — o
+   *  comportamento de sempre, `<img>` DOM sobre o canvas) | 'back' (atrás
+   *  dos objetos 3D — NOVO, ver `_ensureFotoCamBackdropPlane`/
+   *  `_updateFotoCamBackdropPlane` abaixo). `fit`: 'contain' (Caber,
+   *  padrão — mesmo valor que `object-fit:contain` já hardcoded no CSS
+   *  antes desta rodada) | 'cover' (Cortar) | 'stretch' (Esticar).
+   *  `offsetX`/`offsetY`: [13/09/2026 — ITEM C, pedido verbatim: "Os
+   *  offsets devem ser em unidades do mundo"] METROS de deslocamento no
+   *  mundo, na distância de referência do quadro calibrado, ao longo dos
+   *  EIXOS PRÓPRIOS da câmera (right/up dela, não o horizonte do mundo —
+   *  ver `_backdropOffsetFrac`) — ANTES desta rodada era % do quadro
+   *  (screen-space); só a UNIDADE/magnitude mudou, a referência de
+   *  direção continua a mesma de sempre. `flipH`/`flipV`: bool. `rotation`:
+   *  graus, em torno do PRÓPRIO centro da imagem. */
+  _LS_KEY_FOTOCAM_BACKDROP: 'catalogo_camview_backdrop_config',
+
+  _getFotoCamBackdropConfig() {
+    if (this._fotoCamBackdropConfigCache) return this._fotoCamBackdropConfigCache;
+    let cfg = { depth: 'front', fit: 'contain', offsetX: 0, offsetY: 0, flipH: false, flipV: false, rotation: 0 };
+    try {
+      const raw = localStorage.getItem(this._LS_KEY_FOTOCAM_BACKDROP);
+      if (raw) { const parsed = JSON.parse(raw); if (parsed && typeof parsed === 'object') cfg = { ...cfg, ...parsed }; }
+    } catch (e) { /* localStorage indisponível (ex.: modo privado) — usa o padrão */ }
+    this._fotoCamBackdropConfigCache = cfg;
+    return cfg;
+  },
+
+  _setFotoCamBackdropConfig(patch) {
+    const cfg = { ...this._getFotoCamBackdropConfig(), ...patch };
+    this._fotoCamBackdropConfigCache = cfg;
+    try { localStorage.setItem(this._LS_KEY_FOTOCAM_BACKDROP, JSON.stringify(cfg)); } catch (e) { /* ver getter */ }
+    // [19/09/2026] SIMPLIFICADO — pedido verbatim do usuário à época:
+    // abandonar o plano 3D do backdrop 'Trás' em favor de desenhar a foto
+    // sempre no MESMO `<canvas>` 2D usado por 'Frente'
+    // (`#v3d-fotocam-photo-canvas`), mudando só a ORDEM de desenho.
+    // [22/09/2026 — RODADA SEGUINTE] REVERTIDO — pedido verbatim do
+    // usuário, testando aquela simplificação: "Volte a colocar a imagem lá
+    // no fundo, pois os objetos que deveriam estar à frente da imagem não
+    // estão." CAUSA: um `<canvas>` 2D de overlay fica SEMPRE empilhado por
+    // CSS acima do `<canvas>` WebGL inteiro — não existe nenhuma ordem de
+    // `ctx.*` capaz de fazer um objeto 3D REAL (com profundidade de
+    // verdade no espaço) ocluir/aparecer na frente dessa foto, porque ela
+    // nunca fazia parte do z-buffer da cena — só da "ordem de impressão"
+    // de um canvas 2D achatado. 'Trás' voltou a usar um PLANO 3D DE
+    // VERDADE (`THREE.Mesh`/`PlaneGeometry`, adicionado a `engine.scene`,
+    // `depthTest:true`/`depthWrite:false` — ver `_ensureFotoCamBackdropPlane`/
+    // `_updateFotoCamBackdropPlane` abaixo), que agora participa do
+    // z-buffer normalmente: objetos 3D reais na frente dele o ocluem,
+    // objetos atrás dele ficam ocultos por ele — exatamente como antes de
+    // 19/09/2026, mas evitando DE PROPÓSITO o bug de cache que aquela
+    // arquitetura tinha (a textura ficava dessincronizada da Resolução/FOV
+    // até algo forçar o redesenho, ver histórico em `sw.js`/CHANGELOG,
+    // 11/09/2026): a textura off-screen do plano (`_redrawFotoCamBackdropCanvas`)
+    // agora é redesenhada A CADA QUADRO, dentro de `_loop`, sempre que
+    // 'Trás' estiver ativo — nunca só em handlers pontuais de "onSave"/
+    // config que podem ser esquecidos. Esta função (`_setFotoCamBackdropConfig`)
+    // continua chamando só `_updateFotoCamOverlayZoomScale()` (o canvas 2D
+    // de overlay — usado por 'Frente' pra desenhar a foto, e pelos 2 modos
+    // pra desenhar o retângulo amarelo/vinheta, sempre por cima de tudo);
+    // o redesenho do PLANO (textura+posição+tamanho) roda à parte, todo
+    // quadro, em `_loop` — não precisa ser disparado daqui.
+    this._updateFotoCamOverlayZoomScale();
+    return cfg;
+  },
+
+  /** [12/09/2026 — ITEM D] Fórmula ótica idêntica à de sempre (pan+zoom),
+   *  agora também dobrando as novas opções de offset/rotação/flip (mesma
+   *  ordem descrita no pedido: base do enquadramento (fit, aplicado à
+   *  parte via `object-fit`, não faz parte da matriz `transform`) -> offset
+   *  translada -> rotação gira em torno do próprio centro -> flip espelha).
+   *  `object-fit` é sempre reaplicado aqui também, mesmo sem pan/zoom/
+   *  offset ativos, porque antes desta rodada era um valor FIXO no CSS
+   *  (`contain`) — agora precisa refletir `cfg.fit`. */
+  /** [13/09/2026 — ITEM C] Converte um offset em METROS (mundo, na
+   *  distância de referência do "quadro"/retângulo amarelo calibrado) pra
+   *  fração do enquadramento (0.5 = meio quadro) — usada tanto pelo `<img>`
+   *  DOM (modo 'front', translate em % do PRÓPRIO box, que agora é o
+   *  retângulo amarelo em si — ver `_activeCamFrameRectPx`) quanto pelo
+   *  canvas 2D do modo 'back' (`_redrawFotoCamBackdropCanvas`). Pedido
+   *  verbatim: "Os offsets devem ser em unidades do mundo [...] só a
+   *  UNIDADE muda de porcentagem pra metros — a direção/referência
+   *  continua relativa aos EIXOS PRÓPRIOS da câmera (right/up), não ao
+   *  horizonte do mundo" (pedido original, 2 rodadas atrás, mantido). A
+   *  "distância de referência" é só um valor arbitrário e estável
+   *  (`dist = max(2, far*0.9)`, calculado abaixo — [19/09/2026] antes desta
+   *  rodada era também a posição do plano 3D do backdrop 'back', REMOVIDO;
+   *  a fórmula continua igual, agora só como escala de conversão
+   *  metros→fração, sem nenhum objeto 3D posicionado nela) — mover
+   *  o campo pra "1.0" desloca a imagem 1m de verdade nessa distância, nos
+   *  2 modos, de forma consistente entre eles (independente de qual dos 2
+   *  estiver ativo no momento — a config é a mesma pros dois, ver
+   *  `_getFotoCamBackdropConfig`). Usa o FOV CALIBRADO (não o `zoomFov`
+   *  atual) como referência — o zoom (`escalaZoom` abaixo) já é aplicado
+   *  por CIMA deste offset via `scale()`, então a conta do offset em si não
+   *  precisa (nem deve) reagir ao zoom, senão o deslocamento em metros
+   *  pedido pelo usuário pareceria maior/menor conforme o zoom do momento. */
+  // [14/09/2026] CORRIGIDO — usava `zcfg.calibFov` (FOV "zero-zoom" do
+  // RENDER, `_fotoCamFovFor`/vanishCam ou padrão 60°) pra achar `halfH` do
+  // quadro na distância de referência — mas o plano 3D do backdrop 'Trás'
+  // (`_updateFotoCamBackdropPlane`, ver correção abaixo) passou a usar o
+  // FOV calibrado do `camProps` (`_activeCamPropsVFovRad`, o que o
+  // retângulo amarelo usa de verdade) pra ficar do tamanho certo — usar
+  // aqui uma referência DIFERENTE faria "1 metro" de offset corresponder a
+  // uma fração ERRADA do quadro real (dessincronizado do tamanho de
+  // verdade do plano/retângulo amarelo). Agora usa a MESMA função.
+  _backdropOffsetFrac(offsetXm, offsetYm) {
+    const dist = Math.max(2, (this._engine?.camera3?.far || 60) * 0.9);
+    const camPropsVFovRad = this._activeCamPropsVFovRad();
+    const halfH = dist * Math.tan(camPropsVFovRad / 2);
+    const halfW = halfH * this._activeCamFrameAspect();
+    return {
+      x: halfW > 0.0001 ? (offsetXm || 0) / (2 * halfW) : 0,
+      y: halfH > 0.0001 ? (offsetYm || 0) / (2 * halfH) : 0,
+    };
+  },
+
+  /** [12/09/2026 — RODADA "buffer de verdade"] REESCRITO DE NOVO — pedido
+   *  verbatim: "Você não consegue usar o mesmo buffer/canvas/imagem de
+   *  quando está marcado 'Frente' para que possa ser usado quando está
+   *  marcado 'Trás'? Pois em 'Trás', a imagem fica pixelizada no zoom. Use
+   *  a mesma coisa de 'Frente' em 'Trás'. E use o depth buffer para
+   *  imprimir os objetos na tela." + confirmação seguinte: "Se em 'Frente'
+   *  é CSS ou canvas, faça o mesmo em 'Trás'. E use o depth buffer para
+   *  imprimir os objetos e cima da imagem (quando estiver marcado
+   *  'Trás')."
+   *  CAUSA RAIZ do pixelado que sobrava mesmo depois da rodada "mesma
+   *  função" (comentário antigo preservado abaixo): mesmo usando
+   *  `camera3.projectionMatrix` de verdade (sem shader manual), o plano
+   *  ainda era desenhado DENTRO do pipeline WebGL comum a toda a cena —
+   *  `Engine3D._sharedRenderer`/`this.renderTarget`/`readRenderTargetPixels`
+   *  (arquitetura "MODO EYE", engine3d.js) — cuja resolução é limitada por
+   *  `_pixelRatioCap()` (`RESOLUCAO_DPR = {alta:2, media:1.5, baixa:1}`,
+   *  um TETO deliberado de qualidade/performance pra cena 3D real, correto
+   *  pra paredes/objetos mas baixo demais pra uma FOTO plana, que deveria
+   *  poder ficar tão nítida quanto a tela permitir). O `<canvas>` de
+   *  'Frente' (`#v3d-fotocam-photo-canvas`) NUNCA passa por esse pipeline —
+   *  é um elemento DOM comum, pintado pelo navegador na resolução que o
+   *  próprio `canvasEl.width/height` pedir (ver `_updateFotoCamOverlayZoomScale`),
+   *  sem NENHUM teto de `resolucao3D` — por isso sempre foi nítido.
+   *  SOLUÇÃO (o pedido, ao pé da letra): 'Trás' passa a usar O MESMO
+   *  `<canvas>` DOM de 'Frente' — nunca mais escondido (`style.visibility`
+   *  REMOVIDO de `_updateFotoCamOverlayZoomScale`), sempre desenhado pela
+   *  MESMA função, na MESMA resolução nítida. A diferença entre os 2
+   *  modos deixa de ser "existe uma foto ou não" e passa a ser SÓ a ORDEM
+   *  DE EMPILHAMENTO CSS (`z-index`, ver `_updateFotoCamOverlayZoomScale`):
+   *  'Frente' mantém o canvas ACIMA de `#v3d-canvas` (como sempre);
+   *  'Trás' põe o MESMO canvas ABAIXO de `#v3d-canvas` — pra que os
+   *  OBJETOS 3D reais (desenhados por cima, no `#v3d-canvas`) apareçam
+   *  por cima da foto, e a foto apareça nos pixels onde não há objeto.
+   *  "Onde não há objeto" ainda precisa vir do DEPTH BUFFER de verdade
+   *  (pedido explícito) — é exatamente pra isso que este plano 3D
+   *  continua existindo, só que agora com um papel bem mais simples: não
+   *  carrega mais NENHUMA textura/imagem — é um OCLUSOR que pinta uma cor-
+   *  MARCADORA sólida e reservada (ver `_FOTOCAM_BACKDROP_MASK_COLOR`,
+   *  logo abaixo) posicionado exatamente onde a foto "estaria" no mundo
+   *  3D (mesma fórmula de tamanho/posição/billboard de sempre). Com
+   *  `depthWrite:true`+`renderOrder` bem baixo (desenha ANTES de tudo mais
+   *  na cena), ele grava sua PRÓPRIA profundidade no z-buffer — qualquer
+   *  geometria real MAIS DISTANTE que ele (o ambiente/paredes atrás da
+   *  posição da "foto") falha o depth-test de verdade da GPU e é
+   *  descartada, deixando só a cor-marcadora naquele pixel.
+   *  [12/09/2026] CORRIGIDO — 1ª tentativa desta rodada usava
+   *  `colorWrite:false` (achando que um pixel "não pintado por ninguém"
+   *  ficaria automaticamente transparente) — só que a cena SEMPRE tem
+   *  `scene.background` sólido (o céu), pintado opaco em todo pixel não
+   *  coberto por outro objeto, ANTES de qualquer depth-test — o pixel
+   *  "reservado" nunca ficava transparente de verdade, só ficava com a
+   *  cor do céu (sempre opaca), escondendo a foto por baixo ("o 'Trás'
+   *  não está aparecendo a imagem", bug reportado). CORRIGIDO: o oclusor
+   *  pinta a cor-marcadora de verdade (`colorWrite:true`) e
+   *  `Engine3D._presentToCanvas`/`setFotoCamBackdropMask` (engine3d.js,
+   *  chamados por `_updateFotoCamBackdropPlane` logo abaixo) fazem, FORA
+   *  do pipeline WebGL, a única etapa manual que sobrou: zerar o alfa de
+   *  todo pixel que bater com essa cor, só dentro do retângulo do quadro
+   *  (barato, delimitado) — é ESSA etapa que produz o "buraco"
+   *  transparente de verdade, contornando o preenchimento opaco do céu.
+   *  Objetos MAIS PERTO que a "foto" (móveis/itens reais na frente)
+   *  continuam vencendo o depth-test contra o oclusor normalmente (mais
+   *  perto sempre vence, independente de ordem de desenho, z-buffer
+   *  comum), pintando sua PRÓPRIA cor por cima do marcador — nunca batem
+   *  com a cor-marcadora, então a máscara os deixa em paz, opacos,
+   *  cobrindo a foto por baixo normalmente. "Usa o depth buffer para
+   *  decidir se algum pixel será substituído pelo pixel de um objeto" —
+   *  o depth-test de verdade da GPU continua sendo quem decide QUAIS
+   *  pixels viram "buraco"; a máscara em JS só executa essa decisão fora
+   *  do framebuffer (transformando "cor-marcadora" em "alfa=0"), porque o
+   *  `scene.background` sólido não deixa a GPU fazer isso sozinha. */
+  // [12/09/2026] NOVO — cor-marcadora sólida e reservada (magenta puro,
+  // pouco provável de ocorrer "de verdade" em paredes/objetos/luz de um
+  // ambiente mapeado) pintada pelo oclusor invisível do backdrop 'Trás'
+  // (ver `_ensureFotoCamBackdropPlane`) — `Engine3D.setFotoCamBackdropMask`/
+  // `_presentToCanvas` (engine3d.js) zeram o alfa de todo pixel que bater
+  // EXATAMENTE com esta cor, dentro do retângulo do quadro. Compartilhada
+  // aqui (em vez de duplicada em 2 lugares) porque as 2 pontas — a cor do
+  // material E o valor comparado pixel a pixel — precisam ser IDÊNTICAS,
+  // senão a máscara nunca encontra nada pra apagar (mesma lição da
+  // armadilha #4 do projeto: uma única fonte de verdade).
+  _FOTOCAM_BACKDROP_MASK_COLOR: [255, 0, 255],
+
+  _ensureFotoCamBackdropPlane() {
+    const engine = this._engine;
+    const THREE = engine?.THREE;
+    if (!engine?.scene || !THREE) return null;
+    if (this._fotoCamBackdropMesh) return this._fotoCamBackdropMesh;
+    // [12/09/2026 — RODADA "buffer de verdade"] SEM textura/canvas/imagem
+    // nenhuma — este plano nunca é visto DE VERDADE (pinta uma cor-
+    // marcadora reservada, ver `_FOTOCAM_BACKDROP_MASK_COLOR`/comentário
+    // grande logo abaixo); ele só EXISTE pra gravar profundidade no
+    // z-buffer + marcar, com essa cor, os pixels onde o ambiente real é
+    // mais distante que a posição da "foto". A foto de verdade vive
+    // inteiramente no `<canvas>` DOM de 'Frente' (`#v3d-fotocam-photo-canvas`),
+    // por baixo de `#v3d-canvas` via CSS quando 'Trás' está ativo.
+    // [12/09/2026] CORRIGIDO — pedido verbatim: "Agora, o 'Trás' não está
+    // aparecendo a imagem." CAUSA RAIZ: `colorWrite:false` (comentário
+    // antigo, preservado abaixo) partia da premissa de que um pixel "não
+    // pintado por ninguém" ficaria transparente (alfa=0, a cor de limpeza
+    // do frame) — mas a cena SEMPRE tem `scene.background` definido como
+    // uma `THREE.Color` sólida (o céu, ver `engine3d.js _updateSky`), e o
+    // Three.js pinta esse fundo OPACO em TODO pixel não coberto por outro
+    // objeto, ANTES de qualquer depth-test — o pixel "reservado" pelo
+    // oclusor nunca ficava transparente de verdade, só ficava com a cor do
+    // céu (sempre opaca), escondendo a foto por baixo. CORRIGIDO: volta a
+    // `colorWrite:true`, mas pintando uma cor-MARCADORA sólida e reservada
+    // (magenta puro) em vez de textura nenhuma — `Engine3D._presentToCanvas`
+    // (engine3d.js, ver `setFotoCamBackdropMask`) zera o alfa de todo pixel
+    // que bater com essa cor, só dentro do retângulo do quadro — é ESSA
+    // etapa (fora do pipeline WebGL) que produz o "buraco" transparente de
+    // verdade, contornando o preenchimento opaco do céu.
+    const mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(
+        this._FOTOCAM_BACKDROP_MASK_COLOR[0] / 255,
+        this._FOTOCAM_BACKDROP_MASK_COLOR[1] / 255,
+        this._FOTOCAM_BACKDROP_MASK_COLOR[2] / 255,
+      ),
+      // [12/09/2026] `depthWrite:true`/`depthTest:true` continuam iguais —
+      // é o que garante a oclusão de verdade por objetos reais mais perto
+      // (ver `renderOrder`, abaixo). `transparent:false` — precisa ficar
+      // na fila OPACA da cena (a fila "transparente" é ordenada de trás
+      // pra frente DEPOIS da opaca, o que quebraria a garantia de
+      // `renderOrder` desenhar este oclusor sempre PRIMEIRO).
+      transparent: false,
+      depthWrite: true,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+      fog: false,
+    });
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const mesh = new THREE.Mesh(geo, mat);
+    // [12/09/2026] `renderOrder` bem baixo — GARANTE que este oclusor
+    // desenha (e grava profundidade) ANTES de qualquer objeto normal da
+    // cena (`renderOrder` default = 0), não dependendo do heurístico de
+    // ordenação "de perto pra longe" que o Three.js usa por padrão na
+    // fila opaca (que é só uma otimização de performance, não uma garantia
+    // de ordem) — sem isso, um objeto do AMBIENTE desenhado ANTES deste
+    // plano já teria pintado sua PRÓPRIA cor opaca naquele pixel (não a
+    // cor-marcadora), e o depth-test do oclusor (mais perto) só
+    // conseguiria impedir pinturas SEGUINTES no mesmo pixel — o pixel
+    // ficaria com a cor ERRADA (do ambiente, não a marcadora), e a
+    // máscara em `Engine3D._presentToCanvas` nunca encontraria o marcador
+    // ali pra apagar — precisa ser SEMPRE o primeiro a desenhar.
+    mesh.renderOrder = -100000;
+    mesh.visible = false; // só fica visível quando 'Trás' estiver realmente ativo (ver _loop)
+    mesh.frustumCulled = false;
+    engine.scene.add(mesh);
+    this._fotoCamBackdropMesh = mesh;
+    // [22/09/2026] NOVO — ver comentário grande em `Engine3D._renderBackdropEnvPass`:
+    // o motor precisa saber qual malha é este oclusor pra escondê-la SÓ
+    // durante o passe extra de ambiente (sem afetar o passe principal) —
+    // registrado 1x aqui, na criação (a malha nunca é recriada depois).
+    engine.registerFotoCamBackdropOcclusor?.(mesh);
+    return mesh;
+  },
+
+  /** [12/09/2026 — RODADA "buffer de verdade"] REESCRITA (ver comentário
+   *  grande em `_ensureFotoCamBackdropPlane`, acima, pro pedido
+   *  verbatim/causa raiz/solução completa). Continua usando a MESMA
+   *  fórmula de tamanho/posição/billboard das rodadas anteriores
+   *  (`_activeCamPropsVFovRad`/`_activeCamFrameAspect`/`_fotoCamPhotoCanvasRectPx`
+   *  vs. `_activeCamFrameRectPx`, `camera3.projectionMatrix` de verdade,
+   *  sem nenhum deslocamento manual de pan) — só não mexe mais em textura
+   *  nenhuma (este plano não tem `material.map`/`opacity` — é só um
+   *  oclusor de profundidade, ver acima). */
+  /** [12/09/2026 — RODADA "piscada magenta"] MUDADO — agora devolve `true`/
+   *  `false` conforme conseguiu ou não montar uma máscara VÁLIDA (retângulo
+   *  com tamanho > 0) neste quadro — ver comentário grande no chamador
+   *  (dentro de `_loop`, onde `mesh.visible` passa a depender deste
+   *  retorno) pro pedido/causa raiz completa da "piscada". */
+  _updateFotoCamBackdropPlane(renderCam) {
+    const mesh = this._fotoCamBackdropMesh;
+    const THREE = this._engine?.THREE;
+    const camera3 = this._engine?.camera3;
+    if (!mesh || !THREE || !camera3) return false;
+
+    // Mesma distância/fórmula de referência de sempre (`_backdropOffsetFrac`,
+    // inalterada) — acha o tamanho (em metros) do quadro calibrado a
+    // `dist` metros de distância no eixo óptico da câmera.
+    const dist = Math.max(2, (camera3.far || 60) * 0.9);
+    const camPropsVFovRad = this._activeCamPropsVFovRad();
+    const halfH = dist * Math.tan(camPropsVFovRad / 2);
+    const halfW = halfH * this._activeCamFrameAspect();
+
+    // [12/09/2026] CORRIGIDO — pedido verbatim: "Marcando 'Trás' e 'Caber'
+    // nas laterais da imagem fica preto (deveria ser transparente para não
+    // tapar o fundo)." Antes, este `ratioW`/`ratioH` vinha de
+    // `_fotoCamPhotoCanvasRectPx` (o CANVAS inteiro — sempre do tamanho do
+    // quadro, exceto em 'Cortar') — em 'Caber', a foto DESENHADA dentro
+    // desse canvas é MENOR num dos eixos (letterbox/pillarbox, ver
+    // `_fotoCamDrawnSize`), mas o oclusor não sabia disso e cobria o
+    // quadro INTEIRO mesmo assim, marcando a faixa vazia (sem foto
+    // nenhuma) como "buraco" também — ver comentário grande em
+    // `_fotoCamDrawnSize`/no cálculo de `_fotoCamDrawnRectPx`
+    // (`_updateFotoCamOverlayZoomScale`) pra causa raiz completa. CORRIGIDO:
+    // `ratioW`/`ratioH` agora vêm de `_fotoCamDrawnRectPx` (a foto DE
+    // VERDADE, já considerando 'Caber'/'Cortar'/'Esticar' E rotação) — em
+    // 'Esticar'/'Cortar' este valor já bate com o quadro inteiro (sem
+    // mudança de comportamento); só 'Caber' fica menor de verdade agora.
+    const frame = this._activeCamFrameRectPx();
+    const drawnRect = this._fotoCamDrawnRectPx;
+    const ratioW = drawnRect && frame.width > 0 ? drawnRect.width / frame.width : 1;
+    const ratioH = drawnRect && frame.height > 0 ? drawnRect.height / frame.height : 1;
+    mesh.scale.set(halfW * 2 * ratioW, halfH * 2 * ratioH, 1);
+
+    // Posiciona a `dist` metros à frente da câmera, de frente pra ela
+    // (billboard) — SEM nenhum deslocamento manual de pan: o
+    // `setCamPanFrac`/lens-shift já aplicado em `camera3` (antes desta
+    // chamada, mesmo quadro) desloca a PROJEÇÃO inteira, e qualquer
+    // objeto 3D real nesta posição/orientação já aparece deslocado do
+    // jeito certo automaticamente — igual a qualquer peça real da cena.
+    const forward = new THREE.Vector3();
+    camera3.getWorldDirection(forward);
+    mesh.position.copy(camera3.position).addScaledVector(forward, dist);
+    mesh.quaternion.copy(camera3.quaternion);
+
+    // [12/09/2026] NOVO — liga a máscara de alfa que faz o "buraco" de
+    // verdade aparecer (ver comentário grande em `_ensureFotoCamBackdropPlane`
+    // e em `Engine3D._presentToCanvas`/`setFotoCamBackdropMask`, engine3d.js).
+    // [12/09/2026, CORRIGIDO — ver comentário grande acima em `ratioW`/
+    // `ratioH`] Retângulo agora é `drawnRect` (a foto DE VERDADE, não mais
+    // o quadro/canvas inteiro) — mesmo motivo: em 'Caber', procurar a
+    // cor-marcadora FORA da área onde a foto de fato foi desenhada
+    // "furava" a faixa vazia (letterbox) também, revelando o fundo de
+    // `.view3d-wrap` (preto) em vez do cenário 3D real que deveria
+    // aparecer ali (como em 'Frente'). Fonte única com o `scale()` do
+    // oclusor acima — os 2 usam exatamente o mesmo `drawnRect`.
+    // [22/09/2026] NOVO — 3º argumento (`opacidade`, 0-1) — ver comentário
+    // grande em `Engine3D._renderBackdropEnvPass`/`_initThree`
+    // (`_backdropEnvRenderTarget`) pro pedido/arquitetura completa: usado
+    // só pra decidir quanto misturar o ambiente real por cima do
+    // resultado de sempre — nunca muda a máscara/oclusão binária em si.
+    const maskValida = !!drawnRect && drawnRect.width > 0 && drawnRect.height > 0;
+    if (maskValida) this._engine.setFotoCamBackdropMask?.(drawnRect, this._FOTOCAM_BACKDROP_MASK_COLOR, this._getFotoCamOpacidade?.());
+    // [12/09/2026] NOVO — ver comentário grande em `Engine3D._buildGlassPane`/
+    // `setFotoCamBackdropMaskActive` (engine3d.js): mantém o "vidro
+    // rosa choque" desligado (`colorWrite:false`) enquanto a máscara
+    // 'Trás' estiver realmente ativa (chega aqui todo quadro em que
+    // `drawnRect` existe, junto com `setFotoCamBackdropMask` acima —
+    // mesma fonte de verdade, sem duplicar a condição).
+    // [12/09/2026 — RODADA "piscada magenta"] MUDADO — pedido verbatim:
+    // "Logo que clica em 'Ver através desta câmera', um retângulo magenta
+    // aparece repentinamente e depois desaparece. [...] use o mesmo
+    // cálculo para evitar as tiras nesse início." CAUSA RAIZ: bem no
+    // instante de entrar neste modo, o layout do container/canvas (`#v3d-
+    // canvas`, lido por `_activeCamFrameRectPx`) podia ainda não ter sido
+    // recalculado pelo navegador com o tamanho FINAL (troca de painéis/
+    // FOV acontece no mesmo instante) — por 1-2 quadros, `frame`/`drawnRect`
+    // saíam degenerados (tamanho zero ou não confiável), mas o código
+    // anterior ligava `mesh.visible = true` (no chamador, dentro de
+    // `_loop`) de qualquer jeito, incondicionalmente — o oclusor (plano
+    // 3D pintado da cor-marcadora sólida) aparecia então SEM nenhuma
+    // máscara/buraco recortado por cima dele (`maskValida` false ali
+    // também), sobrando magenta puro cobrindo a tela inteira por aquele(s)
+    // quadro(s) — a "piscada". CORRIGIDO: `setFotoCamBackdropMaskActive`
+    // só liga (`true`) quando `maskValida` — nos quadros em que NÃO dá
+    // pra montar uma máscara de verdade, esta função devolve `false` (ver
+    // assinatura acima) e o chamador agora mantém o oclusor ESCONDIDO
+    // (mesmo comportamento do "senão" de sempre, como se 'Trás' não
+    // estivesse ativo ainda) em vez de mostrá-lo cru — nenhum quadro chega
+    // a mostrar o marcador sem buraco.
+    this._engine.setFotoCamBackdropMaskActive?.(maskValida);
+    return maskValida;
+  },
+
+  /** [19/09/2026] REVERTIDO — pedido verbatim: "Tenho uma imagem
+   *  carregada em uma câmera, quando clico em 'Cortar', a imagem fica
+   *  cortada. Apesar do nome, deveria imprimir a imagem como no botão
+   *  'Caber' ampliando (proporcionalmente) até cobrir o retângulo
+   *  amarelo (tanto 'Trás' quanto 'Frente' estando marcado)." CAUSA
+   *  RAIZ: a correção de 16/09/2026 (comentário abaixo, preservado)
+   *  trocou a margem de segurança de 'Cortar' pra uma DIAGONAL FIXA
+   *  (`D = sqrt(frameW²+frameH²)`), sempre maior que o próprio quadro em
+   *  QUALQUER ângulo — inclusive sem rotação nenhuma (`rotation === 0`,
+   *  o caso do teste do usuário) — fazendo 'Cortar' ficar SEMPRE mais
+   *  ampliado/cortado do que o "cover" padrão pedido ("como no botão
+   *  Caber, ampliando proporcionalmente até cobrir o retângulo, sem
+   *  sobrar nem faltar mais do que o necessário"). CORRIGIDO: volta a
+   *  calcular a margem em função do ÂNGULO ATUAL de rotação
+   *  (`frameW*|cos R| + frameH*|sin R|` — a bounding-box real do quadro
+   *  "contra-rotacionado" por `rotationDeg`, técnica padrão de "cover com
+   *  rotação"), que na rotação 0° (o padrão, sem o usuário mexer em nada)
+   *  dá EXATAMENTE `effW=frameW`/`effH=frameH` — ou seja, o cover MÍNIMO
+   *  de verdade, igual ao pedido ("como Caber, só que ampliando até
+   *  cobrir em vez de encolhendo até caber"), sem nenhuma margem extra
+   *  desnecessária — e ainda cresce suavemente (função contínua de R,
+   *  sem saltos) só quando a foto É rotacionada, continuando a cobrir os
+   *  4 cantos do quadro em qualquer ângulo (resolve o bug ORIGINAL de
+   *  cantos vazios ao rotacionar, sem reintroduzir aquele bug).
+   *  `rotationDeg` volta a ser parâmetro (chamado com `cfg.rotation`, ver
+   *  `_drawFotoCamPhoto` abaixo). `imgW`/`imgH` — a RESOLUÇÃO NATURAL da
+   *  foto (`naturalWidth`/`naturalHeight`), não o tamanho do elemento. */
+  _fotoCamCoverBoxSize(frameW, frameH, imgW, imgH, rotationDeg) {
+    if (!imgW || !imgH) return { w: frameW, h: frameH };
+    const rad = ((rotationDeg || 0) * Math.PI) / 180;
+    const cos = Math.abs(Math.cos(rad));
+    const sin = Math.abs(Math.sin(rad));
+    const effW = frameW * cos + frameH * sin;
+    const effH = frameW * sin + frameH * cos;
+    const imgAspect = imgW / imgH;
+    const effAspect = effW / Math.max(0.0001, effH);
+    let w, h;
+    if (imgAspect > effAspect) { h = effH; w = effH * imgAspect; } else { w = effW; h = effW / imgAspect; }
+    return { w, h };
+  },
+
+  /** [16/09/2026 — RODADA SEGUINTE] NOVO — composição 2D pura (translate ->
+   *  offset -> rotação -> flip -> drawImage), compartilhada pelos 2 modos
+   *  de profundidade ('front', canvas DOM sobre tudo, e 'back', textura do
+   *  plano 3D) — pedido verbatim: "É só uma ordem de impressão no canvas
+   *  [...] a rotação é em 2D, pode ser feita direto no canvas sem
+   *  considerar complexidade 3D [...] Faça apenas considerando o 2D (pois
+   *  a vista é fixa)." `cw`/`ch` — tamanho (em "pixels" do canvas de
+   *  destino) do QUADRO calibrado (não precisa ser o tamanho real do
+   *  canvas em 'Cortar' — o próprio `ctx.drawImage`/limite do canvas
+   *  recorta nativamente o que passar de `cw`x`ch`, sem precisar de
+   *  nenhum `overflow:hidden` de DOM). `zoomScale` — fator de zoom da roda
+   *  do mouse (`escalaZoom`, só usado no modo 'front' — no modo 'back' o
+   *  zoom já vem de verdade da projeção da câmera 3D, ver
+   *  `_updateFotoCamBackdropPlane`, então aqui fica sempre 1). */
+  /** [12/09/2026] NOVO — EXTRAÍDO de dentro de `_drawFotoCamPhoto` (era um
+   *  cálculo local, `dw`/`dh`, inacessível de fora) pra virar uma função
+   *  COMPARTILHADA — motivo: corrigir o bug reportado "Marcando 'Trás' e
+   *  'Caber' nas laterais da imagem fica preto (deveria ser transparente
+   *  para não tapar o fundo)". CAUSA RAIZ: em 'Caber' (`fit:'contain'`), a
+   *  foto desenhada (`dw`x`dh`) é MENOR que o quadro calibrado num dos
+   *  eixos (pra preservar a proporção, sem distorcer) — sobra uma faixa
+   *  vazia (letterbox/pillarbox) DENTRO do mesmo `<canvas>`, que
+   *  `_drawFotoCamPhoto` deixa transparente (`clearRect`, nunca pintada).
+   *  Em 'Frente', isso é inofensivo: a faixa vazia do `<canvas>` (por CIMA
+   *  de tudo via CSS) deixa o cenário 3D aparecer por baixo, exatamente
+   *  como esperado. Mas o oclusor do backdrop 'Trás'
+   *  (`_ensureFotoCamBackdropPlane`/`_updateFotoCamBackdropPlane`) sempre
+   *  usava o tamanho do QUADRO INTEIRO (nunca sabia que uma fração dele
+   *  ficava vazia em 'Caber') — marcava a faixa vazia como "buraco"
+   *  (mesma cor-marcadora) igual ao resto, e como o `<canvas>` da foto
+   *  também está vazio/transparente ali (não tem imagem pra mostrar
+   *  naquele pedaço), as 2 camadas (WebGL "furado" + canvas da foto vazio)
+   *  ficam transparentes ao mesmo tempo — revelando o que está ATRÁS de
+   *  ambas: o fundo de `.view3d-wrap` (`#05070a`, quase preto — ver
+   *  correção de 12/09/2026 em `css/style.css`), em vez do cenário 3D real
+   *  (que deveria aparecer ali, como em 'Frente'). CORRIGIDO: esta função
+   *  devolve o retângulo (AABB, já considerando rotação — ver `Math.abs`
+   *  de seno/cosseno abaixo) que a foto REALMENTE ocupa dentro do quadro
+   *  calibrado (`frameW`x`frameH`) — usado por `_updateFotoCamOverlayZoomScale`
+   *  pra guardar `this._fotoCamDrawnRectPx` (lido por
+   *  `_updateFotoCamBackdropPlane`, que agora dimensiona/posiciona o
+   *  oclusor E a máscara por ESTE retângulo — só a foto de verdade, nunca
+   *  a faixa vazia do 'Caber') em vez do quadro inteiro. 'Esticar'
+   *  (preenche 100% do quadro) e 'Cortar' (sempre ≥ quadro, nunca sobra
+   *  vazio) continuam batendo com o quadro inteiro, sem mudança de
+   *  comportamento — só 'Caber' muda de verdade. */
+  _fotoCamDrawnSize(frameW, frameH, iw, ih, cfg) {
+    let dw, dh;
+    if (cfg.fit === 'stretch') {
+      dw = frameW; dh = frameH;
+    } else if (cfg.fit === 'cover') {
+      const box = this._fotoCamCoverBoxSize(frameW, frameH, iw, ih, cfg.rotation || 0);
+      dw = box.w; dh = box.h;
+    } else { // 'contain' (Caber), padrão
+      const imgAspect = iw / Math.max(1, ih), boxAspect = frameW / Math.max(0.0001, frameH);
+      if (imgAspect > boxAspect) { dw = frameW; dh = frameW / imgAspect; } else { dh = frameH; dw = frameH * imgAspect; }
+    }
+    return { dw, dh };
+  },
+
+  // [12/09/2026] NOVO — `bitmapScale` (padrão 1). Pedido verbatim: "Percebi
+  // que, ao dar zoom in (tanto estando 'Trás' quanto estando 'Frente'
+  // marcado), o fps cai bastante. Otimize isso." CAUSA RAIZ (medida com
+  // Playwright): o retângulo calibrado (`frame`, `_activeCamFrameRectPx`)
+  // CRESCE sem limite ao dar zoom in de verdade (`tan(calibFov/2)/
+  // tan(zoomFov/2)` — quanto mais zoom, mais estreito o FOV, maior a
+  // razão) — em zoom forte, `frame`/o `<canvas>` da foto passam a ter
+  // MILHARES de pixels de lado (ex.: 7040x3960 medido a 6° de FOV), a
+  // maior parte disso fora da área visível (`.view3d-wrap{overflow:
+  // hidden}` recorta visualmente, mas o CUSTO de redesenhar
+  // (`ctx.drawImage`) o canvas INTEIRO todo quadro não é recortado —
+  // `_updateFotoCamOverlayZoomScale` sozinha chegou a custar ~35ms/quadro
+  // nesse cenário, muito acima do orçamento de um quadro a 60fps (~16ms),
+  // e ela roda TODO QUADRO em "Ver através desta câmera" (`_loop`),
+  // explicando a queda de FPS em AMBOS os modos ('Frente' e 'Trás' — os 2
+  // chamam esta mesma função). CORRIGIDO: o BITMAP real do `<canvas>`
+  // (`canvasEl.width/height`) passa a ter um TETO (ver
+  // `_updateFotoCamOverlayZoomScale`, que calcula `bitmapScale < 1` quando
+  // o tamanho lógico (`cw`/`ch`) excede o teto) — o `<canvas>` continua do
+  // MESMO TAMANHO VISUAL na tela (`style.width/height`, inalterado,
+  // sempre o tamanho lógico/óptico correto), só a RESOLUÇÃO INTERNA fica
+  // menor além do teto; o navegador escala/interpola o bitmap menor pro
+  // tamanho visual sozinho (mesmo truque já usado pelo motor 3D,
+  // `_pixelRatioCap`/`RESOLUCAO_DPR`, engine3d.js). Only perceptível como
+  // uma leve suavização da foto em zooms MUITO fortes (bem além do ponto
+  // em que dá pra distinguir pixels individuais da foto de qualquer jeito)
+  // — troca ótima: quase nenhuma perda visual por uma queda de custo de
+  // dezenas de vezes. Aplicado aqui via `ctx.setTransform(bitmapScale,0,0,
+  // bitmapScale,0,0)` (em vez do reset pra identidade) ANTES de qualquer
+  // desenho — todo o resto da função continua trabalhando inteiramente em
+  // coordenadas LÓGICAS (`cw`/`ch`/`frameW`/`frameH`, nunca muda), a
+  // transform sozinha resolve o mapeamento pro bitmap físico menor.
+  _drawFotoCamPhoto(ctx, cw, ch, imgEl, cfg, zoomScale, frameW, frameH, bitmapScale) {
+    // [19/09/2026] `frameW`/`frameH` NOVOS parâmetros opcionais — ver
+    // comentário grande em `_updateFotoCamOverlayZoomScale` pra causa raiz
+    // completa do bug corrigido nesta rodada ("Cortar" clipando a sobra da
+    // foto em vez de deixá-la visível pra fora do retângulo amarelo).
+    // Antes `cw`/`ch` faziam DOIS papéis ao mesmo tempo: o tamanho REAL do
+    // canvas (pra `clearRect`/centralizar o desenho) E o tamanho do quadro
+    // calibrado usado nas contas de fit ('Esticar'/'Caber'/'Cortar',
+    // `_fotoCamCoverBoxSize`) — os 2 sempre coincidiam porque o canvas
+    // sempre nasceu do MESMO tamanho do quadro. Agora que o canvas pode
+    // ser MAIOR que o quadro (em 'Cortar', pra deixar a sobra da foto
+    // visível em vez de cortada nas bordas do quadro), os 2 precisam ser
+    // parâmetros SEPARADOS: `cw`/`ch` (tamanho de verdade do canvas, só
+    // usado aqui pra `clearRect`/centralizar) e `frameW`/`frameH` (tamanho
+    // do QUADRO calibrado — o "retângulo amarelo" — usado nas contas de
+    // fit, exatamente como antes). Default pros 2 iguais a `cw`/`ch` —
+    // retrocompatível com qualquer chamada que não passe os novos
+    // parâmetros (as 2 chamadas existentes neste arquivo já foram
+    // atualizadas pra passar os 2 conjuntos separadamente).
+    frameW = frameW ?? cw;
+    frameH = frameH ?? ch;
+    const bmScale = bitmapScale || 1;
+    ctx.setTransform(bmScale, 0, 0, bmScale, 0, 0);
+    ctx.clearRect(0, 0, cw, ch);
+    // [13/09/2026] NOVO — pedido verbatim: "A variar a opacidade quando
+    // está marcado 'Trás' está sendo de opaco (imagem sólido) até preto.
+    // Não deveria ser assim. Deveria variar de opaco (imagem sólida) até
+    // transparente." CAUSA RAIZ: em 'Trás', este `<canvas>` fica ATRÁS do
+    // `<canvas id="v3d-canvas">` (WebGL) — só aparece através do "buraco"
+    // que a máscara abre (ver `Engine3D._presentToCanvas`/
+    // `setFotoCamBackdropMask`); o slider de opacidade aplicava
+    // `canvasEl.style.opacity` no ELEMENTO inteiro, que compõe (alpha
+    // blend) com o que tiver DEPOIS dele na pilha CSS — no caso, o fundo
+    // de `.view3d-wrap` (`#05070a`, quase preto), não a cena 3D real (que
+    // fica NA FRENTE, não atrás, nesta pilha) — por isso a foto "escurecia
+    // pro preto" em vez de "sumir" de verdade. CORRIGIDO (só em 'Trás' —
+    // em 'Frente' o canvas já fica na FRENTE do `<canvas>` WebGL, então
+    // `style.opacity` ali já revela a cena 3D real corretamente, sem
+    // mudança): a opacidade agora é aplicada aqui dentro, via
+    // `ctx.globalAlpha` na hora de desenhar a foto, sobre um FUNDO sólido
+    // pintado antes com a cor do CÉU da cena (`engine.scene.background` —
+    // sempre uma cor sólida, ver `Engine3D._updateSky`) preenchendo o
+    // `<canvas>` inteiro — como este canvas SEMPRE fica 100% opaco agora
+    // (nunca mais depende do que tiver atrás dele na pilha CSS), variar a
+    // opacidade da foto revela o CÉU (o mais próximo de "nada"/"vazio" que
+    // existe nesta cena 3D) em vez do fundo escuro da página. `canvasEl.
+    // style.opacity` (ver handler do slider) fica sempre em '1' quando
+    // 'Trás' está ativo — só o alfa INTERNO aqui muda.
+    // [13/09/2026] NOVO — garante aqui (fonte única, não só no handler do
+    // slider) que `style.opacity` do ELEMENTO nunca fica "preso" num valor
+    // antigo de 'Frente' ao trocar pra 'Trás' (ou vice-versa) sem mexer no
+    // slider de novo — em 'Trás' sempre '1' (só o `globalAlpha` interno,
+    // abaixo, controla a opacidade da foto); em 'Frente', reflete o valor
+    // salvo (`_getFotoCamOpacidade`) normalmente.
+    // [22/09/2026 — RODADA SEGUINTE] REESCRITO — pedido verbatim: "Deixei
+    // a opacidade em torno de 30%, e alternei entre 'Frente' e 'Trás'.
+    // Quando está marcado 'Trás', parece que a mistura de cor gerada pela
+    // opacidade gera uma influência maior do que está atrás (no cenário,
+    // durante o dia fica mais clara a imagem e durante a noite fica mais
+    // escura a imagem). O efeito de mistura de cor gerado pela opacidade
+    // deve ser igual nos dois: 'Trás' e 'Frente'. Tendo como padrão o que
+    // acontece quando está marcado 'Frente'. A única diferença [...] é os
+    // objetos estarem renderizados 'na frente' [...] ou 'atrás' [...]. O
+    // botão controla apenas essa mudança." CAUSA RAIZ: a versão anterior
+    // (hack de 13/09/2026, removido nesta rodada) misturava a foto com uma
+    // cor de céu CHAPADA (`scene.background` — bem clara de dia, bem
+    // escura de noite) ANTES de qualquer coisa (`ctx.globalAlpha` aqui
+    // dentro), e o novo passe de ambiente real (`Engine3D._renderBackdropEnvPass`,
+    // rodada anterior) compunha um SEGUNDO blend por cima disso — 2 blends
+    // encadeados, cada um "roubando" um pouco de força do lado errado.
+    // 'Frente' sempre usou só 1 blend (o `style.opacity` do ELEMENTO,
+    // nativo do navegador, contra o que estiver REALMENTE atrás — nunca
+    // uma cor de céu chapada). CORRIGIDO: esta função para de fazer
+    // QUALQUER mistura interna — em 'Trás', a foto agora é desenhada 100%
+    // OPACA aqui (sem fundo de céu, sem `globalAlpha`), exatamente como em
+    // 'Frente' (a diferença dos dois modos nunca foi COMO a foto é
+    // desenhada neste canvas, só o `z-index`/ordem de empilhamento dele —
+    // ver `_updateFotoCamOverlayZoomScale`). A MISTURA de verdade (opacidade
+    // vs. o que está atrás) passa a acontecer só 1x, e do MESMO jeito nos
+    // 2 modos: em 'Frente', via `style.opacity` do elemento (like sempre);
+    // em 'Trás', via o passe de ambiente (`Engine3D._presentToCanvas`,
+    // ver comentário grande lá) — que agora, sem o fundo de céu chapado
+    // daqui, resulta na MESMA fórmula matemática de 'Frente' (fotoRGB×
+    // opacidade + ambienteRealRGB×(1-opacidade)), só que com o "ambiente
+    // real" vindo do passe de ambiente (o que está de fato atrás da foto)
+    // em vez do que estiver atrás do CANVAS na pilha CSS — que em 'Trás' é
+    // opaco (o `#v3d-canvas`, com o "buraco" exatamente onde a foto
+    // deveria aparecer), então dá no mesmo resultado visual.
+    if (ctx.canvas?.style) {
+      const opacidadeEl = typeof this._getFotoCamOpacidade === 'function' ? this._getFotoCamOpacidade() : 1;
+      ctx.canvas.style.opacity = cfg.depth === 'back' ? '1' : String(opacidadeEl);
+    }
+    if (!imgEl || !imgEl.naturalWidth) return;
+    const iw = imgEl.naturalWidth, ih = imgEl.naturalHeight;
+    // [12/09/2026] `dw`/`dh` agora vêm da função COMPARTILHADA
+    // `_fotoCamDrawnSize` (ver comentário grande dela, acima) — mesma
+    // conta de sempre, só extraída pra também ser usada por
+    // `_updateFotoCamOverlayZoomScale` (dimensionamento do oclusor/máscara
+    // do backdrop 'Trás').
+    const { dw, dh } = this._fotoCamDrawnSize(frameW, frameH, iw, ih, cfg);
+    const offFrac = this._backdropOffsetFrac(cfg.offsetX, cfg.offsetY);
+    ctx.save();
+    // [22/09/2026 — RODADA SEGUINTE] `ctx.globalAlpha` interno REMOVIDO
+    // daqui pra 'Trás' — ver comentário grande acima: a foto agora é
+    // sempre desenhada 100% opaca neste canvas, nos 2 modos; a mistura por
+    // opacidade acontece só 1x, fora daqui (ver `Engine3D._presentToCanvas`).
+    ctx.translate(cw / 2, ch / 2);
+    ctx.translate(offFrac.x * frameW, offFrac.y * frameH);
+    ctx.rotate(((cfg.rotation || 0) * Math.PI) / 180);
+    const zoom = zoomScale || 1;
+    ctx.scale(zoom * (cfg.flipH ? -1 : 1), zoom * (cfg.flipV ? -1 : 1));
+    ctx.drawImage(imgEl, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+  },
+
+  /** [16/09/2026 — RODADA SEGUINTE] REESCRITO — antes manipulava um
+   *  `<img>` DOM com CSS (`object-fit`/`transform`) dentro de um wrapper
+   *  `overflow:hidden` (`#v3d-fotocam-clip`), mais uma cópia DOM separada
+   *  do retângulo amarelo (`#v3d-fotocam-frame`) só pra aparecer por cima
+   *  do `<img>` (que tinha z-index acima do `<canvas>` WebGL). Agora é um
+   *  único `<canvas id="v3d-fotocam-photo-canvas">`: posicionado/
+   *  dimensionado exatamente como o quadro calibrado (igual a vinheta),
+   *  a foto é desenhada nele via `_drawFotoCamPhoto` (2D puro) e, por
+   *  cima, na mesma chamada, o retângulo amarelo via `ctx.strokeRect`
+   *  (última operação — sempre por cima da foto, "ordem de impressão no
+   *  canvas" pedida) quando o enquadramento estiver visível
+   *  (`Engine3D.isCameraFrustumVisible`). O canvas recorta nativamente
+   *  (`ctx.drawImage`/`clearRect` nunca escrevem fora de `cw`x`ch`), então
+   *  não precisa mais de nenhum wrapper `overflow:hidden`. */
+  // [12/09/2026 — RODADA "mesma imagem"] REESCRITO — pedido verbatim:
+  // "Acredito que até seria a mesma exata imagem a ser usada (tanto em
+  // 'Frente' quanto quando 'Trás' estiver marcada), e o depth buffer seria
+  // usado apenas para a 'aparição' dos objetos substituindo os pixels da
+  // imagem. Pois 'Trás' e 'Frente' usam as mesmas opções — 'Esticar',
+  // 'Caber' e 'Cortar' — e a única diferença é ter os objetos desenhados
+  // substituindo os pixels da imagem ou não." Depois de 2 tentativas
+  // anteriores (12/09/2026, "2 bugs Imagem/Trás" e "pixel a pixel") ainda
+  // apresentarem diferenças entre os modos (encolhimento em 'Esticar'/
+  // 'Caber', borrão em 'Cortar', resíduo de composição antiga) — a raiz de
+  // TODAS elas era ter DUAS fontes de verdade pro mesmo desenho: este
+  // canvas (`#v3d-fotocam-photo-canvas`, 'Frente') e um canvas OFF-SCREEN
+  // separado (`_fotoCamBackdropCanvas`, 'Trás'), cada um com seu próprio
+  // cálculo de tamanho/posição — por mais que os 2 cálculos fossem
+  // "espelhados" na intenção, cada rodada de ajuste num lado só (arredon-
+  // damento, ordem de operações, um `Math.round` a mais) reintroduzia um
+  // descasamento sutil. CORRIGIDO na raiz: `_fotoCamBackdropCanvas` (o
+  // canvas off-screen dedicado) foi ELIMINADO — a textura do shader
+  // 'Trás' (ver `_updateFotoCamBackdropPlane`) agora lê DIRETO deste MESMO
+  // `<canvas>` (`#v3d-fotocam-photo-canvas`), a MESMA imagem, os MESMOS
+  // pixels, sem nenhuma cópia/redesenho paralelo — zero chance de
+  // divergir, por construção. O retângulo amarelo/guia (que também vivia
+  // neste canvas) foi MOVIDO pra um canvas próprio, `#v3d-fotocam-frame-canvas`
+  // (ver `_updateFotoCamFrameGuide`, logo abaixo) — precisa continuar
+  // visível por CIMA de tudo nos 2 modos, mas este canvas aqui (a foto)
+  // precisa ficar ESCONDIDO em 'Trás' (a foto só aparece via depth-buffer/
+  // shader — nunca mais como camada plana por cima de tudo, senão nenhum
+  // objeto 3D real conseguiria ocluí-la, o mesmo bug que motivou a
+  // arquitetura de plano 3D em 22/09/2026).
+  _updateFotoCamOverlayZoomScale() {
+    // [17/09/2026] `zcfg` não é mais lido diretamente aqui — a compensação
+    // de zoom (`escalaZoom`) foi removida (ver `_activeCamFrameRectPx`,
+    // que já lê `_activeCamZoomCfg()` sozinha internamente).
+    const canvasEl = this._container?.querySelector('#v3d-fotocam-photo-canvas');
+    if (!canvasEl) return;
+    const bd = this._getFotoCamBackdropConfig();
+    const frame = this._activeCamFrameRectPx();
+    const off = this._camViewPanOffset || { x: 0, y: 0 };
+    const panPxX = off.x * frame.cw;
+    const panPxY = off.y * frame.ch;
+    const vignetteEl = this._container?.querySelector('#v3d-fotocam-vignette');
+    if (vignetteEl) {
+      vignetteEl.style.left = `${frame.left + panPxX}px`;
+      vignetteEl.style.top = `${frame.top + panPxY}px`;
+      vignetteEl.style.width = `${frame.width}px`;
+      vignetteEl.style.height = `${frame.height}px`;
+    }
+    this._updateFotoCamFrameGuide(frame, panPxX, panPxY);
+    const imgEl = this._fotoCamImgEl;
+    if (imgEl && !imgEl.naturalWidth && imgEl.getAttribute('src')) {
+      // Imagem ainda não decodificou — tenta de novo quando terminar de carregar.
+      imgEl.addEventListener('load', () => this._updateFotoCamOverlayZoomScale(), { once: true });
+    }
+    // [19/09/2026, mantido] Em 'Cortar' (`fit:'cover'`), `_fotoCamCoverBoxSize`
+    // DELIBERADAMENTE calcula uma foto MAIOR que o quadro num dos eixos
+    // (pra cobrir sem sobrar espaço vazio) — o CANVAS nasce do tamanho
+    // dessa caixa de cobertura (sempre ≥ quadro nos 2 eixos), centralizado
+    // no CENTRO do quadro (`frameCenterX`/`frameCenterY` abaixo), deixando
+    // a sobra visível pra fora do retângulo amarelo em vez de recortada.
+    // 'Esticar'/'Caber' (que nunca extrapolam o quadro) continuam com o
+    // canvas do tamanho exato do quadro. [12/09/2026 — RODADA "mesma
+    // imagem"] Esta conta agora roda SEMPRE, nos 2 modos de profundidade
+    // (antes só valia fora de 'Trás') — é o ÚNICO cálculo de tamanho que
+    // existe agora, usado pelos 2 modos.
+    let canvasW = frame.width, canvasH = frame.height;
+    if (bd.fit === 'cover' && imgEl && imgEl.naturalWidth) {
+      const box = this._fotoCamCoverBoxSize(frame.width, frame.height, imgEl.naturalWidth, imgEl.naturalHeight, bd.rotation || 0);
+      canvasW = Math.max(frame.width, box.w);
+      canvasH = Math.max(frame.height, box.h);
+    }
+    const cw = Math.max(1, Math.round(canvasW));
+    const ch = Math.max(1, Math.round(canvasH));
+    const frameCenterX = frame.left + frame.width / 2 + panPxX;
+    const frameCenterY = frame.top + frame.height / 2 + panPxY;
+    const left = frameCenterX - cw / 2, top = frameCenterY - ch / 2;
+    canvasEl.style.left = `${left}px`;
+    canvasEl.style.top = `${top}px`;
+    // [12/09/2026] NOVO — pedido verbatim: "Percebi que, ao dar zoom in
+    // (tanto estando 'Trás' quanto estando 'Frente' marcado), o fps cai
+    // bastante. Otimize isso." Ver comentário grande em `_drawFotoCamPhoto`
+    // (`bitmapScale`) pra causa raiz completa (medida com Playwright: o
+    // `<canvas>` da foto cresce SEM LIMITE com o zoom — 7040x3960px a 6°
+    // de FOV, ~35ms só pra redesenhar, todo quadro). `style.width/height`
+    // continuam no tamanho VISUAL/lógico de sempre (`cw`/`ch`, correto
+    // opticamente) — só a RESOLUÇÃO INTERNA do bitmap (`canvasEl.width/
+    // height`) ganha um teto (`BACKDROP_CANVAS_MAX_DIM_PX`, abaixo),
+    // relativo ao tamanho real da tela (`frame.cw`/`frame.ch` — o
+    // `<canvas>` WebGL/container, não o quadro calibrado que pode
+    // extrapolar) vezes o DPR (nítido em telas retina) com uma folga de
+    // 25% (pan/rotação leve sem re-borrar) — o navegador faz o upscale
+    // visual sozinho (mesmo truque de `_pixelRatioCap`/`RESOLUCAO_DPR`,
+    // engine3d.js). Sem isso, um zoom forte redesenhava milhões de pixels
+    // fora da área visível (`overflow:hidden` só recorta visualmente, não
+    // barateia o `drawImage`) todo quadro, à toa.
+    const dprCap = Math.min(window.devicePixelRatio || 1, 2);
+    const BACKDROP_CANVAS_MAX_DIM_PX = Math.max(512, Math.round(Math.max(frame.cw, frame.ch) * dprCap * 1.25));
+    const bitmapMaxSide = Math.max(cw, ch);
+    const bitmapScale = bitmapMaxSide > BACKDROP_CANVAS_MAX_DIM_PX ? BACKDROP_CANVAS_MAX_DIM_PX / bitmapMaxSide : 1;
+    const bw = Math.max(1, Math.round(cw * bitmapScale));
+    const bh = Math.max(1, Math.round(ch * bitmapScale));
+    canvasEl.style.width = `${cw}px`;
+    canvasEl.style.height = `${ch}px`;
+    if (canvasEl.width !== bw || canvasEl.height !== bh) { canvasEl.width = bw; canvasEl.height = bh; }
+    // [12/09/2026 — RODADA "mesma imagem"] NOVO — guardado pra
+    // `_updateFotoCamBackdropPlane` ler DIRETO (mesmos números usados aqui
+    // pra posicionar o canvas de verdade — zero risco de recalcular
+    // diferente do outro lado).
+    this._fotoCamPhotoCanvasRectPx = { left, top, width: cw, height: ch };
+    // [12/09/2026] NOVO — retângulo (AABB, em pixels de PÁGINA — mesma
+    // convenção de `_fotoCamPhotoCanvasRectPx`/`frame`) que a foto REALMENTE
+    // ocupa dentro do quadro/canvas — ver comentário grande em
+    // `_fotoCamDrawnSize`, acima, pro pedido/causa raiz completa ("Marcando
+    // 'Trás' e 'Caber' nas laterais da imagem fica preto"). Em 'Esticar'/
+    // 'Cortar' este retângulo bate exatamente com `_fotoCamPhotoCanvasRectPx`
+    // (dw/dh cobrem cw/ch inteiro); só em 'Caber' fica MENOR num dos eixos —
+    // é esse retângulo menor (não o quadro inteiro) que
+    // `_updateFotoCamBackdropPlane` usa agora pra dimensionar o oclusor e a
+    // máscara do backdrop 'Trás', deixando a faixa vazia do 'Caber'
+    // corretamente FORA da área "furada" (o cenário 3D real aparece ali,
+    // como em 'Frente', em vez de preto). `Math.abs(cos/sin)` — AABB de um
+    // retângulo `dw`x`dh` girado por `cfg.rotation` graus, centrado no MESMO
+    // ponto (`frameCenterX+offPxX`, `frameCenterY+offPxY`) usado por
+    // `_drawFotoCamPhoto` (`ctx.translate` + `offFrac`, ver lá) — sem
+    // duplicar o cálculo do CENTRO, só o TAMANHO final (`dw`/`dh`, já
+    // compartilhado via `_fotoCamDrawnSize`).
+    if (imgEl && imgEl.naturalWidth) {
+      const { dw, dh } = this._fotoCamDrawnSize(frame.width, frame.height, imgEl.naturalWidth, imgEl.naturalHeight, bd);
+      const rotRad = ((bd.rotation || 0) * Math.PI) / 180;
+      const cosA = Math.abs(Math.cos(rotRad)), sinA = Math.abs(Math.sin(rotRad));
+      const aabbW = dw * cosA + dh * sinA;
+      const aabbH = dw * sinA + dh * cosA;
+      // [12/09/2026] `offFrac` recalculado aqui (não está no escopo desta
+      // função — `_drawFotoCamPhoto`, chamada mais abaixo, calcula o SEU
+      // próprio internamente) via a MESMA `_backdropOffsetFrac`, única
+      // fonte de verdade do offset — nunca duplicando a FÓRMULA, só
+      // chamando de novo com os mesmos argumentos (`bd.offsetX/Y`).
+      const offFracHere = this._backdropOffsetFrac(bd.offsetX, bd.offsetY);
+      const offPxX = offFracHere.x * frame.width, offPxY = offFracHere.y * frame.height;
+      const centerX = frameCenterX + offPxX, centerY = frameCenterY + offPxY;
+      // [12/09/2026 — RODADA "tamanho exato da imagem"] MUDADO — pergunta/
+      // pedido verbatim: "Para que serve o que é preto atrás da imagem
+      // [...] Arredonde ou adicione/subtraia valores para que o retângulo
+      // [...] preto seja do exato tamanho da imagem naquele nível de
+      // zoom." O "preto" é só o fundo padrão do visualizador 3D, que fica
+      // ATRÁS de tudo (do `<canvas>` WebGL E do `<canvas>` da foto) — ele
+      // não tem nenhuma função no 'Trás' em si; só aparece quando o
+      // "buraco" recortado no canvas WebGL (`_computeFotoCamMaskRawRect`,
+      // engine3d.js) é maior que a área onde a foto TEM pixels de verdade,
+      // sobrando uma fresta sem nada desenhado ali (nem foto, nem cor-
+      // marcadora) que deixa esse fundo aparecer. CAUSA RAIZ de sobrar
+      // esse excesso: este retângulo (`aabbW`x`aabbH`, base pra
+      // `mask.rectPx`) sempre foi calculado em ponto flutuante CRU — mas o
+      // `<canvas>` da foto de verdade (`_fotoCamPhotoCanvasRectPx`, acima)
+      // já nasce com `width`/`height` ARREDONDADOS (`cw`/`ch`) pra pixels
+      // INTEIROS — em 'Esticar'/'Cortar' (sem letterbox) os 2 deveriam
+      // coincidir exatamente, mas o AABB flutuante podia ficar até ~0.5px
+      // MAIOR que o canvas de verdade (que já arredondou pra baixo em
+      // alguns casos), fazendo o buraco (baseado no AABB) extrapolar a
+      // área onde a foto realmente tem pixel — exatamente a fresta
+      // "preta" reportada. CORRIGIDO: arredonda os 2 CANTOS deste
+      // retângulo (mesma técnica de `_activeCamFrameRectPx`) E, além
+      // disso, recorta (clip) o resultado contra `_fotoCamPhotoCanvasRectPx`
+      // — o retângulo do CANVAS DE VERDADE — garantindo que o retângulo
+      // usado pra máscara NUNCA seja maior que a área onde a foto
+      // realmente foi desenhada, em nenhuma circunstância (o exato pedido:
+      // "do exato tamanho da imagem naquele nível de zoom").
+      const rawDrawnLeft = centerX - aabbW / 2, rawDrawnTop = centerY - aabbH / 2;
+      const rLeft = Math.round(rawDrawnLeft), rTop = Math.round(rawDrawnTop);
+      const rRight = Math.round(rawDrawnLeft + aabbW), rBottom = Math.round(rawDrawnTop + aabbH);
+      const canvasRect = this._fotoCamPhotoCanvasRectPx;
+      const clipLeft = Math.max(canvasRect.left, rLeft);
+      const clipTop = Math.max(canvasRect.top, rTop);
+      const clipRight = Math.min(canvasRect.left + canvasRect.width, rRight);
+      const clipBottom = Math.min(canvasRect.top + canvasRect.height, rBottom);
+      this._fotoCamDrawnRectPx = {
+        left: clipLeft, top: clipTop,
+        width: Math.max(0, clipRight - clipLeft), height: Math.max(0, clipBottom - clipTop),
+      };
+    } else {
+      this._fotoCamDrawnRectPx = null;
+    }
+    // [17/09/2026] REMOVIDO — `escalaZoom` (compensação de zoom aplicada
+    // "por cima" via `ctx.scale`) deixou de ser necessária: `frame`
+    // (`_activeCamFrameRectPx`, acima) agora já devolve o tamanho de tela
+    // REAL do enquadramento NO ZOOM ATUAL (ver comentário grande naquela
+    // função) — `cw`/`ch` já nascem do tamanho certo a cada zoom, então
+    // `_drawFotoCamPhoto` (Esticar/Caber/Cortar ajustados contra ESTE
+    // tamanho) já sai correto sem nenhuma escala extra.
+    const ctx = canvasEl.getContext('2d');
+    // [12/09/2026 — RODADA "mesma imagem"] A foto agora é SEMPRE desenhada
+    // aqui, nos 2 modos (nada de clear/branch por `bd.depth`) — o
+    // retângulo amarelo NÃO é mais desenhado neste canvas (movido pra
+    // `_updateFotoCamFrameGuide`, chamada acima).
+    this._drawFotoCamPhoto(ctx, cw, ch, imgEl, bd, 1, frame.width, frame.height, bitmapScale);
+    // [12/09/2026 — RODADA "buffer de verdade"] REESCRITO — pedido
+    // verbatim: "Use a mesma coisa de 'Frente' em 'Trás'. [...] Se em
+    // 'Frente' é CSS ou canvas, faça o mesmo em 'Trás'." Antes, este
+    // canvas ficava com `style.visibility:hidden` em 'Trás' (a foto só
+    // "aparecia" via uma textura/plano 3D à parte, passando pelo pipeline
+    // WebGL de resolução limitada — a causa raiz do pixelado no zoom, ver
+    // comentário grande em `_ensureFotoCamBackdropPlane`). Agora este
+    // `<canvas>` NUNCA mais é escondido — é o MESMO elemento, sempre
+    // visível, nos 2 modos, na MESMA resolução nítida de sempre. A única
+    // diferença entre 'Frente' e 'Trás' passa a ser SÓ o `z-index` CSS
+    // (este canvas é um elemento DOM SEPARADO, irmão de `#v3d-canvas`
+    // dentro de `#v3d-camzoom-wrap` — ver `_renderFotoCamOverlay`, que
+    // parou de aninhá-lo dentro de `.v3d-fotocam-overlay`, z-index:30,
+    // justamente pra poder empilhá-lo LIVREMENTE acima OU abaixo de
+    // `#v3d-canvas`, algo impossível enquanto ele era descendente de um
+    // contêiner com z-index fixo maior que o do canvas WebGL):
+    // - 'front': `z-index` positivo (25) — ACIMA de `#v3d-canvas` (estático,
+    //   sem z-index) — mesmo comportamento visual de sempre, foto sempre
+    //   por cima de tudo do cenário 3D.
+    // - 'back': `z-index` negativo (-1) — ABAIXO de `#v3d-canvas` — os
+    //   OBJETOS 3D reais (desenhados em `#v3d-canvas`, por cima) aparecem
+    //   por cima da foto; nos pixels onde `#v3d-canvas` fica transparente
+    //   (o oclusor invisível de `_updateFotoCamBackdropPlane` "apaga" o
+    //   ambiente mais distante que a posição da foto via depth-test real —
+    //   ver comentário grande lá), a foto (por baixo, nítida) aparece.
+    // Em ambos os casos, `.v3d-fotocam-frame-canvas` (retângulo-guia +
+    // gizmo do Modelador) continua num z-index:30 fixo (`.v3d-fotocam-overlay`),
+    // sempre por cima de TUDO — nunca precisou mudar.
+    // [22/09/2026] REVERTIDO (mesma rodada) — chegou a existir aqui uma
+    // condição que subia o `z-index` deste canvas pra ACIMA de
+    // `#v3d-canvas` sempre que a opacidade caía abaixo de 1 — pedido
+    // verbatim do usuário CORRIGINDO isso: "Mesmo com a opacidade < 1,
+    // estando marcado 'Trás' a imagem deve continuar atrás dos objetos.
+    // Você colocou ela para frente." Botar a foto por CIMA (mesmo
+    // translúcida) fazia ela aparecer por cima de objetos 3D REAIS mais
+    // perto que deveriam continuar ocluindo-a — exatamente o oposto do que
+    // 'Trás' significa. CORRIGIDO: `z-index` volta a ser SEMPRE `-1` em
+    // 'Trás' (qualquer opacidade) — ver `Engine3D._renderBackdropEnvPass`
+    // (novo, engine3d.js `_presentToCanvas`) pra como o pedido original
+    // (chão/neblina variando com a opacidade) é resolvido agora, sem
+    // depender de mexer no z-index/empilhamento deste canvas.
+    canvasEl.style.zIndex = bd.depth === 'back' ? '-1' : '25';
+  },
+
+  /** [12/09/2026 — RODADA "mesma imagem"] NOVO — desenha só o retângulo
+   *  amarelo/guia de calibração num canvas PRÓPRIO
+   *  (`#v3d-fotocam-frame-canvas`), separado do canvas da foto (ver
+   *  comentário grande em `_updateFotoCamOverlayZoomScale`). SEMPRE do
+   *  tamanho EXATO do quadro calibrado (nunca cresce pra caixa de
+   *  cobertura do 'Cortar' — só o canvas da foto cresce), então a posição
+   *  do stroke é sempre "canto a canto" (sem precisar centralizar dentro
+   *  de um canvas maior, como o antigo cálculo de `rx`/`ry`). Também é o
+   *  destino usado por `_compositeGizmoOverlayOntoPhotoCanvas` (mantém o
+   *  nome antigo por compatibilidade, mas o alvo mudou pra este canvas) —
+   *  o gizmo do Modelador precisa continuar visível por CIMA de tudo nos 2
+   *  modos, mesmo com o canvas da foto escondido em 'Trás'. */
+  _updateFotoCamFrameGuide(frame, panPxX, panPxY) {
+    const canvasEl = this._container?.querySelector('#v3d-fotocam-frame-canvas');
+    if (!canvasEl) return;
+    const cw = Math.max(1, Math.round(frame.width));
+    const ch = Math.max(1, Math.round(frame.height));
+    canvasEl.style.left = `${frame.left + panPxX}px`;
+    canvasEl.style.top = `${frame.top + panPxY}px`;
+    // [12/09/2026] NOVO — MESMO teto de resolução aplicado ao canvas da
+    // foto (ver comentário grande em `_drawFotoCamPhoto`/
+    // `_updateFotoCamOverlayZoomScale`, "otimize isso") — este canvas
+    // (retângulo-guia + gizmo do Modelador) também cresce sem limite com
+    // o zoom (mesmo `frame`), e também é redimensionado/redesenhado TODO
+    // quadro; `style.width/height` continuam no tamanho lógico de sempre,
+    // só a resolução interna do bitmap ganha teto.
+    const dprCapG = Math.min(window.devicePixelRatio || 1, 2);
+    const GUIDE_CANVAS_MAX_DIM_PX = Math.max(512, Math.round(Math.max(frame.cw, frame.ch) * dprCapG * 1.25));
+    const guideMaxSide = Math.max(cw, ch);
+    const guideScale = guideMaxSide > GUIDE_CANVAS_MAX_DIM_PX ? GUIDE_CANVAS_MAX_DIM_PX / guideMaxSide : 1;
+    const gbw = Math.max(1, Math.round(cw * guideScale));
+    const gbh = Math.max(1, Math.round(ch * guideScale));
+    canvasEl.style.width = `${cw}px`;
+    canvasEl.style.height = `${ch}px`;
+    if (canvasEl.width !== gbw || canvasEl.height !== gbh) { canvasEl.width = gbw; canvasEl.height = gbh; }
+    const ctx = canvasEl.getContext('2d');
+    ctx.setTransform(guideScale, 0, 0, guideScale, 0, 0);
+    ctx.clearRect(0, 0, cw, ch);
+    const frustumVisivel = !!(this._fotoCamActiveFoto?.id != null && this._engine?.isCameraFrustumVisible?.(this._fotoCamActiveFoto.id));
+    if (frustumVisivel) {
+      ctx.save();
+      ctx.strokeStyle = '#ffee00';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(1, 1, Math.max(0, cw - 2), Math.max(0, ch - 2));
+      ctx.restore();
+    }
+    // [12/09/2026] NOVO — guarda a escala pra `_compositeGizmoOverlayOntoPhotoCanvas`
+    // (único outro lugar que desenha neste canvas, com sua PRÓPRIA
+    // transform via `ctx.setTransform(1,0,0,1,0,0)` — precisa saber deste
+    // fator pra não desfazer o teto de resolução aplicado aqui).
+    this._fotoCamFrameGuideBitmapScale = guideScale;
+  },
+
+  /** [19/09/2026] NOVO — pedido verbatim: "Se há como definir a ordem de
+   *  impressão do gizmo do objeto selecionado no Modelador, quando se está
+   *  no modo 'Ver através desta câmera', então, faça o gizmo do objeto
+   *  selecionado ser impresso depois da imagem." Ver comentário grande em
+   *  `ModelerGizmo.renderIsolatedToCanvas` (modeler-gizmo.js) pra causa
+   *  raiz completa (resumo: o gizmo é um objeto 3D de verdade dentro do
+   *  `<canvas>` WebGL — nenhum `renderOrder` interno da cena consegue
+   *  fazê-lo aparecer por cima do `<canvas>` DOM 2D da foto do modo
+   *  'Frente', que já fica inteiro por CIMA do canvas WebGL via z-index
+   *  CSS). Esta função é o lado "colar" da operação: recebe o `overlay`
+   *  devolvido por `renderIsolatedToCanvas` (um `<canvas>` já com só os
+   *  pixels do gizmo, fundo transparente, orientação normal/"direita") e
+   *  desenha (`ctx.drawImage`) só a FATIA dele que corresponde à posição
+   *  atual do quadro calibrado (`#v3d-fotocam-photo-canvas`, mesmo
+   *  `frame`/`off` de sempre — ver `_updateFotoCamOverlayZoomScale`) —
+   *  como os DOIS canvases (o do gizmo isolado e o `#v3d-canvas` de onde
+   *  ele foi capturado) compartilham o MESMO sistema de coordenadas de
+   *  tela (o `overlay` é do tamanho inteiro do `#v3d-canvas`, não
+   *  recortado), a conversão é só escala por `dpr` (canvas WebGL em
+   *  pixels de DISPOSITIVO; `frame`/`off`/`#v3d-fotocam-photo-canvas` em
+   *  pixels de CSS) — `ctx.drawImage` com a forma de 9 argumentos já faz
+   *  esse reescalonamento sozinho (fonte em pixels de dispositivo, destino
+   *  em pixels de CSS). Chamado por `Modeler3D._renderFrame`
+   *  (modeler-core.js) a cada quadro do Modelador, DEPOIS de já ter
+   *  chamado `_updateFotoCamOverlayZoomScale()` (redesenha a foto/o
+   *  retângulo do zero — necessário pra não deixar um "rastro" do gizmo
+   *  de quadros anteriores acumulado, já que este canvas não é limpo
+   *  automaticamente entre quadros do Modelador). */
+  // [12/09/2026 — RODADA "mesma imagem"] RETARGETADO — o alvo do
+  // `drawImage` deixou de ser `#v3d-fotocam-photo-canvas` (agora escondido
+  // em 'Trás', usado só como textura do shader — ver comentário grande em
+  // `_updateFotoCamOverlayZoomScale`) e passou a ser
+  // `#v3d-fotocam-frame-canvas` (o retângulo-guia, sempre visível por cima
+  // de tudo nos 2 modos) — o gizmo do Modelador precisa continuar visível
+  // mesmo com a foto escondida em 'Trás'. Nome do método mantido
+  // (`OntoPhotoCanvas`) por compatibilidade com o único chamador
+  // (`modeler-core.js`), mas o destino real é o canvas-guia. Esse canvas
+  // SEMPRE tem exatamente o tamanho do quadro calibrado (nunca cresce pra
+  // caixa de cobertura do 'Cortar' — só o canvas da foto cresce), então
+  // `dx`/`dy` são sempre 0 agora (mantidos na fórmula só por robustez,
+  // caso isso mude no futuro).
+  _compositeGizmoOverlayOntoPhotoCanvas(overlay) {
+    const canvasEl = this._container?.querySelector('#v3d-fotocam-frame-canvas');
+    if (!canvasEl || !overlay?.canvas || !overlay.w || !overlay.h) return;
+    if (canvasEl.width < 1 || canvasEl.height < 1) return;
+    const engineCanvas = this._container?.querySelector('#v3d-canvas');
+    const engineRect = overlay.engineRect || engineCanvas?.getBoundingClientRect();
+    if (!engineRect || engineRect.width < 1 || engineRect.height < 1) return;
+    const dpr = overlay.w / engineRect.width;
+    const frame = this._activeCamFrameRectPx();
+    const off = this._camViewPanOffset || { x: 0, y: 0 };
+    const panPxX = off.x * frame.cw;
+    const panPxY = off.y * frame.ch;
+    const sx = (frame.left + panPxX) * dpr;
+    const sy = (frame.top + panPxY) * dpr;
+    const sw = frame.width * dpr;
+    const sh = frame.height * dpr;
+    if (sw < 0.5 || sh < 0.5) return;
+    // [12/09/2026] CORRIGIDO — este canvas nasce SEMPRE do tamanho exato
+    // do quadro (`_updateFotoCamFrameGuide`, cw=frame.width/ch=frame.height
+    // lógicos — nunca precisou de `dx`/`dy` de centralização, era sempre
+    // 0), mas agora (ver "otimize isso"/teto de resolução, mesma função) o
+    // BITMAP real (`canvasEl.width/height`) pode ser MENOR que o tamanho
+    // lógico em zoom forte — em vez de desenhar em pixels de bitmap
+    // (que mudam de escala a cada zoom), a transform usa
+    // `_fotoCamFrameGuideBitmapScale` (guardado por `_updateFotoCamFrameGuide`,
+    // chamada sempre ANTES desta função no mesmo quadro — ver
+    // modeler-core.js) — destino em coordenadas LÓGICAS
+    // (`0,0,frame.width,frame.height`, o quadro inteiro), a transform
+    // resolve o mapeamento pro bitmap físico sozinha, igual ao resto desta
+    // tela.
+    const ctx = canvasEl.getContext('2d');
+    const scale = this._fotoCamFrameGuideBitmapScale || 1;
+    ctx.save();
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.drawImage(overlay.canvas, sx, sy, sw, sh, 0, 0, frame.width, frame.height);
+    ctx.restore();
+  },
+
+  /** [19/09/2026 — RODADA SEGUINTE] REMOVIDO — `_compositeGizmoOverlayOntoMainCanvas`
+   *  colava o gizmo isolado direto em `#v3d-canvas` (o cenário 3D), técnica
+   *  usada só pelo modo 'Trás' quando a foto vivia dentro da PRÓPRIA cena
+   *  3D (plano `_ensureFotoCamBackdropPlane`, removido nesta rodada). Sem
+   *  esse plano, `#v3d-canvas` nunca mais contém a foto em NENHUM modo — os
+   *  2 modos ('Trás' e 'Frente') agora sempre colam o gizmo isolado sobre
+   *  `#v3d-fotocam-photo-canvas` (`_compositeGizmoOverlayOntoPhotoCanvas`,
+   *  acima), o mesmo `<canvas>` 2D onde a foto é desenhada nos 2 modos —
+   *  ver `js/modeler/modeler-core.js` `_renderFrame` (chamador único). */
+
+  /** [19/09/2026 — RODADA SEGUINTE] REMOVIDO — pedido verbatim do usuário:
+   *  "faça exatamente a mesma coisa [do modo 'Frente'] para 'Trás' [...]
+   *  Apenas dê um jeito de imprimir, no canvas (2D), a imagem logo antes de
+   *  começar a imprimir os objetos." Esta seção tinha `_applyFotoCamBackdropDepthMode`
+   *  (alternava entre o `<canvas>` de overlay 2D — 'front' — e um plano
+   *  Three.js REAL dentro da cena, com uma `THREE.CanvasTexture` off-screen
+   *  redesenhada à parte — 'back'), `_ensureFotoCamBackdropPlane`
+   *  (criava o plano/textura/material), `_redrawFotoCamBackdropCanvas`
+   *  (redesenhava a textura off-screen — a MESMA composição 2D de
+   *  `_drawFotoCamPhoto`, só que pra um canvas invisível que depois virava
+   *  textura) e `_updateFotoCamBackdropPlane` (reposicionava/redimensionava
+   *  o plano todo quadro, em `_loop`, pra cobrir o frustum da pose sendo
+   *  renderizada). Essa arquitetura vinha causando bugs recorrentes de
+   *  dessincronização (textura numa proporção/resolução antiga em relação
+   *  ao plano/retângulo amarelo — ver histórico de correções acima, ex.:
+   *  entrada de 11/09/2026 sobre Resolução da câmera editada depois de já
+   *  haver uma foto carregada) — TODA essa complexidade (plano 3D, textura
+   *  off-screen dedicada, cálculo de posição/orientação por eixo óptico em
+   *  3D) foi REMOVIDA por pedido explícito do usuário, em favor do MESMO
+   *  mecanismo simples já usado por 'Frente': desenhar a foto direto no
+   *  `<canvas>` 2D de overlay (`#v3d-fotocam-photo-canvas`, sempre por cima
+   *  do `<canvas>` WebGL/2D principal via CSS), usando a MESMA função
+   *  `_drawFotoCamPhoto` (Esticar/Caber/Cortar/Offset/Rotação/Flip
+   *  continuam idênticos nos 2 modos, por construção — é a MESMA função).
+   *  A ÚNICA diferença entre 'Trás' e 'Frente' agora é a ORDEM de desenho
+   *  dentro de `_updateFotoCamOverlayZoomScale` (logo abaixo): 'Frente'
+   *  desenha a foto por último (depois do retângulo amarelo/qualquer outro
+   *  elemento já impresso nesse canvas — comportamento de sempre, não
+   *  alterado); 'Trás' desenha a foto ANTES de imprimir esses mesmos
+   *  elementos, ficando por baixo deles dentro do MESMO canvas 2D — nunca
+   *  mais um objeto posicionado no espaço 3D. HONESTIDADE (documentada
+   *  aqui pra não ser confundida com um bug numa rodada futura): como
+   *  `#v3d-fotocam-photo-canvas` é um `<canvas>` DOM SEPARADO, sempre
+   *  empilhado por CSS ACIMA do `<canvas>` WebGL/2D principal
+   *  (`#v3d-canvas`, onde o cenário 3D de verdade — chão/paredes/objetos —
+   *  é desenhado), a ordem de desenho DENTRO do canvas da foto não pode
+   *  fazer a foto ficar visualmente atrás de objetos 3D REAIS — só entre
+   *  ela e outros elementos desenhados NESSE MESMO canvas (hoje, o
+   *  retângulo amarelo de enquadramento; se o gizmo do Modelador estiver
+   *  colado por cima, ver `_compositeGizmoOverlayOntoPhotoCanvas`, também
+   *  entra nessa conta). O próprio pedido do usuário já autorizava
+   *  explicitamente essa simplificação ("não precisa colocar a imagem lá
+   *  no fundo [do espaço 3D]") — a troca aceita é: perder a oclusão real
+   *  por objetos 3D (o que causava toda a complexidade/bugs anteriores) em
+   *  troca de um mecanismo único, simples e robusto, sem nenhuma classe de
+   *  bug de textura/resolução dessincronizada por design (a foto nunca
+   *  mais é cacheada numa textura à parte — é sempre desenhada fresca, a
+   *  partir da imagem original, a cada chamada). Se um efeito de oclusão
+   *  real por objetos 3D for pedido de novo no futuro, ele exigiria voltar
+   *  a algum mecanismo de posicionamento 3D (este comentário documenta o
+   *  porquê, pra a próxima rodada não reinventar do zero). */
+
+
+  /** Zera o zoom (volta ao FOV calibrado desta câmera/orb) E o
+   *  deslocamento panorâmico (`_camViewPanOffset`, Shift+botão-do-meio — ver
+   *  onMouseMove) — chamada ao ENTRAR em `_fotoCamMode`/`_orbCamMode`
+   *  (nunca herda zoom/pan de uma sessão anterior) e ao SAIR (os pontos de
+   *  saída já restauram o FOV/pose de navegação normal por conta própria —
+   *  ver `_exitFotoCameraView`/`_exitCameraOrbView` — esta chamada só
+   *  limpa a compensação da foto-guia/o cursor residual/o offset de pan).
+   *  [10/09/2026] Também limpa o deslocamento de "lente" de verdade em
+   *  `camera3` (`Engine3D.setCamPanFrac(0,0)` → `clearViewOffset()`) — sem
+   *  isto, um pan feito numa sessão de câmera-vista vazaria pra navegação
+   *  normal/Modelador depois de sair (todos reaproveitam o MESMO
+   *  `camera3`). */
+  _resetCamZoom() {
+    this._updateFotoCamOverlayZoomScale();
+    this._camViewPanOffset = { x: 0, y: 0 };
+    this._engine?.setCamPanFrac(0, 0);
+    // [10/09/2026] NOVO — limpa a exclusão de pick (ver
+    // Engine3D.setPickExclude/this._pickExclude) e o ponto de tela do
+    // destaque de mira (ver Engine3D.setHoverScreenPoint/
+    // this._hoverScreenNdc) — chamado tanto ao ENTRAR (reset limpo antes
+    // de _enterFotoCameraView/_enterCameraOrbView religarem a exclusão com
+    // o id certo, logo abaixo) quanto ao SAIR (nenhum dos dois deve
+    // continuar ativo fora de _fotoCamMode/_orbCamMode).
+    this._engine?.clearPickExclude?.();
+    this._engine?.clearHoverScreenPoint?.();
+    const canvas = this._container?.querySelector('#v3d-canvas');
+    if (canvas) canvas.style.cursor = '';
+  },
+
+  _enterFotoCameraView(fotoId) {
+    const foto = (this._map?.fotos || []).find((f) => f.id === fotoId);
+    if (!foto) return;
+    if (this._camMode) this._exitCameraView(); // nunca os dois modos ativos ao mesmo tempo
+    document.exitPointerLock?.();
+    this._resetCamZoom();
+    // [10/09/2026] `calibFov`/`zoomFov` NOVOS — ver onWheel (zoom de
+    // verdade via FOV, não mais CSS scale) e _updateFotoCamOverlayZoomScale
+    // acima. `zoomFov` começa igual a `calibFov` (sem zoom nenhum ainda);
+    // a roda do mouse só reatribui `zoomFov` — `calibFov` nunca muda
+    // enquanto este modo estiver ativo, é a referência "0% de zoom".
+    const calibFovFoto = this._fotoCamFovFor(foto);
+    // [18/09/2026] REMOVIDO `calibResX`/`calibResY` (congelavam a
+    // Resolução no instante da entrada — pedido de 15/09/2026, ver
+    // comentário grande em `_activeCamFrameAspect`) — a caixa/canvas da
+    // foto voltou a ler `camProps.resolutionX/Y` AO VIVO, igual à malha 3D
+    // do retângulo amarelo de verdade, pra "Esticar"/"Caber"/"Cortar"
+    // sempre cobrirem o retângulo amarelo ATUAL, em qualquer resolução.
+    this._fotoCamMode = { fotoId, calibFov: calibFovFoto, zoomFov: calibFovFoto };
+    // [12/09/2026 — RODADA "certifique-se que só quando a imagem for
+    // pintada"] NOVO — pedido verbatim: "Logo que clica em 'Ver através
+    // desta câmera', o retângulo magenta ainda está aparecendo.
+    // Certifique-se que após clicar [...], só quando a imagem for pintada
+    // é que tudo deve acontecer." CAUSA: `this._fotoCamBackdropMesh`
+    // (o oclusor da cor-marcadora) é um objeto 3D PERSISTENTE — reutilizado
+    // entre sessões de "Ver através desta câmera" (ver
+    // `_ensureFotoCamBackdropPlane`) — então, bem no instante de entrar
+    // aqui, ele pode ainda estar com `visible=true`/máscara antiga de uma
+    // sessão ANTERIOR (outra câmera/foto), e qualquer render que aconteça
+    // antes do primeiro quadro do loop principal terminar de montar a
+    // máscara NOVA (ver `_fotoCamBackdropReady` abaixo) pintaria esse
+    // resquício cru, sem buraco — a "piscada". CORRIGIDO: reseta tudo pra
+    // "escondido"/"não pronto" JÁ AQUI, de forma SÍNCRONA, antes de
+    // qualquer render acontecer — `_fotoCamBackdropReady` (novo — ver
+    // `_renderFotoCamOverlay`/o `onload` da imagem, e o chamador de
+    // `_updateFotoCamBackdropPlane` dentro de `_loop`) só vira `true`
+    // depois que a foto REALMENTE decodificou e foi desenhada no canvas
+    // (`_drawFotoCamPhoto`, disparado pelo `onload` da `Image()` nova
+    // criada por `_renderFotoCamOverlay`, chamada logo abaixo) — só a
+    // partir daí o oclusor pode voltar a ficar visível.
+    if (this._fotoCamBackdropMesh) this._fotoCamBackdropMesh.visible = false;
+    this._engine?.clearFotoCamBackdropMask?.();
+    this._engine?.setFotoCamBackdropMaskActive?.(false);
+    this._fotoCamBackdropReady = false;
+    // [10/09/2026] NOVO — pedido verbatim: "logo que entra nesse modo de
+    // 'ver através da câmera', o clique está pegando a própria câmera. O
+    // clique nela mesma deve ser desativado". Sem isto, o próprio orb de
+    // foto/"Câmera" (ainda visível no cenário mesmo estando "dentro" dele
+    // renderizando, ver setFotoMeshVisible(fotoId,false) logo abaixo —
+    // isso só esconde a malha 3D, não o pickable, que é um objeto à parte)
+    // sempre "ganhava" da mira/clique por estar bem na frente da câmera de
+    // render. Desligado em _resetCamZoom (chamada ao SAIR, logo acima).
+    this._engine?.setPickExclude?.('fotoPin', fotoId);
+    // [12/09/2026] NOVO — item "voltar ao ponto de vista original do
+    // personagem" (ver _cameraExitViewMode acima): guarda a pose LIVRE
+    // exata de `this._camera` NESTE instante, ANTES de qualquer coisa
+    // mexer nela (autopilot incluso, ver `_updateAutopilot`/`_playerWalking`
+    // logo abaixo) — restaurada em `_exitFotoCameraView` se a config estiver
+    // em `'originalView'`. MESMO padrão de `_orbCamSavedPose` em
+    // `_enterCameraOrbView`.
+    this._fotoCamSavedPose = { x: this._camera.x, y: this._camera.y, z: this._camera.z, yaw: this._camera.yaw, pitch: this._camera.pitch };
+    // [12/09/2026 — ITEM A] captura o FOV do personagem ANTES de aplicar o
+    // FOV calibrado da foto logo abaixo (`setFov(calibFovFoto)`) — ver
+    // comentário grande em `this._fotoCamSavedFov` (mount()). Restaurado
+    // SEMPRE em `_exitFotoCameraView`, independente da opção "Sair da
+    // câmera" escolhida.
+    this._fotoCamSavedFov = this._engine?.camera3?.fov ?? this._CAM_VIEW_DEFAULT_FOV;
+    this._autopilotTarget = null; // mesmo motivo de _enterCameraView acima
+    this._playerWalking = false;
+    this._engine?.setPlayerFigureVisible?.(true); // mesmo comportamento de _enterCameraView: o jogador vira o boneco palito visto de fora
+    this._engine?.setFov?.(calibFovFoto);
+    // [12/09/2026] NOVO — mesmo bug do cone "na frente da câmera" já
+    // corrigido pro orb de câmera (ver engine3d.js
+    // setCameraMeshVisible/_cameraMeshesById): o olho de render fica bem no
+    // ponto deste orb de foto, então a malha esfera+cone(+placa) DELE
+    // PRÓPRIO precisa ficar invisível enquanto "vendo através" dele.
+    // Restaurada em `_exitFotoCameraView`.
+    this._engine?.setFotoMeshVisible?.(fotoId, false);
+    // [15/09/2026] NOVO — pedido verbatim: "coloque duas opções para o
+    // corte da câmera [...] Uma seção chamada 'Corte', botão para 'Início',
+    // por padrão, 0.1. E botão para 'Fim', por padrão, 100." Mesmo padrão
+    // já usado pelo orb "Câmeras" (`_enterCameraOrbView`, ver
+    // `cam.clipStartM/clipEndM`) — aqui faltava por completo pro "orb de
+    // foto"/"Câmera". `?? 0.1`/`?? 100` cobrem fotos ainda sem
+    // `clipStartM/clipEndM` salvo (mesmo default do novo campo "Corte").
+    this._engine?.setClipPlanes?.(foto.camProps?.clipStartM ?? 0.1, foto.camProps?.clipEndM ?? 100);
+    this._renderFotoCamOverlay(foto);
+    this._renderHotbar();
+  },
+
+  _exitFotoCameraView() {
+    this._exitModeladorSeAtivo(); // [13/09/2026] pilha de "Sair" — ver comentário grande em _exitCameraView
+    // [12/09/2026] captura tudo que precisa do `_fotoCamMode`/foto ANTES de
+    // zerá-lo (mesmo cuidado de `_exitCameraOrbView`, comentário grande lá):
+    // `_computeFotoCamPose()` lê `this._fotoCamMode` internamente, e
+    // `fotoIdSaindo` precisa sobreviver pra restaurar a malha certa.
+    const fotoIdSaindo = this._fotoCamMode?.fotoId;
+    // [11/09/2026] CORRIGIDO (na época) — pedido verbatim: "Ao 'Sair da
+    // câmera', o enquadramento ainda fica ativado." O "retângulo amarelo"
+    // desligava aqui, incondicionalmente, ao sair de "Ver através desta
+    // câmera".
+    // [15/09/2026] REVERTIDO — pedido verbatim: "No 'Ver em 3D', deixe,
+    // pelo momento, o enquadramento (retângulo amarelo) de todas as
+    // câmeras sempre ativo." A chamada `setCameraFrustumVisible(...,
+    // false)` foi removida — o retângulo amarelo agora fica visível o
+    // tempo todo dentro de "Ver em 3D", inclusive depois de "Sair da
+    // câmera" e navegando livremente. `fotoIdSaindo` continua capturado
+    // acima (usado por outro trecho deste método).
+    // [10/09/2026] capturado ANTES de `this._fotoCamMode = null;` logo
+    // abaixo — mesma correção feita em `_exitCameraOrbView` (ver comentário
+    // grande lá): "a perspectiva que o personagem tinha deve ser
+    // preservada" vale pro zoom "de verdade" (FOV, ver onWheel) também, não
+    // só posição/orientação.
+    const zoomFovSaindo = this._fotoCamMode?.zoomFov;
+    this._resetCamZoom(); // [10/09/2026] — ver comentário grande em _resetCamZoom
+    const foto = (this._map?.fotos || []).find((f) => f.id === fotoIdSaindo);
+    // [12/09/2026, CORRIGIDO em 12/09/2026] usava `_cameraExitViewMode()`
+    // (chave compartilhada com "Câmeras") por engano — corrigido pra ler a
+    // chave PRÓPRIA do "orb de foto" (ver `_fotoOrbExitViewMode()` acima).
+    const modo = this._fotoOrbExitViewMode();
+    // [12/09/2026] item "a perspectiva que o personagem tinha [...] deve ser
+    // preservada" — 2 opções configuráveis (ver _fotoOrbExitViewMode acima):
+    // `'lockedView'` (padrão, MESMA ideia já aplicada ao orb de câmera) —
+    // teleporta `this._camera` pra pose EXATA que estava sendo renderizada
+    // (`_computeFotoCamPose()`) — antes desta rodada a saída simplesmente
+    // não tocava `this._camera`, deixando-o onde quer que o passeio
+    // automático de fundo (`_updateAutopilot`, que roda o tempo todo
+    // enquanto `_fotoCamMode` está ativo) tivesse levado o personagem
+    // nesse meio-tempo — um comportamento nem "fica na câmera" nem "volta
+    // pro original", só "onde o autopilot deixou". `'originalView'` —
+    // restaura `_fotoCamSavedPose` (capturado em `_enterFotoCameraView`,
+    // ANTES do autopilot rodar).
+    const lockedPose = foto ? this._computeFotoCamPose() : null;
+    const savedPose = this._fotoCamSavedPose;
+    this._fotoCamMode = null;
+    // [12/09/2026 — RODADA "certifique-se que só quando a imagem for
+    // pintada"] NOVO — limpa junto com o resto do estado do backdrop
+    // 'Trás' ao sair (ver reset simétrico em `_enterFotoCameraView`) —
+    // evita que uma entrada FUTURA comece por acaso com `_fotoCamBackdropReady`
+    // ainda `true` de uma sessão anterior antes do próprio reset de entrada
+    // rodar (defesa extra, redundante com aquele reset, sem custo).
+    this._fotoCamBackdropReady = false;
+    if (this._fotoCamBackdropMesh) this._fotoCamBackdropMesh.visible = false;
+    if (modo === 'originalView' && savedPose) {
+      this._camera.x = savedPose.x; this._camera.y = savedPose.y; this._camera.z = savedPose.z;
+      this._camera.yaw = savedPose.yaw; this._camera.pitch = savedPose.pitch;
+    } else if (lockedPose) {
+      this._camera.x = lockedPose.x; this._camera.y = lockedPose.y; this._camera.z = lockedPose.z;
+      this._camera.yaw = lockedPose.yaw; this._camera.pitch = lockedPose.pitch;
+    } else if (savedPose) {
+      // Rede de segurança (foto apagada nesse meio-tempo, sem pose travada
+      // pra copiar) — mesmo padrão de _exitCameraOrbView.
+      this._camera.x = savedPose.x; this._camera.y = savedPose.y; this._camera.z = savedPose.z;
+      this._camera.yaw = savedPose.yaw; this._camera.pitch = savedPose.pitch;
+    }
+    this._fotoCamSavedPose = null;
+    this._engine?.setPlayerFigureVisible?.(false);
+    // [12/09/2026 — ITEM A, CORRIGIDO] pedido verbatim: o FOV do personagem
+    // deve SEMPRE voltar ao que era ANTES de "Ver através desta câmera",
+    // mesmo com "Permanece com o ponto de vista da câmera" marcada (posição/
+    // orientação seguem `modo` acima, mas o FOV NUNCA deve ficar sendo o FOV
+    // calibrado da foto). Antes desta correção, 'lockedView' mantinha
+    // `zoomFovSaindo`/o FOV calibrado da foto — agora usa sempre
+    // `this._fotoCamSavedFov` (capturado em `_enterFotoCameraView`, ANTES de
+    // aplicar o FOV calibrado), independente de `modo`. `zoomFovSaindo`
+    // continua capturado acima só por não ter mais nenhum uso aqui removido
+    // sem necessidade (documentação/rastreabilidade do zoom que estava
+    // ativo no instante da saída).
+    const fovSaindo = (this._fotoCamSavedFov != null) ? this._fotoCamSavedFov : this._CAM_VIEW_DEFAULT_FOV;
+    this._engine?.setFov?.(fovSaindo);
+    this._fotoCamSavedFov = null;
+    this._engine?.setFotoMeshVisible?.(fotoIdSaindo, true); // [12/09/2026] restaura a visibilidade da malha deste orb de foto (ver _enterFotoCameraView)
+    // [15/09/2026] NOVO — mesmo padrão de `_exitCameraOrbView`
+    // (`clearClipPlanes()` abaixo): desliga o override de near/far
+    // aplicado em `_enterFotoCameraView`/a cada edição de "Corte" (ver
+    // `_activeCamPropsEditTarget`), senão ficaria vazando pro resto da
+    // cena 3D fora do modo "Ver através desta câmera".
+    this._engine?.clearClipPlanes?.();
+    this._removeFotoCamOverlay();
+    this._renderHotbar();
+  },
+
+  /** Pose de onde renderizar enquanto "vendo através" do orb de foto —
+   *  MESMA convenção de posição/altura/ângulo já usada pra desenhar a
+   *  setinha/placa da foto no 3D (ver engine3d.js setScene, bloco "fotos
+   *  vinculadas ao mapa": baseY = piso*2.8+altura, yaw=dirAngulo,
+   *  pitch=rotPerp) — assim a perspectiva bate exatamente com o que o
+   *  cone/placa mostram no mapa.
+   *
+   *  [11/09/2026] VERIFICADO — pedido: conferir se o "retângulo amarelo"
+   *  (engine3d.js, bloco logo depois do cone/placa, `_fotoFrustumMeshesById`)
+   *  usa a MESMA referência de ponto médio/linha até o infinito que o plano
+   *  da foto ('Trás', `_updateFotoCamBackdropPlane`) e o `<img>` ('Frente')
+   *  passaram a usar. Resultado: SIM, os três batem — o retângulo amarelo
+   *  usa `origemFr = (foto.x, baseY, foto.y)` + `dirVec = cameraForward({
+   *  yaw:foto.dirAngulo, pitch:foto.rotPerp})` (linha por linha igual à
+   *  fórmula acima) pra achar o centro do quadro (`centroFr = origemFr +
+   *  dirVec*1m`); esta função devolve exatamente `{x:foto.x, y:baseY,
+   *  z:foto.y, yaw:foto.dirAngulo, pitch:foto.rotPerp}`, e é ESTE valor —
+   *  sem nenhuma suavização/interpolação nem em `_loop` (o `if
+   *  (this._camTransition...)` logo abaixo explicitamente pula a
+   *  interpolação quando `_fotoCamMode` está ativo) — que vira `renderCam`
+   *  e alimenta `Cam3DMath.cameraForward(renderCam)` em
+   *  `_updateFotoCamBackdropPlane`. Origem e direção são, portanto, os
+   *  MESMOS valores em ambos os lugares — o retângulo amarelo e a foto
+   *  ficam matematicamente garantidos na MESMA reta (mesmo ponto médio,
+   *  mesma linha até o infinito), sem nenhuma divergência de código
+   *  encontrada. Se ainda assim aparecer desalinhado na tela, a causa mais
+   *  provável não é este cálculo — é `Offset X`/`Offset Y` do painel
+   *  "🖼️ Imagem" (um deslocamento intencional da foto, em metros, que o
+   *  retângulo amarelo nunca aplica — ele é sempre centrado, sem offset
+   *  próprio) ainda configurado de um teste anterior; zere os dois campos
+   *  pra conferir o alinhamento "puro". */
+  // [22/09/2026 — RODADA SEGUINTE] `yaw` CORRIGIDO — pedido verbatim do
+  // usuário: "No mapa 2D, ao colocar um objeto câmera sua seta aponta para
+  // o norte. O mapa 3D está com o norte apontando para o sul [...] Deve
+  // girar 180 graus". A CAUSA RAIZ (ver comentário grande de
+  // `objectPointerForward`, engine3d.js) é uma inversão de sinal no
+  // componente Z entre `cameraForward(yaw)` (convenção de VISÃO do
+  // personagem) e o vetor de apontamento de um OBJETO câmera/orb de foto
+  // (convenção do mapa 2D) — o cone/seta 3D do objeto (engine3d.js
+  // `setScene`) foi corrigido pra usar `objectPointerForward(dirAngulo,
+  // pitch)` em vez de `cameraForward({yaw:dirAngulo,...})` direto. Esta
+  // função, porém, não pode simplesmente chamar `objectPointerForward` —
+  // ela devolve um `yaw` de CÂMERA DE VISÃO (consumido por
+  // `Cam3DMath.cameraForward(renderCam)` dentro de `Engine3D.render`, ver
+  // `camera3.lookAt`), não um vetor de direção pronto — precisa do YAW
+  // EQUIVALENTE que faz `cameraForward(yaw,pitch)` produzir o MESMO vetor
+  // que `objectPointerForward(dirAngulo,pitch)` dá, senão "Ver através
+  // desta câmera" (e o eixo óptico do plano do backdrop 'Trás', ver
+  // `_updateFotoCamBackdropPlane` mais abaixo, que usa `renderCam` desta
+  // função) deixaria de bater com o cone/retângulo amarelo.
+  //
+  // ÁLGEBRA (conferida): `cameraForward(yaw,pitch) = (-cos(pitch)sin(yaw),
+  // -sin(pitch), cos(pitch)cos(yaw))`. `objectPointerForward(dirAngulo,
+  // pitch) = (-cos(pitch)sin(dirAngulo), -sin(pitch),
+  // -cos(pitch)cos(dirAngulo))` (mesma fórmula, só com Z negado). Precisa-se
+  // de um `yaw'` tal que `cameraForward(yaw',pitch)` bata com o segundo
+  // vetor, mantendo o MESMO `pitch` (o componente Y/vertical já bate
+  // igual, `-sin(pitch)`, não depende de yaw): `sin(yaw')=sin(dirAngulo)`
+  // E `cos(yaw')=-cos(dirAngulo)` simultaneamente — a ÚNICA solução é
+  // `yaw' = π − dirAngulo` (não é uma simples soma de +π, que resolveria
+  // só o cosseno e trocaria o sinal do seno também — verificado: `sin(π−a)
+  // = sin(a)` ✓, `cos(π−a) = −cos(a)` ✓, as DUAS batem exatamente).
+  _computeFotoCamPose() {
+    const cfg = this._fotoCamMode;
+    const foto = (this._map?.fotos || []).find((f) => f.id === cfg?.fotoId);
+    if (!foto) return this._camera;
+    const baseY = (foto.piso || 0) * 2.8 + (foto.altura || 0);
+    // [10/09/2026] CORRIGIDO — `_camViewPanOffset` NÃO É MAIS somado à
+    // posição aqui (deslocar a posição real muda a perspectiva de
+    // verdade — pedido explícito do usuário foi o oposto: "a perspectiva
+    // deve ser preservada"). A pose calibrada da foto continua 100%
+    // intocada; o pan agora é um deslocamento de "lente"/janela de
+    // projeção aplicado à parte em `camera3` — ver `Engine3D.setCamPanFrac`
+    // chamado em `_loop`, logo antes de `this._engine.render(renderCam)`.
+    return { x: foto.x, y: baseY, z: foto.y, yaw: Math.PI - (foto.dirAngulo || 0), pitch: foto.rotPerp || 0 };
+  },
+
+  /** FOV vertical (graus, mesma unidade de Engine3D.setFov/_CAM_VIEW_
+   *  DEFAULT_FOV) a usar ao entrar na câmera desta foto — usa
+   *  `horizontalFieldOfView` do JSON exportado pelo vanishCam (mesmo
+   *  formato do fSpy: radianos), convertido pra vertical usando a
+   *  PROPORÇÃO DA IMAGEM ORIGINAL (imageWidth/imageHeight, também salvos
+   *  nesse JSON — ver vanishCam js/project-io.js exportCameraJSON), não a
+   *  da tela — a foto pode ter proporção diferente do canvas do app.
+   *  Sem JSON do vanishCam (só rotações manuais definidas), cai no FOV
+   *  padrão do modo câmera (mesmo de _enterCameraView). */
+  _fotoCamFovFor(foto) {
+    const vc = foto.vanishCam;
+    const h = vc?.horizontalFieldOfView;
+    if (typeof h === 'number' && isFinite(h) && h > 0) {
+      const aspect = (vc.imageWidth && vc.imageHeight) ? vc.imageWidth / vc.imageHeight : (4 / 3);
+      const vFov = 2 * Math.atan(Math.tan(h / 2) / aspect);
+      const graus = vFov * 180 / Math.PI;
+      return Math.max(this._CAM_VIEW_FOV_MIN, Math.min(this._CAM_VIEW_FOV_MAX, graus));
+    }
+    return this._CAM_VIEW_DEFAULT_FOV;
+  },
+
+  /** Lê a opacidade salva (padrão 0.15 — [10/09/2026] pedido verbatim: "A
+   *  opacidade padrão, agora, deve ser de 15%." Era 0.5 antes desta rodada)
+   *  — cache em memória pra não reler localStorage a cada quadro (o slider
+   *  é o único jeito de mudar, então o cache nunca fica desatualizado
+   *  dentro da mesma sessão de navegador). */
+  _getFotoCamOpacidade() {
+    if (this._fotoCamOpacidadeCache != null) return this._fotoCamOpacidadeCache;
+    let v = 0.15;
+    try {
+      const raw = localStorage.getItem(this._LS_KEY_FOTOCAM_OPACIDADE);
+      if (raw != null) { const n = parseFloat(raw); if (isFinite(n) && n >= 0 && n <= 1) v = n; }
+    } catch (e) { /* localStorage indisponível (ex.: modo privado) — usa o padrão 0.15 */ }
+    this._fotoCamOpacidadeCache = v;
+    return v;
+  },
+
+  _setFotoCamOpacidade(v) {
+    this._fotoCamOpacidadeCache = v;
+    try { localStorage.setItem(this._LS_KEY_FOTOCAM_OPACIDADE, String(v)); } catch (e) { /* ignora — só perde a persistência entre recarregamentos */ }
+  },
+
+  // [11/09/2026] NOVO — pedido verbatim: "Deve ter outra opção, ao lado de
+  // 'Enquadramento' chamada 'Escurecer ao entorno' (ativado por padrão). E
+  // outra opção 'Escurecer imagem' (ao clicar, a imagem é escurecida para
+  // facilitar a visualização)." MESMO padrão de persistência (localStorage +
+  // cache em memória) de `_getFotoCamOpacidade`, acima — GLOBAL (não por
+  // câmera), igual a opacidade.
+  _LS_KEY_FOTOCAM_ESCURECER_ENTORNO: 'catalogo_camview_escurecer_entorno',
+  _LS_KEY_FOTOCAM_ESCURECER_IMAGEM: 'catalogo_camview_escurecer_imagem',
+  _getEscurecerEntornoAtivo() {
+    if (this._escurecerEntornoCache != null) return this._escurecerEntornoCache;
+    let v = true; // "ativado por padrão"
+    try {
+      const raw = localStorage.getItem(this._LS_KEY_FOTOCAM_ESCURECER_ENTORNO);
+      if (raw != null) v = raw === '1';
+    } catch (e) { /* usa o padrão */ }
+    this._escurecerEntornoCache = v;
+    return v;
+  },
+  _setEscurecerEntornoAtivo(v) {
+    this._escurecerEntornoCache = !!v;
+    try { localStorage.setItem(this._LS_KEY_FOTOCAM_ESCURECER_ENTORNO, v ? '1' : '0'); } catch (e) { /* ignora */ }
+  },
+  // [11/09/2026] NOVO — pedido verbatim: "Lado abaixo deste botão, deve
+  // ter um botão triplo para definir o valor da opacidade do preto
+  // aplicado pelo botão 'Escurecer o entorno'. Por padrão é 0.5." Mesmo
+  // padrão de persistência (localStorage + cache em memória) dos outros
+  // 2 acima — o valor salvo em CSS (`.v3d-fotocam-vignette`, style.css)
+  // era um `box-shadow` FIXO (`rgba(0,0,0,.6)`, alfa 0.6 fixo) — agora só
+  // a estrutura/espalhamento (`0 0 0 2000px`) fica em CSS; o ALFA vira
+  // inline (`vignetteEl.style.boxShadow`, ver `aplicarVignette`/wiring do
+  // campo triplo abaixo), sempre lido daqui.
+  _LS_KEY_FOTOCAM_ESCURECER_ENTORNO_OPACIDADE: 'catalogo_camview_escurecer_entorno_opacidade',
+  _getEscurecerEntornoOpacidade() {
+    if (this._escurecerEntornoOpacidadeCache != null) return this._escurecerEntornoOpacidadeCache;
+    let v = 0.5; // "Por padrão é 0.5"
+    try {
+      const raw = localStorage.getItem(this._LS_KEY_FOTOCAM_ESCURECER_ENTORNO_OPACIDADE);
+      if (raw != null) { const n = parseFloat(raw); if (isFinite(n)) v = Math.max(0, Math.min(1, n)); }
+    } catch (e) { /* usa o padrão */ }
+    this._escurecerEntornoOpacidadeCache = v;
+    return v;
+  },
+  _setEscurecerEntornoOpacidade(v) {
+    const clamped = Math.max(0, Math.min(1, v));
+    this._escurecerEntornoOpacidadeCache = clamped;
+    try { localStorage.setItem(this._LS_KEY_FOTOCAM_ESCURECER_ENTORNO_OPACIDADE, String(clamped)); } catch (e) { /* ignora */ }
+    return clamped;
+  },
+  _getEscurecerImagemAtivo() {
+    if (this._escurecerImagemCache != null) return this._escurecerImagemCache;
+    let v = false; // pedido: "ao CLICAR, a imagem é escurecida" — desligado até o usuário pedir
+    try {
+      const raw = localStorage.getItem(this._LS_KEY_FOTOCAM_ESCURECER_IMAGEM);
+      if (raw != null) v = raw === '1';
+    } catch (e) { /* usa o padrão */ }
+    this._escurecerImagemCache = v;
+    return v;
+  },
+  _setEscurecerImagemAtivo(v) {
+    this._escurecerImagemCache = !!v;
+    try { localStorage.setItem(this._LS_KEY_FOTOCAM_ESCURECER_IMAGEM, v ? '1' : '0'); } catch (e) { /* ignora */ }
+  },
+
+  // [10/09/2026, REMOVIDO na mesma rodada] a preferência GLOBAL do gizmo
+  // "🟨 Enquadramento" (localStorage, `_getFrustumGizmoPref`/
+  // `_toggleFrustumGizmos`) foi substituída por um botão POR CÂMERA — ver
+  // `#v3d-fotocam-frustum-toggle` em `_renderFotoCamOverlay` (usa
+  // `Engine3D.setCameraFrustumVisible(fotoId, visible)`/`isCameraFrustumVisible`/
+  // `hasCameraFrustum`, engine3d.js) — pedido verbatim: "O botão de
+  // enquadramento deve ser só para a câmera atual, deve aparecer junto na
+  // barra em baixo (onde tem o botão 'Sair da câmera')."
+
+  /** Overlay HTML (imagem semitransparente "na frente" do 3D renderizado +
+   *  controles) — pedido verbatim acima. Um `<img>` simples cobrindo o
+   *  canvas (não uma textura 3D) já resolve o pedido ("aparece transparente
+   *  na frente") sem precisar mexer em engine3d.js.
+   *  [10/09/2026] GENERALIZADO — pedido verbatim: "O vanishCam será útil
+   *  para isso [o novo 'orb de câmera']." Recebe agora um 2º parâmetro
+   *  opcional `onExit` (o botão "✖ Sair da câmera" chama ele em vez de
+   *  `_exitFotoCameraView` fixo) — assim `_enterCameraOrbView` (mais abaixo)
+   *  reaproveita este MESMO overlay/painel de opacidade/JSON do vanishCam
+   *  sem duplicar HTML/lógica nenhuma, só trocando pra onde o "Sair" volta.
+   *  `foto` só precisa ter `.id` (id da AmbientePhoto de verdade, pra
+   *  salvar o JSON)/`.dataUrl`/`.thumbDataUrl`/`.vanishCam` — mesmo shape
+   *  usado por `this._map.fotos` (orbs de foto) OU montado na hora a partir
+   *  de `DB.getAmbientePhoto(cam.fotoId)` (câmeras "Câmeras" com foto
+   *  associada, ver _enterCameraOrbView). */
+  _renderFotoCamOverlay(foto, onExit) {
+    this._removeFotoCamOverlay();
+    if (!this._container) return;
+    const sair = onExit || (() => this._exitFotoCameraView());
+    const imgSrc = foto.dataUrl || foto.thumbDataUrl || '';
+    const opacidade = this._getFotoCamOpacidade();
+    // [16/09/2026 — RODADA SEGUINTE] NOVO — `this._fotoCamImgEl` substitui
+    // o antigo `<img id="v3d-fotocam-overlay-img">` DOM: agora é só um
+    // `Image()` em memória (nunca anexado ao DOM), fonte de pixels pra
+    // `ctx.drawImage` — ver `_drawFotoCamPhoto`. `onload` redesenha o
+    // `<canvas>` de overlay (a imagem pode ainda não ter decodificado no 1º
+    // desenho, feito logo abaixo desta função, antes do `load` disparar).
+    // [19/09/2026 — RODADA SEGUINTE] REMOVIDO — chamava também
+    // `_redrawFotoCamBackdropCanvas()` (redesenhava a textura off-screen do
+    // plano 3D do backdrop 'Trás', REMOVIDO nesta rodada) — só
+    // `_updateFotoCamOverlayZoomScale()` é necessária agora, nos 2 modos.
+    const imgEl = new Image();
+    this._fotoCamImgEl = imgEl;
+    if (imgSrc) {
+      imgEl.onload = () => {
+        this._updateFotoCamOverlayZoomScale();
+        // [12/09/2026 — RODADA "certifique-se que só quando a imagem for
+        // pintada"] NOVO — só marca "pronto" (libera o oclusor do backdrop
+        // 'Trás', ver `_enterFotoCameraView`/o chamador de
+        // `_updateFotoCamBackdropPlane` em `_loop`) DEPOIS que esta
+        // `Image()` REALMENTE decodificou e `_updateFotoCamOverlayZoomScale`
+        // já desenhou ela no canvas (linha acima) — nunca antes. Guarda
+        // `imgEl === this._fotoCamImgEl` porque, se a pessoa trocar de
+        // câmera/foto rápido o suficiente, este `onload` de uma imagem JÁ
+        // ABANDONADA pode disparar depois de uma mais nova já ter assumido
+        // `this._fotoCamImgEl` — sem essa checagem, marcaria "pronto" pra
+        // sessão ERRADA.
+        if (imgEl === this._fotoCamImgEl) this._fotoCamBackdropReady = true;
+      };
+      imgEl.src = imgSrc;
+    }
+    // [10/09/2026] NOVO — pedido verbatim (correção do botão global
+    // anterior): "O botão de enquadramento deve ser só para a câmera
+    // atual, deve aparecer junto na barra em baixo (onde tem o botão
+    // 'Sair da câmera')." Só existe gizmo de enquadramento (retângulo
+    // amarelo) pra `map.fotos[]` de verdade (ver
+    // Engine3D._fotoFrustumMeshesById/hasCameraFrustum, engine3d.js) —
+    // `_orbCamMode` sem foto vinculada, ou com uma foto vinculada cujo
+    // `.id` não bate com nenhum orb do mapa (o caso comum: o `foto` aqui
+    // vem de `DB.getAmbientePhoto(cam.fotoId)`, um registro do BANCO, não
+    // um orb do MAPA — ver `_renderCameraOrbOverlay`), não têm gizmo
+    // nenhum pra ligar/desligar — o botão simplesmente não aparece nesse
+    // caso, em vez de existir sem fazer nada.
+    const temFrustum = !!this._engine?.hasCameraFrustum?.(foto.id);
+    // [11/09/2026] NOVO — pedido verbatim: "Nas 'configurações 3D', na seção
+    // 'debug', coloque mais uma opção na lista de ativações deste modo que é
+    // o 'Enquadramento de câmera'. Ativo, por padrão." Antes desta correção,
+    // o estado inicial do gizmo era só "o que sobrou" de uma entrada
+    // anterior nesta MESMA sessão do app (`_frustumGizmosEnabled`/toggle por
+    // câmera, nunca resetado) — agora toda vez que se entra em "Ver através
+    // desta câmera" o gizmo nasce explicitamente no estado configurado em
+    // ⚙️ Configurações › 🐞 Debug (ligado por padrão), não importa o que
+    // aconteceu antes. O botão "🟨 Enquadramento" continua deixando
+    // ligar/desligar manualmente DENTRO desta sessão de visualização.
+    // [15/09/2026] o gizmo passou a entrar SEMPRE ligado (temporário, "pelo
+    // momento": "No 'Ver em 3D', deixe, pelo momento, o enquadramento
+    // (retângulo amarelo) de todas as câmeras sempre ativo").
+    // [12/09/2026, RODADA SEGUINTE] REVERTIDO — pedido verbatim: "Desabilite
+    // a impressão do amarrado amarelo de todas as câmeras. Era só para
+    // testes." Volta a ler a preferência de
+    // `_isDebugEnquadramentoCameraAtivo()` (⚙️ Configurações › 🐞 Debug,
+    // agora também atrás do interruptor mestre `_isDebugAtivo()`), em vez de
+    // entrar sempre ligado. O botão "🟨 Enquadramento" (logo abaixo) continua
+    // deixando ligar/desligar manualmente durante a sessão.
+    if (temFrustum) this._engine.setCameraFrustumVisible(foto.id, this._isDebugEnquadramentoCameraAtivo());
+    const wrap = document.createElement('div');
+    wrap.className = 'v3d-fotocam-overlay';
+    wrap.id = 'v3d-fotocam-overlay';
+    wrap.innerHTML = `
+      <!-- [16/09/2026 — RODADA SEGUINTE] SUBSTITUÍDO -- pedido verbatim:
+           "Remova o retangulo amarelo feito por CSS. E so uma ordem de
+           impressao no canvas, pegue uma imagem e use o drawImage do
+           canvas antes ou depois de todos os objetos no cenario." O antigo
+           par de divs (".v3d-fotocam-clip" com overflow:hidden envolvendo
+           um <img> posicionado/transformado via CSS) MAIS a copia DOM
+           separada do retangulo amarelo (".v3d-fotocam-frame", que so
+           existia pra "furar" o z-index do <img> e aparecer por cima dele)
+           foram substituidos por um UNICO <canvas>: a foto e desenhada
+           nele via ctx.drawImage (2D puro -- translate/rotate/scale, sem
+           nenhum object-fit/transform CSS) e o retangulo amarelo e
+           desenhado por cima dela, na MESMA chamada, com ctx.strokeRect,
+           como ULTIMA operacao de desenho -- ordem de impressao no canvas,
+           nao mais camadas de z-index. Ver _updateFotoCamOverlayZoomScale/
+           _drawFotoCamPhoto em view3d.js. O canvas nativamente recorta
+           qualquer desenho fora dos seus limites (nao precisa mais de
+           overflow:hidden num div pai). SEM CRASE nestas linhas de
+           proposito -- risco documentado de crase dentro de comentario
+           HTML dentro de template literal. -->
+      <!-- [12/09/2026 — RODADA "buffer de verdade"] #v3d-fotocam-photo-canvas
+           NAO fica mais aninhado aqui dentro -- pedido verbatim: "Use a
+           mesma coisa de 'Frente' em 'Tras'. E use o depth buffer para
+           imprimir os objetos na tela." Ele precisa poder ficar empilhado
+           (via CSS z-index) tanto ACIMA quanto ABAIXO de #v3d-canvas
+           dependendo do modo 'Frente'/'Tras' -- impossivel enquanto era
+           descendente deste wrap (.v3d-fotocam-overlay, z-index:30 fixo,
+           sempre acima do canvas WebGL). Criado/anexado logo abaixo, como
+           IRMAO de #v3d-canvas dentro de #v3d-camzoom-wrap -- ver o
+           trecho logo apos este template literal e
+           _updateFotoCamOverlayZoomScale (quem alterna o z-index). SEM
+           CRASE nestas linhas de proposito -- risco documentado de crase
+           dentro de comentario HTML dentro de template literal. -->
+      <!-- [12/09/2026 — RODADA "mesma imagem"] NOVO — canvas SEPARADO só
+           pro retangulo amarelo/guia (+ gizmo do Modelador colado por cima,
+           ver metodo _compositeGizmoOverlayOntoPhotoCanvas) — sempre num
+           z-index fixo (30, deste wrap), por cima de TUDO nos 2 modos.
+           Tamanho SEMPRE igual ao quadro calibrado (nunca cresce pra
+           caixa de cobertura do 'Cortar' — so o canvas da foto cresce).
+           SEM CRASE nestas linhas de proposito -- risco documentado de
+           crase dentro de comentario HTML dentro de template literal. -->
+      <canvas class="v3d-fotocam-frame-canvas" id="v3d-fotocam-frame-canvas"></canvas>
+      <!-- [11/09/2026] NOVO — "Escurecer ao entorno" (pedido verbatim,
+           abaixo): escurece tudo FORA do retângulo amarelo, via o truque de
+           box-shadow com espalhamento gigante (0 0 0 2000px rgba(...))
+           num div do exato tamanho/posição do quadro calibrado
+           (_activeCamFrameRectPx, atualizado junto com o resto em
+           _updateFotoCamOverlayZoomScale) — a "sombra" preenche todo o
+           resto da tela ao redor dele sem precisar de 4 retângulos
+           manuais. pointer-events:none — nunca rouba clique/arrasto.
+           SEM CRASE nestas linhas de proposito -- risco documentado de
+           crase dentro de comentario HTML dentro de template literal. -->
+      <div class="v3d-fotocam-vignette hidden" id="v3d-fotocam-vignette"></div>
+      <!-- [15/09/2026] CORRIGIDO -- pedido verbatim (Parte B): "O botão
+           'Sair da câmera' deve ficar acima e no centro do canvas logo
+           abaixo de região onde aparece a mensagem 'Clique para interagir
+           com o cenário 3D'." Antes vivia dentro da barra
+           .v3d-fotocam-overlay-controls (rodapé, junto com todos os outros
+           botões -- Enquadramento/Escurecer o entorno/Escurecer imagem/
+           Imagem/Propriedades/Informações -- todos removidos daqui nesta
+           rodada e realocados pra aba lateral direita "Propriedades", ver
+           _renderPropriedadesPanel logo abaixo). CSS nova
+           .v3d-fotocam-sair-topcenter (style.css) posiciona no topo/
+           centro, logo abaixo de .v3d-lockstate-hint. -->
+      <button type="button" class="btn secondary sm v3d-fotocam-sair-topcenter" id="v3d-fotocam-sair" title="Sair da visão desta câmera">✖ Sair da câmera</button>
+      <div class="v3d-fotocam-info-panel hidden" id="v3d-fotocam-info-panel">
+        <textarea id="v3d-fotocam-info-json" spellcheck="false">${foto.vanishCam ? Utils.escapeHtml(JSON.stringify(foto.vanishCam, null, 2)) : ''}</textarea>
+        <div class="v3d-fotocam-info-actions">
+          <button type="button" class="btn sm" id="v3d-fotocam-info-salvar">💾 Salvar</button>
+          <span class="v3d-fotocam-info-status" id="v3d-fotocam-info-status"></span>
+        </div>
+      </div>
+    `;
+    // [10/09/2026, REESCRITO] Anexa dentro de #v3d-camzoom-wrap (mero
+    // agrupador do <canvas> + overlays, sem nenhum transform aplicado a
+    // ele hoje — o zoom da roda do mouse virou FOV real, ver onWheel/
+    // _resetCamZoom — mantido só como ponto de montagem estável). A
+    // compensação da foto-guia contra o zoom é feita à parte, direto no
+    // <img> (ver _updateFotoCamOverlayZoomScale).
+    const camzoomWrap = this._container?.querySelector('#v3d-camzoom-wrap') || this._container;
+    // [12/09/2026 — RODADA "buffer de verdade"] `#v3d-fotocam-photo-canvas`
+    // criado/anexado AQUI, como elemento PRÓPRIO — IRMÃO de `#v3d-canvas`
+    // dentro de `#v3d-camzoom-wrap` (não mais um `<canvas>` dentro do
+    // innerHTML de `wrap`/`.v3d-fotocam-overlay`, ver comentário grande no
+    // template acima) — pedido verbatim: "Use a mesma coisa de 'Frente' em
+    // 'Trás'. E use o depth buffer para imprimir os objetos na tela." Ser
+    // IRMÃO de `#v3d-canvas` (em vez de descendente de um wrap com
+    // z-index:30 fixo) é o que permite `_updateFotoCamOverlayZoomScale`
+    // alternar livremente, via `style.zIndex`, se este canvas fica ACIMA
+    // (modo 'front') ou ABAIXO (modo 'back') do canvas WebGL — algo
+    // impossível enquanto ele era descendente de um contêiner cujo
+    // z-index (30) sempre vencia o de `#v3d-canvas` inteiro, não dava pra
+    // "furar" só este elemento. Guardado em `this._fotoCamPhotoCanvasEl`
+    // pra `_removeFotoCamOverlay` conseguir limpá-lo (não é mais removido
+    // de graça junto com `wrap`).
+    let photoCanvasEl = null;
+    if (imgSrc && camzoomWrap) {
+      photoCanvasEl = document.createElement('canvas');
+      photoCanvasEl.className = 'v3d-fotocam-photo-canvas';
+      photoCanvasEl.id = 'v3d-fotocam-photo-canvas';
+      camzoomWrap.appendChild(photoCanvasEl);
+    }
+    this._fotoCamPhotoCanvasEl = photoCanvasEl;
+    (this._container?.querySelector('#v3d-camzoom-wrap') || this._container)?.appendChild(wrap);
+    // [15/09/2026] REMOVIDO -- pedido verbatim (Parte B): wiring dos
+    // botões "🟨 Enquadramento"/"🌑 Escurecer o entorno"/"🌒 Escurecer
+    // imagem"/opacidade/"ℹ️ Informações do vanishCam" que vivia AQUI (cada
+    // um lendo `wrap.querySelector('#v3d-fotocam-...')` de um botão da
+    // extinta barra .v3d-fotocam-overlay-controls) foi todo realocado pra
+    // `_renderPropriedadesPanel` (chamada no fim desta função) -- os
+    // botões agora vivem nas seções "Fundo"/"Câmera" da aba lateral
+    // direita "Propriedades", mas continuam manipulando os MESMOS
+    // elementos (`#v3d-fotocam-vignette`/`#v3d-fotocam-overlay-img`/
+    // `#v3d-fotocam-info-panel`, todos ainda dentro deste `wrap`) --
+    // `_renderPropriedadesPanel` recebe `wrap` via `this._fotoCamOverlayEl`
+    // (atribuído logo abaixo) pra achá-los. O botão "ℹ️ Informações do
+    // vanishCam" também mudou de lugar, mas o PAINEL que ele abre
+    // (`#v3d-fotocam-info-panel`) continua aqui, flutuante, sem mudança.
+    wrap.querySelector('#v3d-fotocam-sair').onclick = () => sair();
+    wrap.querySelector('#v3d-fotocam-info-salvar').onclick = async () => {
+      const status = wrap.querySelector('#v3d-fotocam-info-status');
+      const textarea = wrap.querySelector('#v3d-fotocam-info-json');
+      try {
+        const json = textarea.value.trim() ? JSON.parse(textarea.value) : null;
+        const photoFull = await DB.getAmbientePhoto(foto.id);
+        if (!photoFull) throw new Error('Foto não encontrada.');
+        await DB.saveAmbientePhoto({ ...photoFull, mapaVanishCam: json });
+        foto.vanishCam = json; // atualiza a cópia local desta vista, sem esperar recarregar o mapa inteiro
+        // Só o modo "ver através de um orb de FOTO" deriva o FOV do
+        // vanishCam salvo aqui (ver _fotoCamFovFor) — no modo "orb de
+        // CÂMERA" (_orbCamMode) o FOV vem da própria câmera (Blender-style
+        // focalLength/fov, ver _enterCameraOrbView), então não mexe nele.
+        // [10/09/2026] Recalibrar o vanishCam com o zoom "lupa" ativo
+        // recomeça o zoom do zero (novo calibFov = novo zoomFov) — senão a
+        // compensação da foto-guia (_updateFotoCamOverlayZoomScale) ficaria
+        // calculada contra um FOV calibrado que não existe mais.
+        if (this._fotoCamMode) {
+          const novoCalibFov = this._fotoCamFovFor(foto);
+          this._fotoCamMode.calibFov = novoCalibFov;
+          this._fotoCamMode.zoomFov = novoCalibFov;
+          this._engine?.setFov?.(novoCalibFov);
+          this._updateFotoCamOverlayZoomScale();
+        }
+        if (status) status.textContent = '✅ Salvo.';
+      } catch (e) {
+        console.warn('[FotoCam] JSON inválido ao salvar:', e);
+        if (status) status.textContent = '⚠️ JSON inválido.';
+      }
+    };
+    // [15/09/2026] REMOVIDO -- pedido verbatim (Parte B): "coloque o
+    // conteúdo (não o botão) de 'Propriedades'" + "mostra o que hoje está
+    // em 'Ver através desta câmera'->Imagem". O wiring dos painéis
+    // "🖼️ Imagem"/"⚙️ Propriedades" (que vivia aqui, com botões-toggle
+    // próprios) foi todo realocado pra dentro de `_renderPropriedadesPanel`
+    // (chamada logo abaixo, depois de `this._fotoCamOverlayEl = wrap`) --
+    // o conteúdo agora mora nas seções "Fundo"/"Câmera" da aba lateral
+    // direita "Propriedades", sem precisar de um botão-toggle próprio (o
+    // cabeçalho recolhível da própria seção já cumpre esse papel).
+    this._fotoCamOverlayEl = wrap;
+    // [12/09/2026 — ITEM D] reaplica object-fit/offset/rotação/flip salvos
+    // — precisa rodar DEPOIS do `<img>` existir no DOM (acabou de ser
+    // criado acima). `_resetCamZoom` (chamado ANTES de `_renderFotoCamOverlay`
+    // por quem entra neste modo) já tenta chamar `_updateFotoCamOverlayZoomScale`
+    // uma vez, mas àquela altura o `<img>` ainda não existia — sem esta
+    // 2ª chamada aqui, um `fit`/offset/rotação salvo diferente do padrão
+    // CSS (`contain`) silenciosamente não seria aplicado na entrada.
+    this._updateFotoCamOverlayZoomScale();
+    // [19/09/2026 — RODADA SEGUINTE] REMOVIDO — `_applyFotoCamBackdropDepthMode()`
+    // (alternava entre o `<canvas>` de overlay e o plano 3D do backdrop
+    // 'Trás', ambos removidos) não existe mais; a chamada acima já cobre
+    // os 2 modos ('Trás'/'Frente' só mudam a ORDEM de desenho dentro dela).
+    // [15/09/2026] NOVO — constrói o conteúdo das seções "Fundo"/"Câmera"
+    // da aba lateral direita "Propriedades" pra esta câmera/foto (ver
+    // `_renderPropriedadesPanel`, comentário grande lá).
+    this._renderPropriedadesPanel({ rebuild: true, foto, temFrustum, hasImage: !!imgSrc });
+  },
+
+  _removeFotoCamOverlay() {
+    this._fotoCamOverlayEl?.remove();
+    this._fotoCamOverlayEl = null;
+    // [12/09/2026 — RODADA "buffer de verdade"] NOVO — `#v3d-fotocam-photo-canvas`
+    // deixou de ser descendente de `wrap` (ver `_renderFotoCamOverlay`),
+    // então `wrap.remove()` (linha acima) não o remove mais sozinho —
+    // precisa de limpeza própria.
+    this._fotoCamPhotoCanvasEl?.remove();
+    this._fotoCamPhotoCanvasEl = null;
+    // [16/09/2026 — RODADA SEGUINTE] limpa o `Image()` em memória (ver
+    // `_renderFotoCamOverlay`) e seu `onload` — evita um redesenho tardio
+    // (decodificação terminando DEPOIS de já ter saído deste modo) mexer
+    // num canvas que não existe mais.
+    if (this._fotoCamImgEl) this._fotoCamImgEl.onload = null;
+    this._fotoCamImgEl = null;
+    // [15/09/2026] NOVO — reseta as seções "Fundo"/"Câmera" (aba lateral
+    // "Propriedades") pro aviso padrão sempre que o overlay de "Ver
+    // através desta câmera" é removido (tanto ao SAIR de verdade quanto no
+    // início de `_renderFotoCamOverlay`/`_renderCameraOrbOverlay`, que
+    // reconstroem logo em seguida chamando `_renderPropriedadesPanel` de
+    // novo com `rebuild:true`).
+    this._renderPropriedadesPanel();
+    // [19/09/2026 — RODADA SEGUINTE] REMOVIDO — chamava
+    // `_removeFotoCamBackdropPlane()` (desfazia o plano 3D do backdrop
+    // 'back', REMOVIDO por completo nesta rodada) — não existe mais nenhum
+    // objeto 3D "fantasma" pra limpar; a foto só vive no `<canvas>` de
+    // overlay (removido junto com o resto de `wrap`, no início desta
+    // função — `this._fotoCamOverlayEl?.remove()`).
+  },
+
+  /** [12/09/2026 — ITEM D] Markup do painel "🖼️ Imagem" — os 3 grupos de
+   *  botões colados (Trás/Frente, Esticar/Caber/Cortar), os 2 checkboxes
+   *  (Virar H/V) e os 3 slots vazios onde os widgets `_createNumField`
+   *  (Offset X/Y, Rotação — o MESMO widget de "Transformação" no
+   *  Modelador, ver `_wireFotoCamBackdropPanel`) são montados via JS (não
+   *  dá pra desenhar aquele widget só com HTML — ele é construído por
+   *  `ModelerUI._createNumField`, com listeners próprios). Estado inicial
+   *  dos grupos/checkboxes é aplicado por `_wireFotoCamBackdropPanel`
+   *  também (evita duplicar `cfg` aqui). */
+  _fotoCamBackdropPanelHtml() {
+    return `
+      <div class="v3d-fotocam-backdrop-panel hidden" id="v3d-fotocam-backdrop-panel">
+        <!-- [13/09/2026 — ITEM A] pedido verbatim: "coloque a opacidade
+             dentro da janela do 'Imagem'" — movida pra cá (1ª linha do
+             painel, antes de Trás/Frente) de dentro da barra de controles
+             (onde o botão "🖼️ Imagem" está agora, ver _renderFotoCamOverlay).
+             MESMO id/elemento (id=v3d-fotocam-opacidade) — a wiring
+             (range.oninput, também em _renderFotoCamOverlay) continua
+             achando por wrap.querySelector, não precisou mudar. -->
+        <div class="v3d-backdrop-row">
+          <label class="v3d-fotocam-opacidade-label">Opacidade da foto
+            <input type="range" min="0" max="1" step="0.01" id="v3d-fotocam-opacidade" value="${this._getFotoCamOpacidade()}">
+          </label>
+        </div>
+        <div class="v3d-backdrop-row">
+          <span class="v3d-backdrop-row-label">Profundidade da imagem</span>
+          <div class="v3d-backdrop-seg-group" data-backdrop-group="depth">
+            <button type="button" class="v3d-backdrop-seg-btn" data-value="back" title="A imagem fica ATRÁS dos objetos 3D — eles a ocluem normalmente">Trás</button>
+            <button type="button" class="v3d-backdrop-seg-btn" data-value="front" title="A imagem fica NA FRENTE de todos os objetos 3D (padrão)">Frente</button>
+          </div>
+        </div>
+        <div class="v3d-backdrop-row">
+          <span class="v3d-backdrop-row-label">Ajuste no enquadramento</span>
+          <div class="v3d-backdrop-seg-group" data-backdrop-group="fit">
+            <button type="button" class="v3d-backdrop-seg-btn" data-value="stretch" title="Esticar — preenche todo o enquadramento, ignorando a proporção original">Esticar</button>
+            <button type="button" class="v3d-backdrop-seg-btn" data-value="contain" title="Caber — mantém a proporção, toda a imagem visível dentro do enquadramento (padrão)">Caber</button>
+            <button type="button" class="v3d-backdrop-seg-btn" data-value="cover" title="Cortar — mantém a proporção, preenche todo o enquadramento, partes da imagem podem ficar de fora">Cortar</button>
+          </div>
+        </div>
+        <div class="v3d-backdrop-row" id="v3d-backdrop-offsetx-wrap"></div>
+        <div class="v3d-backdrop-row" id="v3d-backdrop-offsety-wrap"></div>
+        <label class="v3d-backdrop-checkbox-row"><input type="checkbox" id="v3d-backdrop-fliph"> Virar Horizontalmente</label>
+        <label class="v3d-backdrop-checkbox-row"><input type="checkbox" id="v3d-backdrop-flipv"> Virar Verticalmente</label>
+        <div class="v3d-backdrop-row" id="v3d-backdrop-rotation-wrap"></div>
+      </div>`;
+  },
+
+  /** [12/09/2026 — ITEM D] Liga os 7 controles do painel "🖼️ Imagem" —
+   *  chamada 1x por `_renderFotoCamOverlay`, logo depois do painel ser
+   *  inserido no DOM (`_fotoCamBackdropPanelHtml`, acima). Offset X/Y e
+   *  Rotação reusam `ModelerUI._createNumField` (o MESMO widget de 3
+   *  botões — arrastar/clicar seta/clicar valor pra digitar — já usado em
+   *  "Ver em 3D" → Modelador → "Transformação", pedido explícito do
+   *  usuário: "do mesmo jeito que é [...] em 'Transformação'"). Cada
+   *  controle chama `_setFotoCamBackdropConfig` (persiste + reaplica tudo
+   *  — CSS do `<img>` em modo 'front', canvas+plano 3D em modo 'back'). */
+  _wireFotoCamBackdropPanel(panel) {
+    const cfg = this._getFotoCamBackdropConfig();
+    const syncSegGroup = (grupo, valor) => {
+      panel.querySelectorAll(`[data-backdrop-group="${grupo}"] .v3d-backdrop-seg-btn`).forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.value === valor);
+      });
+    };
+    syncSegGroup('depth', cfg.depth);
+    syncSegGroup('fit', cfg.fit);
+    panel.querySelectorAll('[data-backdrop-group="depth"] .v3d-backdrop-seg-btn').forEach((btn) => {
+      btn.onclick = () => { this._setFotoCamBackdropConfig({ depth: btn.dataset.value }); syncSegGroup('depth', btn.dataset.value); };
+    });
+    panel.querySelectorAll('[data-backdrop-group="fit"] .v3d-backdrop-seg-btn').forEach((btn) => {
+      btn.onclick = () => { this._setFotoCamBackdropConfig({ fit: btn.dataset.value }); syncSegGroup('fit', btn.dataset.value); };
+    });
+    const offXWrap = panel.querySelector('#v3d-backdrop-offsetx-wrap');
+    const offYWrap = panel.querySelector('#v3d-backdrop-offsety-wrap');
+    const rotWrap = panel.querySelector('#v3d-backdrop-rotation-wrap');
+    // [13/09/2026 — ITEM C] pedido verbatim: "Os offsets devem ser em
+    // unidades do mundo" — `step`/`minDecimals`/`suffix` trocados de
+    // porcentagem (`step:1`, inteiro, '%') pra metros (`step:0.05`, 2 casas,
+    // 'm' — precisão fina o bastante pra ajustes de alinhamento de foto sem
+    // ficar minúsculo demais pra arrastar). O VALOR salvo (`cfg.offsetX/Y`)
+    // já é a magnitude em metros — ver `_backdropOffsetFrac` (conversão
+    // metros -> fração do quadro, usada tanto pelo `<img>` DOM quanto pelo
+    // canvas do modo 'back').
+    if (offXWrap && window.ModelerUI) {
+      offXWrap.appendChild(ModelerUI._createNumField({
+        label: 'Offset X', value: cfg.offsetX || 0, step: 0.05, minDecimals: 2, suffix: 'm',
+        onCommit: (v) => this._setFotoCamBackdropConfig({ offsetX: v }),
+      }).el);
+    }
+    if (offYWrap && window.ModelerUI) {
+      offYWrap.appendChild(ModelerUI._createNumField({
+        label: 'Offset Y', value: cfg.offsetY || 0, step: 0.05, minDecimals: 2, suffix: 'm',
+        onCommit: (v) => this._setFotoCamBackdropConfig({ offsetY: v }),
+      }).el);
+    }
+    if (rotWrap && window.ModelerUI) {
+      rotWrap.appendChild(ModelerUI._createNumField({
+        label: 'Rotação', value: cfg.rotation || 0, step: 1, formatMode: 'rotation', suffix: '°',
+        onCommit: (v) => this._setFotoCamBackdropConfig({ rotation: v }),
+      }).el);
+    }
+    const fliph = panel.querySelector('#v3d-backdrop-fliph');
+    const flipv = panel.querySelector('#v3d-backdrop-flipv');
+    if (fliph) { fliph.checked = !!cfg.flipH; fliph.onchange = () => this._setFotoCamBackdropConfig({ flipH: fliph.checked }); }
+    if (flipv) { flipv.checked = !!cfg.flipV; flipv.onchange = () => this._setFotoCamBackdropConfig({ flipV: flipv.checked }); }
+  },
+
+  /** [11/09/2026] NOVO — pedido verbatim: "Deve ser possível acessar a
+   *  janela de propriedades da câmera no modo 'Ver através desta câmera'
+   *  [...] A mudança dos valores devem ter efeito imediato." Devolve QUEM
+   *  editar (o objeto de verdade que guarda `fov`/`resolutionX`/
+   *  `resolutionY`) e COMO salvar, dependendo de qual dos 2 modos de
+   *  câmera especial está ativo agora — MESMA distinção já usada por
+   *  `_activeCamFrameAspect`/`_activeCamPropsVFovRad` (acima): orb "Câmeras"
+   *  guarda esses campos DIRETO no objeto (`cam.fov`/`cam.resolutionX/Y`,
+   *  ver mapping.js `addCamera`); orb de "foto" guarda dentro de
+   *  `foto.camProps`/`AmbientePhoto.mapaCamProps`. `null` se nenhum modo
+   *  especial estiver ativo (nunca deveria acontecer — só chamado de
+   *  dentro do overlay de "Ver através desta câmera" — mas protegido do
+   *  mesmo jeito que o resto do arquivo faz pra estas 2 flags). */
+  _activeCamPropsEditTarget() {
+    if (this._orbCamMode) {
+      const cam = (this._map?.cameras || []).find((c) => c.id === this._orbCamMode.camId);
+      if (!cam) return null;
+      return {
+        idPrefix: 'v3dlivecam',
+        props: cam,
+        onSave: (patch) => {
+          Mapping.updateCamera(this._map, cam.id, patch);
+          Object.assign(cam, patch);
+          // Efeito imediato (pedido verbatim: "mudar o FOV, ajustando/
+          // aproximando o enquadramento da câmera"): o retângulo amarelo já
+          // recalcula sozinho a cada quadro a partir de `cam.fov`/
+          // `resolutionX/Y` (ver `_activeCamPropsVFovRad`/
+          // `_activeCamFrameAspect`, que leem o objeto `cam` ao vivo — já
+          // mutado acima) — só falta reaplicar o FOV na câmera de RENDER
+          // de verdade (o "orb de câmera" É a câmera do jogo nesse modo,
+          // diferente do orb de foto — ver comentário grande em
+          // `_enterCameraOrbView`), reiniciando o zoom "lupa" do zero
+          // (mesmo padrão já usado ao recalibrar o vanishCam, ver
+          // `#v3d-fotocam-info-salvar` acima) pra não ficar calculado
+          // contra um FOV calibrado que não existe mais.
+          // [16/09/2026] CORRIGIDO — pedido verbatim: "Ao variar a resolução
+          // da câmera em [...] 'Propriedades da câmera', o zoom deve
+          // permanecer como está. Atualmente o zoom acaba mudando ao
+          // variar a resolução da câmera." CAUSA RAIZ: `salvar()` (ver
+          // mapview.js `_wireCamPropsFieldset`) sempre manda o PATCH
+          // INTEIRO (fov + resolutionX/Y + clipStartM/Y juntos) — este
+          // trecho reagia a QUALQUER chamada de `onSave` reatribuindo
+          // `zoomFov = fovDeg` incondicionalmente, mesmo quando só
+          // Resolução X/Y (ou Corte) mudou e o FOV calibrado (`cam.fov`)
+          // continuava exatamente o mesmo — isso jogava fora qualquer zoom
+          // manual (roda do mouse) que o usuário já tivesse aplicado,
+          // voltando pro "0% de zoom" sem pedido nenhum. CORRIGIDO: só
+          // reseta `zoomFov`/reaplica `setFov` quando o FOV CALIBRADO
+          // (`fovDeg`) realmente mudou desde a última vez — editar só
+          // Resolução/Corte não mexe mais no zoom atual.
+          const fovDeg = this._camOrbFovDeg(cam);
+          const fovMudou = !this._orbCamMode || Math.abs(fovDeg - this._orbCamMode.calibFov) > 0.001;
+          if (this._orbCamMode) {
+            this._orbCamMode.calibFov = fovDeg;
+            if (fovMudou) this._orbCamMode.zoomFov = fovDeg;
+          }
+          if (fovMudou) this._engine?.setFov?.(fovDeg);
+          // [15/09/2026] NOVO — pedido verbatim: "Ao vivo e imediatamente,
+          // devem ser aplicadas as alterações no retângulo amarelo."
+          // Recalcula a malha 3D de verdade do frustum (engine3d.js
+          // `updateCameraFrustumGeometry`, ver comentário grande lá) com o
+          // `cam` já mutado (Object.assign acima) — sem isso só o quadro
+          // CSS 2D (`_activeCamFrameRectPx`) reagia; a malha 3D ficava
+          // congelada até o próximo `setScene()` completo.
+          this._engine?.updateCameraFrustumGeometry?.(cam.id, cam);
+          // [15/09/2026] NOVO — pedido verbatim: "coloque duas opções para
+          // o corte da câmera [...] Uma seção chamada 'Corte', botão para
+          // 'Início', por padrão, 0.1. E botão para 'Fim', por padrão, 100."
+          // Aplica ao vivo o near/far do frustum de RENDER de verdade
+          // (Engine3D.setClipPlanes) — antes só era aplicado na ENTRADA
+          // deste modo (`_enterCameraOrbView`, `cam.clipStartM/clipEndM`);
+          // agora também a cada edição do fieldset "Propriedades"→"Câmera"
+          // (campos "Início"/"Fim" da seção "Corte").
+          this._engine?.setClipPlanes?.(cam.clipStartM ?? 0.1, cam.clipEndM ?? 100);
+          // [14/09/2026] CORRIGIDO — pedido verbatim: "Ao variar o valor da
+          // resolução, por exemplo, em X (...) a imagem está esticando. Isto
+          // não deve acontecer. É o retângulo amarelo que deve ter o seu
+          // tamanho modificado." BUG CONFIRMADO via Playwright (live, ver
+          // sessão de testes): faltava esta chamada aqui — `cam.fov`/
+          // `resolutionX/Y` já ficavam corretos no objeto de dados (mutado 2
+          // linhas acima) e `_activeCamFrameRectPx()` já recalculava certo
+          // SE chamado, mas nada disparava um novo cálculo — o retângulo
+          // amarelo (`#v3d-fotocam-vignette`) e a foto-guia
+          // (`#v3d-fotocam-overlay-img`) ficavam com o `left/top/width/
+          // height` CSS "congelados" no tamanho antigo até a PRÓXIMA
+          // interação não relacionada (zoom da roda, pan, etc.) disparar
+          // `_updateFotoCamOverlayZoomScale` por conta própria — nesse
+          // instante os dois (moldura recalculada x DOM desatualizado)
+          // ficavam fora de sincronia por um instante e o salto súbito de
+          // tamanho parecia a IMAGEM "esticando" sozinha. O branch
+          // `_fotoCamMode` (logo abaixo) já fazia esta chamada corretamente
+          // desde a correção de 11/09/2026 — só faltava espelhar aqui no
+          // branch do orb "Câmeras" (`_orbCamMode`), que usa este MESMO
+          // `_activeCamPropsEditTarget()` mas tinha ficado sem ela.
+          this._updateFotoCamOverlayZoomScale();
+          // [19/09/2026 — RODADA SEGUINTE] REMOVIDO — havia aqui uma 2ª
+          // chamada, `_redrawFotoCamBackdropCanvas()`, que existia só pra
+          // manter em sincronia uma TEXTURA OFF-SCREEN separada usada pelo
+          // modo 'Trás' (`this._fotoCamBackdropCanvas`, plano 3D do
+          // backdrop) — essa textura (e toda a classe de bugs de cache
+          // dessincronizado da Resolução/FOV que ela causava, ver histórico
+          // de correções acima) deixou de existir por completo nesta
+          // rodada: a foto agora é SEMPRE desenhada fresca, a partir da
+          // imagem original, direto no `<canvas>` de overlay 2D
+          // (`_updateFotoCamOverlayZoomScale`, chamada acima) — nos 2 modos
+          // ('Trás' e 'Frente') — nenhuma segunda chamada é necessária.
+        },
+      };
+    }
+    if (this._fotoCamMode) {
+      const foto = (this._map?.fotos || []).find((f) => f.id === this._fotoCamMode.fotoId);
+      if (!foto) return null;
+      return {
+        idPrefix: 'v3dlivefoto',
+        props: foto.camProps || {},
+        onSave: (patch) => {
+          // [11/09/2026] CORRIGIDO — pedido verbatim: "Ao mudar o FOV da
+          // câmera é a câmera que deve ter a sua perspectiva mudada, não a
+          // imagem. A imagem continua fixa em relação ao retângulo amarelo
+          // da câmera." Antes desta correção este `onSave` só mexia no
+          // retângulo amarelo (`camProps.fov` alimentava só
+          // `_activeCamPropsVFovRad`), deixando a câmera de RENDER (o que
+          // de fato se vê em "Ver através desta câmera") intocada — editar
+          // o FOV aqui não mudava a perspectiva nenhuma, só o tamanho do
+          // quadro desenhado, dando a impressão de que era a IMAGEM que
+          // mudava de tamanho (já que ela segue o quadro, ver
+          // `_updateFotoCamOverlayZoomScale`/`_activeCamFrameRectPx`), não a
+          // câmera. CORRIGIDO: agora também reaplica o FOV na câmera de
+          // render (mesmo padrão já usado pelo orb "Câmeras", acima),
+          // reiniciando o zoom "lupa" do zero — a imagem/foto-guia SEGUE o
+          // quadro automaticamente (ela é sempre desenhada EM RELAÇÃO a
+          // `_activeCamFrameRectPx()`/`_activeCamPropsVFovRad()`, nunca tem
+          // tamanho/perspectiva própria), então "fica fixa em relação ao
+          // retângulo amarelo" continua verdade sem nenhum código a mais.
+          //
+          // [15/09/2026] CORRIGIDO — pedido verbatim: "Atualmente o aramado
+          // amarelo não atualiza em tempo real conforme as alterações
+          // feitas na resolução da câmera." CAUSA RAIZ: este `onSave` era
+          // `async` e fazia `await DB.getAmbientePhoto`/`await
+          // DB.saveAmbientePhoto` ANTES de tocar em qualquer atualização
+          // visual (FOV/frustum/overlay) — como o campo numérico
+          // (`ModelerUI._createNumField`) dispara `onCommit`→`salvar()`→
+          // este `onSave` A CADA PASSO do arraste (várias vezes por
+          // segundo), as chamadas assíncronas se acumulavam/desordenavam
+          // (cada uma esperando 2 round-trips de banco) e a atualização
+          // visual do retângulo amarelo ficava atrasada, ou nunca
+          // "alcançava" o valor mais recente. O branch `_orbCamMode`
+          // (acima) nunca teve este bug por ser 100% síncrono — pista
+          // decisiva pro diagnóstico. CORRIGIDO: `onSave` volta a ser
+          // síncrono — `foto.camProps`/FOV/frustum/corte/overlay são
+          // aplicados IMEDIATAMENTE (nesta mesma função, sem `await`) — a
+          // gravação no banco (`DB.getAmbientePhoto`/
+          // `DB.saveAmbientePhoto`) passa a rodar em segundo plano, com
+          // debounce de 300ms (`_fotoCamPropsSaveTimer`): só a ÚLTIMA
+          // edição de uma rajada de arraste é persistida, sem nunca
+          // bloquear nenhuma das atualizações visuais anteriores.
+          foto.camProps = patch;
+          if (this._fotoCamPropsSaveTimer) clearTimeout(this._fotoCamPropsSaveTimer);
+          this._fotoCamPropsSaveTimer = setTimeout(() => {
+            this._fotoCamPropsSaveTimer = null;
+            DB.getAmbientePhoto(foto.id).then((photoFull) => {
+              if (photoFull) return DB.saveAmbientePhoto({ ...photoFull, mapaCamProps: patch });
+            }).catch((err) => console.error('[view3d] falha ao salvar camProps (Propriedades da câmera):', err));
+          }, 300);
+          if (this._fotoCamMode) {
+            // [11/09/2026 — CORRIGIDO] Era `_activeCamPropsVFovRad()` (passa
+            // `patch.fov` pelo "Sensor Fit: Auto" usando Resolução X/Y) —
+            // fazia a Resolução X/Y também mudar a perspectiva de verdade da
+            // câmera de render, não só o retângulo amarelo. Pedido verbatim:
+            // "Em 'Propriedades da câmera', os valores de resolução não
+            // devem alterar a resolução da imagem, mas sim o retângulo
+            // amarelo." Agora usa `patch.fov` DIRETO (mesmo padrão do orb
+            // "Câmeras", ver `_camOrbFovDeg` acima) — só o campo FOV mexe na
+            // câmera de verdade; Resolução X/Y continuam mudando só o
+            // retângulo amarelo (`_activeCamPropsVFovRad`/
+            // `_activeCamFrameAspect`, usados só pelo cálculo do quadro,
+            // intocados).
+            // [16/09/2026] CORRIGIDO — MESMO motivo/pedido do branch
+            // `_orbCamMode` acima (ver comentário grande lá): só reseta o
+            // zoom quando o FOV calibrado de verdade mudou, nunca só por
+            // causa de Resolução X/Y ou Corte terem sido editados no MESMO
+            // patch (`salvar()` sempre manda tudo junto).
+            const novoFovDeg = Math.max(1, Math.min(170, ((patch.fov ?? Math.PI / 3) * 180) / Math.PI));
+            const fovMudou = Math.abs(novoFovDeg - this._fotoCamMode.calibFov) > 0.001;
+            this._fotoCamMode.calibFov = novoFovDeg;
+            if (fovMudou) {
+              this._fotoCamMode.zoomFov = novoFovDeg;
+              this._engine?.setFov?.(novoFovDeg);
+            }
+            // [15/09/2026] NOVO — MESMO motivo/pedido do branch `_orbCamMode`
+            // acima (ver comentário grande lá): recalcula a malha 3D de
+            // verdade do retângulo amarelo ao vivo, a cada edição em
+            // "Propriedades" (FOV OU Resolução X/Y).
+            this._engine?.updateCameraFrustumGeometry?.(foto.id, patch);
+            // [15/09/2026] NOVO — pedido verbatim: "coloque duas opções para
+            // o corte da câmera [...] Uma seção chamada 'Corte', botão para
+            // 'Início', por padrão, 0.1. E botão para 'Fim', por padrão,
+            // 100." Aplica ao vivo o near/far do frustum de RENDER de
+            // verdade — antes só era aplicado na ENTRADA deste modo (ver
+            // `_enterFotoCameraView` abaixo); agora também a cada edição.
+            this._engine?.setClipPlanes?.(patch.clipStartM ?? 0.1, patch.clipEndM ?? 100);
+            this._updateFotoCamOverlayZoomScale();
+            // [19/09/2026 — RODADA SEGUINTE] REMOVIDO — MESMA remoção do
+            // branch `_orbCamMode` acima: a chamada extra a
+            // `_redrawFotoCamBackdropCanvas()` (textura off-screen do plano
+            // 3D do backdrop 'Trás') não é mais necessária — essa textura,
+            // e toda a classe de bugs de cache dessincronizado da Resolução/
+            // FOV que ela causava (era justamente ESTE branch,
+            // `_fotoCamMode`, o mais comumente exercitado pelo usuário na
+            // prática, ver histórico de correções acima), deixou de existir
+            // por design: a foto é sempre desenhada fresca direto no
+            // `<canvas>` de overlay 2D (`_updateFotoCamOverlayZoomScale`,
+            // chamada acima), nos 2 modos.
+          }
+        },
+      };
+    }
+    return null;
+  },
+
+  /** [11/09/2026] NOVO — constrói + liga o fieldset "⚙️ Propriedades" dentro
+   *  de `#v3d-fotocam-props-panel` (ver botão/HTML em `_renderFotoCamOverlay`),
+   *  reaproveitando o MESMO `_camPropsFieldsetHtml`/`_wireCamPropsFieldset`
+   *  de mapview.js já usado em `_showCameraCard3D`/`_showFotoPinCard3D` —
+   *  nunca um fieldset PRÓPRIO/duplicado, sempre a mesma fonte única de
+   *  verdade dos campos FOV/Resolução X/Y. */
+  _wireLiveCamPropsPanel(panel) {
+    const target = this._activeCamPropsEditTarget();
+    if (!target || !window.MapView?._camPropsFieldsetHtml || !window.MapView?._wireCamPropsFieldset) {
+      panel.innerHTML = '<div class="map2d-toolctx-info">Propriedades indisponíveis.</div>';
+      return;
+    }
+    panel.innerHTML = window.MapView._camPropsFieldsetHtml(target.idPrefix, target.props) || '';
+    window.MapView._wireCamPropsFieldset(panel, target.idPrefix, target.props, target.onSave);
+  },
+
+  // ---------- "Orb de câmera" / redesenho do "Camera Match" — [10/09/2026]
+  // NOVO, pedido verbatim: "Sobre o 'câmera match' [...] não deve ser uma
+  // tela a parte como estava antes, deve ser no próprio cenário 3D. Não é
+  // simular um 3D fictício com linhas estático como antes, o próprio 'Ver em
+  // 3D' já é o 3D em perspectiva necessário [...] com um 'orb de câmera'
+  // deve dar para ver através dele. Com a câmera do personagem fixa pela
+  // visão do 'orb de câmera' deve ser possível continuar interagindo com o
+  // mapa do mesmo jeito que antes. As duas únicas diferenças são que: 1, não
+  // dá para olhar em volta pois a câmera fica fixa; e 2, tem uma imagem na
+  // frente da câmera como um 'guia visual' [...]". "Orb de câmera" aqui é o
+  // objeto "Câmeras" já existente (`this._map.cameras`, mapping.js
+  // addCamera) — já tinha `fotoId` opcional (mesma ideia de "orb de foto
+  // vinculada"), então nenhum objeto/tipo novo foi inventado, só esta nova
+  // forma interativa de "entrar" nele. Diferente de `_enterFotoCameraView`/
+  // `_camMode` (modos de ESPECTADOR — ver comentário grande em
+  // `this._orbCamMode`, mount()), aqui `this._camera` é travado DE VERDADE,
+  // então toda a interação existente (seleção/posicionamento via
+  // `_placeWithBuildTool`, que sempre lê `this._camera`) continua
+  // funcionando sem duplicar nada. ----------
+  _enterCameraOrbView(camId) {
+    const cam = (this._map?.cameras || []).find((c) => c.id === camId);
+    if (!cam) { Utils.toast('Câmera não encontrada neste mapa.', { type: 'warn' }); return; }
+    // Nunca 2+ modos de câmera especial ativos ao mesmo tempo — mesma regra
+    // já usada entre _camMode/_fotoCamMode.
+    if (this._camMode) this._exitCameraView();
+    if (this._fotoCamMode) this._exitFotoCameraView();
+    document.exitPointerLock?.();
+    this._resetCamZoom(); // [10/09/2026] — ver comentário grande em _resetCamZoom
+    // Guarda a pose LIVRE atual pra restaurar ao sair (pedido implícito: o
+    // usuário volta a andar de onde estava, não teleporta pro ponto onde a
+    // câmera calibrada ficava) — só na 1ª entrada (reentrar sem sair não
+    // deveria sobrescrever o "de onde vim" de verdade, mas _exitCameraOrbView
+    // sempre limpa este campo, então nunca fica "preso" num valor velho).
+    this._orbCamSavedPose = { x: this._camera.x, y: this._camera.y, z: this._camera.z, yaw: this._camera.yaw, pitch: this._camera.pitch };
+    // [12/09/2026 — ITEM A] captura o FOV do personagem ANTES de aplicar o
+    // FOV calibrado da câmera logo abaixo (`setFov(fovDeg)`) — ver
+    // comentário grande em `this._fotoCamSavedFov` (mount()). Restaurado
+    // SEMPRE em `_exitCameraOrbView`, independente da opção "Sair da
+    // câmera" escolhida.
+    this._orbCamSavedFov = this._engine?.camera3?.fov ?? this._CAM_VIEW_DEFAULT_FOV;
+    // Mesma pose/convenção ângulo->yaw de `_computeWatchCameraPose` acima
+    // (ALTURA_CAMERA=1.6) — a câmera do "orb" É a câmera do jogo agora, não
+    // uma renderCam à parte (ver comentário grande em `this._orbCamMode`).
+    // [11/09/2026] CORRIGIDO — MESMA correção/motivo de `_computeWatchCameraPose`
+    // acima (ver comentário grande lá): `- Math.PI/2` virou `+ Math.PI/2`.
+    const ALTURA_CAMERA = 1.6;
+    const baseY = (cam.piso || 0) * 2.8;
+    const pose = { x: cam.x, y: baseY + ALTURA_CAMERA, z: cam.y, yaw: (cam.angulo || 0) + Math.PI / 2, pitch: cam.pitch || 0 };
+    this._orbCamLockedPose = pose;
+    this._camera.x = pose.x; this._camera.y = pose.y; this._camera.z = pose.z;
+    this._camera.yaw = pose.yaw; this._camera.pitch = pose.pitch;
+    // [10/09/2026] `calibFov`/`zoomFov` NOVOS — ver comentário grande em
+    // `_resetCamZoom`/`onWheel`: zoom de verdade (recalcula o FOV real),
+    // não mais um CSS scale. `calibFov` é a referência "0% de zoom" desta
+    // câmera (nunca muda enquanto o modo estiver ativo).
+    const fovDeg = this._camOrbFovDeg(cam);
+    // [18/09/2026] REMOVIDO `calibResX`/`calibResY` — MESMO motivo/pedido
+    // do `_enterFotoCameraView` (ver comentário grande em
+    // `_activeCamFrameAspect`).
+    this._orbCamMode = { camId, calibFov: fovDeg, zoomFov: fovDeg };
+    // [12/09/2026 — RODADA "certifique-se que só quando a imagem for
+    // pintada"] NOVO — MESMO reset síncrono de `_enterFotoCameraView` (ver
+    // comentário grande lá pra causa raiz completa da "piscada" magenta):
+    // uma câmera "Câmeras" com `cam.fotoId` associado também usa o backdrop
+    // 'Trás' (via `_renderCameraOrbOverlay` -> `_renderFotoCamOverlay`,
+    // logo abaixo), então precisa do MESMO cuidado ao entrar.
+    if (this._fotoCamBackdropMesh) this._fotoCamBackdropMesh.visible = false;
+    this._engine?.clearFotoCamBackdropMask?.();
+    this._engine?.setFotoCamBackdropMaskActive?.(false);
+    this._fotoCamBackdropReady = false;
+    // [10/09/2026] NOVO — MESMO motivo/pedido do _enterFotoCameraView (ver
+    // comentário grande lá): a própria câmera sendo vista através nunca
+    // deve ser pega pelo clique/destaque de mira.
+    this._engine?.setPickExclude?.('camera', camId);
+    // Diferente de _enterCameraView/_enterFotoCameraView (boneco palito
+    // visível — modos de ESPECTADOR, "o jogador anda sozinho, visto de
+    // fora"): aqui a câmera do personagem É a do orb (pedido verbatim: "a
+    // câmera do personagem fixa pela visão do 'orb de câmera'"), então o
+    // boneco continua invisível (1ª pessoa normal), só travado.
+    this._engine?.setPlayerFigureVisible?.(false);
+    // FOV/near/far vêm de verdade das propriedades "estilo Blender" da
+    // câmera (ver js/mapping.js addCamera e js/mapview.js
+    // _openCameraPanel/_camPropsFieldsetHtml) — é o cerne do "camera match":
+    // a perspectiva do 3D deve bater com a da foto calibrada.
+    this._engine?.setFov?.(fovDeg);
+    this._engine?.setClipPlanes?.(cam.clipStartM, cam.clipEndM);
+    // [11/09/2026] NOVO — item "parte do cone aparece na frente da câmera":
+    // esconde a malha caixa+cone da PRÓPRIA câmera que está sendo vista
+    // através (ver engine3d.js setCameraMeshVisible/_cameraMeshesById) —
+    // senão o cone dela (que se estende do centro da caixa pra fora, na
+    // mesma direção de apontamento pra onde o olho de render agora está)
+    // acaba dentro do próprio frustum, como se estivesse "na frente" de
+    // tudo. Restaurada em _exitCameraOrbView.
+    this._engine?.setCameraMeshVisible?.(camId, false);
+    // [11/09/2026] CORRIGIDO — pedido verbatim: "Parece que há duas fotos,
+    // quando alternar entre 'Trás' e 'Frente'." CAUSA RAIZ ENCONTRADA: uma
+    // câmera "Câmeras" com `cam.fotoId` associado (ver `_renderCameraOrbOverlay`
+    // abaixo — é essa foto que vira o backdrop/imagem-guia dentro de "Ver
+    // através desta câmera") tinha só a PRÓPRIA malha da câmera escondida
+    // (`setCameraMeshVisible` acima) — a malha do ORB DE FOTO vinculado
+    // (esfera+cone+"placa" com a MESMA imagem, ver engine3d.js
+    // `_fotoMeshesById`/`setFotoMeshVisible`, já usado por
+    // `_enterFotoCameraView` pro caso "orb de foto" direto) nunca era
+    // escondida aqui — se esse orb de foto ficasse dentro do campo de visão
+    // (comum: ele fica pertinho de onde a câmera aponta, já que é a MESMA
+    // foto), a "placa" dele (0,42x0,3m, textura = a MESMA foto do backdrop)
+    // aparecia na cena AO MESMO TEMPO que o backdrop/imagem-guia — exatamente
+    // a impressão de "duas fotos" relatada. CORRIGIDO: esconde também a
+    // malha do orb de foto vinculado (restaurada em `_exitCameraOrbView`,
+    // MESMO padrão já usado pro caso "orb de foto" direto).
+    if (cam.fotoId != null) this._engine?.setFotoMeshVisible?.(cam.fotoId, false);
+    this._renderCameraOrbOverlay(cam);
+    this._renderHotbar();
+  },
+
+  _exitCameraOrbView() {
+    this._exitModeladorSeAtivo(); // [13/09/2026] pilha de "Sair" — ver comentário grande em _exitCameraView
+    // [11/09/2026] restaura a malha da câmera escondida ao entrar (ver
+    // comentário grande em _enterCameraOrbView acima) ANTES de limpar
+    // `this._orbCamMode` (guarda o camId antigo pra saber qual mostrar de
+    // volta — depois de limpar não teríamos mais como saber qual era).
+    const camIdSaindo = this._orbCamMode?.camId;
+    // [11/09/2026] CORRIGIDO — mesma correção de `_exitFotoCameraView` (ver
+    // comentário grande lá): "Ao 'Sair da câmera', o enquadramento ainda
+    // fica ativado." O gizmo do retângulo amarelo é indexado pelo id da
+    // FOTO associada (`cam.fotoId`, ver `_renderCameraOrbOverlay` acima —
+    // `fotoLike.id`), não pelo id da câmera em si — busca a câmera de novo
+    // aqui (ainda com `this._orbCamMode` intacto, antes de zerá-lo mais
+    // abaixo) só pra pegar esse id e desligar o gizmo dela ao sair.
+    // [11/09/2026] CORRIGIDO (na época) — desligava o retângulo amarelo ao
+    // sair de "Ver através desta câmera" (`setCameraFrustumVisible(...,
+    // false)`, mesmo padrão de `_exitFotoCameraView`).
+    // [15/09/2026] REVERTIDO — MESMO pedido/motivo documentado no
+    // comentário grande de `_exitFotoCameraView` (ver lá): "deixe, pelo
+    // momento, o enquadramento [...] de todas as câmeras sempre ativo." A
+    // busca por `camSaindo` e a chamada `setCameraFrustumVisible(...,
+    // false)` foram removidas (não usadas em mais nada neste método).
+    this._resetCamZoom(); // [10/09/2026] — ver comentário grande em _resetCamZoom
+    // [11/09/2026] item "a câmera do personagem deve assumir a pose EXATA
+    // que estava sendo vista": copia a última pose TRAVADA (posição +
+    // orientação, `this._orbCamLockedPose`) — a que estava de fato sendo
+    // renderizada neste exato instante — pra dentro da câmera livre, em vez
+    // de restaurar `_orbCamSavedPose` (de onde o jogador estava ANTES de
+    // entrar).
+    // RE-INVESTIGADO nesta rodada (pedido explícito pra não confiar cegamente
+    // num relato de sessão anterior): diferente do que um relato antigo
+    // presumia, o comportamento ATUAL já trava posição E orientação —
+    // `_updatePlayerOrAutopilot` (por volta da linha 6522, busca por
+    // "this._orbCamMode) {" logo antes de "camOrbAinda") faz um `return`
+    // antecipado que PULA todo processamento de WASD/gravidade/pulo enquanto
+    // `_orbCamMode` está ativo (não é só orientação/FOV travados — o
+    // personagem simplesmente não anda nenhum pixel enquanto "vendo através"
+    // de uma câmera), e o re-trava-a-cada-quadro em `_loop` (~linha 5799,
+    // busca por "_orbCamLockedPose" lá) reforça a mesma pose todo frame como
+    // rede de segurança redundante. Ou seja, na prática
+    // `_orbCamLockedPose` já é idêntico a `{x,y,z,yaw,pitch}` de
+    // `this._camera` em TODO instante enquanto travado — copiar explicitamente
+    // aqui não muda o comportamento observável hoje, mas é a correção
+    // CORRETA e sem custo de qualquer forma: deixa a saída explicitamente
+    // independente de qualquer suposição sobre o que fica livre/preso
+    // durante o modo travado (se essa regra de "personagem não anda" mudar
+    // numa rodada futura, esta linha continua garantindo a pose exata sem
+    // precisar ser revisitada). FOV também copiado (ver logo abaixo) pra não
+    // haver nenhum "salto" perceptível de campo de visão no mesmo instante.
+    const lp = this._orbCamLockedPose;
+    // [10/09/2026] CORRIGIDO — antes recalculava o FOV CALIBRADO da câmera
+    // de novo aqui, ignorando qualquer zoom "de verdade" (ver onWheel/
+    // `_orbCamMode.zoomFov`) que estivesse ativo no instante da saída —
+    // "a câmera do personagem deve assumir a pose EXATA que estava sendo
+    // vista" vale pro FOV também, não só posição/orientação. Usa
+    // `zoomFov` (o FOV de fato sendo renderizado agora, calibrado OU
+    // ampliado/reduzido pela roda do mouse) em vez de recalcular do zero.
+    const fovDegSaindo = this._orbCamMode ? (this._orbCamMode.zoomFov ?? this._camOrbFovDeg((this._map?.cameras || []).find((c) => c.id === camIdSaindo) || {})) : null;
+    // [12/09/2026, FUNDIDA NESTA RODADA] item "Sair da câmera": configurável
+    // (ver `_cameraExitViewMode()` acima, seção única "Ver através desta
+    // câmera" em Configurações 3D — chave `cameraExitViewMode`, também usada
+    // por `_exitFotoCameraView` via `_fotoOrbExitViewMode()`, que agora só
+    // delega pra esta mesma chave — ver nota grande em mapconfig.js
+    // DEFAULTS.cameraExitViewMode). `'lockedView'`
+    // (padrão) é EXATAMENTE o comportamento acima (já implementado em
+    // rodada anterior, sem mudança); `'originalView'` restaura
+    // `_orbCamSavedPose` (a pose livre capturada em `_enterCameraOrbView`,
+    // ANTES de travar na câmera) em vez da pose travada, mesmo com `lp`
+    // disponível.
+    const modo = this._cameraExitViewMode();
+    const savedPose = this._orbCamSavedPose;
+    this._orbCamMode = null;
+    this._orbCamLockedPose = null;
+    if (modo === 'originalView' && savedPose) {
+      this._camera.x = savedPose.x; this._camera.y = savedPose.y; this._camera.z = savedPose.z;
+      this._camera.yaw = savedPose.yaw; this._camera.pitch = savedPose.pitch;
+    } else if (lp) {
+      this._camera.x = lp.x; this._camera.y = lp.y; this._camera.z = lp.z;
+      this._camera.yaw = lp.yaw; this._camera.pitch = lp.pitch;
+    } else if (savedPose) {
+      // Rede de segurança (nunca deveria acontecer em uso normal — só entra
+      // aqui se _exitCameraOrbView for chamado sem uma entrada válida
+      // correspondente): sem pose travada pra copiar, cai de volta na pose
+      // livre salva na entrada, mesmo comportamento de antes desta rodada.
+      const p = savedPose;
+      this._camera.x = p.x; this._camera.y = p.y; this._camera.z = p.z;
+      this._camera.yaw = p.yaw; this._camera.pitch = p.pitch;
+    }
+    this._orbCamSavedPose = null;
+    // [12/09/2026 — ITEM A, CORRIGIDO] pedido verbatim: o FOV do personagem
+    // deve SEMPRE voltar ao que era ANTES de "Ver através desta câmera",
+    // mesmo com "Permanece com o ponto de vista da câmera" marcada (posição/
+    // orientação seguem `modo` acima, mas o FOV NUNCA deve ficar sendo o FOV
+    // calibrado da câmera). Antes desta correção, 'lockedView' mantinha
+    // `fovDegSaindo`/o FOV calibrado (ou ampliado/reduzido por zoom) da
+    // câmera — agora usa sempre `this._orbCamSavedFov` (capturado em
+    // `_enterCameraOrbView`, ANTES de aplicar o FOV calibrado), independente
+    // de `modo`. `fovDegSaindo` continua calculado acima só por
+    // documentação/rastreabilidade do zoom que estava ativo no instante da
+    // saída (sem uso restante aqui).
+    const fovSaindo = (this._orbCamSavedFov != null) ? this._orbCamSavedFov : this._CAM_VIEW_DEFAULT_FOV;
+    this._engine?.setFov?.(fovSaindo);
+    this._orbCamSavedFov = null;
+    this._engine?.clearClipPlanes?.();
+    this._engine?.setCameraMeshVisible?.(camIdSaindo, true); // [11/09/2026] restaura a visibilidade da malha desta câmera (ver _enterCameraOrbView)
+    // [11/09/2026] restaura a malha do orb de foto vinculado (`cam.fotoId`),
+    // escondida ao entrar — ver comentário grande em `_enterCameraOrbView`
+    // ("duas fotos" ao alternar Trás/Frente). `camSaindo` já foi capturado
+    // acima (antes de `this._orbCamMode` ser zerado), mesma referência
+    // usada pro `setCameraFrustumVisible` alguns passos atrás.
+    if (camSaindo?.fotoId != null) this._engine?.setFotoMeshVisible?.(camSaindo.fotoId, true);
+    this._removeFotoCamOverlay();
+    this._renderHotbar();
+  },
+
+  /** FOV vertical (graus) DE VERDADE pra câmera de render (`THREE.
+   *  PerspectiveCamera.fov`, SEMPRE vertical, independente de resolução —
+   *  convenção fixa do Three.js).
+   *  [11/09/2026 — REVERTIDO em 11/09/2026] A versão anterior (comentário
+   *  removido, ver git blame) passava `cam.fov` por `Cam3DMath.
+   *  camPropsVFovRad` (a conversão "Sensor Fit: Auto" que também dá forma
+   *  ao retângulo amarelo) ANTES de aplicar na câmera de render de
+   *  verdade — ou seja, mudar a Resolução X/Y também mudava a perspectiva
+   *  real da câmera renderizada (o "Ver através desta câmera" de verdade),
+   *  não só o retângulo amarelo. CORRIGIDO — pedido verbatim: "Em
+   *  'Propriedades da câmera', os valores de resolução não devem alterar
+   *  a resolução da imagem, mas sim o retângulo amarelo." A câmera de
+   *  render agora usa `cam.fov` DIRETO (só ele controla a perspectiva de
+   *  verdade — mesmo espírito do pedido anterior "ao mudar o FOV da
+   *  câmera é a câmera que deve ter a sua perspectiva mudada, não a
+   *  imagem"); Resolução X/Y continuam mudando SÓ o retângulo amarelo
+   *  (`_activeCamFrameAspect`/`_activeCamPropsVFovRad`/engine3d.js
+   *  `_fotoFrustumMeshesById` — nenhum dos três foi tocado, continuam
+   *  aplicando o "Sensor Fit: Auto" só no cálculo do quadro). Clamp de
+   *  segurança (1°-170°) preservado. */
+  _camOrbFovDeg(cam) {
+    const g = (cam?.fov ?? Math.PI / 3) * 180 / Math.PI;
+    return (isFinite(g) && g > 0) ? Math.max(1, Math.min(170, g)) : 60;
+  },
+
+  /** Busca a foto vinculada (se houver, `cam.fotoId`) e monta/mostra o MESMO
+   *  overlay do vanishCam (_renderFotoCamOverlay, generalizado acima) — sem
+   *  foto associada, o "guia visual" simplesmente não aparece (só os botões
+   *  de sair/opacidade fariam sentido, então mostra só um overlay mínimo
+   *  com o botão de sair, sem forçar o usuário a associar uma foto só pra
+   *  poder usar a câmera travada). */
+  async _renderCameraOrbOverlay(cam) {
+    if (!cam.fotoId) {
+      this._removeFotoCamOverlay();
+      if (!this._container) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'v3d-fotocam-overlay';
+      wrap.id = 'v3d-fotocam-overlay';
+      // [15/09/2026] CORRIGIDO -- pedido verbatim (Parte B): "Sair da
+      // câmera" no topo/centro (mesma classe .v3d-fotocam-sair-topcenter
+      // de `_renderFotoCamOverlay`, ver comentário grande lá) — este
+      // ramo (câmera "Câmeras" SEM foto vinculada) nunca teve a barra
+      // .v3d-fotocam-overlay-controls cheia, só este único botão, então
+      // segue o mesmo padrão de posição.
+      wrap.innerHTML = `
+        <button type="button" class="btn secondary sm v3d-fotocam-sair-topcenter" id="v3d-fotocam-sair" title="Sair da visão desta câmera">✖ Sair da câmera</button>`;
+      // [10/09/2026] mesmo motivo do appendChild em _renderFotoCamOverlay —
+      // ver comentário grande lá.
+      (this._container?.querySelector('#v3d-camzoom-wrap') || this._container)?.appendChild(wrap);
+      wrap.querySelector('#v3d-fotocam-sair').onclick = () => this._exitCameraOrbView();
+      this._fotoCamOverlayEl = wrap;
+      // [15/09/2026] NOVO — sem foto vinculada não há imagem/frustum pra
+      // configurar ("Fundo" mostra aviso), mas o fieldset de "⚙️
+      // Propriedades" (FOV/Resolução da câmera) continua fazendo sentido
+      // (não depende de foto nenhuma) — ver `_renderPropriedadesPanel`.
+      this._renderPropriedadesPanel({ rebuild: true, foto: { id: null }, temFrustum: false, hasImage: false });
+      return;
+    }
+    const photo = await DB.getAmbientePhoto(cam.fotoId);
+    // Ainda no mesmo orb ao terminar de carregar? (usuário pode ter saído
+    // enquanto a Promise resolvia — mesma checagem de segurança usada em
+    // _openCameraPanel/_pickPhotoForCamera pra evitar aplicar overlay velho.)
+    if (this._orbCamMode?.camId !== cam.id) return;
+    const fotoLike = photo ? { id: photo.id, dataUrl: photo.dataUrl, thumbDataUrl: photo.thumbDataUrl, vanishCam: photo.mapaVanishCam || null } : { id: cam.fotoId };
+    this._renderFotoCamOverlay(fotoLike, () => this._exitCameraOrbView());
   },
 
   // ---------- Raio X global (rodada 48) — pedido do usuário: "deve ter um
@@ -2695,6 +6898,35 @@ const View3D = {
    *  elemento sem camada). Mesma lógica de mapview.js _refreshItensNoMapa
    *  (2D) — refeita aqui porque os pinos não vêm do `map` (são registros à
    *  parte, `DB.getItemsByAmbiente`). */
+  /** [09/09/2026] Bug relatado pelo usuário: "No mapa 2D, ao posicionar o
+   *  personagem em frente a um orb de foto e entrar em 'Ver em 3D', o orb
+   *  de foto não aparece na cena 3D." Causa raiz: igual ao caso de
+   *  `_buildItensNoMapa` (comentário acima) — `foto.fotos` também NÃO vive
+   *  dentro do `map` salvo no banco (são registros à parte,
+   *  `DB.getAllAmbientePhotos`, ver mapview.js `_refreshFotosNoMapa`, que
+   *  monta `this._map.fotos` no editor 2D). Aqui, `this._map` vem de
+   *  `DB.getMap(id)` (ver mount()), então nunca ganhava esse campo — a
+   *  cena 3D (engine3d.js, bloco "fotos vinculadas ao mapa") sempre
+   *  iterava `mapData.fotos || []`, ou seja, um array vazio, sem nenhum
+   *  orb aparecer. MESMA lógica de `_refreshFotosNoMapa` (mapview.js),
+   *  refeita aqui pra montar `this._map.fotos` antes de `_rebuildScene()`. */
+  async _buildFotosNoMapa() {
+    if (!this._map) return;
+    const fotos = await DB.getAllAmbientePhotos();
+    const posicionadas = fotos.filter((f) => typeof f.mapaX === 'number' && typeof f.mapaY === 'number');
+    const curar = [];
+    this._map.fotos = posicionadas.map((f) => {
+      const layerId = Mapping.resolveLayerId(this._map, f.mapaLayerId);
+      if (layerId && layerId !== (f.mapaLayerId || null)) curar.push({ id: f.id, layerId });
+      return {
+        id: f.id, x: f.mapaX, y: f.mapaY, piso: f.mapaPiso || 0, nome: f.nome || '', layerId,
+        dirAngulo: f.mapaDirAngulo || 0, altura: f.mapaAltura ?? 1.6, rotPerp: f.mapaRotPerp || 0,
+        thumbDataUrl: f.thumbDataUrl, dataUrl: f.dataUrl,
+      };
+    });
+    for (const c of curar) { const photo = await DB.getAmbientePhoto(c.id); if (photo) await DB.saveAmbientePhoto({ ...photo, mapaLayerId: c.layerId }); }
+  },
+
   async _buildItensNoMapa() {
     if (!this._map) return;
     const items = await DB.getItemsByAmbiente(this._map.id);
@@ -2836,7 +7068,11 @@ const View3D = {
       return;
     }
     document.exitPointerLock?.();
-    const nomes = { object: 'objeto', camera: 'câmera', item: 'item', wall: 'parede', porta: 'porta', janela: 'janela' };
+    // NOVO (08/09/2026, 38a rodada): rótulo 'tijolo' -- cobre tanto o
+    // aglomerado inteiro (hit.id === 'tijolos-merged', ver
+    // engine3d.js _rebuildTijolos) quanto um tijolo individual (cunha/com
+    // textura) -- ver _confirmDeleteHit abaixo pro tratamento de cada caso.
+    const nomes = { object: 'objeto', camera: 'câmera', item: 'item', wall: 'parede', porta: 'porta', janela: 'janela', tijolo: 'tijolo' };
     const el = document.createElement('div');
     el.className = 'v3d-del-confirm';
     el.innerHTML = `
@@ -2880,6 +7116,28 @@ const View3D = {
     if (!this._map || !this._engine) return;
     const pos = hit.center || hit.pos;
     const half = hit.obb?.half || { x: 0.4, y: 0.4, z: 0.4 };
+    // NOVO (08/09/2026, 38a rodada), pedido verbatim: "o objeto que foi
+    // formado pelo aglomerado de tijolos deve ser um objeto no mundo,
+    // podendo ser exluido." -- `hit.id === 'tijolos-merged'` é o pickable
+    // ÚNICO que cobre TODOS os tijolos 'caixa' sem textura fundidos numa
+    // malha só (ver engine3d.js `_rebuildTijolos`) -- exclui todos de uma
+    // vez (mesmo espírito de "objeto único" pedido). Um id diferente é um
+    // tijolo INDIVIDUAL (cunha ou com textura, que nunca entram na fusão --
+    // ver Tijolos.buildAll) -- reaproveita `Tijolos.remove` já existente
+    // (mesma função usada pela exclusão via botão direito, ver
+    // `onContextMenu` em `_bindDesktopControls`).
+    if (hit.type === 'tijolo') {
+      this._engine.spawnCollectEffect(pos, '#78c8ff', Math.max(half.x, half.y, half.z) * 2);
+      if (hit.id === 'tijolos-merged') {
+        this._map.tijolos = (this._map.tijolos || []).filter((t) => (t.formato || 'caixa') !== 'caixa' || t.texturaUrl);
+      } else {
+        Tijolos.remove(this._map, hit.id);
+      }
+      this._engine.rebuildTijolos?.(this._map);
+      DB.saveMap(this._map);
+      Utils.toast('Removido 🗑️', { type: 'ok', duration: 1400 });
+      return;
+    }
     if (hit.type === 'object' || hit.type === 'camera' || hit.type === 'item') {
       const cor = hit.type === 'object' ? (hit.ref?.cor || '#8a92a3') : hit.type === 'camera' ? '#33383f' : '#4f8cff';
       this._engine.spawnCollectEffect(pos, cor, Math.max(half.x, half.y, half.z) * 2);
@@ -3030,6 +7288,18 @@ const View3D = {
     eng.setXRayTarget?.(null);
     if (!this._buildTool) return;
     const ray = eng.centerRay(this._camera);
+    // NOVO (08/09/2026, 38a rodada), pedido verbatim: "Os tijolos devem ter
+    // ghost." — ver comentário grande acima da função `showGhostTijolo`
+    // (engine3d.js) e o item 8 logo abaixo (`this._tijoloGhostCfg`).
+    if (this._buildTool === 'tijolo') {
+      const cfg = this._tijoloGhostCfg || Tijolos.DEFAULTS;
+      const hit = eng.raycastSurface(ray.origin, ray.dir);
+      if (hit) {
+        const xz = Tijolos.snapXZ(hit.x, hit.z, cfg);
+        eng.showGhostTijolo(xz.x, hit.y + cfg.sy / 2, xz.z, cfg.sx, cfg.sy, cfg.sz, (cfg.formato === 'cunha') ? (cfg.rotY || 0) : 0, cfg.formato);
+      }
+      return;
+    }
     if (this._buildTool === 'parede') {
       // MESMO critério de _placeWithBuildTool: só testa parede primeiro no
       // 1º ponto de uma cadeia nova (pedido do usuário: "ao apontar para
@@ -3432,6 +7702,13 @@ const View3D = {
       // já que os dois nunca acontecem ao mesmo tempo (ferramentas
       // diferentes) mas por clareza de prioridade.
       if (e.code === 'Escape' && this._camMode) { this._exitCameraView(); return; }
+      // [10/09/2026] RESTAURADO junto com o resto do bloco "ver através
+      // desta câmera"/vanishCam (ver comentário grande em this._fotoCamMode,
+      // mount()).
+      if (e.code === 'Escape' && this._fotoCamMode) { this._exitFotoCameraView(); return; }
+      // [10/09/2026] NOVO — mesmo padrão pro "orb de câmera" (ver
+      // this._orbCamMode, mount()).
+      if (e.code === 'Escape' && this._orbCamMode) { this._exitCameraOrbView(); return; }
       if (e.code === 'Escape' && this._wallChainStart) { this._wallChainStart = null; Utils.toast('Parede: cadeia cancelada.', { duration: 1500 }); return; }
       // Enter conclui (pedido do usuário: "o enter pode servir para
       // concluir as coisas, inclusive a parede") — mesmo efeito do botão
@@ -3577,6 +7854,27 @@ const View3D = {
       // Sobrevoo automático do cenário (rodada 48 — ver _startSceneFlythrough/
       // onKeyDown acima): qualquer clique também cancela, igual a qualquer tecla.
       if (this._flythroughActive) { this._cancelFlythrough(); return; }
+      // [10/09/2026] NOVO — pedido verbatim: "ao clicar em uma câmera e
+      // selecionar 'Ver através desta câmera', deve ser possível interagir
+      // com o cenário [...] ao clicar em um objeto com o botão esquerdo do
+      // mouse, abre-se a janela em tamanho normal mesmo". `_fotoCamMode`/
+      // `_orbCamMode` SAEM do Pointer Lock ao entrar (ver
+      // _enterFotoCameraView/_enterCameraOrbView) — o resto deste handler,
+      // daqui pra baixo, pressupõe navegação em 1ª pessoa TRAVADA (mira
+      // central, requestPointerLock ao clicar destravado, ferramentas de
+      // construção etc.) — nada disso faz sentido aqui. Usa o clique REAL
+      // do mouse (posição de tela, não a mira central) via
+      // `_pickAtClientPoint`/`_tryPick(hit)` (ambas novas, ver mais abaixo)
+      // — o cartão/janela aberto é o MESMO de sempre (_showObjectCard3D/
+      // _showFotoPinCard3D/etc., dentro de `_tryPick`), em tamanho normal,
+      // porque nunca esteve dentro de nenhum elemento com zoom aplicado
+      // (ver onWheel — o zoom passou a recalcular o FOV de verdade, não
+      // mais um `transform:scale()` do CSS que pudesse afetar isto).
+      if (this._fotoCamMode || this._orbCamMode) {
+        const hit = this._pickAtClientPoint(e.clientX, e.clientY, canvas);
+        if (hit) this._tryPick(hit);
+        return;
+      }
       // Pedido do usuário: botão "+" esquerdo (id="m3d-sidebar-toggle",
       // compartilhado com o Modelador — ver comentário grande junto ao HTML
       // dele) clicável mesmo com o Pointer Lock ativo — ver comentário
@@ -3618,6 +7916,17 @@ const View3D = {
         // janela de busca de patrimônio pro objeto mirado (ver
         // _addOrbWithTool), em vez de colocar/remover algo na cena.
         this._addOrbWithTool();
+      } else if (this._buildTool === 'tijolo') {
+        // CORRIGIDO (08/09/2026, 38a rodada) — a colocação em si saiu
+        // daqui e foi pro `mousedown` (ver `onMouseDownTijolo` abaixo) —
+        // ver o comentário grande junto a ele pro motivo (o `click` só
+        // dispara DEPOIS do botão já ter sido solto, impossibilitando a
+        // colocação contínua com Ctrl+segurar). Nada a fazer aqui agora.
+      } else if (this._buildTool === 'tijolo-pintar') {
+        // NOVO (07/09/2026) — "novas ideias" pedidas ("pintar tijolos já
+        // colocados"): clique mira um tijolo JÁ colocado e aplica a
+        // cor/textura atual do menu nele (ver _paintTijoloClick).
+        this._paintTijoloClick();
       } else if (this._buildTool) {
         // Ferramenta de construção ativa (hotbar) — clique COLOCA em vez de
         // selecionar/abrir a ficha (pedido do usuário: parede/porta/janela/
@@ -3672,6 +7981,23 @@ const View3D = {
       if (this._buildTool === 'parede' && this._wallChainStart) {
         this._wallChainStart = null;
         Utils.toast('Parede concluída ✓', { type: 'ok', duration: 1500 });
+        return;
+      }
+      // NOVO (08/09/2026, 38a rodada), pedido verbatim: "Ao selecionar
+      // 'Cunha / rampa' e clicar com o botão do meio do mouse a cunha deve
+      // girar 90 graus a cada clique. Resetando apenas quando troca para
+      // 'Caixa'." -- `await` não é permitido aqui (handleMiddleClickAction
+      // é síncrona, chamada direto do handler de clique) -- dispara
+      // Tijolos.setConfig (assíncrono) sem esperar, mesmo padrão "fire and
+      // forget" já usado noutros salvamentos de config desta tela que não
+      // precisam bloquear a interação; `_renderTijoloPanel()` (também sem
+      // esperar) atualiza o <select> #tj-rotY pra refletir o novo valor.
+      if (this._buildTool === 'tijolo') {
+        Tijolos.getConfig().then((cfg) => {
+          if ((cfg.formato || 'caixa') !== 'cunha') return;
+          const novoRotY = ((cfg.rotY || 0) + 90) % 360;
+          Tijolos.setConfig({ rotY: novoRotY }).then(() => this._renderTijoloPanel());
+        });
         return;
       }
       // Pedido do usuário (24/08/2026): "o botão direito do mouse deve
@@ -3764,19 +8090,164 @@ const View3D = {
     this._middleButtonHeld = false;
     const onMouseDownMiddle = (e) => {
       if (e.button !== 1 || document.pointerLockElement !== canvas) return;
+      // NOVO (08/09/2026, 38a rodada) -- ver comentário grande acima:
+      // Modelador ativo = a órbita do botão do meio é DELE (modeler-input.js),
+      // não do View3D.
+      if (window.Modeler3D?.isActive?.()) return;
       e.preventDefault();
       this._middleButtonHeld = true;
     };
     canvas.addEventListener('mousedown', onMouseDownMiddle);
-    const onMouseUpMiddle = (e) => { if (e.button === 1) this._middleButtonHeld = false; };
+    const onMouseUpMiddle = (e) => {
+      if (e.button !== 1) return;
+      // NOVO (08/09/2026, 39a rodada) -- MESMO guard ja aplicado em
+      // onMouseDownMiddle/onMouseMove/onClick (ver comentarios la): faltava
+      // aqui, unico dos 4 handlers de botao do meio sem ele -- inofensivo
+      // por si so (so zera uma flag do View3D), mas fica consistente com os
+      // demais e evita zerar 'this._middleButtonHeld' por engano se o
+      // botao do meio for solto ainda com o Modelador ativo.
+      if (window.Modeler3D?.isActive?.()) return;
+      this._middleButtonHeld = false;
+    };
     document.addEventListener('mouseup', onMouseUpMiddle);
+    // NOVO (07/09/2026), pedido verbatim: "Ao segurar o ctrl, vai adicionando
+    // um após o outro no mesmo nível de altura... com o ctrl pressionado,
+    // clica e mantém pressionado o botão esquerdo do mouse" — rastreia SE o
+    // botão ESQUERDO está fisicamente pressionado (`this._tijoloMouseDown`),
+    // consultado a cada quadro por `_updateTijoloDrag` (ver mais abaixo).
+    // O `click` sozinho (`onClick`, mais acima) já cuida da colocação do
+    // 1º tijolo; este par mousedown/mouseup só existe pra saber se o botão
+    // CONTINUA pressionado nos quadros seguintes (um `click` não informa
+    // isso). Mesmo padrão de guard do meio-do-mouse acima: só liga dentro
+    // do Pointer Lock, e o mouseup fica no `document` (não só no canvas)
+    // pra não "grudar" pressionado caso o usuário solte o botão fora da
+    // área do canvas.
+    const onMouseDownTijolo = (e) => {
+      if (e.button !== 0 || document.pointerLockElement !== canvas) return;
+      if (this._buildTool !== 'tijolo') return;
+      this._tijoloMouseDown = true;
+      // CORRIGIDO (08/09/2026, 38a rodada) — ver comentário grande em
+      // `onClick` acima: a colocação (e a decisão de armar ou não a sessão
+      // de arrasto contínuo, dentro de `_placeTijoloClick`) precisa
+      // acontecer AQUI, no `mousedown`, com o botão ainda genuinamente
+      // pressionado — nunca no `click` (que só dispara depois do
+      // `mouseup`, quando já é tarde demais pra continuar colocando com o
+      // botão "segurado").
+      this._placeTijoloClick();
+    };
+    canvas.addEventListener('mousedown', onMouseDownTijolo);
+    const onMouseUpTijolo = (e) => { if (e.button === 0) this._tijoloMouseDown = false; };
+    document.addEventListener('mouseup', onMouseUpTijolo);
     // Botão direito: não faz mais nada nesta tela (a rotação/conclusão de
     // parede passou pro botão do meio, ver acima) — só suprime o menu de
     // contexto nativo do navegador pra não aparecer por cima da cena 3D.
-    const onContextMenu = (e) => { e.preventDefault(); };
+    const onContextMenu = (e) => {
+      e.preventDefault();
+      // NOVO (08/09/2026, 38a rodada), pedido verbatim: "Para simplificar,
+      // quando a ferramenta for ativa e só serve para ela, o botão direito
+      // do mouse servirá para excluir o tijolo." -- só age com a ferramenta
+      // 🔘 Tijolo ativa (não com 🎨 Pintar, que já usa o clique esquerdo
+      // pra outra coisa) e dentro do Pointer Lock (mesmo guard de sempre).
+      if (this._buildTool !== 'tijolo' || document.pointerLockElement !== canvas) return;
+      const ray = this._engine.centerRay(this._camera);
+      const hit = Tijolos.raycastTijolos(ray.origin, ray.dir, this._map.tijolos || []);
+      if (!hit) return;
+      Tijolos.remove(this._map, hit.id);
+      this._engine.rebuildTijolos?.(this._map);
+      DB.saveMap(this._map);
+      Utils.toast('Tijolo removido 🗑️', { type: 'ok', duration: 1200 });
+    };
     canvas.addEventListener('contextmenu', onContextMenu);
 
     const onMouseMove = (e) => {
+      // [11/09/2026] CORRIGIDO — pedido verbatim: "no 'Ver em 3D', ao
+      // clicar em uma câmera e selecionar 'Ver através desta câmera', no
+      // Modelador, ao clicar no gizmo para mover o objeto para o lado o
+      // cursor muda e fica travado, passando a coexistir os dois cursores:
+      // o normal e o do pointer lock. Mesmo sem estar mais com o botão
+      // esquerdo do mouse pressionado." CAUSA RAIZ: o guard
+      // `window.Modeler3D?.isActive?.()` já existia mais abaixo nesta MESMA
+      // função (ver comentário "38a rodada" perto do fim), mas só depois do
+      // bloco `if (this._fotoCamMode || this._orbCamMode)` logo abaixo —
+      // ou seja, com a câmera-vista combinada com o Modelador, esse bloco
+      // rodava SEM guard nenhum, em TODO `mousemove`, e terminava sempre em
+      // `canvas.style.cursor = 'move'` ou `canvas.style.cursor = ''` (ver
+      // as 2 atribuições dentro do bloco) — isso reescrevia por cima do
+      // `canvas.style.cursor = 'none'` que o PRÓPRIO Modelador aplica
+      // durante o arraste de gizmo com Pointer Lock (cursor "infinito",
+      // ver `_updateFakeCursor` em modeler-input.js) a cada movimento do
+      // mouse, trazendo o cursor OS de volta a aparecer POR CIMA do cursor
+      // falso (cruz) do Modelador — daí os "dois cursores coexistindo".
+      // Como o reset acontecia em QUALQUER `mousemove`, não só durante o
+      // arraste, o sintoma também sobrevivia ao soltar o botão esquerdo
+      // (bastava mexer o mouse depois). CORRIGIDO: move o mesmo guard já
+      // usado por `onClick`/`onMouseDownMiddle`/`onMouseDownTijolo` (nesta
+      // mesma função) pro TOPO — com o Modelador ativo, é sempre ELE quem
+      // decide cursor/seleção/gizmo (ver modeler-input.js), o View3D nunca
+      // deve mexer em `canvas.style.cursor` por cima.
+      if (window.Modeler3D?.isActive?.()) return;
+      // [10/09/2026] NOVO — pedido verbatim: "o cursor do mouse deve
+      // aparecer para ir apontando para as coisas, poder selecioná-las".
+      // `_fotoCamMode`/`_orbCamMode` SAEM do Pointer Lock ao entrar (ver
+      // _enterFotoCameraView/_enterCameraOrbView) — todo o resto desta
+      // função (girar a câmera arrastando o mouse travado, cursor virtual
+      // etc.) não se aplica aqui, por isso este bloco fica ANTES de
+      // qualquer guard de `pointerLockElement` e sempre retorna cedo. A
+      // seleção de verdade acontece no `click` (ver onClick,
+      // `_pickAtClientPoint`/`_tryPick`) — este bloco só mantém
+      // `Engine3D.setHoverScreenPoint` atualizado (ver `_pickAtClientPoint`
+      // logo abaixo) pro destaque de mira de sempre (contorno pontilhado
+      // etc.) seguir o cursor. [10/09/2026] CORRIGIDO — pedido verbatim:
+      // "Ao mirar em um objeto, ele deve ter o mesmo destaque que tem
+      // quando não se está nesse modo [...] Não precisa ser o ícone da
+      // mão, no cursor do mouse, pode ser a seta mesmo." O destaque em si
+      // (contorno pontilhado/hitbox/tightbox, conforme a config) já
+      // comunica "isto está mirado" — o cursor NUNCA mais vira "mão"
+      // aqui, fica sempre a seta padrão do sistema (`''`).
+      if (this._fotoCamMode || this._orbCamMode) {
+        // [10/09/2026] Gatilho: Shift + BOTÃO DO MEIO DO MOUSE segurado
+        // (`e.buttons & 4`, bit do botão do meio em `MouseEvent.buttons` —
+        // sempre disponível em `mousemove`, com ou sem Pointer Lock; aqui
+        // NÃO há Pointer Lock, então não dá pra reaproveitar direto
+        // `this._middleButtonHeld`, que só é ligado por `onMouseDownMiddle`
+        // sob o guard `pointerLockElement === canvas`). CORRIGIDO (pedido
+        // verbatim, com 2 capturas do Blender): "O shift+ botão do meio do
+        // mouse não pode mudar a perspectiva. A perspectiva deve ser
+        // preservada [...] É como pegar uma foto e só movê-la para o
+        // lado, a foto não muda, mas a posição sim." Por isso NÃO É MAIS
+        // um deslocamento de posição no mundo (3D, eixos direita/cima da
+        // câmera) — é um deslocamento de "lente"/janela de projeção em
+        // 2D, puramente na tela: `off.x`/`off.y` acumulam frações da
+        // largura/altura do CANVAS (não do mundo), na MESMA direção do
+        // arrasto do mouse (arrastar pra direita "puxa a foto" pra
+        // direita, como segurar uma foto de verdade) — aplicadas de
+        // verdade em `camera3` via `Engine3D.setCamPanFrac` (ver _loop,
+        // logo antes de `this._engine.render(renderCam)`; a fórmula/o
+        // porquê do sinal invertido internamente está documentada lá).
+        if (e.shiftKey && (e.buttons & 4)) {
+          const rect = canvas.getBoundingClientRect();
+          const off = this._camViewPanOffset || (this._camViewPanOffset = { x: 0, y: 0 });
+          off.x += (e.movementX || 0) / (rect.width || canvas.clientWidth || 1);
+          off.y += (e.movementY || 0) / (rect.height || canvas.clientHeight || 1);
+          // [10/09/2026] NOVO — pedido verbatim: "A foto é para ser
+          // carregada dentro do enquadramento e deve permanecer dentro do
+          // enquadramento, com o shift+botão do meio do mouse." Sem isto,
+          // a foto-guia (imagem plana) ficava parada enquanto só a cena
+          // 3D (via lens-shift, `Engine3D.setCamPanFrac` em `_loop`)
+          // deslocava — ver comentário grande em
+          // `_updateFotoCamOverlayZoomScale` pro "porquê"/fórmula do
+          // `translate()` que ela aplica agora.
+          this._updateFotoCamOverlayZoomScale();
+          canvas.style.cursor = 'move';
+          return;
+        }
+        // [10/09/2026] `_pickAtClientPoint` chamado só pelo efeito colateral
+        // de atualizar `Engine3D.setHoverScreenPoint` (ver comentário
+        // grande acima) — o "hit" em si não decide mais o cursor.
+        this._pickAtClientPoint(e.clientX, e.clientY, canvas);
+        canvas.style.cursor = '';
+        return;
+      }
       // Janela de carência do ESC/unlock (rodada 50 — ver onKeyDown/
       // onPointerLockChange) — checada ANTES até do guard de
       // `pointerLockElement` logo abaixo, de propósito: o "salto" sintético
@@ -3787,6 +8258,21 @@ const View3D = {
       // disparar mais de um `mousemove` sintético nessa janela.
       if (performance.now() < (this._pointerUnlockGraceUntil || 0)) return;
       if (document.pointerLockElement !== canvas) return;
+      // NOVO (08/09/2026, 38a rodada) -- MESMO guard de onMouseDownMiddle/
+      // onClick acima: com o Modelador ativo, é ELE quem decide o que
+      // acontece com o movimento do mouse (seleção/gizmo/órbita própria,
+      // ver modeler-input.js) -- o View3D girar `this._camera.yaw/pitch`
+      // (ou fazer o pan de Shift+meio) POR CIMA disso é exatamente a causa
+      // do bug relatado ("só o objeto selecionado é que está interagindo
+      // com a câmera, o mundo inteiro deveria"): os dois sistemas de
+      // órbita competiam pelos MESMOS eventos de movementX/Y.
+      // [11/09/2026] Este guard ficou REDUNDANTE (nunca mais executa,
+      // sempre retorna antes, no guard idêntico movido pro TOPO da função —
+      // ver comentário grande lá, correção do bug do "cursor duplo" com
+      // câmera-vista + Modelador) — mantido aqui mesmo assim, sem remover,
+      // por segurança/clareza histórica (documenta a mesma razão de sempre
+      // pra quem só ler este trecho isolado).
+      if (window.Modeler3D?.isActive?.()) return;
       // Pedido do usuário (rodada seguinte, 02/09/2026): cursor VIRTUAL
       // (mesma técnica do "cursor infinito" do Modelador, modeler-input.js
       // `_onMouseMove`/`state.mouse.vx/vy`) — com o Pointer Lock ativo,
@@ -3874,7 +8360,135 @@ const View3D = {
     // sentido com o ponteiro travado (dentro do jogo) — fora disso, deixa a
     // página rolar normal (não faz preventDefault).
     const onWheel = (e) => {
-      if (document.pointerLockElement !== canvas) return;
+      // [10/09/2026, REESCRITO] pedido original: "Assim como no Blender,
+      // quando se seleciona uma câmera para ver através dela, a roda do
+      // mouse deve funcionar como zoom in e zoom out [...] a perspectiva
+      // gerada no retângulo formado pela vista da câmera deve ser
+      // preservada." Correção do usuário na rodada seguinte, MESMO dia:
+      // "ao dar zoom, não deve dar uma mera ampliação da imagem. Deve sim
+      // preservar a perspectiva, mas reconstruindo o desenho da cena (para
+      // que as coisas fiquem nítidas)" + "o botão/grupo de botões para
+      // fechar a câmera não deve dar zoom junto" + "o zoom in deve ser
+      // maior. O zoom out deve estender para além do enquadramento da
+      // câmera". A 1ª versão (CSS `transform:scale()` no wrapper do
+      // canvas) foi SUBSTITUÍDA — ver comentário grande em `_resetCamZoom`/
+      // `_CAMVIEW_ZOOM_FOV_MIN/MAX` pra explicação completa da técnica
+      // nova (FOV real, `Engine3D.setFov`, o mesmo motor de sempre
+      // recalculando e redesenhando a cena — sempre nítido); resolve os 3
+      // itens de uma vez: reconstrução de verdade (não mera ampliação),
+      // faixa bem mais ampla que o enquadramento calibrado de qualquer
+      // câmera (zoom in mais forte E zoom out além do normal), e os
+      // botões de controle nunca foram tocados por nenhum `transform`
+      // (só a foto-guia recebe uma compensação própria, ver
+      // `_updateFotoCamOverlayZoomScale`). Vale tanto pro "ver através" de
+      // um orb de foto (`_fotoCamMode`) quanto pro "orb de câmera" travado
+      // de verdade (`_orbCamMode`) — os 2 únicos modos onde a visão fica
+      // "presa" a uma câmera calibrada.
+      // ANTES desta guarda: `_camMode`/`_fotoCamMode`/`_orbCamMode` SAEM do
+      // Pointer Lock ao entrar (`document.exitPointerLock?.()`, ver
+      // `_enterCameraView`/`_enterFotoCameraView`/`_enterCameraOrbView`),
+      // então o `if (document.pointerLockElement !== e.currentTarget)
+      // return;` logo abaixo (guarda de TODO o resto desta função, pensada
+      // pra navegação em 1ª pessoa travada) sempre barraria a roda do mouse
+      // nesses 3 modos — por isso este bloco novo fica ANTES dela, não
+      // depois.
+      if (this._fotoCamMode || this._orbCamMode) {
+        e.preventDefault();
+        const cfg = this._fotoCamMode || this._orbCamMode;
+        // Rolar "pra frente" (deltaY<0, longe de quem usa o mouse — mesma
+        // convenção já usada pelo `_camMode` legado logo abaixo) = zoom IN
+        // = FOV MENOR. Fator multiplicativo (não aditivo, ao contrário do
+        // `_camMode` legado) pra sentir consistente tanto perto de 5° (zoom
+        // in extremo) quanto perto de 140° (zoom out extremo).
+        const fator = e.deltaY < 0 ? (1 / 1.12) : 1.12;
+        cfg.zoomFov = Utils.clamp(cfg.zoomFov * fator, this._CAMVIEW_ZOOM_FOV_MIN, this._CAMVIEW_ZOOM_FOV_MAX);
+        this._engine?.setFov?.(cfg.zoomFov);
+        // [13/09/2026 — ITEM F, REFINADO 14/09/2026] pedido verbatim (rodada
+        // 13/09): "faça o zoom ir em direção aonde o mouse está apontando".
+        // Pedido verbatim de REFINAMENTO (14/09/2026): "deve funcionar tanto
+        // ao ampliar quanto ao reduzir" (antes só tratava zoom IN) e "a
+        // 'posição relativa' deve ser calculada em relação à posição do
+        // retângulo amarelo já desenhado no canvas (não em relação ao canto
+        // do canvas inteiro nem ao centro da tela)" — antes usava
+        // `canvas.getBoundingClientRect()` puro (canto/centro do CANVAS) como
+        // referência; agora usa `_activeCamFrameRectPx()` (o "retângulo
+        // amarelo"/quadro calibrado — MESMA função usada pelo `<img>`/plano
+        // do backdrop, ver comentário grande dela). Reaproveita o MESMO
+        // deslocamento de "lente" já usado pelo pan Shift+botão-do-meio
+        // (`_camViewPanOffset`/`Engine3D.setCamPanFrac`, ver onMouseMove/
+        // _loop acima) em vez de girar `yaw`/`pitch` da câmera de verdade —
+        // evita reabrir a lógica de pose travada (`_orbCamLockedPose`/
+        // `_computeFotoCamPose`, recalculada do zero todo quadro) e continua
+        // 100% compatível com a foto-guia (que já lê `_camViewPanOffset` em
+        // `_updateFotoCamOverlayZoomScale`).
+        {
+          const frame = this._activeCamFrameRectPx();
+          const rect = canvas.getBoundingClientRect();
+          const prevOff = this._camViewPanOffset || { x: 0, y: 0 };
+          // Centro ATUAL na tela do retângulo amarelo — `_activeCamFrameRectPx`
+          // sozinha sempre devolve um retângulo CENTRADO no canvas (ignora
+          // pan de propósito, ver comentário dela), mas o retângulo amarelo
+          // DE VERDADE (objeto 3D real, engine3d.js) já pode estar deslocado
+          // na tela por um pan anterior (`prevOff`, aplicado como lens-shift
+          // de verdade em `camera3` — desloca TUDO que é renderizado,
+          // inclusive o retângulo amarelo) — sem somar `prevOff` aqui, um
+          // 2º/3º passo de zoom sobre um pan já existente ia convergir pro
+          // lugar ERRADO (o centro "de fábrica", não o centro real atual).
+          const frameCenterX = frame.left + frame.width / 2 + prevOff.x * frame.cw;
+          const frameCenterY = frame.top + frame.height / 2 + prevOff.y * frame.ch;
+          // [11/09/2026] CORRIGIDO — pedido verbatim: "ao centro do canvas o
+          // zoom deve ser direcionado para ali." ANTES o ponto de
+          // convergência era a posição do CURSOR (`e.clientX/Y`, pedido
+          // explícito de uma rodada anterior) — trocado agora pelo CENTRO DO
+          // CANVAS (`rect.width/2`, `rect.height/2`), fixo, independente de
+          // onde o mouse está. Na prática, isso faz o zoom ir sempre
+          // "recentrando" o retângulo amarelo/a foto no meio do canvas
+          // conforme se aproxima/afasta — desfazendo aos poucos qualquer
+          // deslocamento feito antes pelo pan de Shift+botão-do-meio (ver
+          // `off.x/y` mais abaixo, mesma fórmula de sempre, só que agora
+          // convergindo pro centro do canvas em vez do cursor).
+          const centerPxX = rect.width / 2;
+          const centerPxY = rect.height / 2;
+          // `cx`/`cy` = posição do centro do canvas relativa ao CENTRO do
+          // retângulo amarelo (não do cursor), em fração do PRÓPRIO
+          // retângulo (-0.5..0.5 dentro dele).
+          const cx = frame.width > 0.0001 ? (centerPxX - frameCenterX) / frame.width : 0;
+          const cy = frame.height > 0.0001 ? (centerPxY - frameCenterY) / frame.height : 0;
+          // `off.x`/`off.y` (`_camViewPanOffset`) são fração do CANVAS (não
+          // do retângulo amarelo — mesma unidade que `Engine3D.setCamPanFrac`
+          // espera, ver Shift+MMB acima) — converte a fração (relativa ao
+          // retângulo amarelo) pra essa mesma unidade antes de aplicar,
+          // multiplicando pela proporção retângulo/canvas — preserva o PONTO
+          // físico de convergência (o pixel sob o cursor) trocando só a
+          // referência/escala usada pra descrevê-lo.
+          const off = this._camViewPanOffset || (this._camViewPanOffset = { x: 0, y: 0 });
+          const EASE = 0.15;
+          const fracToCanvasX = frame.cw > 0 ? frame.width / frame.cw : 1;
+          const fracToCanvasY = frame.ch > 0 ? frame.height / frame.ch : 1;
+          // [14/09/2026] Antes só rodava em `e.deltaY < 0` (zoom IN); pedido
+          // de refinamento explícito: "tanto ao ampliar quanto ao reduzir" —
+          // convergência agora roda nos 2 sentidos, sinal do `EASE` não muda
+          // (converge pro cursor tanto aproximando quanto afastando).
+          off.x += (-cx * fracToCanvasX - off.x) * EASE;
+          off.y += (-cy * fracToCanvasY - off.y) * EASE;
+        }
+        this._updateFotoCamOverlayZoomScale();
+        return;
+      }
+      // [10/09/2026] CORRIGIDO — bug relatado: "com a ferramenta 'Objeto'
+      // ativa, rolar a roda do mouse não está mais trocando entre os
+      // objetos". Antes conferia `document.pointerLockElement !== canvas`
+      // usando a variável `canvas` fechada no escopo de `_bindDesktopControls`
+      // — se por qualquer motivo o elemento `<canvas>` de verdade no DOM for
+      // outro (re-render do container que recria o canvas, ou esta função
+      // rodar presa a uma referência antiga por causa de algum caminho de
+      // remontagem do "Ver em 3D"), a comparação falha silenciosamente pra
+      // sempre e a roda nunca mais funciona — mesmo com a ferramenta certa
+      // ativa e o ponteiro de fato travado. Comparar com `e.currentTarget`
+      // (o elemento REAL em que este listener está registrado nesta
+      // invocação) em vez da variável fechada é estritamente mais robusto —
+      // nunca pode divergir do canvas que realmente recebeu o evento.
+      if (document.pointerLockElement !== e.currentTarget) return;
       if (this._camMode) {
         // "É possível dar zoom" (pedido do usuário) — enquanto se assiste
         // uma câmera fixa, a roda passa a ser zoom (campo de visão) em vez
@@ -3978,6 +8592,8 @@ const View3D = {
       canvas.removeEventListener('auxclick', onMiddleClick);
       canvas.removeEventListener('mousedown', onMouseDownMiddle);
       document.removeEventListener('mouseup', onMouseUpMiddle);
+      canvas.removeEventListener('mousedown', onMouseDownTijolo);
+      document.removeEventListener('mouseup', onMouseUpTijolo);
       canvas.removeEventListener('contextmenu', onContextMenu);
       document.removeEventListener('mousemove', onMouseMove);
       canvas.removeEventListener('wheel', onWheel);
@@ -4069,7 +8685,18 @@ const View3D = {
     Mapping.updateObject(this._map, novo.id, { customMesh: novo.customMesh, customMeshXform: novo.customMeshXform, forma: novo.forma, largura: novo.largura, profundidade: novo.profundidade, altura: novo.altura });
     DB.saveMap(this._map);
     this._rebuildScene();
-    setTimeout(() => Modeler3D.enter(this, novo), 0);
+    // NOVO (07/09/2026), pedido verbatim: "inquebrável, tudo com estrutura
+    // try{}catch(){} [...]" — mesmo motivo do `setTimeout` em `mount()`
+    // (ver comentário grande lá): uma exceção dentro de um `setTimeout` não
+    // é capturável por quem chamou esta função, então precisa da própria
+    // proteção.
+    setTimeout(() => {
+      try { Modeler3D.enter(this, novo, { enterOrbital: !(this._orbCamMode || this._fotoCamMode) }); } // [12/09/2026 — ITEM C]
+      catch (err) {
+        if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError('Modelador 3D', err);
+        else console.error('Falha ao entrar no Modelador 3D:', err);
+      }
+    }, 0);
   },
 
   // NOVO (02/09/2026) — chamado por cada botão de primitiva do painel "+"
@@ -4113,7 +8740,18 @@ const View3D = {
     Mapping.updateObject(this._map, novo.id, patch);
     DB.saveMap(this._map);
     this._rebuildScene();
-    setTimeout(() => Modeler3D.enter(this, novo), 0);
+    // NOVO (07/09/2026), pedido verbatim: "inquebrável, tudo com estrutura
+    // try{}catch(){} [...]" — mesmo motivo do `setTimeout` em `mount()`
+    // (ver comentário grande lá): uma exceção dentro de um `setTimeout` não
+    // é capturável por quem chamou esta função, então precisa da própria
+    // proteção.
+    setTimeout(() => {
+      try { Modeler3D.enter(this, novo, { enterOrbital: !(this._orbCamMode || this._fotoCamMode) }); } // [12/09/2026 — ITEM C]
+      catch (err) {
+        if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError('Modelador 3D', err);
+        else console.error('Falha ao entrar no Modelador 3D:', err);
+      }
+    }, 0);
   },
 
   // Pedido do usuário: "ao capturar o mouse, não é mais possível clicar
@@ -4147,10 +8785,82 @@ const View3D = {
       && this._lockCursorY >= r.top && this._lockCursorY <= r.bottom;
   },
 
-  _tryPick() {
-    const ray = this._engine.centerRay(this._camera);
-    const hit = this._engine.pickFromRay(ray.origin, ray.dir);
+  /** [10/09/2026] NOVO — converte um ponto de tela (coordenadas de
+   *  cliente, `e.clientX/Y`) num raio de verdade através da câmera atual
+   *  (`Engine3D.rayFromScreenPoint`) e devolve o pickable sob ele
+   *  (`Engine3D.pickFromRay`, MESMA função usada pela mira central de
+   *  sempre — só o raio de entrada é diferente). Usado só enquanto
+   *  `_fotoCamMode`/`_orbCamMode` estão ativos (ver onMouseMove/onClick
+   *  em `_bindDesktopControls`) — a navegação normal em 1ª pessoa continua
+   *  100% com a mira central (`_tryPick` sem argumento, `centerRay`).
+   *  [10/09/2026] Também atualiza `Engine3D.setHoverScreenPoint` (mesmo
+   *  ponto NDC já calculado aqui) — pedido verbatim: "Ao mirar em um
+   *  objeto, ele deve ter o mesmo destaque que tem quando não se está
+   *  nesse modo, por exemplo, 'contorno pontilhado'". Assim
+   *  `_updateHoverHighlight` (chamada todo quadro por `render()`) passa a
+   *  desenhar o destaque de mira de sempre sob o CURSOR real, em vez do
+   *  crosshair central (que nem existe nesses modos) — sem duplicar o
+   *  cálculo do raio, `pickFromRay`/`hoverPick` já reaproveitam a MESMA
+   *  técnica (`rayFromScreenPoint`) por baixo. */
+  _pickAtClientPoint(clientX, clientY, canvasEl) {
+    const canvas = canvasEl || this._container?.querySelector('#v3d-canvas');
+    if (!canvas || !this._engine) return null;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -(((clientY - rect.top) / rect.height) * 2 - 1);
+    this._engine.setHoverScreenPoint?.(ndcX, ndcY);
+    const ray = this._engine.rayFromScreenPoint(ndcX, ndcY);
+    if (!ray) return null;
+    return this._engine.pickFromRay(ray.origin, ray.dir);
+  },
+
+  /** [10/09/2026] `hitOverride` NOVO — quando fornecido (mousedown/click
+   *  real dentro de `_fotoCamMode`/`_orbCamMode`, ver `_pickAtClientPoint`
+   *  acima), usa ESSE hit em vez de recalcular pela mira central — deixa o
+   *  resto da função (o "o que fazer com o hit", cartões/scripts/etc.)
+   *  100% compartilhado entre os 2 jeitos de mirar. */
+  _tryPick(hitOverride) {
+    let hit = hitOverride;
+    if (hit === undefined) {
+      const ray = this._engine.centerRay(this._camera);
+      hit = this._engine.pickFromRay(ray.origin, ray.dir);
+    }
     if (!hit) return;
+    // [09/09/2026] Ajuste solicitado pelo usuário: "Todos os objetos devem
+    // poder ter scripts (portas, janelas, etc.)." — o gatilho "rodar ao
+    // clicar/mirar+tocar" (pedido original, 07/09/2026: "interações por
+    // meio de botões configuráveis no cenário") ANTES só checava
+    // `hit.type === 'object'` (ver comentário removido daqui, mesma ideia)
+    // — parede/porta/janela/câmera com script configurado no painel de
+    // propriedades (ver mapview.js `_scriptFieldsetHtml`/
+    // `_wireScriptFieldset`, usado agora por TODO painel, não só o de
+    // Objeto) nunca tinham chance de disparar o script ao clicar, mesmo
+    // com o campo salvo. Movido pra ANTES de qualquer `hit.type`
+    // específico e generalizado pra `hit.ref` (existe em todo tipo de
+    // pickable — object/camera/wall/porta/janela/fotoPin, ver os vários
+    // `userData.pick = {...ref...}` em engine3d.js) — mesma prioridade de
+    // sempre (um elemento-botão nunca mostra o cartão informativo comum
+    // dele, roda o script NO LUGAR), agora valendo pra qualquer tipo.
+    // [11/09/2026] ATUALIZADO — gatilho "ao clicar" passa pelo
+    // SceneEventBus/sistema de Componentes (js/components.js).
+    // [11/09/2026, mesmo dia — REESCRITO] Removida a menção a migração de
+    // campos legados/`LegacyRawScript` — eliminados nesta rodada, pedido
+    // verbatim "elimine tudo do projeto que é legado" (ver comentário
+    // grande no topo de js/components.js). `Components.ensureComponents`
+    // hoje só garante que `hit.ref.components` seja um array (sem
+    // sintetizar nada a partir de campos antigos). Só dispara (e retorna,
+    // "vira um botão do cenário" em vez de mostrar o cartão informativo
+    // comum) se o objeto tiver de fato algum EventTrigger com evento
+    // `onClick` configurado na UI nova ("🧩 Editar componentes…").
+    if (hit.ref) {
+      const comps = window.Components?.ensureComponents?.(hit.ref) || [];
+      const temOnClick = comps.some((c) => c.type === 'EventTrigger' && c.enabled !== false && (c.events || []).some((ev) => ev.event === 'onClick'));
+      if (temOnClick) {
+        window.SceneEventBus?.emit?.('onClick', hit.ref, { pointer: null, camera: this._camera }, { map: this._map, view3d: this });
+        return;
+      }
+    }
     if (hit.type === 'camera') this._showCameraCard3D(hit.ref);
     // NOVO (03/09/2026), pedido verbatim: "deve ser possível interagir com
     // o objeto da foto tirada" — ver o retângulo texturizado + pickable
@@ -4179,7 +8889,56 @@ const View3D = {
         else this._showMultiFlashcard3D(validIds);
       });
     } else if (hit.type === 'object') this._showObjectCard3D(hit.ref);
+    // CORRIGIDO (09/09/2026), bug relatado: "com o 'Mirar' selecionado,
+    // aponto para o aglomerado de tijolos e clico [...] porém não abre a
+    // opção de 'Modelar em 3D'. [...] o contorno pontilhado de destaque ao
+    // apontar [...] está funcionando, mas não pode ser só isso." Causa:
+    // pickables do tipo 'tijolo' (ver engine3d.js `_rebuildTijolos`) não
+    // têm `hit.ref` (só `id`/`pos`/`obb` — não são um objeto do mapa de
+    // verdade ainda) — caíam direto no `else` genérico abaixo
+    // (`_showFlashcard3D(hit.ref)` com `hit.ref` undefined), que não faz
+    // nada útil pra este tipo. O aglomerado inteiro (`hit.id ===
+    // 'tijolos-merged'`, ver engine3d.js) já tinha TODA a conversão pra
+    // objeto modelável pronta (`_tijoloAglomeradoVirarObjeto`, pedido
+    // anterior "deve se tornar um objeto único Modelável e excluível") —
+    // só faltava um jeito de CHEGAR nela mirando/clicando, em vez de só
+    // pelo botão da janela "🧱 Tijolo". Um tijolo INDIVIDUAL (cunha ou com
+    // textura, nunca entra na fusão) ainda não tem cartão dedicado —
+    // ignorado aqui de propósito (mesmo comportamento de antes: sem
+    // cartão), só o aglomerado fundido ganhou o novo cartão.
+    else if (hit.type === 'tijolo' && hit.id === 'tijolos-merged') this._showTijoloAglomeradoCard3D();
+    else if (hit.type === 'tijolo') { /* tijolo individual (cunha/textura) — sem cartão próprio ainda, evita cair no cartão de item genérico abaixo */ }
     else this._showFlashcard3D(hit.ref); // item (ou pickable antigo sem `type`, por segurança)
+  },
+
+  /** NOVO (09/09/2026), bug relatado: mirar + clicar no aglomerado de
+   *  tijolos (fundido, `hit.id === 'tijolos-merged'`) não abria nenhuma
+   *  opção de "Modelar em 3D" — só o contorno pontilhado de destaque (o
+   *  highlight de mira já funcionava, ver engine3d.js). Cartão mínimo, no
+   *  mesmo estilo de `_showObjectCard3D`, com 2 ações: "🔧 Modelar em 3D"
+   *  reaproveita `_tijoloAglomeradoVirarObjeto()` (já existente — funde os
+   *  tijolos 'Caixa' sem textura num objeto de verdade com `customMesh` e
+   *  entra direto no Modelador); "🗑️ Excluir" reaproveita
+   *  `_openDeleteConfirmPopup()` (mesmo popup de confirmação estilo
+   *  Blender já usado pra qualquer outro objeto/parede/item — ele mesmo
+   *  mira de novo com `hoverPick`, então funciona igual clicando com a
+   *  ferramenta 🗑️ Remover ou apertando DEL). */
+  _showTijoloAglomeradoCard3D() {
+    document.exitPointerLock?.();
+    const existing = this._container.querySelector('.flashcard3d-overlay');
+    if (existing) existing.remove();
+    const el = document.createElement('div');
+    el.className = 'flashcard3d-overlay';
+    el.innerHTML = `
+      <div style="text-align:center; font-weight:700; margin-bottom:8px">🧱 Aglomerado de tijolos</div>
+      <button class="btn secondary block sm" id="v3d-tj-modelar" title="Fundir os tijolos num objeto único e editar a malha 3D vértice a vértice, como no Blender">🔧 Modelar em 3D</button>
+      <button class="btn danger block sm" id="v3d-tj-excluir" title="Excluir o aglomerado inteiro">🗑️ Excluir</button>
+      <button class="btn block sm" id="v3d-fc-close" title="Fechar este cartão e voltar a andar">Fechar</button>
+    `;
+    this._container.appendChild(el);
+    el.querySelector('#v3d-fc-close').onclick = () => el.remove();
+    el.querySelector('#v3d-tj-modelar').onclick = () => { el.remove(); this._tijoloAglomeradoVirarObjeto(); };
+    el.querySelector('#v3d-tj-excluir').onclick = () => { el.remove(); this._openDeleteConfirmPopup(); };
   },
 
   // REMOVIDO (02/09/2026) — `_openModelerNoCentro` (handler de um botão "+"
@@ -4203,11 +8962,61 @@ const View3D = {
         <div class="k">Direção</div><div class="v">${Math.round((cam.angulo || 0) * 180 / Math.PI)}°</div>
         <div class="k">Campo de visão</div><div class="v">${Math.round((cam.fov || Math.PI / 3) * 180 / Math.PI)}°</div>
       </div>
+      <button class="btn block sm" id="v3d-cam-vertravado" title="Travar a câmera do personagem na pose calibrada desta câmera, com a foto associada (se houver) sobreposta como guia — como 'ver através da câmera' no Blender. Continua dando pra selecionar/posicionar objetos normalmente; só o olhar em volta fica travado.">👁️ Ver através desta câmera (Camera Match)</button>
       <button class="btn block sm" id="v3d-cam-foto" ${cam.fotoId ? '' : 'disabled'} title="${cam.fotoId ? 'Abrir a foto associada a esta câmera' : 'Esta câmera não tem foto associada'}">🖼️ ${cam.fotoId ? 'Abrir foto associada' : 'Sem foto associada'}</button>
+      <button type="button" class="btn secondary block sm" id="v3d-cam-props-toggle" style="margin-top:6px">⚙️ Propriedades da câmera</button>
+      <div id="v3d-cam-props" class="hidden"></div>
       <button class="btn secondary block sm" id="v3d-fc-close" style="margin-top:6px" title="Fechar este cartão e voltar a andar">Fechar</button>
     `;
     this._container.appendChild(el);
     el.querySelector('#v3d-fc-close').onclick = () => el.remove();
+    // [10/09/2026] NOVO — pedido verbatim: "No objeto câmera e no 'orb da
+    // foto' deve ser possível definir as propriedades da câmera tanto no 2D
+    // quanto no 3D. São as mesmas do Blender." Reaproveita o MESMO fieldset/
+    // wiring do painel 2D (window.MapView._camPropsFieldsetHtml/
+    // _wireCamPropsFieldset — mesmo padrão de acesso cross-módulo já usado
+    // neste arquivo, ver `window.MapView?._personagem2D` em mount()), pra
+    // nunca divergir do que o 2D lê/escreve nos MESMOS campos do objeto.
+    const propsToggle = el.querySelector('#v3d-cam-props-toggle');
+    const propsHost = el.querySelector('#v3d-cam-props');
+    propsToggle.onclick = () => {
+      if (propsHost.classList.contains('hidden') && !propsHost.dataset.built) {
+        propsHost.innerHTML = window.MapView?._camPropsFieldsetHtml?.('v3dcam', cam) || '';
+        // [11/09/2026] CORRIGIDO — mesmo ajuste de `_openCameraPanel`
+        // (mapview.js): `_wireCamPropsFieldset` passou a chamar `onSave` só
+        // com `props` (já contendo `fov` em radianos direto, sem
+        // "Proporção de tela"/`fovDeg` separados — painel reformulado,
+        // pedido verbatim "apague todas as propriedades [...] deixe apenas
+        // a resolução"). Este call site ainda esperava a assinatura antiga
+        // (`fovDeg` chegaria `undefined`, quebrando o FOV salvo com `NaN`).
+        window.MapView?._wireCamPropsFieldset?.(propsHost, 'v3dcam', cam, async (props) => {
+          Mapping.updateCamera(this._map, cam.id, props);
+          Object.assign(cam, props);
+          await this._afterMapMutated();
+          // Câmera calibrada mudou enquanto o próprio orb dela está sendo
+          // "vista através" agora — atualiza FOV renderizado na hora, sem
+          // precisar sair/entrar de novo. `setClipPlanes` (planos de corte)
+          // não depende mais de `camProps` (campos removidos do painel,
+          // mesma rodada) — chamado sem argumentos, cai nos padrões (ver
+          // `Engine3D.setClipPlanes`).
+          if (this._orbCamMode?.camId === cam.id) {
+            this._engine?.setFov?.(this._camOrbFovDeg(cam));
+            this._engine?.setClipPlanes?.();
+          }
+        });
+        propsHost.dataset.built = '1';
+      }
+      propsHost.classList.toggle('hidden');
+      // [12/09/2026] NOVO — ver comentário grande da classe
+      // ".v3d-camprops-toggle-active" em css/style.css: ancora visualmente
+      // o fieldset ao botão que o abre.
+      propsToggle.classList.toggle('v3d-camprops-toggle-active', !propsHost.classList.contains('hidden'));
+    };
+    // [10/09/2026] NOVO — ver comentário grande em _enterCameraOrbView.
+    el.querySelector('#v3d-cam-vertravado').onclick = () => {
+      el.remove();
+      this._enterCameraOrbView(cam.id);
+    };
     el.querySelector('#v3d-cam-foto').onclick = async () => {
       if (!cam.fotoId) return;
       const photo = await DB.getAmbientePhoto(cam.fotoId);
@@ -4235,13 +9044,166 @@ const View3D = {
     if (existing) existing.remove();
     const el = document.createElement('div');
     el.className = 'flashcard3d-overlay';
+    // [10/09/2026] RESTAURADO — botão "👁️ Ver através desta câmera" tinha se
+    // perdido nesta cópia de trabalho (ver comentário grande em
+    // this._fotoCamMode, mount()). NOVO (09/09/2026), pedido verbatim: "No
+    // 'Ver em 3D', deve ser possível clicar na câmera do orb de câmera e
+    // 'entrar nela'." — ver _enterFotoCameraView acima.
+    // [10/09/2026] NOVO — pedido verbatim: "deve ser possível ver uma
+    // miniatura da foto (assim como aparece nas propriedades só que no
+    // mapa 2D) e poder trocá-la." Reaproveita as MESMAS classes/lógica do
+    // painel 2D (`.map-fotopin-thumb-wrap`/`.map-fotopin-thumb`, ver
+    // mapview.js `_openFotoPinPopover`/`atualizarThumbOuBotaoAnexar`) — só
+    // a miniatura+trocar, sem duplicar o resto do painel 2D aqui.
     el.innerHTML = `
-      <div style="text-align:center; font-weight:700; margin-bottom:8px">🖼️ Foto no mapa</div>
-      <button class="btn block sm" id="v3d-foto-abrir" title="Abrir esta foto em 'Mapa' → 'Fotos'">🖼️ Abrir foto</button>
+      <div style="text-align:center; font-weight:700; margin-bottom:8px">📷 Câmera</div>
+      <div class="map-fotopin-thumb-wrap" id="v3d-foto-thumb-wrap" title="Toque para trocar a foto">
+        <img id="v3d-foto-thumb" class="map-fotopin-thumb hidden" alt="">
+        <button type="button" class="btn secondary sm hidden" id="v3d-foto-anexar" title="Escolher uma imagem para esta câmera">📎 Anexar foto</button>
+        <input type="file" id="v3d-foto-anexar-file" accept="image/*" style="display:none">
+      </div>
+      <button class="btn block sm" id="v3d-foto-vercamera" title="Ver o cenário 3D pela perspectiva desta foto, com a foto sobreposta semitransparente (como 'ver através da câmera' no Blender)">👁️ Ver através desta câmera</button>
+      <button class="btn block sm" id="v3d-foto-abrir" style="margin-top:6px" title="Abrir esta foto em 'Mapa' → 'Fotos'">🖼️ Abrir foto</button>
+      <button type="button" class="btn secondary block sm" id="v3d-foto-props-toggle" style="margin-top:6px">⚙️ Propriedades da câmera</button>
+      <div id="v3d-foto-props" class="hidden"></div>
       <button class="btn secondary block sm" id="v3d-fc-close" style="margin-top:6px" title="Fechar este cartão e voltar a andar">Fechar</button>
     `;
     this._container.appendChild(el);
     el.querySelector('#v3d-fc-close').onclick = () => el.remove();
+    // Miniatura + trocar foto — MESMO padrão de mapview.js
+    // `atualizarThumbOuBotaoAnexar`/`#fotopin-anexar-file` (painel 2D):
+    // mostra a miniatura se já há imagem, senão o botão "📎 Anexar foto";
+    // escolher um arquivo novo reprocessa (mesmas 2 resoluções) e
+    // substitui `dataUrl`/`thumbDataUrl` do registro, sem mexer em mais
+    // nada (posição/rotação/nome/câmera/script continuam intactos).
+    const v3dAtualizarThumb = (photo) => {
+      const img = el.querySelector('#v3d-foto-thumb');
+      const btn = el.querySelector('#v3d-foto-anexar');
+      const temFoto = !!(photo && photo.dataUrl);
+      if (img) { img.classList.toggle('hidden', !temFoto); if (temFoto) img.src = photo.thumbDataUrl || photo.dataUrl || ''; }
+      if (btn) btn.classList.toggle('hidden', temFoto);
+      // [11/09/2026] NOVO — mesmo pedido já atendido em mapview.js
+      // (`_openCameraPanel`/`atualizarThumbOuBotaoAnexar`): "Ao carregar uma
+      // foto, a câmera deve assumir a resolução da foto" + "A resolução da
+      // imagem carregada [...] deve aparecer." `v3dPropsApi` só existe
+      // depois que o fieldset de propriedades é montado (1ª vez que
+      // "⚙️ Propriedades da câmera" é aberto, ver `propsToggle.onclick` logo
+      // abaixo) — se o usuário troca a foto ANTES de nunca ter aberto as
+      // propriedades, não tem widget nenhum pra atualizar ainda (tudo bem:
+      // ao abrir depois, o fieldset já nasce com `foto.camProps` no estado
+      // salvo mais recente, então não perde nada — só não teria a resolução
+      // adotada automaticamente até abrir uma vez as propriedades).
+      if (temFoto && v3dPropsApi?.setResolutionFromPhoto) {
+        const im = new Image();
+        im.onload = () => {
+          if (!el.isConnected) return; // cartão fechado enquanto a imagem carregava
+          v3dPropsApi.setResolutionFromPhoto(im.naturalWidth, im.naturalHeight);
+        };
+        im.src = photo.dataUrl;
+      }
+    };
+    let v3dPropsApi = null;
+    DB.getAmbientePhoto(foto.id).then((photo) => v3dAtualizarThumb(photo));
+    el.querySelector('#v3d-foto-anexar').onclick = () => el.querySelector('#v3d-foto-anexar-file').click();
+    el.querySelector('#v3d-foto-thumb-wrap').addEventListener('click', (e) => {
+      if (e.target.closest('#v3d-foto-anexar')) return; // já tem handler próprio
+      el.querySelector('#v3d-foto-anexar-file').click();
+    });
+    el.querySelector('#v3d-foto-anexar-file').onchange = async (e) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      Utils.toast('Processando foto…');
+      try {
+        const dataUrl = await Utils.resizeImage(file, 2400, 0.85);
+        const thumbDataUrl = await Utils.resizeImage(file, 220, 0.75);
+        const photo = await DB.getAmbientePhoto(foto.id);
+        if (!photo) return;
+        await DB.saveAmbientePhoto({ ...photo, dataUrl, thumbDataUrl });
+        v3dAtualizarThumb({ ...photo, dataUrl, thumbDataUrl });
+        Utils.toast('Foto trocada ✓', { type: 'ok' });
+      } catch (err) {
+        console.error('Falha ao trocar a foto desta câmera:', err);
+        Utils.toast('Não foi possível processar esta foto: ' + (err?.message || err), { type: 'danger', duration: 5000 });
+      }
+    };
+    // [10/09/2026] NOVO — MESMO recurso/comentário grande de
+    // _showCameraCard3D acima ("Propriedades da câmera (Blender)"), aqui pro
+    // orb de FOTO — persistido em `mapaCamProps` (ver mapview.js
+    // _refreshFotosNoMapa/_openFotoPinPopover, mesmo campo).
+    const propsToggle = el.querySelector('#v3d-foto-props-toggle');
+    const propsHost = el.querySelector('#v3d-foto-props');
+    propsToggle.onclick = () => {
+      if (propsHost.classList.contains('hidden') && !propsHost.dataset.built) {
+        propsHost.innerHTML = window.MapView?._camPropsFieldsetHtml?.('v3dfoto', foto.camProps || {}) || '';
+        // [16/09/2026] CORRIGIDO — pedido verbatim: "Parece que acessar a
+        // resolução da câmera por 'clicar no objeto Câmera'->selecionar
+        // 'Propriedades da câmera', não é o mesmo que em 'Ver através
+        // desta câmera'->Propriedades->Câmera->'Propriedades da câmera'.
+        // Eles devem ser o mesmo, alterar em um deve alterar no outro
+        // [...] Por isso não está atualizando o retângulo amarelo quando
+        // se usa o caminho 'clicar no objeto Câmera'->selecionar
+        // 'Propriedades da câmera'." CAUSA RAIZ: os 2 caminhos editam o
+        // MESMO `foto.camProps`/`mapaCamProps` (mesma fonte de dados —
+        // nunca divergiam nos VALORES salvos), mas tinham 2 implementações
+        // de `onSave` TOTALMENTE separadas — esta aqui (cartão "📷 Câmera",
+        // aberto ao clicar direto no objeto) só persistia no banco, nunca
+        // chamava `engine.updateCameraFrustumGeometry` (o retângulo
+        // amarelo só reage a essa chamada explícita, ver comentário grande
+        // em `_activeCamPropsEditTarget`) — daí editar por aqui nunca
+        // atualizar o retângulo amarelo ao vivo, mesmo com o valor
+        // corretamente salvo. CORRIGIDO: espelha o MESMO padrão síncrono +
+        // persistência em segundo plano com debounce (300ms) já usado por
+        // `_activeCamPropsEditTarget` (ver comentário grande lá) — aplica
+        // `foto.camProps`/frustum imediatamente, e também `setFov`/
+        // `setClipPlanes` na hora se este MESMO orb de foto estiver sendo
+        // "visto através" neste exato momento (card e "Ver através desta
+        // câmera" podem coexistir — ver `_showFotoPinCard3D`, chamado
+        // independente de `_fotoCamMode`).
+        v3dPropsApi = window.MapView?._wireCamPropsFieldset?.(propsHost, 'v3dfoto', foto.camProps || {}, (props) => {
+          foto.camProps = props;
+          this._engine?.updateCameraFrustumGeometry?.(foto.id, props);
+          if (this._fotoCamMode?.fotoId === foto.id) {
+            const novoFovDeg = Math.max(1, Math.min(170, ((props.fov ?? Math.PI / 3) * 180) / Math.PI));
+            const fovMudou = Math.abs(novoFovDeg - this._fotoCamMode.calibFov) > 0.001;
+            this._fotoCamMode.calibFov = novoFovDeg;
+            if (fovMudou) { this._fotoCamMode.zoomFov = novoFovDeg; this._engine?.setFov?.(novoFovDeg); }
+            this._engine?.setClipPlanes?.(props.clipStartM ?? 0.1, props.clipEndM ?? 100);
+            this._updateFotoCamOverlayZoomScale?.();
+          }
+          if (this._v3dFotoPropsSaveTimer) clearTimeout(this._v3dFotoPropsSaveTimer);
+          this._v3dFotoPropsSaveTimer = setTimeout(() => {
+            this._v3dFotoPropsSaveTimer = null;
+            DB.getAmbientePhoto(foto.id).then((photoFull) => {
+              if (photoFull) return DB.saveAmbientePhoto({ ...photoFull, mapaCamProps: props });
+            }).catch((err) => console.error('[view3d] falha ao salvar camProps (cartão Câmera):', err));
+          }, 300);
+        });
+        // Se a foto já estava carregada ANTES de abrir as propriedades pela
+        // 1ª vez (caso comum: card aberto pra uma foto já existente), adota
+        // a resolução dela agora que o widget passou a existir — sem isso,
+        // só trocar/anexar uma foto DEPOIS de já ter aberto as propriedades
+        // chamaria `setResolutionFromPhoto` (ver `v3dAtualizarThumb`). Busca
+        // `dataUrl` de resolução PLENA de novo (não `thumbDataUrl`, já
+        // reduzido a 220px pela miniatura — daria a resolução errada aqui).
+        DB.getAmbientePhoto(foto.id).then((photoFull) => {
+          if (!photoFull?.dataUrl || !el.isConnected) return;
+          const im2 = new Image();
+          im2.onload = () => { if (el.isConnected) v3dPropsApi?.setResolutionFromPhoto(im2.naturalWidth, im2.naturalHeight); };
+          im2.src = photoFull.dataUrl;
+        });
+        propsHost.dataset.built = '1';
+      }
+      propsHost.classList.toggle('hidden');
+      // [12/09/2026] NOVO — ver comentário grande da classe
+      // ".v3d-camprops-toggle-active" em css/style.css: ancora visualmente
+      // o fieldset ao botão que o abre.
+      propsToggle.classList.toggle('v3d-camprops-toggle-active', !propsHost.classList.contains('hidden'));
+    };
+    el.querySelector('#v3d-foto-vercamera').onclick = () => {
+      el.remove();
+      this._enterFotoCameraView(foto.id);
+    };
     el.querySelector('#v3d-foto-abrir').onclick = async () => {
       const photo = await DB.getAmbientePhoto(foto.id);
       if (!photo) { Utils.toast('Esta foto não foi encontrada (pode ter sido excluída).', { type: 'warn' }); return; }
@@ -4302,7 +9264,13 @@ const View3D = {
         Mapping.updateObject(this._map, alvo.id, { customMesh: alvo.customMesh, customMeshXform: alvo.customMeshXform, forma: alvo.forma, largura: alvo.largura, profundidade: alvo.profundidade, altura: alvo.altura });
         DB.saveMap(this._map);
       }
-      window.Modeler3D?.enter(this, alvo);
+      // [12/09/2026 — ITEM C] pedido verbatim: "ao entrar no Modelador,
+      // estando no modo 'Ver através desta câmera', a câmera não deve
+      // ficar orbital, mas sim deve permanecer na perspectiva da câmera
+      // que se selecionou". `_orbCamMode`/`_fotoCamMode` são os 2 estados
+      // de "Ver através desta câmera" (objeto "Câmeras"/orb de foto) — ver
+      // modeler-core.js `enter()` pro que `enterOrbital:false` faz.
+      window.Modeler3D?.enter(this, alvo, { enterOrbital: !(this._orbCamMode || this._fotoCamMode) });
     };
   },
 
@@ -4550,6 +9518,13 @@ const View3D = {
     // encadeado (this._loopHandle) só pra retomar sozinho assim que o
     // modelador for fechado, sem precisar reiniciar o loop de fora.
     if (window.Modeler3D?.isActive?.()) { this._loopHandle = requestAnimationFrame((tt) => this._loop(tt)); return; }
+    // NOVO (07/09/2026), pedido verbatim: "scripts para os objetos como no
+    // Unity... Útil para animações..." — avança as animações registradas via
+    // Scripting.tween (ver js/scripting.js), a cada quadro, igual a física
+    // logo abaixo. Roda mesmo se `delta` ainda não tiver sido calculado
+    // neste ponto (ver `delta` acima, já calculado antes desta linha) —
+    // custo zero quando não há nenhuma animação pendente.
+    window.Scripting?.tick?.(delta);
     // Física/input SEMPRE roda a cada quadro (mantém o movimento fluido,
     // sem soluço, mesmo com um limite de FPS ligado) — só o RENDER (a parte
     // cara pra GPU, que é o que o limite de FPS existe pra aliviar) é que é
@@ -4591,6 +9566,29 @@ const View3D = {
     const TOLERANCIA_JITTER_MS = 1;
     if (desdeUltimoRender >= intervaloMin - TOLERANCIA_JITTER_MS) {
       Perf.markFrameStart();
+      // [10/09/2026] NOVO — "orb de câmera" (ver this._orbCamMode, mount()):
+      // re-trava `this._camera` na pose calibrada TODO quadro, ANTES de
+      // qualquer outra coisa mexer nela (mouse-look, WASD, gravidade,
+      // sobrevoo) — pedido verbatim: "não dá para olhar em volta pois a
+      // câmera fica fixa". Como `this._camera` é a MESMA usada por todo o
+      // raycasting de seleção/posicionamento (_placeWithBuildTool etc — ver
+      // comentário grande em _enterCameraOrbView), travar aqui, no único
+      // lugar, é suficiente — sem precisar caçar/gatear cada handler de
+      // mouse/teclado que toca `this._camera` espalhado pelo arquivo
+      // (onMouseMove, o loop de WASD logo abaixo, `_updateAutopilot`, etc.):
+      // qualquer mutação que aconteça entre um quadro e outro é desfeita
+      // aqui antes da cena ser desenhada — nunca acumula/deriva.
+      if (this._orbCamMode && this._orbCamLockedPose) {
+        const lp = this._orbCamLockedPose;
+        // [10/09/2026] CORRIGIDO — `_camViewPanOffset` NÃO é mais somado à
+        // posição aqui (ver comentário grande em `_computeFotoCamPose`,
+        // mesmo motivo: deslocar a posição real muda a perspectiva de
+        // verdade, o oposto do pedido do usuário). A pose travada (`lp`)
+        // é reaplicada 100% pura; o pan vira um deslocamento de "lente" em
+        // `camera3`, aplicado à parte logo antes de `this._engine.render`.
+        this._camera.x = lp.x; this._camera.y = lp.y; this._camera.z = lp.z;
+        this._camera.yaw = lp.yaw; this._camera.pitch = lp.pitch;
+      }
       this._updateBuildGhost();
       // "Assistindo" uma câmera fixa (ver _enterCameraView): quem é
       // renderizado passa a ser ELA (pan/tilt/zoom aplicados em cima —
@@ -4609,7 +9607,13 @@ const View3D = {
       // lá), então só um destes três está ativo por vez.
       let renderCam = this._flyToActive ? this._computeFlyToPose()
         : this._flythroughActive ? this._computeFlythroughPose()
-        : (this._camMode ? this._computeWatchCameraPose() : this._camera);
+        : this._camMode ? this._computeWatchCameraPose()
+        // [10/09/2026] RESTAURADO — "ver através" de um orb de foto/câmera,
+        // MESMO padrão de pose calculada à parte substituindo só a câmera
+        // renderizada (ver _computeFotoCamPose acima e comentário grande em
+        // this._fotoCamMode, mount()).
+        : this._fotoCamMode ? this._computeFotoCamPose()
+        : this._camera;
       // Pedido do usuário: transição suave ao VOLTAR do Modelador pro modo
       // normal de navegação (a metade "de entrada" fica em modeler-core.js
       // `enter()`/`_updateOrbitCamera` — ver comentário lá). `this._camera`
@@ -4617,7 +9621,7 @@ const View3D = {
       // Modelador estava aberto — ver o retorno antecipado no topo deste
       // `_loop`), então só a pose RENDERIZADA (`renderCam`) é interpolada
       // aqui, sem mexer em `this._camera` nem no resto da física/input.
-      if (this._camTransition && !this._camMode) {
+      if (this._camTransition && !this._camMode && !this._fotoCamMode) {
         const tr = this._camTransition;
         const t = Math.min(1, (performance.now() - tr.t0) / tr.dur);
         const ease = t * t * (3 - 2 * t);
@@ -4630,7 +9634,7 @@ const View3D = {
         };
         if (t >= 1) this._camTransition = null;
       }
-      if (this._camMode) {
+      if (this._camMode || this._fotoCamMode) {
         this._engine.updatePlayerFigure?.(this._camera.x, this._camera.y, this._camera.z, this._camera.yaw, !!this._playerWalking, this._playerWalkT || 0);
       }
       // Só as luzes de luminária mais próximas ficam acesas (ver
@@ -4655,6 +9659,106 @@ const View3D = {
       const fpsAtual = desdeUltimoRender > 0 ? 1000 / desdeUltimoRender : (this._fpsSmoothed || fpsLimite || 60);
       this._fpsSmoothed = this._fpsSmoothed ? this._fpsSmoothed * 0.85 + fpsAtual * 0.15 : fpsAtual;
       this._engine.updateHybridQuality?.(renderCam, this._fpsSmoothed, fpsLimite);
+      // [10/09/2026] Pan de "lente" (Shift+botão-do-meio em câmera-vista,
+      // ver onMouseMove/`Engine3D.setCamPanFrac`) aplicado aqui, todo
+      // quadro, e só quando um dos 2 modos de câmera-vista está ativo —
+      // nos outros casos (`_camViewPanOffset` sempre `{x:0,y:0}` fora
+      // deles, zerado por `_resetCamZoom` ao sair) não precisa reaplicar
+      // nada: `camera3.clearViewOffset()` já foi chamado na saída e
+      // continua limpo até a próxima sessão de câmera-vista.
+      if (this._fotoCamMode || this._orbCamMode) {
+        const off = this._camViewPanOffset || { x: 0, y: 0 };
+        this._engine.setCamPanFrac(off.x, off.y);
+        // [12/09/2026 — RODADA "mesma imagem"] `_updateFotoCamOverlayZoomScale()`
+        // agora roda TODO QUADRO, incondicionalmente, nos 2 modos de
+        // profundidade — pedido verbatim: "seria a mesma exata imagem a
+        // ser usada (tanto em 'Frente' quanto quando 'Trás' estiver
+        // marcada), e o depth buffer seria usado apenas para a 'aparição'
+        // dos objetos substituindo os pixels da imagem." Ela é a ÚNICA
+        // fonte da imagem desenhada (`#v3d-fotocam-photo-canvas`), usada
+        // tanto pra exibição direta ('Frente', por cima de tudo via CSS)
+        // quanto como textura do shader de tela cheia ('Trás', ver
+        // `_updateFotoCamBackdropPlane` logo abaixo) — substitui a antiga
+        // chamada a `_redrawFotoCamBackdropCanvas()` (canvas off-screen
+        // dedicado, ELIMINADO nesta rodada). Rodar sempre (não só em
+        // handlers pontuais de pan/zoom/resize) evita reintroduzir o
+        // mesmo bug de cache dessincronizado já documentado (CHANGELOG
+        // 11/09/2026).
+        this._updateFotoCamOverlayZoomScale();
+        const bdCfg = this._getFotoCamBackdropConfig();
+        const imgElLoop = this._fotoCamImgEl;
+        // [22/09/2026] REVERTIDO (mesma rodada) — a 1ª tentativa desta
+        // correção desligava o oclusor/máscara inteiros sempre que a
+        // opacidade caía abaixo de 1, e passava a desenhar a foto como uma
+        // camada TRANSLÚCIDA por CIMA de tudo (`z-index` acima do
+        // `#v3d-canvas`, ver `_updateFotoCamOverlayZoomScale`/
+        // `_drawFotoCamPhoto`, revertido lá também). Pedido verbatim do
+        // usuário CORRIGINDO isso: "Mesmo com a opacidade < 1, estando
+        // marcado 'Trás' a imagem deve continuar atrás dos objetos. Você
+        // colocou ela para frente." CAUSA RAIZ do meu erro: pôr a foto por
+        // CIMA de tudo (mesmo translúcida) faz ela aparecer inclusive por
+        // cima de objetos 3D REAIS mais perto que deveriam continuar
+        // ocluindo-a normalmente (a razão de existir do modo 'Trás') —
+        // regressão clara. CORRIGIDO DE VERDADE: o oclusor/máscara volta a
+        // ficar SEMPRE ativo em 'Trás' (qualquer opacidade, exatamente como
+        // sempre foi) — objetos reais mais perto continuam ocluindo a foto
+        // normalmente, em QUALQUER opacidade. O pedido original (ver chão/
+        // neblina variando com a opacidade) agora é resolvido por um 2º
+        // passe de render SEPARADO, só de LEITURA (nunca participa da
+        // oclusão/máscara principal) — ver `Engine3D._renderBackdropEnvPass`/
+        // `_presentToCanvas` — que compõe o ambiente real (sem o oclusor/
+        // máscara do chão) DENTRO do retângulo da foto, por cima do
+        // resultado já existente, num alfa proporcional a `(1-opacidade)`
+        // — mesmo padrão (2 render targets) já usado pro vidro
+        // (`_renderGlassOnlyPass`), nunca troca a ORDEM de empilhamento
+        // real (foto continua atrás de qualquer objeto mais perto).
+        if (bdCfg.depth === 'back' && imgElLoop && imgElLoop.naturalWidth) {
+          this._ensureFotoCamBackdropPlane();
+          // [12/09/2026 — RODADA "piscada magenta"] MUDADO — pedido
+          // verbatim: "Logo que clica em 'Ver através desta câmera', um
+          // retângulo magenta aparece repentinamente e depois desaparece.
+          // Faça com que essa 'piscada' não aconteça." `mesh.visible`
+          // (o oclusor pintado da cor-marcadora sólida) agora só liga
+          // quando `_updateFotoCamBackdropPlane` devolve `true` — ou seja,
+          // só quando ela mesma conseguiu montar uma máscara/buraco VÁLIDA
+          // pra cobri-lo naquele quadro (ver comentário grande na função,
+          // acima). Nos 1-2 primeiros quadros logo após entrar em "Ver
+          // através desta câmera" (layout do canvas ainda se ajustando ao
+          // tamanho final), quando o retângulo sai degenerado, o oclusor
+          // agora fica ESCONDIDO (mesmo estado do "senão" abaixo) em vez
+          // de aparecer cru sem buraco nenhum — elimina a piscada.
+          const maskValida = this._updateFotoCamBackdropPlane(renderCam);
+          // [12/09/2026 — RODADA "certifique-se que só quando a imagem for
+          // pintada"] MUDADO — pedido verbatim: "Certifique-se que após
+          // clicar em 'Ver através desta câmera', só quando a imagem for
+          // pintada é que tudo deve acontecer." `maskValida` sozinho não
+          // bastava — cobre só o retângulo estar geometricamente OK, não
+          // se a `Image()` da foto atual já decodificou/foi desenhada de
+          // verdade no canvas (`_fotoCamBackdropReady`, setado no `onload`
+          // dela — ver `_renderFotoCamOverlay`/reset em
+          // `_enterFotoCameraView`). Só liga o oclusor quando as DUAS
+          // condições valem.
+          if (this._fotoCamBackdropMesh) this._fotoCamBackdropMesh.visible = maskValida && !!this._fotoCamBackdropReady;
+        } else {
+          // [12/09/2026] NOVO — `clearFotoCamBackdropMask()` sempre que o
+          // modo 'back' NÃO está ativo (senão a máscara antiga ficaria
+          // "vazando" — zerando alfa de pixels com a cor-marcadora em
+          // qualquer outra situação que por acaso pinte essa mesma cor,
+          // mesmo fora do backdrop 'Trás').
+          if (this._fotoCamBackdropMesh) this._fotoCamBackdropMesh.visible = false;
+          this._engine.clearFotoCamBackdropMask?.();
+          // [12/09/2026] NOVO — ver `setFotoCamBackdropMaskActive`/
+          // `_buildGlassPane` (engine3d.js): volta o vidro a pintar
+          // normalmente (`colorWrite:true`) fora do 'Trás', mesma lógica
+          // do `clearFotoCamBackdropMask()` acima.
+          this._engine.setFotoCamBackdropMaskActive?.(false);
+        }
+      } else {
+        // Fora de "Ver através desta câmera" (navegação normal, Modelador
+        // entrando por outro caminho, etc.) o plano nunca deveria aparecer.
+        if (this._fotoCamBackdropMesh) this._fotoCamBackdropMesh.visible = false;
+        this._engine.clearFotoCamBackdropMask?.();
+      }
       this._engine.render(renderCam);
       Perf.markFrameEnd();
       // O "fps" do HUD reflete o RENDER de verdade (respeitando o limite
@@ -4676,13 +9780,23 @@ const View3D = {
     }
     // Pedido do usuário (03/09/2026): "Conforme gira no mundo 3D, a roda gira
     // na tela" — gira visualmente o anel de bússola a cada quadro conforme o
-    // yaw atual da câmera. `yaw=0` é definido como "Norte" nesta app (ver
-    // comentário no HTML do anel); rotate(-yawDeg) mantém cada rótulo
-    // apontando pra sua direção real (yaw crescente = girando pra Leste).
+    // yaw atual da câmera. rotate(-yawDeg) mantém cada rótulo apontando pra
+    // sua direção real (yaw crescente = girando pra Leste).
+    // [12/09/2026] CORRIGIDO — pedido verbatim: "Inverta o norte do
+    // personagem no 'Ver em 3D', pois também está 180 graus virado,
+    // conforme indicação da roda dos pontos cardeais no canto superior
+    // direito da tela." CAUSA RAIZ: o comentário antigo (preservado no
+    // histórico) dizia que `yaw=0` era "Norte" — errado. A relação
+    // correta (ver comentário grande em `_giroBussola3DParaDirecao`,
+    // mesma causa raiz) é `bearing = yaw + 180°` — `yaw=0` na verdade é
+    // Sul. Sem o "+180°" que faltava aqui, girar a câmera pra encarar o
+    // Norte de verdade deixava o rótulo "S" (não "N") no topo do anel — a
+    // inversão de 180° reportada. CORRIGIDO: soma 180° (`Math.PI`) antes
+    // de girar o anel.
     const compassInner = this._container?.querySelector('#v3d-compass-ring-inner');
     if (compassInner) {
       const yawDeg = (this._camera.yaw || 0) * 180 / Math.PI;
-      compassInner.style.transform = `rotate(${-yawDeg}deg)`;
+      compassInner.style.transform = `rotate(${-yawDeg - 180}deg)`;
     }
     this._loopHandle = requestAnimationFrame((tt) => this._loop(tt));
   },
@@ -4691,16 +9805,589 @@ const View3D = {
   // de uma das direções, então, a câmera do personagem é apontada para
   // aquela direção" — dispara uma transição suave de yaw (ver o consumo em
   // _update, via this._compassTurnTo) em vez de saltar instantaneamente.
+  // [12/09/2026] CORRIGIDO — pedido verbatim: "Inverta o norte do
+  // personagem no 'Ver em 3D', pois também está 180 graus virado, conforme
+  // indicação da roda dos pontos cardeais no canto superior direito da
+  // tela." CAUSA RAIZ (mesma dos dois lugares que convertem `bearingRad`
+  // ↔ `this._camera.yaw`, ver também a atualização visual do anel em
+  // `_loop`): `bearingRad` (vindo de `data-bearing` no HTML do anel, 0 =
+  // Norte, sentido horário — mesma convenção de bússola de verdade) e
+  // `yaw` (a rotação de CÂMERA de verdade deste app) NÃO são o mesmo
+  // número — a relação correta, derivada da mesma fórmula já usada em
+  // mount() pra converter o ângulo do personagem 2D (0 = eixo X) em yaw
+  // (`yaw = angulo - 90°`) combinada com a relação entre esse ângulo e o
+  // rumo/bearing verdadeiro (`bearing = angulo + 90°`, mesma convenção do
+  // anel/`Map2DRenderer` — "Norte" = topo da tela = eixo -Y), é
+  // `yaw = bearing - 180°`. O código antigo usava `toYaw: bearingRad`
+  // direto (como se `yaw = bearing`), uma diferença de exatamente 180° —
+  // por isso "Norte" (e todas as outras direções) saíam invertidas.
+  // CORRIGIDO: subtrai 180° (`Math.PI`) na conversão.
   _giroBussola3DParaDirecao(bearingRad) {
     this._compassTurnTo = {
       fromYaw: this._camera.yaw || 0,
-      toYaw: bearingRad,
+      toYaw: bearingRad - Math.PI,
       t0: performance.now(),
       duration: 400, // ms
     };
   },
 
+  /** Dispara os eventos de proximidade (`onProximityEnter`/
+   *  `onProximityExit` do EVENT_CATALOG) configurados via EventTrigger:
+   *  calcula a distância (só X/Z — plano horizontal, ignora altura/piso de
+   *  propósito, mesma simplificação de outros raios deste app) até o
+   *  jogador (`this._camera.x/z`) e dispara `SceneEventBus.emit` quando a
+   *  distância cruza de "fora" pra "dentro" (ou vice-versa) do raio
+   *  configurado no evento — nunca a cada quadro parado dentro do raio.
+   *  Entidade que sai do raio é removida do Set — reentra e dispara de
+   *  novo na próxima aproximação. */
+  // [11/09/2026] ATUALIZADO — gatilhos de proximidade passam pelo
+  // SceneEventBus/sistema de Componentes (js/components.js), dispara TANTO
+  // `onProximityEnter` (borda de subida) QUANTO `onProximityExit` (borda de
+  // descida), cada evento com seu próprio `radius` (campo do EVENTO, não
+  // mais do objeto).
+  // [11/09/2026, mesmo dia — REESCRITO] Removida a menção a migração de
+  // campos legados — eliminados nesta rodada (ver js/components.js,
+  // topo do arquivo). `Components.ensureComponents` hoje só garante o
+  // array `components`.
+  _updateScriptProximityTriggers() {
+    if (!this._map || !window.SceneEventBus) return;
+    // [09/09/2026] Ajuste solicitado pelo usuário: "Todos os objetos devem
+    // poder ter scripts (portas, janelas, etc.)." Esta função varria só
+    // `this._map.objects` (comentário antigo acima: "só objetos — os
+    // únicos com scriptCode/painel de script nesta rodada" — não é mais
+    // verdade, ver mapview.js `_scriptFieldsetHtml`, usado agora também
+    // por porta/janela/câmera/texto). Generalizado pra varrer TODAS as
+    // listas com posição própria: portas/janelas usam
+    // `Mapping.resolveDoorWindowPos` (o `x/y` bruto salvo nelas só é válido
+    // quando SOLTAS — presas a uma parede, a posição de verdade é
+    // recalculada a partir da parede, mesma função usada pra desenhar/
+    // clicar nelas, ver engine3d.js/mapview.js). Paredes ficaram DE FORA
+    // de propósito (são segmentos, não um ponto — "se aproximar" não tem
+    // um significado único pra elas; continuam podendo rodar script só
+    // pelo gatilho "ao clicar", ver `_tryPick` acima).
+    const px = this._camera.x, pz = this._camera.z;
+    if (!this._scriptProximityInside) this._scriptProximityInside = new Set();
+    const dentroAgora = this._scriptProximityInside;
+    const ctx = { map: this._map, view3d: this };
+    // [11/09/2026] NOVO — evento `onStart` (spec seção 3.2, "a cena/objeto
+    // termina de carregar"): sem um passo de "carregamento da cena"
+    // dedicado neste motor, o disparo é feito aqui, aproveitando que este
+    // loop já varre todas as entidades com posição todo quadro — dispara
+    // UMA vez por entidade (`this._startedComponentIds`, Set persistente
+    // entre quadros) na primeira vez que ela é vista depois de entrar no
+    // "Ver em 3D"/trocar de mapa.
+    if (!this._startedComponentIds) this._startedComponentIds = new Set();
+    const checar = (entidade, x, y) => {
+      const comps = window.Components?.ensureComponents?.(entidade) || [];
+      if (entidade.id && !this._startedComponentIds.has(entidade.id)) {
+        this._startedComponentIds.add(entidade.id);
+        const temOnStart = comps.some((c) => c.type === 'EventTrigger' && c.enabled !== false && (c.events || []).some((ev) => ev.event === 'onStart'));
+        if (temOnStart) window.SceneEventBus.emit('onStart', entidade, {}, ctx);
+      }
+      // Coleta todos os eventos onProximityEnter/onProximityExit
+      // configurados (legado sintetizado, ou já editados na UI nova) — um
+      // mesmo objeto pode ter mais de um EventTrigger/mais de uma entrada,
+      // então o raio "ativo" pra decidir dentro/fora é o do evento
+      // onProximityEnter mais próximo configurado (mesma simplificação de
+      // "um raio por objeto" que já existia; múltiplos raios por objeto
+      // seria uma extensão futura, não pedida nesta rodada).
+      let raioEnter = null;
+      for (const c of comps) {
+        if (c.type !== 'EventTrigger' || c.enabled === false) continue;
+        for (const ev of (c.events || [])) {
+          if (ev.event === 'onProximityEnter') raioEnter = ev.radius || 1.5;
+        }
+      }
+      if (raioEnter == null) { dentroAgora.delete(entidade.id); return; }
+      const dist = Math.hypot((x || 0) - px, (y || 0) - pz);
+      const jaEstava = dentroAgora.has(entidade.id);
+      if (dist <= raioEnter && !jaEstava) {
+        dentroAgora.add(entidade.id);
+        window.SceneEventBus.emit('onProximityEnter', entidade, { distance: dist }, ctx);
+      } else if (dist > raioEnter && jaEstava) {
+        dentroAgora.delete(entidade.id);
+        window.SceneEventBus.emit('onProximityExit', entidade, { distance: dist }, ctx);
+      }
+    };
+    (this._map.objects || []).forEach((o) => checar(o, o.x, o.y));
+    (this._map.cameras || []).forEach((c) => checar(c, c.x, c.y));
+    (this._map.textos || []).forEach((t) => checar(t, t.x, t.y));
+    if (typeof Mapping !== 'undefined') {
+      (this._map.portas || []).forEach((d) => { const p = Mapping.resolveDoorWindowPos(this._map, d); checar(d, p.x, p.y); });
+      (this._map.janelas || []).forEach((j) => { const p = Mapping.resolveDoorWindowPos(this._map, j); checar(j, p.x, p.y); });
+    }
+  },
+
+  /** [11/09/2026] NOVO — ciclo de vida automático de scripts (estilo
+   *  Unity: Start()/Update() rodam sozinhas, sem precisar de nenhum
+   *  Gatilho de Evento configurado — pedido verbatim desta rodada: "ela
+   *  deve ter a estrutura Start(){}, Update(){} [...] Update é chamada
+   *  uma vez por quadro"). Fecha o gap documentado no fim da rodada
+   *  anterior ("onUpdate sem dispatcher por quadro" — ver claude/status-
+   *  component-inspector.md). Varre TODAS as coleções nomeáveis do mapa
+   *  (mesmas de `SceneObjects`/`_updateScriptProximityTriggers`, MAIS as
+   *  paredes — Update() não depende de proximidade do jogador, então não
+   *  há razão pra excluir paredes aqui como `_updateScriptProximityTriggers`
+   *  exclui de propósito) a cada quadro, chamando `Components.tickEntity`
+   *  — que só faz trabalho de verdade pra entidades que realmente têm
+   *  `components` com algum Script ativo (guard barato, ver
+   *  `Components.tickEntity`). */
+  _updateScriptLifecycle(dt) {
+    if (!this._map || !window.Components) return;
+    const ctx = { map: this._map, view3d: this };
+    const tick = (entidade) => { if (entidade) window.Components.tickEntity(entidade, ctx, dt); };
+    (this._map.objects || []).forEach(tick);
+    (this._map.cameras || []).forEach(tick);
+    (this._map.textos || []).forEach(tick);
+    (this._map.portas || []).forEach(tick);
+    (this._map.janelas || []).forEach(tick);
+    (this._map.walls || []).forEach(tick);
+  },
+
+  /** NOVO (07/09/2026), pedido verbatim: "blocos de construção". Acha o
+   *  ponto onde a mira (centro da tela) bate numa superfície (chão, topo de
+   *  um objeto, ou o topo de um tijolo já colocado — ver engine3d.js
+   *  raycastSurface, estendido pra incluir 'tijolo') e devolve `{x,y,z}`
+   *  do CENTRO onde o próximo tijolo iria (já com snap XZ aplicado e
+   *  pousado exatamente EM CIMA da superfície atingida em Y) — ou `null` se
+   *  a mira não bate em nada. Não coloca nada sozinho — só calcula. */
+  async _tijoloAimTarget(cfgPreCarregada) {
+    const eng = this._engine;
+    if (!eng?._ready) return null;
+    // `cfgPreCarregada` (opcional) evita reler a config do banco A CADA
+    // QUADRO durante uma sessão de arrasto (ver `_updateTijoloDrag`, que
+    // busca a config UMA VEZ ao iniciar a sessão e reaproveita) — o clique
+    // único (`_placeTijoloClick`) sempre busca fresca (baixa frequência,
+    // sem custo).
+    const cfg = cfgPreCarregada || await Tijolos.getConfig();
+    const ray = eng.centerRay(this._camera);
+    const hit = eng.raycastSurface(ray.origin, ray.dir);
+    if (!hit) return null;
+    const xz = Tijolos.snapXZ(hit.x, hit.z, cfg);
+    return { x: xz.x, y: hit.y + cfg.sy / 2, z: xz.z, cfg };
+  },
+
+  /** Coloca DE VERDADE um tijolo em `alvo` (devolvido por `_tijoloAimTarget`)
+   *  — usado tanto pelo clique único (`_placeTijoloClick`) quanto pela
+   *  colocação contínua (`_updateTijoloDrag`). Ignora silenciosamente um
+   *  pedido de colocar exatamente na MESMA célula do último tijolo desta
+   *  "sessão" (pedido verbatim: "para não sair jorrando tijolos como uma
+   *  mangueira de água"). */
+  _tijoloPlaceAt(alvo) {
+    const cfg = alvo.cfg;
+    const chave = Tijolos._key(alvo.x, alvo.y, alvo.z);
+    if (chave === this._tijoloLastPlacedKey) return null;
+    const base = {
+      x: alvo.x, y: alvo.y, z: alvo.z,
+      sx: cfg.sx, sy: cfg.sy, sz: cfg.sz,
+      cor: cfg.corPadrao,
+      corFaces: cfg.corPorFace ? cfg.corFaces : null,
+      texturaUrl: cfg.texturaUrl,
+      formato: cfg.formato,   // NOVO (07/09/2026) — "caixa" ou "cunha"
+      rotY: cfg.rotY,          // NOVO (07/09/2026) — 0/90/180/270 (só visível na cunha)
+    };
+    const t = Tijolos.add(this._map, base);
+    const criados = [t];
+    // NOVO (07/09/2026) — "novas ideias" pedidas ("modo espelho/
+    // simetria"): com o espelho ligado (`cfg.espelhoAtivo`), CADA
+    // colocação também cria uma cópia espelhada num plano perpendicular
+    // ao eixo escolhido (`cfg.espelhoEixo`), na posição configurada
+    // (`cfg.espelhoPos`) — reflete x (eixo 'x') ou z (eixo 'z') em torno
+    // desse plano; y nunca muda (espelho sempre "de pé"). Não duplica se
+    // a posição espelhada cair EXATAMENTE em cima da original (tijolo
+    // colocado bem em cima do próprio plano de espelho). DECISÃO DE
+    // ESCOPO: a cópia espelhada de uma 'cunha' mantém o MESMO `rotY` da
+    // original — um espelho geometricamente exato inverteria a
+    // "quiralidade" da rampa (não representável só com rotações de 90°
+    // no modelo atual) — aproximação visual aceitável pra a maioria dos
+    // casos (ex.: paredes/pilares simétricos em caixa), registrado como
+    // refinamento futuro se o usuário notar diferença com cunhas.
+    if (cfg.espelhoAtivo) {
+      const espX = cfg.espelhoEixo === 'x' ? (2 * cfg.espelhoPos - alvo.x) : alvo.x;
+      const espZ = cfg.espelhoEixo === 'z' ? (2 * cfg.espelhoPos - alvo.z) : alvo.z;
+      if (Math.abs(espX - alvo.x) > 1e-6 || Math.abs(espZ - alvo.z) > 1e-6) {
+        criados.push(Tijolos.add(this._map, { ...base, x: espX, y: alvo.y, z: espZ }));
+      }
+    }
+    this._tijoloLastPlacedKey = chave;
+    // NOVO (07/09/2026) — "novas ideias" pedidas ("desfazer/refazer
+    // dedicado"): cada colocação (1 tijolo, ou 1 tijolo + sua cópia
+    // espelhada) vira 1 entrada no histórico PRÓPRIO de tijolos (não usa o
+    // Historico geral do app, ver `_tijoloUndo`/`_tijoloRedo`) — guarda
+    // o(s) REGISTRO(S) INTEIRO(S) (não só o id), pra o redo conseguir
+    // devolver o MESMO objeto (cor/faces/textura/formato) sem precisar
+    // recriar do zero. Qualquer colocação NOVA limpa a pilha de refazer.
+    this._tijoloUndoStack = this._tijoloUndoStack || [];
+    this._tijoloRedoStack = [];
+    this._tijoloUndoStack.push({ tijolos: criados });
+    this._engine.rebuildTijolos?.(this._map);
+    DB.saveMap(this._map);
+    return t;
+  },
+
+  /** Clique único (sem soltar o botão entre mousedown/mouseup) — SEMPRE 1
+   *  tijolo, com ou sem Ctrl (pedido verbatim: "apenas 1 por clique").
+   *  Se Ctrl JÁ estava pressionado neste clique, também abre a "sessão de
+   *  arrasto" (ver `_updateTijoloDrag`) travada no MESMO nível de altura
+   *  deste 1º tijolo — dali em diante, `_updateTijoloDrag` (chamado a cada
+   *  quadro em `_update`) continua colocando enquanto Ctrl+botão esquerdo
+   *  seguirem pressionados e a mira for variando de alvo. */
+  async _placeTijoloClick() {
+    this._tijoloLastPlacedKey = null; // clique novo = nunca é "a mesma célula" do que veio antes
+    const alvo = await this._tijoloAimTarget();
+    if (!alvo) return;
+    const t = this._tijoloPlaceAt(alvo);
+    const ctrlPressionado = this._keys.ControlLeft || this._keys.ControlRight;
+    if (t && ctrlPressionado) {
+      this._tijoloDragActive = true;
+      this._tijoloDragLevel = alvo.y;
+      // NOVO (07/09/2026): guarda a config JÁ CARREGADA deste 1º tijolo pra
+      // `_updateTijoloDrag` reaproveitar em TODOS os quadros seguintes da
+      // mesma sessão de arrasto, em vez de reler `Tijolos.getConfig()` (uma
+      // ida ao banco) a cada quadro — ver comentário em `_tijoloAimTarget`.
+      this._tijoloDragCfg = alvo.cfg;
+    } else {
+      this._tijoloDragActive = false;
+      this._tijoloDragCfg = null;
+    }
+  },
+
+  /** Chamado a cada quadro (ver `_update`) — só faz algo enquanto uma
+   *  "sessão de arrasto" estiver ativa (iniciada por `_placeTijoloClick`
+   *  com Ctrl pressionado) E o botão esquerdo do mouse continuar
+   *  fisicamente pressionado (`this._tijoloMouseDown`, ver mousedown/
+   *  mouseup em `_bindDesktopControls`) E Ctrl continuar pressionado.
+   *  Solta qualquer uma dessas 3 condições e a sessão encerra sozinha —
+   *  soltar só o Ctrl (mantendo o botão) NÃO recomeça a colocar (evita
+   *  "vazamento" de tijolos se o usuário soltar e apertar Ctrl de novo sem
+   *  soltar o botão — precisa de um clique NOVO pra abrir outra sessão). */
+  async _updateTijoloDrag() {
+    if (this._buildTool !== 'tijolo' || !this._tijoloDragActive) return;
+    if (!this._tijoloMouseDown || !(this._keys.ControlLeft || this._keys.ControlRight)) {
+      this._tijoloDragActive = false;
+      return;
+    }
+    // NOVO (07/09/2026): trava anti-sobreposição — `_update(delta)` chama
+    // este método a cada quadro SEM aguardar (`await`) o anterior terminar;
+    // como ele é `async` (por causa do `await` dentro), duas chamadas de
+    // quadros diferentes poderiam ficar "em voo" ao mesmo tempo se algo
+    // atrasar. `this._tijoloDragBusy` garante só 1 por vez.
+    if (this._tijoloDragBusy) return;
+    this._tijoloDragBusy = true;
+    try {
+      // Reaproveita a config já carregada no início da sessão (ver
+      // `_placeTijoloClick`) em vez de reler do banco a cada quadro.
+      const alvo = await this._tijoloAimTarget(this._tijoloDragCfg);
+      if (!alvo) return;
+      // Só continua no MESMO nível de altura travado pelo 1º tijolo desta
+      // sessão (pedido verbatim: "vai adicionando um após o outro no mesmo
+      // nível de altura").
+      if (Math.abs(alvo.y - this._tijoloDragLevel) > 0.005) return;
+      this._tijoloPlaceAt(alvo);
+    } finally {
+      this._tijoloDragBusy = false;
+    }
+  },
+
+  /** NOVO (07/09/2026) — "novas ideias" pedidas ("desfazer/refazer
+   *  dedicado"). Desfaz a ÚLTIMA acao de colocação de tijolo (1 clique = 1
+   *  tijolo = 1 entrada; 1 preenchimento de volume = TODOS os tijolos
+   *  daquele preenchimento numa entrada só, ver `_fillTijoloVolume`) —
+   *  histórico PRÓPRIO da ferramenta de tijolos, independente do Historico
+   *  geral do app (decisão de escopo: o Historico geral guarda diffs de
+   *  propriedades de item/objeto isolado, não foi desenhado pra sequências
+   *  de dezenas/centenas de colocações de 1 preenchimento de volume). Pintar
+   *  um tijolo (`_paintTijoloClick`) NÃO entra nesta pilha — decisão de
+   *  escopo: pintura é um ajuste estético iterativo, o próprio usuário pinta
+   *  de volta se quiser desfazer; desfazer/refazer aqui cobre a parte mais
+   *  "destrutiva/trabalhosa" (colocação, principalmente em volume). */
+  _tijoloUndo() {
+    const entry = (this._tijoloUndoStack || []).pop();
+    if (!entry) { Utils.toast('Nada para desfazer', { type: 'warn' }); return; }
+    entry.tijolos.forEach((t) => Tijolos.remove(this._map, t.id));
+    this._tijoloRedoStack = this._tijoloRedoStack || [];
+    this._tijoloRedoStack.push(entry);
+    this._engine.rebuildTijolos?.(this._map);
+    DB.saveMap(this._map);
+    this._renderTijoloPanel();
+  },
+  _tijoloRedo() {
+    const entry = (this._tijoloRedoStack || []).pop();
+    if (!entry) { Utils.toast('Nada para refazer', { type: 'warn' }); return; }
+    if (!this._map.tijolos) this._map.tijolos = [];
+    entry.tijolos.forEach((t) => this._map.tijolos.push(t)); // MESMO objeto de volta (preserva cor/faces/textura)
+    this._tijoloUndoStack = this._tijoloUndoStack || [];
+    this._tijoloUndoStack.push(entry);
+    this._engine.rebuildTijolos?.(this._map);
+    DB.saveMap(this._map);
+    this._renderTijoloPanel();
+  },
+
+  /** NOVO (07/09/2026) — "novas ideias" pedidas ("pintar tijolos já
+   *  colocados"). Ferramenta separada (`this._buildTool === 'tijolo-pintar'`,
+   *  ativada pelo botão próprio no painel — NUNCA junto com a ferramenta de
+   *  colocar, pra não confundir "clique = coloca" com "clique = pinta").
+   *  Mira (mesmo raio central da colocação) contra a lista CRUA de tijolos
+   *  (`Tijolos.raycastTijolos` — a malha mesclada não separa triângulo por
+   *  tijolo, então testar direto contra as caixas é mais simples e
+   *  suficiente aqui) e aplica a cor/textura ATUAL do menu (mesmos campos
+   *  usados pra colocar um tijolo novo) no tijolo atingido. */
+  async _paintTijoloClick() {
+    const eng = this._engine;
+    if (!eng?._ready) return;
+    if (!this._map.tijolos || !this._map.tijolos.length) {
+      Utils.toast('Nenhum tijolo no mapa ainda', { type: 'warn' });
+      return;
+    }
+    const cfg = await Tijolos.getConfig();
+    const ray = eng.centerRay(this._camera);
+    const hit = Tijolos.raycastTijolos(ray.origin, ray.dir, this._map.tijolos);
+    if (!hit) { Utils.toast('Nenhum tijolo mirado', { type: 'warn' }); return; }
+    hit.tijolo.cor = cfg.corPadrao;
+    hit.tijolo.corFaces = cfg.corPorFace ? cfg.corFaces : null;
+    hit.tijolo.texturaUrl = cfg.texturaUrl;
+    this._engine.rebuildTijolos?.(this._map);
+    DB.saveMap(this._map);
+    Utils.toast(`🎨 "${hit.tijolo.nome}" pintado`, { type: 'ok' });
+  },
+
+  /** NOVO (07/09/2026) — "novas ideias" pedidas ("ferramenta 'preencher
+   *  volume'"). Preenche um bloco RETANGULAR de tijolos (contagens em
+   *  X/Y/Z configuradas no painel, `this._tijoloFillX/Y/Z`) a partir do
+   *  ponto mirado (MESMA superfície/snap usado pra colocar 1 tijolo, ver
+   *  `_tijoloAimTarget`) — decisão de escopo (simplificação deliberada,
+   *  registrada): em vez de um gizmo 3D de 2 cliques definindo os 2 cantos
+   *  opostos de um volume qualquer no espaço (mais complexo/arriscado de
+   *  acertar sem poder testar num navegador de verdade nesta sessão), o
+   *  volume cresce em X (+, na direção "direita" da grade)/Y (+, pra cima)/
+   *  Z (+, na direção "frente" da grade) a partir do ponto mirado — ainda
+   *  cobre o caso de uso central do pedido ("preencher volume" de uma vez,
+   *  em vez de tijolo por tijolo), só que com uma UI mais simples/segura.
+   *  Todos os tijolos criados nesta chamada viram 1 ÚNICA entrada no
+   *  histórico de desfazer (ver `_tijoloUndo`) — desfazer um preenchimento
+   *  de 200 tijolos remove os 200 de uma vez, não um por um. */
+  async _fillTijoloVolume() {
+    const cfg = await Tijolos.getConfig();
+    const alvo = await this._tijoloAimTarget(cfg);
+    if (!alvo) { Utils.toast('Mire numa superfície para preencher', { type: 'warn' }); return; }
+    const nx = Utils.clamp(parseInt(this._tijoloFillX, 10) || 1, 1, 50);
+    const ny = Utils.clamp(parseInt(this._tijoloFillY, 10) || 1, 1, 50);
+    const nz = Utils.clamp(parseInt(this._tijoloFillZ, 10) || 1, 1, 50);
+    const ocupados = new Set((this._map.tijolos || []).map((t) => Tijolos._key(t.x - t.sx / 2, t.y - t.sy / 2, t.z - t.sz / 2)));
+    const criados = [];
+    for (let iy = 0; iy < ny; iy++) {
+      for (let ix = 0; ix < nx; ix++) {
+        for (let iz = 0; iz < nz; iz++) {
+          const x = alvo.x + ix * cfg.sx;
+          const y = alvo.y + iy * cfg.sy;
+          const z = alvo.z + iz * cfg.sz;
+          const chave = Tijolos._key(x - cfg.sx / 2, y - cfg.sy / 2, z - cfg.sz / 2);
+          if (ocupados.has(chave)) continue; // já tem tijolo exatamente ali — não duplica
+          ocupados.add(chave);
+          const t = Tijolos.add(this._map, {
+            x, y, z, sx: cfg.sx, sy: cfg.sy, sz: cfg.sz,
+            cor: cfg.corPadrao, corFaces: cfg.corPorFace ? cfg.corFaces : null, texturaUrl: cfg.texturaUrl,
+            formato: cfg.formato, rotY: cfg.rotY,
+          });
+          criados.push(t);
+        }
+      }
+    }
+    if (!criados.length) { Utils.toast('Nada novo pra preencher ali (já ocupado)', { type: 'warn' }); return; }
+    this._tijoloUndoStack = this._tijoloUndoStack || [];
+    this._tijoloRedoStack = [];
+    this._tijoloUndoStack.push({ tijolos: criados });
+    this._engine.rebuildTijolos?.(this._map);
+    DB.saveMap(this._map);
+    Utils.toast(`${criados.length} tijolo(s) adicionados ✓`, { type: 'ok' });
+    this._renderTijoloPanel();
+  },
+
+  /** NOVO (07/09/2026) — "novas ideias" pedidas ("carimbos/receitas de
+   *  conjuntos reutilizáveis"). Salva TODOS os tijolos do mapa atual como
+   *  um carimbo nomeado (`#tj-carimbo-nome`), com posições relativas ao
+   *  ponto mirado AGORA (mesma mira/superfície da colocação normal) —
+   *  reaplica esse mesmo conjunto em qualquer lugar depois, mantendo as
+   *  posições relativas entre os tijolos. DECISÃO DE ESCOPO: salva TODOS
+   *  os tijolos do mapa, não um subconjunto "selecionado" — o app não tem
+   *  seleção múltipla de tijolos nesta rodada (só picking de 1 por vez, ver
+   *  `_paintTijoloClick`); pra carimbar só uma parte, o jeito é remover os
+   *  tijolos indesejados antes ou construir a peça isolada num canto vazio
+   *  do mapa antes de carimbar. */
+  async _salvarCarimboTijolos() {
+    const panel = this._container?.querySelector('#v3d-tijolo-panel');
+    const nome = panel?.querySelector('#tj-carimbo-nome')?.value?.trim();
+    if (!nome) { Utils.toast('Digite um nome pro carimbo', { type: 'warn' }); return; }
+    if (!this._map.tijolos || !this._map.tijolos.length) { Utils.toast('Nenhum tijolo no mapa pra carimbar', { type: 'warn' }); return; }
+    const alvo = await this._tijoloAimTarget();
+    const origem = alvo ? { x: alvo.x, y: alvo.y, z: alvo.z } : { x: 0, y: 0, z: 0 };
+    await Tijolos.saveStamp(nome, this._map.tijolos, origem);
+    Utils.toast(`💾 Carimbo "${nome}" salvo (${this._map.tijolos.length} tijolos)`, { type: 'ok' });
+    this._renderTijoloPanel();
+  },
+  /** Aplica o carimbo escolhido no seletor, ancorado no ponto mirado agora
+   *  — todos os tijolos criados viram 1 ÚNICA entrada no histórico de
+   *  desfazer (mesmo padrão de `_fillTijoloVolume`). */
+  async _aplicarCarimboTijolos() {
+    const panel = this._container?.querySelector('#v3d-tijolo-panel');
+    const nome = panel?.querySelector('#tj-carimbo-select')?.value;
+    if (!nome) return;
+    const alvo = await this._tijoloAimTarget();
+    if (!alvo) { Utils.toast('Mire numa superfície para aplicar o carimbo', { type: 'warn' }); return; }
+    const criados = await Tijolos.applyStamp(this._map, nome, { x: alvo.x, y: alvo.y, z: alvo.z });
+    if (!criados.length) { Utils.toast('Carimbo vazio ou não encontrado', { type: 'warn' }); return; }
+    this._tijoloUndoStack = this._tijoloUndoStack || [];
+    this._tijoloRedoStack = [];
+    this._tijoloUndoStack.push({ tijolos: criados });
+    this._engine.rebuildTijolos?.(this._map);
+    DB.saveMap(this._map);
+    Utils.toast(`📌 Carimbo "${nome}" aplicado (${criados.length} tijolos)`, { type: 'ok' });
+    this._renderTijoloPanel();
+  },
+  async _excluirCarimboTijolos() {
+    const panel = this._container?.querySelector('#v3d-tijolo-panel');
+    const nome = panel?.querySelector('#tj-carimbo-select')?.value;
+    if (!nome) return;
+    await Tijolos.deleteStamp(nome);
+    Utils.toast(`🗑️ Carimbo "${nome}" excluído`, { type: 'ok' });
+    this._renderTijoloPanel();
+  },
+
+  /** NOVO (07/09/2026) — "novas ideias" pedidas ("exportar/importar uma
+   *  construção de tijolos como modelo reutilizável"). Baixa TODOS os
+   *  tijolos do mapa atual como um arquivo `.json` (mesmo formato relativo
+   *  dos carimbos, ver `Tijolos.exportConstruction`) — reaproveita
+   *  `Utils.downloadBlob`, o MESMO utilitário já usado por outras
+   *  exportações do app. */
+  /** NOVO (08/09/2026, 39a rodada), pedido verbatim: "O aglomerado de
+   *  tijolos deve se tornar um objeto unico Modelavel e excluivel." --
+   *  excluivel ja funcionava (pickable fixo 'tijolos-merged', ver
+   *  engine3d.js `_rebuildTijolos`); este botao resolve o MODELAVEL --
+   *  funde os tijolos 'Caixa' sem textura (Tijolos.buildMergedCustomMesh,
+   *  MESMA logica de culling de `buildMergedGeometry`) num objeto normal
+   *  do mapa (`Mapping.addObject`, `tipo:null`, MESMO padrao de
+   *  `_createAndEnterNewCube3D`/`_createPrimitiveObjectAndEnter` acima)
+   *  com `customMesh`/`customMeshXform` -- a partir dai e um objeto igual
+   *  qualquer outro, 100% editavel no Modelador 3D (abre direto nele) e
+   *  excluivel do jeito normal (tecla Del com o objeto selecionado, alem
+   *  do fluxo antigo de excluir o aglomerado inteiro pela ferramenta
+   *  Tijolo). Os tijolos convertidos SAEM de `map.tijolos` (senão
+   *  apareceriam duplicados -- a malha antiga E o objeto novo). Cunhas e
+   *  tijolos com textura NAO participam (mesma decisao de escopo de
+   *  `buildMergedGeometry`/`buildMergedCustomMesh` -- nunca fazem parte da
+   *  malha fundida) -- continuam soltos no mapa, do jeito que estavam. */
+  async _tijoloAglomeradoVirarObjeto() {
+    const todos = this._map.tijolos || [];
+    const convertiveis = todos.filter((t) => (t.formato || 'caixa') === 'caixa' && !t.texturaUrl);
+    if (!convertiveis.length) { Utils.toast('Nenhum tijolo \'Caixa\' sem textura pra converter (cunhas/com textura não entram nessa fusão).', { type: 'warn' }); return; }
+    if (typeof Modeler3D === 'undefined') { Utils.toast('Modelador 3D não carregado.', { type: 'danger' }); return; }
+    const cm = Tijolos.buildMergedCustomMesh(convertiveis);
+    if (!cm) { Utils.toast('Nada pra converter (nenhuma face visível sobrou).', { type: 'warn' }); return; }
+    document.exitPointerLock?.();
+    const novo = Mapping.addObject(this._map, cm.origin.x, cm.origin.z, null, {
+      layerId: this._layerIdParaNovosItens(),
+      elevacao: cm.origin.y,
+      forma: 'retangulo',
+      customMesh: { vertices: cm.vertices, edges: cm.edges, faces: cm.faces },
+      customMeshXform: { rotX: 0, rotY: 0, rotZ: 0, scaleX: 1, scaleY: 1, scaleZ: 1 },
+      cor: convertiveis[0].cor || '#c77f4a',
+    });
+    const bb = ModelerMesh.localBBox(cm.vertices);
+    Mapping.updateObject(this._map, novo.id, {
+      largura: Math.max(0.05, bb.maxX - bb.minX),
+      profundidade: Math.max(0.05, bb.maxZ - bb.minZ),
+      altura: Math.max(0.05, bb.maxY - bb.minY),
+    });
+    // Remove os tijolos convertidos (por id, evita apagar algum tijolo que
+    // um outro sistema tenha adicionado ao mapa entre a leitura e aqui).
+    const idsConvertidos = new Set(convertiveis.map((t) => t.id));
+    this._map.tijolos = todos.filter((t) => !idsConvertidos.has(t.id));
+    DB.saveMap(this._map);
+    await this._rebuildScene();
+    this._renderTijoloPanel();
+    Utils.toast(`Aglomerado convertido em objeto modelável (${convertiveis.length} tijolo(s) fundido(s)) 🧊`, { type: 'ok' });
+    setTimeout(() => {
+      try { Modeler3D.enter(this, (this._map.objects || []).find((o) => o.id === novo.id) || novo, { enterOrbital: !(this._orbCamMode || this._fotoCamMode) }); } // [12/09/2026 — ITEM C]
+      catch (err) {
+        if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError('Modelador 3D', err);
+        else console.error('Falha ao entrar no Modelador 3D:', err);
+      }
+    }, 0);
+  },
+
+    async _exportarConstrucaoTijolos() {
+    if (!this._map.tijolos || !this._map.tijolos.length) { Utils.toast('Nenhum tijolo no mapa pra exportar', { type: 'warn' }); return; }
+    const alvo = await this._tijoloAimTarget();
+    const origem = alvo ? { x: alvo.x, y: alvo.y, z: alvo.z } : { x: 0, y: 0, z: 0 };
+    const dados = Tijolos.exportConstruction(this._map.tijolos, origem);
+    const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
+    Utils.downloadBlob(blob, `construcao-tijolos-${Date.now()}.json`);
+    Utils.toast(`⬇️ ${this._map.tijolos.length} tijolo(s) exportados`, { type: 'ok' });
+  },
+  /** Lê o `.json` escolhido e aplica no mapa, ancorado no ponto mirado
+   *  agora — mesmo padrão de "1 ação = 1 entrada no histórico" dos outros
+   *  caminhos de colocação em lote. */
+  async _importarConstrucaoTijolos(file) {
+    if (!file) return;
+    const panel = this._container?.querySelector('#v3d-tijolo-panel');
+    try {
+      const texto = await file.text();
+      const dados = JSON.parse(texto);
+      const alvo = await this._tijoloAimTarget();
+      if (!alvo) { Utils.toast('Mire numa superfície para importar', { type: 'warn' }); return; }
+      const criados = Tijolos.importConstruction(this._map, dados, { x: alvo.x, y: alvo.y, z: alvo.z });
+      if (!criados.length) { Utils.toast('Arquivo inválido ou vazio', { type: 'warn' }); return; }
+      this._tijoloUndoStack = this._tijoloUndoStack || [];
+      this._tijoloRedoStack = [];
+      this._tijoloUndoStack.push({ tijolos: criados });
+      this._engine.rebuildTijolos?.(this._map);
+      DB.saveMap(this._map);
+      Utils.toast(`⬆️ ${criados.length} tijolo(s) importados`, { type: 'ok' });
+    } catch (err) {
+      Utils.toast('Não foi possível ler esse arquivo — confira se é um .json exportado daqui', { type: 'warn' });
+    } finally {
+      if (panel) { const inp = panel.querySelector('#tj-importar-input'); if (inp) inp.value = ''; }
+      this._renderTijoloPanel();
+    }
+  },
+
+  /** NOVO (08/09/2026), pedido verbatim: "No 'Ver em 3D', como o
+   *  Modelador pertence a tela 'Ver em 3D', então, fica dentro dela,
+   *  configurável na seção destinada a isso nas 'configurações do app'."
+   *  O Modelador já é confinado por padrão (arquiteturalmente — ver
+   *  wrapEl em modeler-core.js), então esta função só cuida do modo
+   *  OPT-IN "tela cheia" (`workspaceFullscreenConfig.modelador === true`):
+   *  detecta a TRANSIÇÃO inativo→ativo/ativo→inativo de `Modeler3D.isActive()`
+   *  (chamado a cada quadro por `_update`, sem custo — é só leitura de
+   *  flag) e liga/desliga uma classe CSS (`.view3d-modelador-fullscreen`)
+   *  no próprio `this._container` de View3D — cobrindo tudo via
+   *  `position:fixed;inset:0`, registrado no `WindowManager` na camada
+   *  "fullscreen-views" (zIndex 900, mesma usada por Foto/Organizar/Modo
+   *  assistido — ver KNOWN_LAYERS em windowmanager.js) pra não conflitar
+   *  com modais/painéis flutuantes de zIndex maior. ZERO mudanças em
+   *  modeler-core.js/modeler-ui.js — o Modelador nem sabe que isso existe,
+   *  só o CONTAINER dele (que já é responsivo por CSS, ver engine3d.js
+   *  `clientWidth/clientHeight` por quadro) muda de tamanho/posição por
+   *  fora. */
+  _syncModeladorFullscreen() {
+    if (!this._container || !this._wsFullscreenCfg?.modelador) return;
+    const ativo = !!window.Modeler3D?.isActive?.();
+    if (ativo === this._modeladorFullscreenActive) return;
+    this._modeladorFullscreenActive = ativo;
+    this._container.classList.toggle('view3d-modelador-fullscreen', ativo);
+    if (typeof WindowManager !== 'undefined') {
+      if (ativo) WindowManager.register('view3d-modelador-fullscreen', { el: this._container, kind: 'fullscreen', label: 'Modelador (tela cheia)', zIndex: 900 });
+      else WindowManager.unregister('view3d-modelador-fullscreen');
+    }
+  },
+
   _update(delta) {
+    // NOVO (08/09/2026): checa a cada quadro se o Modelador acabou de
+    // ficar ativo/inativo e liga/desliga o popup "tela cheia" opcional
+    // (ver _syncModeladorFullscreen abaixo) — feito ANTES do guard
+    // `isActive()` logo abaixo, senão nunca rodaria enquanto o Modelador
+    // está de fato ativo (que é exatamente quando precisa rodar).
+    this._syncModeladorFullscreen();
     // Modelador 3D ativo (js/modeler/*.js) — pedido do usuário (28/08/2026):
     // enquanto modelando, a câmera do View3D fica PARADA (o modelador tem seu
     // próprio controle de órbita da câmera, ver Modeler3D._updateOrbitCamera)
@@ -4729,6 +10416,29 @@ const View3D = {
       if (!camAinda) { this._exitCameraView(); }
       else { this._updateAutopilot(delta); return; }
     }
+    // [10/09/2026] RESTAURADO — MESMA proteção acima, agora pro orb de
+    // foto/câmera sendo "visto através" (ver comentário grande em
+    // this._fotoCamMode, mount()). NOVO (09/09/2026) — sai sozinho se a
+    // foto foi apagada/desvinculada do mapa enquanto estava sendo vista.
+    if (this._fotoCamMode) {
+      const fotoAinda = (this._map?.fotos || []).some((f) => f.id === this._fotoCamMode.fotoId);
+      if (!fotoAinda) { this._exitFotoCameraView(); }
+      else { this._updateAutopilot(delta); return; }
+    }
+    // [10/09/2026] NOVO — MESMA proteção acima, pro "orb de câmera" (ver
+    // this._orbCamMode, mount()/_enterCameraOrbView). Diferente dos dois
+    // ramos acima (modos de espectador, que chamam _updateAutopilot pro
+    // boneco continuar andando sozinho): aqui `return` simplesmente PULA
+    // todo o processamento de movimento/gravidade/WASD abaixo — pedido
+    // verbatim: "a câmera do personagem fixa" — a pose já é garantida todo
+    // quadro pelo re-trava em `_loop` (ver "_orbCamLockedPose" lá), este
+    // `return` só evita processamento e efeitos colaterais (queda/pulo)
+    // inúteis enquanto travado.
+    if (this._orbCamMode) {
+      const camOrbAinda = (this._map?.cameras || []).some((c) => c.id === this._orbCamMode.camId);
+      if (!camOrbAinda) { this._exitCameraOrbView(); }
+      else { return; }
+    }
     // Pedido do usuário (03/09/2026): transição suave de yaw disparada pelo
     // clique num rótulo do anel de bússola (ver _giroBussola3DParaDirecao).
     // Propositalmente SEM `return` antecipado (diferente dos guards do
@@ -4743,6 +10453,30 @@ const View3D = {
       this._camera.yaw = Cam3DMath.lerpAngle(turn.fromYaw, turn.toYaw, tEased);
       if (t >= 1) this._compassTurnTo = null;
     }
+    // NOVO (07/09/2026), pedido verbatim: "scripts para os objetos [...]
+    // Útil para animações e interações [...] Por exemplo, dá para fazer um
+    // script de quando o personagem apertar um botão algo acontecer." —
+    // gatilho automático "por proximidade" (o app não tem física de
+    // colisão de verdade jogador×objeto — ver NOTA em Colisão do painel de
+    // Objeto — então proximidade é o substituto honesto pra "encostar
+    // nele"/"apertar" um botão do cenário sem precisar construir um motor
+    // de física do zero): entidades com um EventTrigger `onProximityEnter`
+    // configurado disparam a(s) ação(ões) UMA VEZ quando o jogador ENTRA no
+    // raio configurado NO EVENTO (padrão 1.5m) — borda de subida, não a
+    // cada quadro parado dentro do raio — controlado por
+    // `this._scriptProximityInside` (Set de ids "dentro" no quadro
+    // anterior).
+    this._updateScriptProximityTriggers();
+    // [11/09/2026] NOVO — ciclo de vida automático Start()/Update() de
+    // TODO ScriptComponent ativo (ver _updateScriptLifecycle acima) —
+    // roda TODO quadro, independente de proximidade/clique.
+    this._updateScriptLifecycle(delta);
+    // NOVO (07/09/2026), pedido verbatim: "blocos de construção [...] Ao
+    // segurar o ctrl, vai adicionando um após o outro no mesmo nível de
+    // altura [...] Para continuar adicionando tijolos [...] o importante é
+    // [a mira] variar [de alvo] e o raio bater em uma superfície." Checado a
+    // cada quadro (não só no clique) — ver _updateTijoloDrag.
+    this._updateTijoloDrag();
     const cam = this._camera;
     const forward = Cam3DMath.cameraForwardFlat(cam);
     const right = Cam3DMath.cameraRightFlat(cam);

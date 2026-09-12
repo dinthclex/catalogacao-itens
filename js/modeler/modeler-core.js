@@ -6,7 +6,10 @@
  * ESTADO compartilhado (`this._state`, documentado logo abaixo) — nenhum dos
  * outros módulos guarda estado próprio, todos recebem `state` como 1º
  * argumento de cada função. Expõe a API pública que mapview.js/view3d.js
- * chamam: `enter(view3d, obj)`, `exit()`, `isActive()`, `ensureCustomMesh(obj)`.
+ * chamam: `enter(view3d, obj, opts)`, `exit()`, `isActive()`,
+ * `ensureCustomMesh(obj)`. [12/09/2026] `enter` ganhou um 3º argumento
+ * opcional `opts.enterOrbital` (padrão `true`, comportamento de sempre) —
+ * ver comentário grande dentro de `enter()`.
  *
  * HISTÓRICO — pedido original do usuário (28/08/2026): "Vamos implementar o
  * modelar de um objeto como no blender. Deve haver os dois modos o modo
@@ -96,7 +99,27 @@ const Modeler3D = {
     // modelado, continua sendo uma mesa." `obj.tipo` NÃO é mais tocado aqui
     // — o objeto mantém seu tipo de catálogo original mesmo depois de
     // ganhar uma malha customizada.
-    const w = obj.largura || 0.5, d = obj.profundidade || 0.5, h = obj.altura || 0.5;
+    // [09/09/2026] Ajuste solicitado pelo usuário: "No mapa 2D, no 'Retículo
+    // métrico', ao ir em 'Ver em 3D', apontar para um 'Retículo métrico' e
+    // clicar em 'Modelar em 3D', ele vira uma caixa (ganha uma altura) e
+    // soma com o desenho de grade interno. Não deveria ser assim." Causa
+    // raiz: esta função sempre semeava `obj.customMesh` com um cubo cheio
+    // usando `obj.altura` como ALTURA DE VERDADE (h) — mas pra um Retículo
+    // métrico, `obj.altura` NUNCA é altura (é reaproveitado como ELEVAÇÃO,
+    // ver engine3d.js `_buildOneObjectMesh`, bloco "Retículo métrico": a
+    // espessura de verdade dele é sempre fixa em 1mm, uma "placa" fina — é
+    // assim que o retículo aparece normalmente no 3D, com as linhas da
+    // grade desenhadas rentes ao topo dessa placa). Semear com `h =
+    // obj.altura` (tipicamente bem maior que 1mm) extrudia a placa fina num
+    // bloco alto — daí "ganha uma altura" — e, como a malha original
+    // continua sendo montada com aquele mesmo `obj.altura` fora do
+    // Modelador (só o `customMesh` muda o que se vê DENTRO do editor/depois
+    // de editado), o resultado somava a caixa alta com o desenho de grade
+    // que continuava sendo calculado a partir das dimensões antigas.
+    // Corrigido: retículo métrico sempre semeia com espessura de 1mm (igual
+    // ao 3D "de fora"), então entrar no Modelador não distorce a placa —
+    // continua fina/reta até a pessoa editar de propósito.
+    const w = obj.largura || 0.5, d = obj.profundidade || 0.5, h = obj.reticuloMetrico ? 0.001 : (obj.altura || 0.5);
     // Pedido do usuário: "Isso deve ser uma opção nas 'configurações 3D' na
     // seção 'Cubo'" — lê `MapConfig._cache` direto (síncrono: por padrão já
     // populado, `view3d.js` chama `MapConfig.get()` ao montar a tela 3D,
@@ -106,7 +129,30 @@ const Modeler3D = {
     const centered = (typeof MapConfig !== 'undefined' && MapConfig._cache)
       ? MapConfig._cache.cuboOrigemCentro !== false
       : (typeof MapConfig !== 'undefined' ? MapConfig.DEFAULTS.cuboOrigemCentro !== false : true);
-    obj.customMesh = ModelerMesh.defaultCubeMesh(w, d, h, centered);
+    // [22/09/2026] NOVO — pedido verbatim: "Há um bug do objeto escada
+    // quando se vai modelá-lo [...] ao entrar no modo Modelador, a Escada
+    // acaba virando uma caixa visualmente [...] Este fenômeno [...] está
+    // acontecendo com outros objetos: Mesa, Luminária." CAUSA RAIZ/CORREÇÃO
+    // — ver comentário grande em `ModelerMesh.stairsMesh`/`mesaMesh`/
+    // `luminariaMesh` (modeler-mesh.js) pra causa raiz completa: esta
+    // função sempre semeava QUALQUER objeto com uma caixa lisa
+    // (`defaultCubeMesh`), mesmo tipos com renderização PRÓPRIA fora do
+    // Modelador — agora, pra esses 3 tipos, semeia com uma malha editável
+    // que já reproduz a silhueta real (degraus/tampo+pernas/tubos+tampas)
+    // em vez de uma caixa única. Dimensões/fórmulas iguais às usadas pela
+    // malha "de fora" (engine3d.js `_buildEscadaMesh`/`_buildMesaMesh`/
+    // `_buildLuminariaMesh`) — mesmos valores-padrão quando o campo do
+    // objeto ainda não existe. Qualquer OUTRO tipo (sem renderização
+    // própria) continua caindo no `defaultCubeMesh` de sempre, sem mudança.
+    if (obj.tipo === 'escada') {
+      obj.customMesh = ModelerMesh.stairsMesh(w, d, obj.escadaDegraus);
+    } else if (obj.tipo === 'mesa') {
+      obj.customMesh = ModelerMesh.mesaMesh(w, d, h);
+    } else if (obj.tipo === 'luminaria') {
+      obj.customMesh = ModelerMesh.luminariaMesh(w, d, h);
+    } else {
+      obj.customMesh = ModelerMesh.defaultCubeMesh(w, d, h, centered);
+    }
     obj.customMeshXform = { rotX: 0, rotY: 0, rotZ: 0, scaleX: 1, scaleY: 1, scaleZ: 1 };
     if (obj.forma !== 'retangulo' && obj.forma !== 'poligono') {
       obj.forma = 'retangulo';
@@ -122,8 +168,26 @@ const Modeler3D = {
   /** `view3d`: a View3D já montada (view3d.js) — reaproveita `view3d._engine`/
    *  `view3d._map`/`view3d._container`. `obj`: a referência VIVA do objeto
    *  dentro de `view3d._map.objects` (nunca uma cópia — ver item 4 no
-   *  cabeçalho deste arquivo). */
-  enter(view3d, obj) {
+   *  cabeçalho deste arquivo). `opts.enterOrbital` [12/09/2026, NOVO] —
+   *  `true` (padrão, comportamento de sempre) entra com `camPosMode:
+   *  'orbit'` (câmera orbitando em torno do objeto, centro = pivô dele);
+   *  `false` entra com `camPosMode: 'free'` a partir da pose ATUAL de
+   *  `camera3` (mesma técnica de `toggleCamPosMode`), sem nenhum
+   *  comportamento orbital — usado por `view3d.js` quando o Modelador é
+   *  aberto enquanto o personagem está em "Ver através desta câmera"
+   *  (`_orbCamMode`/`_fotoCamMode` ativos): pedido verbatim do usuário
+   *  "ao entrar no Modelador, estando no modo 'Ver através desta câmera',
+   *  a câmera não deve ficar orbital, mas sim deve permanecer na
+   *  perspectiva da câmera que se selecionou". Antes desta rodada, mesmo
+   *  com a pose inicial já correta (`_poseFromCurrentCamera`/
+   *  `_initOrbitFromCamera`, ver comentário grande abaixo), o Modelador
+   *  SEMPRE entrava em modo orbital — a posição inicial batia com a
+   *  câmera, mas o alvo da órbita era sempre o CENTRO DO OBJETO, então
+   *  qualquer interação de câmera (arrastar pra orbitar) já girava em
+   *  torno do objeto em vez de continuar livre a partir da perspectiva da
+   *  câmera. */
+  enter(view3d, obj, opts = {}) {
+    const enterOrbital = opts.enterOrbital !== false;
     if (this._state?.active) this.exit({ skipRebuild: true });
     if (!obj) return;
     // NOVO (03/09/2026) — bug relatado: "ao inserir um objeto escada no
@@ -157,6 +221,16 @@ const Modeler3D = {
       Utils.toast?.('O motor 3D ainda não terminou de carregar — tente de novo em instantes.', { type: 'warn' });
       return;
     }
+    // [10/09/2026] NOVO — pedido verbatim: "ao apontar para um objeto e
+    // clicar em 'Modelar em 3D', quando entrar no Modelador, a perspectiva
+    // da câmera selecionada deve se manter." O Modelador nunca toca em
+    // `camera3.view` (o deslocamento de "lente"/pan de Shift+botão-do-meio
+    // em 'Ver através desta câmera', ver Engine3D.setCamPanFrac) — um pan
+    // deixado ligado ficaria PERMANENTEMENTE torto durante toda a sessão
+    // do Modelador (a órbita dele não sabe nada sobre esse offset). Limpo
+    // aqui, sempre, incondicionalmente (barato/inofensivo mesmo fora de
+    // 'Ver através' — não há nada a limpar nesse caso).
+    engine.setCamPanFrac?.(0, 0);
 
     const state = {
       active: true,
@@ -219,7 +293,7 @@ const Modeler3D = {
       // ponto fixo — `orbit.target`, o pivô do objeto). 'free' = câmera de
       // voo livre (`_updateFreeCamera`, ver lá), sem mirar nada fixo,
       // WASD/setas movem de verdade — ver `ModelerInput.toggleCamPosMode`.
-      camPosMode: 'orbit',
+      camPosMode: 'orbit', // [12/09/2026] valor inicial só de "esqueleto" — sobrescrito logo abaixo, depois de `camPoseNow` calculado, conforme `enterOrbital`
       freeCam: null, // {x,y,z,yaw,pitch} — só existe/usado quando camPosMode==='free', ver toggleCamPosMode
       freeCamVelY: 0, // velocidade vertical (gravidade) — só usada com freeCamGravity ligada
       // "Neste modo a gravidade volta a atuar. O padrão é iniciar com a
@@ -232,7 +306,10 @@ const Modeler3D = {
       keys: {}, // teclas seguradas (WASD/setas) — ver ModelerInput._onKeyDown/_onKeyUp, consumido por _updateFreeCamera
       modal: null,
       raycaster: new engine.THREE.Raycaster(),
-      mouse: { x: 0, y: 0, downX: 0, downY: 0, downButton: -1, moved: false },
+      // [11/09/2026] `rebaseDX`/`rebaseDY`: NOVO — ver comentário grande em
+      // `ModelerInput._releasePointerLockIfOwned`/`_onMouseMove` (correção do
+      // "salto" do cursor ao soltar um arrasto travado por Pointer Lock).
+      mouse: { x: 0, y: 0, downX: 0, downY: 0, downButton: -1, moved: false, rebaseDX: 0, rebaseDY: 0 },
       loopHandle: null,
       listeners: [],
       _lastFrameT: performance.now(),
@@ -254,7 +331,123 @@ const Modeler3D = {
     // a cena inteira do zero — não precisa reverter isto aqui).
     (engine._pickMeshes || []).forEach((m) => { if (m.userData?.pick?.ref?.id === obj.id) m.visible = false; });
 
-    this._initOrbitFromCamera(state);
+    // [10/09/2026] CORRIGIDO — pedido verbatim: "a perspectiva da câmera
+    // selecionada deve se manter" (entrando no Modelador enquanto "vendo
+    // através" de uma câmera/orb calibrado). ANTES este bloco (e o de
+    // `_camTransition` logo abaixo) usavam `view3d._camera` — a câmera de
+    // navegação normal, que enquanto `_fotoCamMode`/`_orbCamMode` está
+    // ativo é só o jogador "andando por trás" invisível (ver arquitetura
+    // documentada em view3d.js): nada a ver com o que está de fato sendo
+    // exibido na tela. `_poseFromCurrentCamera(state)` lê a pose de
+    // `state.camera` (`engine.camera3`, a câmera Three.js de VERDADE, já
+    // sincronizada pelo último `render()` com QUALQUER câmera efetivamente
+    // usada pra desenhar o quadro mais recente — navegação normal,
+    // `_fotoCamMode`, `_orbCamMode`, câmera assistida, sobrevoo, etc.,
+    // sem precisar tratar cada caso à parte aqui) — mesma função já usada
+    // pra converter órbita<->livre (`toggleCamPosMode`, mais abaixo). Sem
+    // mudança nenhuma pro caso normal (fora de câmera-vista): `camera3` já
+    // é sincronizado com `view3d._camera` todo quadro, então o resultado é
+    // idêntico ao de antes.
+    const camPoseNow = this._poseFromCurrentCamera(state);
+    // [12/09/2026] `_initOrbitFromCamera` continua sendo chamada
+    // INCONDICIONALMENTE (mesmo com `enterOrbital: false`) — só popula
+    // `state.orbit.{yaw,pitch,dist,target}` a partir da pose atual, pra que
+    // alternar pra modo Órbita mais tarde (botão de `camPosMode`, ver
+    // `toggleCamPosMode`) já comece de um lugar coerente, em vez de nunca
+    // ter sido inicializado. Não afeta a câmera renderizada por si só —
+    // quem decide isso é `state.camPosMode`, ajustado logo abaixo.
+    this._initOrbitFromCamera(state, camPoseNow);
+    if (enterOrbital) {
+      state.camPosMode = 'orbit';
+      state.camLocked = false;
+    } else {
+      // Pedido verbatim: "a câmera não deve ficar orbital, mas sim deve
+      // permanecer na perspectiva da câmera que se selecionou" — mesma
+      // técnica de `toggleCamPosMode` (orbit->free): `freeCam` = a pose
+      // ATUAL (já é exatamente a perspectiva da câmera/orb travada, ver
+      // `_poseFromCurrentCamera` acima), câmera nunca orbita em torno do
+      // objeto.
+      state.camPosMode = 'free';
+      state.freeCam = { x: camPoseNow.x, y: camPoseNow.y, z: camPoseNow.z, yaw: camPoseNow.yaw, pitch: camPoseNow.pitch };
+      state.freeCamVelY = 0;
+      // [13/09/2026 — ITEM E] NOVO — pedido verbatim: "a perspectiva deve se
+      // manter, o personagem não pode se mover [...] Também, não deve ser
+      // possível apontar a câmera para qualquer lado clicando com o botão do
+      // meio do mouse. O 'Modo: Livre' talvez não resolva tudo isso. Se
+      // tiver de implementar algo para que funcione, faça." Investigação
+      // confirmou que `camPosMode:'free'` sozinho NÃO travava nada — WASD/
+      // setas (`_updateFreeCamera` abaixo) continuavam movendo `state.freeCam`
+      // normalmente, e o arrasto com o botão do meio/direito
+      // (`ModelerInput._onMouseMove`, ramo `state.orbitDrag`) continuava
+      // girando `state.freeCam.yaw/pitch` e, com Shift, deslocando a própria
+      // posição (pan). `state.camLocked` é o novo guard EXPLÍCITO, distinto
+      // de `camPosMode` (que continua `'free'` só pra reaproveitar toda a
+      // MATEMÁTICA de câmera livre — projeção, FOV etc. — sem duplicar
+      // código): quando `true`, `_updateFreeCamera` (abaixo) vira um no-op
+      // total (nenhuma tecla move nada), `ModelerInput._onMouseMove` pula
+      // por completo a aplicação de rotação/pan do `orbitDrag` (mas o botão
+      // direito ainda SELECIONA num clique simples — isso não depende de
+      // `orbitDrag` — ver `_onMouseUp`/`_handleSelectClick`, não tocado),
+      // `ModelerInput._onWheel` deixa de mover `freeCam` pra frente/trás, e
+      // `toggleCamPosMode` (botão "Modo: Livre"/"Modo: Órbita" da barra)
+      // recusa trocar de modo (viraria pra Órbita, que RECENTRALIZA a
+      // câmera no objeto — exatamente o que não pode acontecer). Nada disso
+      // afeta seleção/edição de malha (gizmo G/R/S, seleção de vértice/
+      // aresta/face, todo o resto do Modelador) — só os caminhos que MOVEM
+      // OU GIRAM `state.freeCam`.
+      state.camLocked = true;
+      // [14/09/2026] NOVO — pedido verbatim: "coloque botões de tudo que
+      // foi modificado no Modelador quando ele trabalha no modo normal
+      // [...] Um botão para cada coisa que foi desativada, por exemplo,
+      // orbitar em torno do objeto selecionado" + esclarecimento seguinte:
+      // "ao desativá-lo, deve voltar a perspectiva fixa da câmera
+      // selecionada." Guarda aqui a pose CALIBRADA/travada de verdade
+      // (`camPoseNow`, a MESMA que acabou de virar `state.freeCam` acima),
+      // num campo PRÓPRIO e nunca mais tocado enquanto durar esta sessão do
+      // Modelador — é o "lugar de volta" que `toggleCamLockedOrbitOverride`
+      // (abaixo) restaura quando o usuário desliga o botão "Orbitar em
+      // torno do objeto" (ver `ModelerUI` — botão injetado na bandeja de
+      // baixo do 'Ver através desta câmera', `.v3d-fotocam-overlay-
+      // controls`). Precisa ser uma cópia PRÓPRIA (não uma referência a
+      // `state.freeCam`) porque `state.freeCam` é reatribuído pro objeto
+      // "atual" quando o override liga o modo órbita de verdade — sem uma
+      // 2ª cópia intocada, não haveria como voltar pro ponto exato de
+      // antes.
+      state._camLockedFixedPose = { x: camPoseNow.x, y: camPoseNow.y, z: camPoseNow.z, yaw: camPoseNow.yaw, pitch: camPoseNow.pitch };
+      // [14/09/2026] CORRIGIDO — pedido verbatim: "No 'Ver em 3D', ao
+      // clicar em uma câmera e selecionar 'Ver através desta câmera', no
+      // Modelador, ao posicionar um objeto mais longe da câmera o gizmo do
+      // objeto selecionado acaba sendo clipado em algumas partes." CAUSA
+      // RAIZ: `state.camera` É `engine.camera3` (MESMA referência, ver
+      // comentário grande logo acima em `enter()`) — enquanto travado numa
+      // câmera calibrada, `camera3.near/far` ficam nos valores de
+      // `cam.clipStartM/clipEndM` (ver view3d.js `_enterCameraOrbView`/
+      // `_enterFotoCameraView`, `engine.setClipPlanes`), pensados pro
+      // "Camera Match" (alinhar a cena com a FOTO de fundo) — não pro
+      // Modelador. Um objeto perto do limite de `clipEndM` continua com o
+      // CENTRO dentro do recorte (por isso ele aparece), mas o gizmo (ver
+      // modeler-gizmo.js `updateGizmo`, `depthTest:false`/`renderOrder`
+      // alto só livra ele de ser TAMPADO por outra malha — nunca do recorte
+      // de verdade do near/far da câmera, que acontece na GPU antes de
+      // qualquer material) se ESTENDE pra fora do objeto em todas as
+      // direções — alguns eixos/pontas acabavam além do `far` calibrado,
+      // sendo cortados. CORRIGIDO: alarga `near`/`far` de verdade
+      // (diretamente em `camera3`, sem tocar em `engine.setClipPlanes`/
+      // `_clipNearOverride`/`_clipFarOverride` — ver comentário grande lá:
+      // aquele override só é reaplicado por `Engine3D.setConfig`, nunca a
+      // cada quadro, e o Modelador usa seu PRÓPRIO loop/`_presentFrame`,
+      // nunca chama `render()`/`setConfig`, então o valor largo aqui fica
+      // intocado durante toda a sessão) só enquanto o Modelador estiver
+      // aberto — `exit()` (abaixo) restaura os valores exatos de antes,
+      // deixando "Ver através desta câmera" (fora do Modelador, onde o
+      // recorte calibrado importa de verdade pro alinhamento com a foto)
+      // exatamente como estava.
+      state._camLockedOrigClipNear = engine.camera3.near;
+      state._camLockedOrigClipFar = engine.camera3.far;
+      engine.camera3.near = Math.min(engine.camera3.near, 0.05);
+      engine.camera3.far = Math.max(engine.camera3.far, 2000);
+      engine.camera3.updateProjectionMatrix();
+    }
     // Pedido do usuário: "Deve haver uma transição entre a direção e
     // posição da câmera quando alterna entre os modo Modelador e o modo
     // normal de navegação... para não trocar direto." Guarda a pose de
@@ -265,11 +458,10 @@ const Modeler3D = {
     // `_initOrbitFromCamera`) em vez de simplesmente "teleportar" pra lá
     // no 1º quadro. Ver o mesmo recurso na volta, em `exit()`.
     {
-      const cam = view3d._camera;
-      const fwd = window.Cam3DMath.cameraForward(cam);
+      const fwd = window.Cam3DMath.cameraForward(camPoseNow);
       state._camTransition = {
-        fromPos: { x: cam.x, y: cam.y, z: cam.z },
-        fromLookAt: { x: cam.x + fwd.x * 5, y: cam.y + fwd.y * 5, z: cam.z + fwd.z * 5 },
+        fromPos: { x: camPoseNow.x, y: camPoseNow.y, z: camPoseNow.z },
+        fromLookAt: { x: camPoseNow.x + fwd.x * 5, y: camPoseNow.y + fwd.y * 5, z: camPoseNow.z + fwd.z * 5 },
         t0: performance.now(),
         dur: 350,
       };
@@ -306,6 +498,18 @@ const Modeler3D = {
   exit({ skipRebuild = false } = {}) {
     const state = this._state;
     if (!state?.active) return;
+    // [14/09/2026] CORRIGIDO — desfaz o alargamento de `near`/`far`
+    // aplicado em `enter()` (ver comentário grande lá, "gizmo [...]
+    // clipado") ANTES de qualquer outra coisa nesta função — `camera3` é a
+    // MESMA referência usada por `view3d._loop`/"Ver através desta câmera"
+    // depois que o Modelador fechar, então o recorte calibrado
+    // (`clipStartM/clipEndM`, o que faz a cena bater com a foto de fundo)
+    // precisa voltar a valer exatamente como estava, byte-a-byte.
+    if (state._camLockedOrigClipFar != null && state.camera) {
+      state.camera.near = state._camLockedOrigClipNear;
+      state.camera.far = state._camLockedOrigClipFar;
+      state.camera.updateProjectionMatrix();
+    }
     if (state.modal) ModelerInput._cancelModal(state);
     // Mesmo pedido do `enter()` (ver lá), agora na VOLTA: guarda onde a
     // câmera do Modelador estava olhando (posição + direção, convertida de
@@ -359,7 +563,56 @@ const Modeler3D = {
     }
     this._commit(state);
     ModelerInput.unbind(state);
+    // [11/09/2026] Limpa o `cursor:none` inline que `ModelerInput.
+    // _updateFakeCursor` pode ter deixado no canvas (ver correção do
+    // "salto" do cursor lá) — sem isso, sair do Modelador com um rebase de
+    // cursor ainda ativo deixaria o cursor OS de verdade escondido também
+    // no modo normal de navegação (`#v3d-canvas` é o MESMO canvas dos 2
+    // modos, ver `state.canvas` acima).
+    if (state.canvas) state.canvas.style.cursor = '';
     if (state.loopHandle) cancelAnimationFrame(state.loopHandle);
+    // [19/09/2026] CORRIGIDO — pedido verbatim do usuário: "Ao sair do
+    // Modelador, estando no modo 'Ver através desta câmera', o gizmo acaba
+    // ficando impresso. Não deveria ser assim. Os pixels dele deveriam ser
+    // limpos ao sair do Modelador." CAUSA RAIZ: a composição do gizmo por
+    // cima da foto (ver v451/v452 — `ModelerGizmo.renderIsolatedToCanvas` +
+    // `View3D._compositeGizmoOverlayOntoPhotoCanvas`) roda a cada quadro SÓ
+    // DENTRO do loop do próprio Modelador (`_renderFrame`, mais abaixo
+    // neste arquivo) — ao sair, esse loop para (`cancelAnimationFrame` na
+    // linha acima) e o ÚLTIMO quadro composto (com o gizmo ainda desenhado
+    // por cima) fica PARADO nos pixels do `<canvas>` DOM SEPARADO
+    // (`#v3d-fotocam-photo-canvas`, `View3D._updateFotoCamOverlayZoomScale`),
+    // que só é redesenhado quando algo manda explicitamente (zoom,
+    // opacidade, trocar Esticar/Caber/Cortar etc) — `View3D._loop` NUNCA
+    // toca nele — então o gizmo da última composição ficava gravado ali
+    // PRA SEMPRE após sair do Modelador. Mesma família do "fantasma" já
+    // tratada DENTRO da sessão (quando só o objeto era desmarcado ou o
+    // Modo trocado — ver `state._camLockedGizmoOverlayWasVisible` em
+    // `_renderFrame`, mais abaixo), mas aquele tratamento só cobre
+    // desmarcar/trocar Modo, nunca SAIR de vez do Modelador (o loop dele
+    // já não roda mais no próximo quadro pra disparar aquela checagem).
+    // CORRIGIDO: uma última chamada a `_updateFotoCamOverlayZoomScale()`
+    // aqui, redesenhando a foto do zero (sem gizmo nenhum, já que o
+    // Modelador já não existe mais neste ponto — `ModelerGizmo.dispose`
+    // roda logo abaixo) — chamada incondicionalmente (não só quando
+    // `state._camLockedFixedPose`), porque a própria função já não faz
+    // nada quando o canvas da foto não existe no DOM (fora de "Ver através
+    // desta câmera", ou sem foto nenhuma carregada) — sem custo/efeito
+    // colateral em nenhum desses casos.
+    // [19/09/2026 — RODADA SEGUINTE] SIMPLIFICADO — desde a remoção do
+    // plano 3D do backdrop 'Trás' (`_ensureFotoCamBackdropPlane`/
+    // `_updateFotoCamBackdropPlane`, ver view3d.js), o modo 'Trás' NÃO
+    // desenha mais nada em `#v3d-canvas`/`camera3` — a foto (nos 2 modos,
+    // 'Trás' e 'Frente') vive SEMPRE em `#v3d-fotocam-photo-canvas`. O
+    // parágrafo acima sobre "`#v3d-canvas` normal (WebGL) volta a ser
+    // redesenhado sozinho no modo 'Trás'" descreve a arquitetura ANTIGA
+    // (já removida) — preservado por completo pra não apagar histórico,
+    // mas não reflete mais o código atual: a chamada incondicional a
+    // `_updateFotoCamOverlayZoomScale()` logo abaixo agora cobre os 2
+    // modos igualmente (o `#v3d-fotocam-photo-canvas` é o único lugar que
+    // precisa de limpeza explícita do "fantasma" do gizmo, em qualquer
+    // modo).
+    state.view3d?._updateFotoCamOverlayZoomScale?.();
     ModelerGizmo.dispose(state);
     ModelerRender.disposeSceneObjects(state);
     ModelerUI.dispose(state);
@@ -379,6 +632,7 @@ const Modeler3D = {
     // "Ferramentas" sumir e a aba "Criar" voltar pra versão simples da tela
     // base, se o painel estava aberto.
     if (view3d) ModelerUI.refreshSharedSidebar?.(view3d);
+    if (view3d) view3d._resetPropriedadesTransformacaoPlaceholder?.();
   },
 
   /** Escreve a malha/transform da sessão de volta no objeto — sempre
@@ -509,12 +763,16 @@ const Modeler3D = {
     return { x: pos.x, y: pos.y, z: pos.z, yaw, pitch };
   },
 
-  /** `camPose` opcional (formato {x,y,z}) — por padrão usa `view3d._camera`
-   *  (câmera de navegação normal, caso de uso original, ao ENTRAR no
-   *  Modelador). `ModelerInput`/`toggleCamPosMode` (abaixo) passa
-   *  `state.freeCam` no lugar quando volta do modo Livre pro Orbital, pra
-   *  recalcular a órbita a partir de onde a câmera livre parou, em vez da
-   *  câmera de navegação (que nem está em uso nesse momento). */
+  /** `camPose` (formato {x,y,z}) — de onde calcular a órbita inicial (alvo
+   *  sempre o próprio `obj`, só posição/distância/ângulo vêm de `camPose`).
+   *  [10/09/2026] CORRIGIDO — os 2 chamadores (`enter()`, logo abaixo, e
+   *  `toggleCamPosMode`) sempre passam `camPose` explicitamente agora:
+   *  `enter()` passa `_poseFromCurrentCamera(state)` (a pose de VERDADE da
+   *  câmera `camera3`, não `view3d._camera` — ver comentário grande em
+   *  `enter()` sobre por que isso importa em `_fotoCamMode`/`_orbCamMode`);
+   *  `toggleCamPosMode` passa `state.freeCam` (de onde a câmera livre
+   *  parou). `state.view3d._camera` como reserva (`camPose ||`) só por
+   *  segurança — nenhum caminho conhecido chama isto sem `camPose`. */
   _initOrbitFromCamera(state, camPose) {
     const cam = camPose || state.view3d._camera;
     const obj = state.obj;
@@ -535,6 +793,15 @@ const Modeler3D = {
    *  lugar) — mesma técnica de conversão câmera<->yaw/pitch já usada na
    *  transição Modelador<->navegação normal (ver `_poseFromCurrentCamera`). */
   toggleCamPosMode(state) {
+    // [13/09/2026 — ITEM E] Com `state.camLocked` (ver comentário grande em
+    // `enter()`), a perspectiva precisa ficar CONGELADA de verdade — trocar
+    // pra "Modo: Órbita" recentralizaria a câmera no objeto (`_initOrbitFromCamera`
+    // usa o CENTRO DO OBJETO como alvo, não a pose calibrada), quebrando a
+    // garantia. Recusa a troca (nenhum efeito) e avisa o motivo.
+    if (state.camLocked) {
+      Utils.toast?.('🔒 Perspectiva da câmera travada — não é possível trocar de modo enquanto estiver vendo através de uma câmera calibrada.', { type: 'warn', duration: 3200 });
+      return;
+    }
     if (state.camPosMode === 'orbit') {
       state.freeCam = this._poseFromCurrentCamera(state);
       state.freeCamVelY = 0;
@@ -547,6 +814,52 @@ const Modeler3D = {
       Utils.toast?.('🎯 Câmera orbital — sempre mirando o objeto', { duration: 2200 });
     }
     ModelerUI.updateToolbarActive?.(state);
+  },
+
+  /** [14/09/2026] NOVO — pedido verbatim: "na bandeja de baixo [...]
+   *  coloque botões de tudo que foi modificado no Modelador quando ele
+   *  trabalha no modo normal [...] Um botão para cada coisa que foi
+   *  desativada, por exemplo, orbitar em torno do objeto selecionado" +
+   *  esclarecimento: "ao desativá-lo, deve voltar a perspectiva fixa da
+   *  câmera selecionada no modo 'Ver através desta câmera'." Diferente de
+   *  `toggleCamPosMode` (acima, recusa trocar de modo inteiramente
+   *  enquanto `camLocked`): este é o "botão de exceção" que o usuário pediu
+   *  — LIGAR permite orbitar de verdade em torno do objeto selecionado
+   *  (mesmo mecanismo de sempre, `_initOrbitFromCamera` + `camPosMode:
+   *  'orbit'`, com `camLocked` temporariamente `false` pra `_updateFreeCamera`/
+   *  `ModelerInput._onMouseMove`/`_onWheel` pararem de recusar a
+   *  interação); DESLIGAR não volta pra onde a órbita "andou" — restaura
+   *  byte-a-byte `state._camLockedFixedPose` (a pose calibrada de verdade,
+   *  guardada em `enter()` no instante em que `camLocked` virou `true`,
+   *  ANTES de qualquer órbita) em `state.freeCam`, igual a como era antes
+   *  de ligar o override, e trava de novo (`camLocked = true`). Só existe
+   *  (é chamado) enquanto `state._camLockedFixedPose` estiver definido —
+   *  ver guard logo abaixo — nunca deveria ser chamado fora de uma sessão
+   *  que entrou travada (`enter(..., {enterOrbital:false})`, ver
+   *  `_renderCamLockedOverridesBar`/`ModelerUI`, que só desenha o botão
+   *  quando `state._camLockedFixedPose` existe). */
+  toggleCamLockedOrbitOverride(state) {
+    if (!state._camLockedFixedPose) return;
+    if (state.camLocked) {
+      // LIGA o orbitador temporário — mesma conversão de pose usada em
+      // `toggleCamPosMode` (órbita a partir da pose atual, que nesse
+      // instante ainda é a calibrada/travada).
+      state.camLocked = false;
+      this._initOrbitFromCamera(state, state.freeCam || state._camLockedFixedPose);
+      state.camPosMode = 'orbit';
+      state.freeCam = null;
+      Utils.toast?.('🎯 Orbitador temporário ativado — arraste para orbitar em torno do objeto selecionado. Desative de novo pra voltar à perspectiva fixa da câmera.', { duration: 3600 });
+    } else {
+      // DESLIGA — volta pra perspectiva FIXA da câmera selecionada (a pose
+      // calibrada original, nunca a pose "onde a órbita parou").
+      state.camPosMode = 'free';
+      state.freeCam = { ...state._camLockedFixedPose };
+      state.freeCamVelY = 0;
+      state.camLocked = true;
+      Utils.toast?.('🔒 Perspectiva fixa da câmera restaurada.', { duration: 2200 });
+    }
+    ModelerUI.updateToolbarActive?.(state);
+    ModelerUI.updateCamLockedOverrideButton?.(state);
   },
 
   /** Atualiza a câmera no modo de posicionamento LIVRE — chamada a cada
@@ -563,6 +876,12 @@ const Modeler3D = {
    *  `_surfaceHeightAt`/`EYE_HEIGHT` do View3D (via `state.view3d`), pra se
    *  comportar como o modo normal de navegação. */
   _updateFreeCamera(state, delta) {
+    // [13/09/2026 — ITEM E] Guard de travamento — ver comentário grande em
+    // `enter()`/`toggleCamPosMode`. Com `camLocked`, NENHUMA tecla move
+    // `state.freeCam` — sai antes de ler `state.keys`, então WASD/setas/
+    // Espaço (pulo)/gravidade ficam todos inertes; a pose fica byte-a-byte
+    // igual à calibrada até o Modelador ser fechado.
+    if (state.camLocked) return;
     const fc = state.freeCam;
     const keys = state.keys || {};
     const forward = window.Cam3DMath.cameraForwardFlat(fc);
@@ -672,6 +991,38 @@ const Modeler3D = {
    *  (render WebGL + overlay 2D) — mesmo padrão de view3d.js `_loop`. */
   _renderLoop(state) {
     if (!state.active || this._state !== state) return;
+    // CORRIGIDO (08/09/2026, 39a rodada), pedido verbatim: "clicando para
+    // trocar de modo, a tela fica preta (a parte do cenario apenas, os
+    // botoes continuam funcionando), tendo que sair do Modelador para o
+    // cenario voltar a aparecer." CAUSA RAIZ (analise estatica de codigo --
+    // sem navegador real disponivel nesta sessao para confirmar
+    // interativamente, restricao ja conhecida do projeto): este loop
+    // chamava requestAnimationFrame SOMENTE no final do corpo da funcao,
+    // sem try/catch nenhum ao redor -- qualquer excecao nao tratada em
+    // QUALQUER passo do quadro (atualizacao de camera, gizmo, resize,
+    // render do Three.js, overlay 2D) MATA a cadeia de requestAnimationFrame
+    // pra sempre (nunca mais agenda o proximo quadro), deixando o canvas
+    // congelado/preto no ultimo quadro desenhado com sucesso -- exatamente
+    // o sintoma relatado (preto so na area 3D, os botoes da UI continuam
+    // funcionando porque sao DOM normal, nao dependem deste loop). Isso
+    // tambem explica a camera "paralisada no Modo Objeto" relatada
+    // (provavel excecao ja no 1o quadro em Modo Objeto, antes do usuario
+    // sequer arrastar o mouse). Corrigido envolvendo o quadro inteiro em
+    // try/catch com console.error (para diagnostico futuro) e SEMPRE
+    // reagendando o proximo quadro (bloco finally), nunca deixando uma
+    // excecao isolada travar o loop permanentemente.
+    try {
+      this._renderFrame(state);
+    } catch (err) {
+      console.error('[Modelador] excecao no quadro de render (loop continua, ver stack abaixo):', err);
+    } finally {
+      state.loopHandle = requestAnimationFrame(() => this._renderLoop(state));
+    }
+  },
+
+  /** Corpo de verdade de um quadro de `_renderLoop` (extraido pra dentro do
+   *  try/catch acima, ver comentario la). */
+  _renderFrame(state) {
     Perf.markFrameStart?.();
     // `delta` (segundos desde o quadro anterior) — só usado pelo modo de
     // câmera LIVRE (`_updateFreeCamera`, WASD/setas/gravidade); o modo
@@ -695,14 +1046,152 @@ const Modeler3D = {
     // real (esticado por CSS) do canvas. Sem isso, o canvas do Modelador
     // ficava preso na resolução do MOMENTO em que entrou (herdada de
     // qualquer sessão 3D anterior) — daí o aspecto "baixa resolução"
-    // relatado. `_resize()` sozinho (sem o resto de `Engine3D.render`) já
-    // resolve, e é barato (só recalcula/aplica quando o tamanho realmente
-    // mudou, ver early-return `w === this._lastW && h === this._lastH`).
-    state.view3d._engine._resize();
-    state.view3d._engine.renderer.render(state.scene, state.camera);
+    // relatado.
+    //
+    // CORRIGIDO DE NOVO (08/09/2026), pedido verbatim (ITENS 5/6 da rodada
+    // de 11 itens): "ao redimensionar a tela, fica preto o cenário" / "o
+    // objeto não aparece (o cenário também fica congelado)" / "o cenário
+    // atrás fica todo congelado (como se [...] um 'screenshot' [...] fica
+    // sendo exibido 'atrás', imóvel)." CAUSA RAIZ (ver comentário GRANDE em
+    // `Engine3D._presentFrame`, engine3d.js, pra explicação completa):
+    // desde a arquitetura "MODO EYE" (07/09/2026), o `<canvas>` visível de
+    // `view3d.js` NÃO é mais um canvas WebGL de verdade — é um canvas 2D
+    // puro, e o resultado do render só chega nele através de
+    // `Engine3D._presentToCanvas()` (lê o WebGLRenderTarget próprio da
+    // instância de volta pra CPU e desenha com `drawImage`). Chamar
+    // `renderer.render()` DIRETO (como este trecho fazia até aqui) desenha
+    // no render target que estiver setado no renderer COMPARTILHADO
+    // (`Engine3D._sharedRenderer`, dividido entre Ver em 3D/miniatura do
+    // Mapa/prévia de Modelos3D) naquele instante — NUNCA no canvas visível
+    // de verdade, já que `_presentToCanvas()` nunca era chamado por este
+    // caminho. Resultado: o canvas ficava "congelado" no último quadro
+    // desenhado pelo `View3D._loop` normal (pausado durante o Modelador),
+    // e um `_resize()` (que reatribui `canvas.width/height`, LIMPANDO o
+    // bitmap) deixava tudo preto, sem nada pra redesenhar por cima — e o
+    // overlay 2D do Modelador (`ModelerRender.drawFrame`, logo abaixo, um
+    // canvas 2D TOTALMENTE SEPARADO por cima) continuava funcionando
+    // normalmente (Canvas2D puro, nunca dependeu do render quebrado),
+    // dando a falsa impressão de "funciona" só em Modo Edição (onde esse
+    // overlay desenha vértices/arestas/contorno) — em Modo Objeto (sem
+    // nada desse overlay) nada aparecia mesmo. CORRIGIDO chamando
+    // `_presentFrame()` (novo método em engine3d.js — o MESMO trecho
+    // "resize + desenha no render target + copia pro canvas visível" que
+    // `Engine3D.render(camera)` já usa no fluxo normal) em vez de
+    // `_resize()` + `renderer.render()` soltos — a câmera (`state.camera`
+    // === `state.view3d._engine.camera3`, MESMA referência, ver `enter()`
+    // acima) já foi posicionada por `_updateOrbitCamera`/
+    // `_updateFreeCamera` duas linhas acima, então `_presentFrame()` (que,
+    // ao contrário de `render(camera)`, NÃO mexe na pose da câmera —
+    // deliberado, ver comentário grande em engine3d.js) já renderiza a
+    // partir da pose certa deste quadro. HONESTIDADE (convenção já
+    // estabelecida neste projeto): correção por ANÁLISE ESTÁTICA de
+    // código, sem navegador real disponível nesta sessão pra confirmar
+    // visualmente — ainda precisa de confirmação ao vivo (abrir o
+    // Modelador, alternar Modo Objeto/Edição, redimensionar a divisão)
+    // antes de considerar o bug 100% fechado.
+    // [22/09/2026 — RODADA SEGUINTE] NOVO — o plano 3D do backdrop 'Trás'
+    // (`View3D._ensureFotoCamBackdropPlane`/`_updateFotoCamBackdropPlane`,
+    // restaurados nesta rodada) precisa ser reposicionado/redesenhado A
+    // CADA QUADRO enquanto 'Trás' estiver ativo — exatamente igual a
+    // `View3D._loop` (ver lá) — mas o `_loop` normal NÃO RODA enquanto o
+    // Modelador está aberto (retorno antecipado no topo dele, ver
+    // comentário lá) — SEM este bloco aqui, o plano ficaria "congelado" na
+    // pose de quando o Modelador foi aberto, mesmo bug já documentado (v442,
+    // ver CHANGELOG 11/09/2026) da arquitetura antiga deste mesmo plano.
+    // `state._camLockedFixedPose` é a MESMA pose calibrada travada usada
+    // pra tudo mais neste Modelador (câmera/gizmo) — equivalente ao
+    // `renderCam` de `View3D._loop`.
+    // [12/09/2026 — RODADA "mesma imagem"] `_updateFotoCamOverlayZoomScale()`
+    // substitui a antiga `_redrawFotoCamBackdropCanvas()` (canvas off-screen
+    // dedicado, ELIMINADO — ver comentário grande em
+    // `View3D._updateFotoCamOverlayZoomScale`/`_updateFotoCamBackdropPlane`,
+    // view3d.js) — roda incondicionalmente, nos 2 modos de profundidade,
+    // sempre que o Modelador está aberto travado numa câmera calibrada
+    // (senão o gizmo composto logo abaixo, em `gizmoVisivelAgora`, também
+    // chamaria de novo — mas rodar aqui garante que a foto/textura também
+    // fiquem em dia mesmo quando o gizmo não estiver visível).
+    if (state._camLockedFixedPose) {
+      state.view3d?._updateFotoCamOverlayZoomScale?.();
+    }
+    if (state._camLockedFixedPose && state.view3d?._getFotoCamBackdropConfig?.()?.depth === 'back') {
+      const imgElMdl = state.view3d._fotoCamImgEl;
+      if (imgElMdl && imgElMdl.naturalWidth) {
+        state.view3d._ensureFotoCamBackdropPlane();
+        state.view3d._updateFotoCamBackdropPlane(state._camLockedFixedPose);
+        if (state.view3d._fotoCamBackdropMesh) state.view3d._fotoCamBackdropMesh.visible = true;
+      }
+    } else {
+      // [12/09/2026] NOVO — mesmo motivo/comentário grande de
+      // `View3D._loop` (view3d.js): `clearFotoCamBackdropMask()` sempre
+      // que o modo 'back' não está ativo aqui dentro do Modelador também,
+      // senão a máscara da última pose travada ficaria "vazando" pro
+      // resto do render normal do Modelador.
+      if (state.view3d?._fotoCamBackdropMesh) state.view3d._fotoCamBackdropMesh.visible = false;
+      state.view3d?._engine?.clearFotoCamBackdropMask?.();
+    }
+    state.view3d._engine._presentFrame();
     ModelerRender.drawFrame(state);
+    // [19/09/2026] NOVO — pedido verbatim: "Se há como definir a ordem de
+    // impressão do gizmo do objeto selecionado no Modelador, quando se
+    // está no modo 'Ver através desta câmera', então, faça o gizmo do
+    // objeto selecionado ser impresso depois da imagem." + (correção
+    // seguinte, mesmo dia) "Utilize este método tanto para quando estiver
+    // marcado 'Trás' quanto quando estiver marcado o 'Frente'." Ver
+    // comentário grande em `ModelerGizmo.renderIsolatedToCanvas`
+    // (modeler-gizmo.js) e em `View3D._compositeGizmoOverlayOntoPhotoCanvas`
+    // (view3d.js) pra causa raiz/técnica completas. `state._camLockedFixedPose`
+    // só existe quando este Modelador foi aberto de DENTRO de "Ver através
+    // desta câmera" (ver `enter`, acima) — fora disso, nada aqui roda
+    // (custo zero no uso normal do Modelador).
+    // [19/09/2026] SIMPLIFICADO (à época) — o plano 3D do backdrop 'Trás'
+    // tinha sido removido em favor de desenhar a foto sempre no MESMO
+    // `<canvas>` 2D usado por 'Frente' (`#v3d-fotocam-photo-canvas`) — sem
+    // nenhum plano/textura dentro de `#v3d-canvas` pro modo 'Trás',
+    // `_compositeGizmoOverlayOntoMainCanvas` (que colava o gizmo ali)
+    // tinha deixado de fazer sentido e foi REMOVIDA.
+    // [22/09/2026 — RODADA SEGUINTE] O plano 3D do backdrop 'Trás' foi
+    // RESTAURADO (ver `View3D._ensureFotoCamBackdropPlane`/
+    // `_updateFotoCamBackdropPlane`) — AVALIADO explicitamente se
+    // `_compositeGizmoOverlayOntoMainCanvas` também precisaria voltar
+    // (pedido do usuário, item 5): CONCLUSÃO — NÃO, e por um motivo
+    // estrutural, não só "não deu tempo de testar": o `#v3d-fotocam-photo-
+    // canvas` (destino de `_compositeGizmoOverlayOntoPhotoCanvas`, abaixo)
+    // já é o MESMO elemento único compartilhado pelos 2 modos ('Trás'/
+    // 'Frente') desde a unificação de 16/09/2026 (é ele quem desenha o
+    // retângulo amarelo/guia em AMBOS os modos, com ou sem a foto sendo
+    // desenhada ali) — continua existindo e continua sendo o `<canvas>`
+    // DOM SEMPRE empilhado por CSS acima de `#v3d-canvas` (WebGL),
+    // independente de a foto em si viver no plano 3D (agora) ou no próprio
+    // canvas 2D (antes/'Frente'). Colar o gizmo isolado sobre ESTE canvas
+    // continua garantindo "por cima de tudo" nos 2 modos, sem precisar de
+    // um destino diferente pro plano — `_compositeGizmoOverlayOntoMainCanvas`
+    // só fazia sentido numa arquitetura ANTERIOR a essa unificação, onde o
+    // canvas de overlay possivelmente nem existia em 'Trás'. Mantida
+    // REMOVIDA — os 2 modos continuam colando o gizmo isolado SEMPRE sobre
+    // `#v3d-fotocam-photo-canvas` (`_compositeGizmoOverlayOntoPhotoCanvas`),
+    // redesenhando a foto/o retângulo do zero (`_updateFotoCamOverlayZoomScale`)
+    // ANTES de colar — senão o gizmo de quadros anteriores ficaria
+    // "acumulado" (esse canvas não se limpa sozinho entre quadros do
+    // Modelador). Quando o gizmo pára de estar visível (objeto desmarcado,
+    // ou saiu do Modo Objeto), uma ÚLTIMA chamada a
+    // `_updateFotoCamOverlayZoomScale()` limpa o "fantasma" do gizmo da
+    // última composição — nos 2 modos.
+    const camView = state.view3d;
+    const depth = camView?._getFotoCamBackdropConfig?.()?.depth;
+    const gizmoVisivelAgora = !!(
+      state._camLockedFixedPose
+      && (depth === 'front' || depth === 'back')
+      && ModelerGizmo._activeGizmoGroup(state)?.visible
+    );
+    if (gizmoVisivelAgora) {
+      camView._updateFotoCamOverlayZoomScale();
+      const overlay = ModelerGizmo.renderIsolatedToCanvas(state);
+      if (overlay) camView._compositeGizmoOverlayOntoPhotoCanvas(overlay);
+    } else if (state._camLockedGizmoOverlayWasVisible && camView?._updateFotoCamOverlayZoomScale) {
+      camView._updateFotoCamOverlayZoomScale();
+    }
+    state._camLockedGizmoOverlayWasVisible = gizmoVisivelAgora;
     Perf.markFrameEnd?.();
-    state.loopHandle = requestAnimationFrame(() => this._renderLoop(state));
   },
 };
 

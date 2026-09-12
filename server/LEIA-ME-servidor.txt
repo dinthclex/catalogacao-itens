@@ -16,12 +16,16 @@ Este "modo servidor" é OPCIONAL, útil para duas coisas:
      "sincroniza" entre os aparelhos.
 
      Configurável em Configurações → "Salvamento automático em arquivo":
-       - "Um arquivo por item": cria server/itens/<patrimonio>__<id>.json para
-         cada item (o ID único vai no nome para nunca sobrescrever nada,
-         mesmo se dois aparelhos catalogarem o mesmo patrimônio).
+       - "Um arquivo por item": cria
+         server/storage/text/itens/<patrimonio>__<id>.json para cada item
+         (o ID único vai no nome para nunca sobrescrever nada, mesmo se dois
+         aparelhos catalogarem o mesmo patrimônio).
        - "Um único arquivo com o catálogo completo": mantém
-         server/catalogo-unico.json sempre atualizado com todos os itens.
+         server/storage/text/catalogo-unico.json sempre atualizado com
+         todos os itens.
        - "Ambos": faz as duas coisas.
+       (Veja a seção "PASTA DE DADOS" mais abaixo — "storage/" pode ser
+       movida/renomeada pelas Configurações do app ou por config.json.)
 
   c) Sincronização entre VÁRIOS aparelhos ao mesmo tempo (PCs e celulares).
      Com o servidor configurado, cada aparelho pode catalogar simultaneamente:
@@ -29,8 +33,9 @@ Este "modo servidor" é OPCIONAL, útil para duas coisas:
      sobrescrito — mesmo cadastrando o MESMO número de patrimônio em dois
      aparelhos ao mesmo tempo, os dois catálogos ficam salvos e aparecem
      juntos na busca ("N catálogos recebidos para este patrimônio"). Cada
-     aparelho puxa periodicamente do servidor (server/catalogo-unico.json,
-     via a ação "listar") o que os outros cadastraram. Configurável em
+     aparelho puxa periodicamente do servidor
+     (server/storage/text/catalogo-unico.json, via a ação "listar") o que
+     os outros cadastraram. Configurável em
      Configurações → "🔗 Sincronização entre aparelhos" (apelido do aparelho,
      sincronizar automaticamente, ou "Sincronizar agora" manual).
 
@@ -85,8 +90,9 @@ OBSERVAÇÕES IMPORTANTES:
   email de fato. Em hospedagens compartilhadas costuma funcionar; num XAMPP
   local do zero, pode ser necessário configurar um relay SMTP (ex: com o
   pacote PHPMailer) — o arquivo receive.php já indica onde adaptar isso.
-- Uma cópia de cada envio recebido fica salva em server/recebidos/ (criada
-  automaticamente) — é seu backup mesmo se o email falhar.
+- Uma cópia de cada envio recebido fica salva em server/storage/text/
+  recebidos/ (criada automaticamente) — é seu backup mesmo se o email
+  falhar.
 
 IMPORTAR OBJETOS 3D (.obj) — rodada 51:
 - Se o app estiver rodando por este servidor (não por file:///), ele busca
@@ -108,30 +114,72 @@ IMPORTAR OBJETOS 3D (.obj) — rodada 51:
   casos, os objetos importados ficam só na memória RAM da aba aberta —
   precisam ser importados de novo a cada vez que a página é recarregada.
 
-PASTA DE DADOS — onde os arquivos ficam salvos (NOVO, 03/09/2026):
+PASTA DE DADOS — onde os arquivos ficam salvos (ATUALIZADO, 07/09/2026):
 - Enquanto o servidor (receive.js ou receive.php) estiver rodando, TUDO que
-  ele grava (itens/, catalogo-unico.json, preferencias-usuario.json,
-  backup-completo.json, recebidos/) fica dentro de uma pasta de DADOS
-  dedicada — por padrão "dados/", criada automaticamente ao lado do
-  receive.js/receive.php, na primeira vez que algo é salvo.
+  ele grava fica dentro de uma pasta de DADOS dedicada — por padrão
+  "storage/", criada automaticamente ao lado do receive.js/receive.php, na
+  primeira vez que algo é salvo. Dentro dela, cada arquivo é organizado por
+  TIPO, em 5 subpastas:
+    storage/
+    ├── 3d/      (reservada — nenhum recurso do app grava .obj/.gltf/.stl
+    │             direto em arquivo ainda; modelos 3D continuam embutidos
+    │             dentro dos JSONs)
+    ├── images/  (reservada — mesma situação, fotos continuam embutidas
+    │             como base64 dentro dos JSONs)
+    ├── text/    catalogo-unico.json, catalogo-simples.txt,
+    │             backup-completo.json, itens/, recebidos/
+    ├── raw/     catalogo-completo.csv
+    └── app/     preferencias-usuario.json (configurações/opções de menu)
+- O arquivo "config.json" (que diz ONDE fica a pasta "storage/", entre
+  outras coisas) continua FORA dela, na mesma pasta do receive.js/
+  receive.php — ele é quem aponta pra "storage/", então não pode morar
+  dentro dela.
+- Se você já tinha um servidor rodando com a pasta antiga "dados/" (de
+  antes desta atualização): na primeira vez que o servidor atualizado
+  receber qualquer chamada, ele migra tudo sozinho pra "storage/",
+  reorganizado nas subpastas acima — não é preciso mover nada manualmente,
+  e nada é apagado (a pasta "dados/" antiga simplesmente passa a se chamar
+  "storage/", com os arquivos internos reorganizados).
 - Isso é ALÉM do IndexedDB do navegador, que continua sendo usado sempre,
   com ou sem servidor — o servidor é uma cópia extra, "independente do
   navegador" (sobrevive a limpar os dados do navegador, trocar de aparelho
   etc.).
 - Pra mudar essa pasta (pode ser em qualquer outro lugar do computador),
   duas formas, à sua escolha:
-    a) Pelo próprio app: Configurações → "🖥️ Servidor local" → campo "Pasta
-       onde o servidor guarda os arquivos" → "💾 Salvar pasta". Aceita um
-       caminho relativo (à pasta do servidor) ou absoluto (ex:
-       D:\Backups\catalogacao).
+    a) Pelo próprio app: Configurações → "💾 Armazenamento no servidor" →
+       campo "Pasta onde o servidor guarda os arquivos" → "💾 Salvar pasta".
+       Aceita um caminho relativo (à pasta do servidor) ou absoluto (ex:
+       D:\Backups\catalogacao). As mesmas 5 subpastas por tipo são criadas
+       dentro do caminho escolhido.
     b) Manualmente: crie/edite um arquivo "config.json" na mesma pasta do
        receive.js/receive.php, com o conteúdo: {"pastaDados": "caminho aqui"}
-- Dentro do app, Configurações → "🖥️ Servidor local" mostra, em tempo real,
-  qual é a pasta atual e quando foi o último salvamento de preferências/
-  backup completo (com ✅/⏳ ao lado) — é como fica "claro visualmente" que
-  o salvamento em arquivo está funcionando.
-- Backup completo automático: a cada ~5 minutos (com servidor configurado),
-  o app envia um espelho de TUDO (patrimônios, mapas, fotos, configurações —
-  o mesmo conteúdo do botão "⬇️ Exportar backup") pro servidor guardar em
-  backup-completo.json, dentro da pasta de dados. O botão
-  "⬇️ Restaurar tudo do servidor" (mesma seção) busca esse arquivo de volta.
+- Dentro do app, Configurações → "💾 Armazenamento no servidor" mostra, em
+  tempo real, qual é a pasta atual e quando foi o último salvamento de
+  preferências/backup completo (com ✅/⏳ ao lado) — é como fica "claro
+  visualmente" que o salvamento em arquivo está funcionando.
+- Backup completo automático (ATUALIZADO, 07/09/2026): com servidor
+  configurado, um espelho de TUDO (patrimônios, mapas, fotos,
+  configurações — o mesmo conteúdo do botão "⬇️ Exportar backup") é enviado
+  pro servidor guardar em storage/text/backup-completo.json alguns segundos
+  depois de QUALQUER gravação no app (não mais só a cada 5 minutos) — pedido
+  do usuário de "guardar tudo no servidor" quando ele estiver rodando. O
+  botão "⬇️ Restaurar tudo a partir do servidor" (Configurações → 💾
+  Armazenamento no servidor) busca esse arquivo de
+  volta.
+- Dentro de Configurações → "💾 Armazenamento no servidor", uma seção "📁
+  Estrutura de arquivos no servidor" mostra a árvore de pastas/arquivos de
+  verdade (clique numa pasta abre/fecha), e avisa se algum item do
+  IndexedDB deste aparelho ainda não chegou no servidor — com um botão "📤
+  Gravar tudo no servidor" pra enviar o que estiver faltando.
+- ATUALIZADO (07/09/2026): se o app for aberto por um endereço http(s)://
+  (em vez de file:///) e já existir um receive.php/receive.js respondendo,
+  o campo "URL do servidor" (Configurações → "🖥️ Servidor local") é
+  preenchido sozinho, sem precisar digitar nada. A detecção tenta, nesta
+  ordem: 1) "server/receive.php" (o layout ENTREGUE deste projeto — ex.:
+  rodar "php -S 127.0.0.1:8000" direto na pasta raiz do projeto, sem copiar
+  nada; o app abre por http://127.0.0.1:8000/ e o servidor é encontrado em
+  http://127.0.0.1:8000/server/receive.php automaticamente); 2)
+  "receive.php" na MESMA pasta do index.html (layout do passo a passo XAMPP
+  acima, onde receive.php é copiado pra fora da pasta "server/"). Continua
+  editável normalmente para apontar pra outro endereço (ex.: servidor
+  rodando em outro aparelho da rede).

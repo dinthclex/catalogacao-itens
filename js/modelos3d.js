@@ -56,8 +56,18 @@ const Modelos3DView = {
   // fakeView3d?, orbitCtl? }.
   _sessao: null,
 
-  async mount(container) {
+  // NOVO (08/09/2026), pedido verbatim: "No 'Mapa 2D', como o 'Acessar
+  // modelos' pertence a tela 'Mapa 2D', então, fica dentro dela [...]" —
+  // `opts.onClose` permite quem montou (js/mapview.js, _openAcessarModelos)
+  // decidir o que "✕ Fechar" faz, em vez do padrão fixo App.closeModelos3D()
+  // (que sempre navega de volta pra rota 'mapa' — errado quando Modelos3D
+  // foi montado CONFINADO dentro do próprio Mapa 2D, sem trocar de rota).
+  // 100% compatível: nenhum outro chamador (App.navigate, js/app.js) passa
+  // um 2º argumento, então `this._onCloseOverride` fica `null` e o botão
+  // continua chamando App.closeModelos3D() exatamente como antes.
+  async mount(container, opts = {}) {
     this._container = container;
+    this._onCloseOverride = opts?.onClose || null;
     await this.ensureCustomTypesRegistered();
     await this._render();
   },
@@ -396,6 +406,7 @@ const Modelos3DView = {
   unmount() {
     this._encerrarSessao().catch(() => {});
     this._container = null;
+    this._onCloseOverride = null;
   },
 
   _label(tipo) {
@@ -412,6 +423,9 @@ const Modelos3DView = {
     const porTipo = {};
     modelos.forEach((m) => { (porTipo[m.tipo] || (porTipo[m.tipo] = {}))[m.nivel] = true; });
     const tipos = Object.keys(window.OBJECT3D_PROFILES || {}).sort((a, b) => this._label(a).localeCompare(this._label(b), 'pt-BR'));
+    // NOVO (07/09/2026) — ver comentário grande no botão "📥 Importar .obj"
+    // logo abaixo (HTML do toolbar).
+    const importados = window.ObjImport?.listImported?.() || [];
 
     container.innerHTML = `
       <div class="view-pad">
@@ -423,10 +437,41 @@ const Modelos3DView = {
         </p>
         <div class="modelos3d-toolbar">
           <button type="button" class="btn primary sm" id="m3dv-novo-modelo" title="Criar um modelo 3D novo do zero, com nome escolhido por você">➕ Criar novo modelo</button>
+          <!-- NOVO (07/09/2026), pedido verbatim: "poder carregar modelos 3D
+               externos [...] Os objetos carregados devem poder ser
+               acessados pela ferramenta 'Objetos' no 2D e no 3D. No 2D,
+               pela ferramenta 'Objetos', no botão 'Acessar modelos' deve
+               ser possível visualizar os objetos carregados e, também,
+               definir um ícone 2D para cada objeto." — mesmo parser/
+               mecanismo de importação já existente (js/objimport.js,
+               rodada 51 — .obj em memória, some com F5), só que agora
+               também acessível DAQUI (antes só existia dentro do painel de
+               objetos do "Ver em 3D"), pra caber no pedido de "no 2D E no
+               3D". Lista/ícone dos importados aparecem na seção
+               "📥 Objetos importados (.obj)" logo abaixo da lista de tipos
+               padrão — ver _render (bloco importados). -->
+          <label class="btn secondary sm modelos3d-import-btn" title="Escolher um ou mais arquivos .obj do seu aparelho — fica disponível na ferramenta Objetos (2D e 3D) até a página recarregar">
+            📥 Importar .obj<input type="file" accept=".obj" multiple id="m3dv-obj-input" style="display:none">
+          </label>
         </div>
         <div class="modelos3d-list" id="m3dv-list">
           ${tipos.map((tipo) => this._rowHtml(tipo, porTipo[tipo] || {})).join('')}
         </div>
+        ${importados.length ? `
+          <h3 style="margin-top:18px">📥 Objetos importados (.obj)</h3>
+          <p class="modelos3d-intro">Carregados nesta sessão a partir de arquivos .obj — ficam só na memória do navegador (somem se a página recarregar). Aqui dá pra definir a representação 2D (ícone) de cada um; o modelo 3D em si é o do próprio arquivo carregado, sem edição de vértices/low poly.</p>
+          <div class="modelos3d-list" id="m3dv-list-importados">
+            ${importados.map((i) => `
+              <div class="modelos3d-row">
+                <div class="modelos3d-row-head">
+                  <span class="ic">${this._svg(i.key)}</span><span class="t">${Utils.escapeHtml(i.label)}</span>
+                  <span class="modelos3d-row-head-actions">
+                    <button type="button" class="btn secondary sm m3dv-2d-import" data-tipo="${Utils.escapeHtml(i.key)}" title="Editar a representação 2D (ícone SVG) deste objeto importado, usado na planta baixa">🎨 Representação 2D</button>
+                  </span>
+                </div>
+              </div>`).join('')}
+          </div>
+        ` : ''}
       </div>
     `;
     // CORRIGIDO (03/09/2026) — pedido do usuário: "ao clicar em 'Fechar'
@@ -434,10 +479,22 @@ const Modelos3DView = {
     // voltar a tela do 'Mapa'." `App.back('mapa')` sempre reiniciava a tela
     // do Mapa na tela de ENTRADA — ver App.closeModelos3D (app.js) pra
     // causa raiz completa/correção (mesmo padrão de App.closeView3D).
-    container.querySelector('#m3dv-close').onclick = () => App.closeModelos3D();
+    container.querySelector('#m3dv-close').onclick = () => (this._onCloseOverride ? this._onCloseOverride() : App.closeModelos3D());
     // NOVO (02/09/2026) — botão "criar novo modelo" (item 3 do pedido),
     // ver bloco grande de comentário acima de `_criarNovoModelo`.
     container.querySelector('#m3dv-novo-modelo').onclick = () => this._criarNovoModelo();
+    // NOVO (07/09/2026) — ver comentário grande no HTML do botão acima.
+    const objInput = container.querySelector('#m3dv-obj-input');
+    if (objInput) {
+      objInput.onchange = async () => {
+        const n = await window.ObjImport?.importFiles?.(objInput.files);
+        if (n > 0) Utils.toast?.(`${n} objeto(s) .obj importado(s) ✓ — já disponível na ferramenta Objetos.`, { type: 'ok' });
+        await this._render(); // reconstrói já com a nova seção "Objetos importados"
+      };
+    }
+    container.querySelectorAll('.m3dv-2d-import').forEach((btn) => {
+      btn.onclick = () => this._abrirEditor2D(btn.dataset.tipo);
+    });
     tipos.forEach((tipo) => {
       // NOVO (02/09/2026) — "trocar o nome do modelo" (item 4, só pros
       // tipos CUSTOMIZADOS — ver comentário em `_renomearCustom`) e
@@ -587,7 +644,15 @@ const Modelos3DView = {
     // `MapConfig.get()` antes de criar o Engine3D). Corrigido lendo a MESMA
     // config real aqui.
     const cfgReal = (typeof MapConfig !== 'undefined') ? await MapConfig.get() : {};
-    const engine = new Engine3D(canvas, cfgReal);
+    // NOVO (07/09/2026), pedido verbatim: "tanto o 'Ver em 3D' quanto a
+    // miniatura e, também, qualquer outro retângulo que possa ser colocado
+    // um 'olho' para ver a cena" — este preview/editor de molde é o
+    // 3º "olho" do app (ver engine3d.js, comentário grande "MODO EYE"),
+    // reaproveitando o MESMO contexto WebGL único de tudo o mais, em vez de
+    // criar o SEU PRÓPRIO (era exatamente esse padrão, repetido em 3
+    // lugares diferentes do app, que causava o "Cannot read properties of
+    // null (reading precision)" na miniatura quando 2 desses coexistiam).
+    const engine = new Engine3D(canvas, cfgReal, { eye: true });
     await engine._loadPromise; // ver comentário grande no topo do arquivo — garante this._ready antes de setScene
     engine.setScene(mapaFalso);
 
@@ -654,7 +719,29 @@ const Modelos3DView = {
     ctx.overlay.appendChild(barra);
     barra.querySelector('#m3dv-editor-sair').onclick = () => this._sairEditor();
 
-    Modeler3D.enter(fakeView3d, ctx.obj);
+    // NOVO (07/09/2026), pedido verbatim: "inquebrável, tudo com estrutura
+    // try{}catch(){} [...]" — `this._sessao` (linha acima) já foi definida
+    // ANTES de `Modeler3D.enter` rodar (precisa existir pra `_sairEditor`/
+    // `_persistirMolde` funcionarem) — sem proteção própria aqui, uma falha
+    // dentro de `enter` deixava `this._sessao` "meio pronta" (aponta pra um
+    // Modelador que nunca terminou de entrar) e a barra flutuante "✅ Salvar
+    // e sair" já no DOM, sem editor nenhum funcionando por trás — um estado
+    // travado, sem aviso. Corrigido: desfaz tudo que já foi montado (barra +
+    // overlay/cena, via `_montarCenaMolde`/`ctx.engine.dispose()`) e limpa
+    // `this._sessao`, deixando a lista de tipos/níveis como se o clique em
+    // "editar" nunca tivesse acontecido — igual ao caminho de erro já
+    // existente logo acima, quando é `_montarCenaMolde` que falha.
+    try {
+      Modeler3D.enter(fakeView3d, ctx.obj);
+    } catch (err) {
+      barra.remove();
+      try { ctx.engine.dispose(); } catch (_e) { /* já em falha — melhor esforço, não pode lançar de novo aqui */ }
+      ctx.overlay.remove();
+      this._sessao = null;
+      if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError(`Editor de molde — ${this._label(tipo)}`, err);
+      else console.error('Falha ao entrar no Modelador (editor de molde):', err);
+      return;
+    }
     // Snapshot do PONTO DE PARTIDA — só depois de `enter` (que já garantiu
     // `ctx.obj.customMesh` preenchido, cubo padrão ou molde existente, ver
     // `hadExisting` acima) — comparado em `_persistirMolde` pra decidir se

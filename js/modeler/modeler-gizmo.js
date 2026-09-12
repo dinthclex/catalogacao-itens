@@ -238,6 +238,91 @@ const ModelerGizmo = {
     return state.gizmoMode === 'move' ? state.gizmoMove : state.gizmoMode === 'rotate' ? state.gizmoRotate : state.gizmoScale;
   },
 
+  /** [19/09/2026] NOVO — pedido verbatim: "Se há como definir a ordem de
+   *  impressão do gizmo do objeto selecionado no Modelador, quando se está
+   *  no modo 'Ver através desta câmera', então, faça o gizmo do objeto
+   *  selecionado ser impresso depois da imagem." O gizmo já tem uma "ordem
+   *  de impressão" (`renderOrder:100` + `depthTest:false`, ver `build`
+   *  acima) — mas essa ordem só vale DENTRO do próprio `<canvas>` WebGL
+   *  (contra outros objetos 3D da MESMA cena, como o plano de fundo do
+   *  modo 'Trás', `renderOrder:-1000`, que já fica atrás do gizmo por essa
+   *  MESMA conta, sem precisar de nada novo). No modo 'Frente', porém, a
+   *  foto é um `<canvas id="v3d-fotocam-photo-canvas">` DOM separado,
+   *  posicionado por CIMA do `<canvas>` WebGL INTEIRO via z-index (CSS,
+   *  `.v3d-fotocam-overlay`) — nenhum `renderOrder` de dentro da cena 3D
+   *  pode fazer um objeto WebGL (como o gizmo) aparecer por cima de um
+   *  elemento DOM que já está inteiro por CIMA do canvas WebGL na
+   *  composição da página. A única forma real de "definir essa ordem" é
+   *  colar os PIXELS do gizmo em cima da foto, no MESMO canvas 2D da foto
+   *  — exatamente o que esta função faz. REAPROVEITA a MESMA técnica de
+   *  isolamento de `pickPixelPerfect` (abaixo: esconde TUDO da cena exceto
+   *  o gizmo ativo, restaura tudo depois), mas com os MATERIAIS/CORES REAIS
+   *  do gizmo (não as cores sólidas de picking) e fundo TRANSPARENTE
+   *  (`scene.background=null` + `clearAlpha=0`), renderizado num
+   *  `THREE.WebGLRenderTarget` PRÓPRIO (`state._gizmoOverlayRT`, nunca o
+   *  mesmo `pickRT` — evita qualquer conflito com um picking em andamento).
+   *  Devolve um `<canvas>` 2D já "direito" (não invertido), pronto pra
+   *  `ctx.drawImage`: a leitura de volta pra CPU
+   *  (`renderer.readRenderTargetPixels`) devolve as linhas de BAIXO pra
+   *  CIMA (convenção do WebGL) — corrigido com a MESMA técnica de
+   *  `Engine3D._presentToCanvas` (engine3d.js): `putImageData` os pixels
+   *  crus num canvas auxiliar, depois `drawImage` desse auxiliar pro
+   *  canvas final com `setTransform(1,0,0,-1,0,h)` (espelha o eixo Y). Quem
+   *  chama esta função (`Modeler3D._renderFrame`) decide QUANDO chamá-la
+   *  (só quando `state._camLockedFixedPose` — este Modelador foi aberto
+   *  de dentro de "Ver através desta câmera" — E o modo de profundidade
+   *  ativo é 'Frente') — nenhum custo extra nos outros casos. */
+  renderIsolatedToCanvas(state) {
+    const active = this._activeGizmoGroup(state);
+    if (!active || !active.visible) return null;
+    const THREE = state.THREE;
+    const renderer = state.view3d._engine.renderer;
+    const rect = state.canvas.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return null;
+    const dpr = renderer.getPixelRatio();
+    const w = Math.max(1, Math.round(rect.width * dpr)), h = Math.max(1, Math.round(rect.height * dpr));
+    if (!state._gizmoOverlayRT || state._gizmoOverlayRT.width !== w || state._gizmoOverlayRT.height !== h) {
+      state._gizmoOverlayRT?.dispose();
+      state._gizmoOverlayRT = new THREE.WebGLRenderTarget(w, h);
+      state._gizmoOverlayBuf = new Uint8Array(w * h * 4);
+      state._gizmoOverlayRawCanvas = document.createElement('canvas');
+      state._gizmoOverlayRawCanvas.width = w; state._gizmoOverlayRawCanvas.height = h;
+      state._gizmoOverlayRawCtx = state._gizmoOverlayRawCanvas.getContext('2d');
+      state._gizmoOverlayCanvas = document.createElement('canvas');
+      state._gizmoOverlayCanvas.width = w; state._gizmoOverlayCanvas.height = h;
+      state._gizmoOverlayCtx = state._gizmoOverlayCanvas.getContext('2d');
+    }
+    // Esconde TUDO da cena, exceto o gizmo ativo (MESMA técnica de
+    // `pickPixelPerfect`, ver abaixo) — mas SEM trocar materiais (queremos
+    // as cores/transparência REAIS do gizmo aqui, não cores sólidas de
+    // picking).
+    const savedVisible = [];
+    state.scene.children.forEach((child) => { savedVisible.push([child, child.visible]); if (child !== active) child.visible = false; });
+    const savedBg = state.scene.background;
+    state.scene.background = null;
+    const savedClearAlpha = renderer.getClearAlpha();
+    renderer.setClearAlpha(0);
+    renderer.setRenderTarget(state._gizmoOverlayRT);
+    renderer.clear(true, true, true);
+    renderer.render(state.scene, state.camera);
+    renderer.setRenderTarget(null);
+    renderer.setClearAlpha(savedClearAlpha);
+    savedVisible.forEach(([child, vis]) => { child.visible = vis; });
+    state.scene.background = savedBg;
+
+    renderer.readRenderTargetPixels(state._gizmoOverlayRT, 0, 0, w, h, state._gizmoOverlayBuf);
+    const imgData = new ImageData(new Uint8ClampedArray(state._gizmoOverlayBuf.buffer, state._gizmoOverlayBuf.byteOffset, state._gizmoOverlayBuf.length), w, h);
+    state._gizmoOverlayRawCtx.putImageData(imgData, 0, 0);
+    const ctx = state._gizmoOverlayCtx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.setTransform(1, 0, 0, -1, 0, h);
+    ctx.drawImage(state._gizmoOverlayRawCanvas, 0, 0);
+    ctx.restore();
+    return { canvas: state._gizmoOverlayCanvas, w, h, engineRect: rect };
+  },
+
   /** GPU picking pixel-perfect (ver cabeçalho do arquivo) — devolve 'x'/'y'/
    *  'z' ou null (nenhum handle sob o cursor). `clientX/clientY`: coordenadas
    *  de tela (as mesmas de um MouseEvent). */
@@ -354,6 +439,18 @@ const ModelerGizmo = {
     }
     state.pickRT?.dispose();
     state.pickRT = null;
+    // [19/09/2026] NOVO — limpa o render target usado por
+    // `renderIsolatedToCanvas` (gizmo por cima da foto em "Ver através
+    // desta câmera", modo 'Frente'); os canvases auxiliares
+    // (`_gizmoOverlayRawCanvas`/`_gizmoOverlayCanvas`) não precisam de
+    // `.dispose()` (não são recursos WebGL), só perdem a referência.
+    state._gizmoOverlayRT?.dispose();
+    state._gizmoOverlayRT = null;
+    state._gizmoOverlayBuf = null;
+    state._gizmoOverlayRawCanvas = null;
+    state._gizmoOverlayRawCtx = null;
+    state._gizmoOverlayCanvas = null;
+    state._gizmoOverlayCtx = null;
   },
 };
 

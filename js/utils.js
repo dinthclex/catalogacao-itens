@@ -913,24 +913,33 @@ Utils.attachAutocomplete = function attachAutocomplete(input, listProvider, onSe
   return { refresh: async () => { await loadItems(); render(input.value); } };
 };
 
-// Contador compartilhado (fecha sobre este módulo) usado por bringToFront —
-// permite que painéis "flutuantes" de módulos DIFERENTES (mapview.js:
-// Ferramentas/Camadas; history.js: Histórico) disputem o mesmo espaço de
-// z-index e o último "selecionado" (aberto/reaberto/arrastado) sempre fique
-// na frente dos outros dois, não importa em que ordem foram usados. Começa
-// acima de qualquer z-index estático já usado por esses 3 painéis (o maior
-// hoje é o do Histórico, 960) e abaixo de modais/telas cheias (900-2100).
-let _frontZCounter = 961;
 /** Traz `el` pra frente de qualquer outro elemento que também já tenha
- *  passado por aqui (ver comentário acima) — usado pelos painéis
- *  Ferramentas/Histórico/Camadas do Mapa (pedido do usuário: "o último
- *  selecionado deve ficar mais à frente que os outros, inclusive no
- *  reaparecer"). Não faz nada se `el` for nulo (painel ainda não montado). */
+ *  passado por aqui — usado pelos painéis Ferramentas/Histórico/Camadas/
+ *  propriedades de objeto do Mapa (pedido do usuário, rodada antiga: "o
+ *  último selecionado deve ficar mais à frente que os outros, inclusive no
+ *  reaparecer"). Não faz nada se `el` for nulo (painel ainda não montado).
+ *  ATUALIZADO (07/09/2026), "posicionamento das janelas no app" — pedido
+ *  verbatim: "Faça uma função de gerenciamento de janelas para todo o
+ *  app... Para evitar ficar só aumentando cada vez mais os números de
+ *  z-index a cada 'subida' para o foco, deve haver um valor padrão mais
+ *  alto distante de z-index [...] conferido toda vez [...] Se não estiver,
+ *  então, é aumentado." Antes, esta função tinha um contador PRÓPRIO
+ *  (`_frontZCounter`) que só crescia +1 a cada chamada, pra sempre — sem
+ *  nenhuma checagem, exatamente o padrão que o pedido quer evitar. Virou um
+ *  wrapper fino sobre `js/windowmanager.js` (`WindowManager.focus`, que
+ *  implementa o algoritmo pedido de verdade) — MESMA assinatura/contrato de
+ *  sempre (recebe o elemento, devolve o novo z-index aplicado), nenhum dos
+ *  ~10 lugares que já chamavam `Utils.bringToFront(el)` precisou mudar.
+ *  Fallback pro comportamento antigo só no caso (não esperado em produção,
+ *  windowmanager.js está sempre carregado) de `WindowManager` não existir
+ *  ainda por algum motivo. */
+let _frontZCounterFallback = 961;
 Utils.bringToFront = function bringToFront(el) {
   if (!el) return;
-  _frontZCounter += 1;
-  el.style.zIndex = String(_frontZCounter);
-  return _frontZCounter;
+  if (typeof window.WindowManager !== 'undefined') return window.WindowManager.focus(el);
+  _frontZCounterFallback += 1;
+  el.style.zIndex = String(_frontZCounterFallback);
+  return _frontZCounterFallback;
 };
 
 window.Utils = Utils;

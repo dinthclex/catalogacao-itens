@@ -13,7 +13,59 @@
  * continuam aceitos por `open()` (quem chama — mapview.js/view3d.js — ainda
  * os passa) mas não são mais usados aqui dentro; deixados de propósito
  * caso a lista volte no futuro.
+ *
+ * ---------------------------------------------------------------------
+ * [11/09/2026] CABEÇALHO COM ÍNDICE DE FUNÇÕES (pedido recorrente do
+ * usuário, "evitar buscas exaustivas") — `MapConfig` é um objeto único
+ * (`const MapConfig = {...}`), sem classes. Listado na ordem em que
+ * aparece no arquivo.
+ *
+ * Dados/config (não são função, mas fazem parte da API do objeto):
+ * - DEFAULTS — valores de fábrica de toda config 2D/3D persistida (chave
+ *   por chave, cada uma comentada no próprio objeto).
+ * - NAV_TOOLS / NAV_HEADER_BUTTONS — listas usadas pela seção "Modo
+ *   Navegação assistida" do painel.
+ * - RENDER_DISTANCE_PRESETS/_MIN, FPS_LIMITE_PRESETS/_MIN,
+ *   PAREDE_SNAP_GRADE_MIN/_MAX — presets/limites usados pelos controles
+ *   de desempenho 3D e snap de parede no próprio `open()`.
+ * - _WALL_JOIN_TYPES — tipos de junção de parede (ícones SVG), usados por
+ *   `_juncaoIconSvg`.
+ * - _cache/_listeners — estado interno: cache em memória da config lida
+ *   do DB e a lista de callbacks de `onChange`.
+ *
+ * Funções/métodos:
+ * - get() — lê a config persistida (DB.getSetting), mescla com DEFAULTS e
+ *   guarda em `_cache`; usada por praticamente toda tela do app pra saber
+ *   preferências 2D/3D atuais.
+ * - set(patch) — mescla `patch` na config, persiste (DB.setSetting) e
+ *   notifica `_listeners`.
+ * - onChange(fn) / offChange(fn) — assina/cancela um callback chamado a
+ *   cada `set()` (mapview.js/view3d.js reagem a mudanças de config sem
+ *   precisar reabrir o painel).
+ * - _formatHora(h) — formata um valor de hora (usado nos campos de
+ *   horário de funcionamento/relatórios, se aplicável nesta seção).
+ * - _juncaoIconSvg(tipo) — devolve o SVG do ícone de um tipo de junção de
+ *   parede (`_WALL_JOIN_TYPES`), usado nos botões de escolha de junção.
+ * - _flagsLegendHtml() — monta o HTML da legenda das 2 flags de
+ *   patrimônio associado (duplicidade/associação), mostrada no painel.
+ * - open(map, opts) — MÉTODO PRINCIPAL, monta e abre o painel de
+ *   configurações inteiro (2D+3D, todas as seções/abas) — a grande
+ *   maioria do arquivo (linhas ~900-2319) vive dentro desta função
+ *   (handlers de cada controle, inline).
+ * - _wireMapRotationSnapBtn(btn) — liga o botão de snap de rotação do
+ *   mapa a um mini-diálogo de valor (usa `_openMapRotationSnapDialog`).
+ * - _openMapRotationSnapDialog(valorInicial, commitValor) — abre um
+ *   diálogo pequeno pra digitar o valor de snap de rotação do mapa (2D).
+ * ---------------------------------------------------------------------
  */
+
+// ⚠️ RESSALVA GLOBAL DO PROJETO (07/09/2026) — ver o comentário completo no
+// topo de js/mapview.js: NUNCA usar crase (`) dentro de um comentário HTML
+// (<!-- ... -->) que fica dentro de um template literal de innerHTML (é
+// exatamente o caso deste arquivo inteiro, que só monta HTML assim) — use
+// aspas simples (') pra citar seletor/nome de função. Crase solta ali fecha
+// o template literal sem avisar e vira um ReferenceError em runtime,
+// invisível pro node --check.
 
 const MapConfig = {
   DEFAULTS: {
@@ -61,6 +113,55 @@ const MapConfig = {
     // menos GPU, e é o visual "cru" que o Blender também usa no viewport por
     // padrão); só pega efeito reabrindo o 3D (ver engine3d.js _initThree).
     antialiasing3D: false,
+    // NOVO (07/09/2026), pedido verbatim do usuário: "Coloque nas
+    // 'configurações 3D', em uma seção de 'Efeitos de tela' este efeito de
+    // escurecimento, quando está sem o 'colorSpace: THREE.SRGBColorSpace'
+    // como opção nesta seção." — contexto: a v398 (integração da
+    // arquitetura WebGLRenderTarget) introduziu sem querer um escurecimento
+    // geral da cena (bug de espaço de cor — render targets não aplicam a
+    // conversão linear->sRGB sozinhos, ao contrário do canvas de tela),
+    // corrigido na v399 forçando `colorSpace: THREE.SRGBColorSpace` na
+    // textura do render target de cada "olho" (ver engine3d.js
+    // `_initThree`). Em vez de só corrigir e esquecer, o usuário pediu pra
+    // expor esse efeito como uma OPÇÃO visual em "Efeitos de tela" — quem
+    // quiser o visual mais escuro/dramático (sem a correção de cor) pode
+    // ligar de propósito. `false` (padrão) = com a correção sRGB, visual
+    // claro/correto de sempre; `true` = SEM a correção (efeito
+    // "escurecido"). Ver engine3d.js `_initThree`/`setConfig`
+    // (`_colorSpaceEfeito`/`_applyColorSpaceEfeito`) pra como isto é
+    // aplicado na textura do render target de cada "olho".
+    // BUG CORRIGIDO (07/09/2026), rodada seguinte, pedido verbatim: "Está
+    // sendo necessário sair e entra no 'Ver em 3D' para que seja aplicado.
+    // Não precisou recarregar a página, só sair e entrar no 'Ver em 3D'
+    // mesmo. Se não for possível aplicar direto, coloque uma informação
+    // dizendo 'saia da tela do 3D e entre novamente para aplicar o
+    // efeito'." — `setConfig()`/`_applyColorSpaceEfeito()` (engine3d.js) já
+    // trocam `this.renderTarget.texture.colorSpace` na hora, mas isso
+    // sozinho NÃO bastou na prática (relato confirmado do usuário) — o
+    // Three.js aparentemente reaproveita o PROGRAM (shader já compilado) de
+    // cada material entre quadros, sem perceber que o `colorSpace` do
+    // render target mudou, então a conversão de cor só é recalculada de
+    // verdade quando os materiais da cena são reconstruídos do zero (o que
+    // acontece ao sair/entrar no "Ver em 3D" — `dispose()`+`new Engine3D`
+    // de novo). Sem conseguir testar num navegador de verdade nesta sessão
+    // (sem Playwright, restrição do projeto) pra confirmar/corrigir a causa
+    // exata dentro do Three.js com segurança, a opção continua tentando
+    // aplicar ao vivo (não faz mal, e pode ajudar em algum cenário futuro),
+    // mas o rótulo abaixo agora avisa da limitação conhecida — ver
+    // `mc-efeito-tela-escurecida3d` mais abaixo.
+    efeitoTelaEscurecida3D: false,
+    // NOVO (07/09/2026), pedido verbatim: "carregar materiais e definir luz
+    // ambiente [...]" — parte que tinha ficado de fora da rodada anterior
+    // (materiais/texturas por OBJETO foram implementados; isto aqui é
+    // iluminação AMBIENTE da CENA inteira, ver engine3d.js `_updateSky`,
+    // que já calculava a intensidade da `THREE.AmbientLight` sozinha a
+    // partir da hora do dia — `luzAmbienteIntensidade` é um MULTIPLICADOR
+    // em cima desse valor calculado (1 = sem mudança, o comportamento de
+    // sempre), não um valor absoluto, pra não brigar com o ciclo dia/noite
+    // já existente; `luzAmbienteCor` tinge essa luz (branca por padrão,
+    // igual sempre foi).
+    luzAmbienteIntensidade: 1,
+    luzAmbienteCor: '#ffffff',
     // Metros até a neblina esconder tudo — sempre um NÚMERO livre (não uma
     // chave fixa); o `<select>` só oferece atalhos pros valores mais comuns
     // (20/42/80/150) + "Personalizada…", que revela um campo numérico (ver
@@ -145,8 +246,32 @@ const MapConfig = {
     //    Livre). Ver também o comentário grande em engine3d.js
     //    _initBuildGhosts sobre `frustumCulled = false` nestas linhas — bug
     //    à parte investigado na mesma leva ("às vezes não aparece todo").
+    // [12/09/2026] NOVO — pedido verbatim: "Em 'configurações 3D', na seção
+    // 'Debug', coloque um botão para ativar o debug. Ativando o debug,
+    // todas as suas opções entram em execução." Interruptor MESTRE da
+    // seção inteira — DESLIGADO por padrão (diferente dos interruptores
+    // individuais abaixo, que continuam `true`/"ligado" por padrão): agora
+    // NENHUMA das opções de debug desta seção (transferidor, prolongamento,
+    // alvo-orbital, enquadramento de câmera) executa de verdade a menos que
+    // `debugModoAtivo` esteja ligado — os interruptores individuais
+    // continuam decidindo QUAIS aparecem quando o modo Debug está ligado,
+    // mas o mestre precisa estar ligado primeiro (ver `_isDebugAtivo()`,
+    // usado por `_isDebugTransferidorAtivo`/`_isDebugProlongamentoAtivo`/
+    // `_isDebugEnquadramentoCameraAtivo`, view3d.js, e por
+    // `_drawOrbitTargetDot`, modeler-render.js).
+    debugModoAtivo: false,
     debugTransferidorAtivo: true,
     debugProlongamentoAtivo: true,
+    // [11/09/2026] NOVO — pedido verbatim: "Ao 'Sair da câmera', o
+    // enquadramento ainda fica ativado. Nas 'configurações 3D', na seção
+    // 'debug', coloque mais uma opção na lista de ativações deste modo que
+    // é o 'Enquadramento de câmera'. Ativo, por padrão." Controla se o
+    // "retângulo amarelo"/gizmo de enquadramento (o quadro que representa
+    // os limites da câmera calibrada, ver engine3d.js
+    // `_fotoFrustumMeshesById`/view3d.js `_activeCamFrameRectPx`) fica
+    // visível — mesmo padrão "liga por padrão, `!== false`" dos outros 2
+    // interruptores desta seção, logo acima.
+    debugEnquadramentoCameraAtivo: true,
     // ---------- Seção "🌗 Hora do dia" (pedido do usuário, 03/09/2026):
     // "Coloque uma seção, nas 'configurações 3D', para fazer com que se
     // possa escolher entre manhã, dia, tarde e noite. E uma barra com vários
@@ -189,6 +314,16 @@ const MapConfig = {
     // superior direito na grade [...] deve ser possível mover também." Ver
     // mapview.js _mountMinimap3D/_toggleMinimap3D.
     miniatura3DAtiva: false,
+    // NOVO (07/09/2026), pedido verbatim: "Nas 'configurações 2D', na seção
+    // 'Miniatura 3D', deve haver uma opção para 'fechar janela de miniatura
+    // ao sair do Mapa'. Por padrão, fica desabilitada." — desde a correção
+    // desta mesma rodada (ver comentário grande em mapview.js
+    // _ensureMinimap3DPanel), a miniatura virou um elemento persistente de
+    // nível de app que, por padrão, CONTINUA aberta ao trocar de aba (não só
+    // no Mapa). Esta opção, quando LIGADA, restaura o comportamento antigo
+    // de fechar a miniatura automaticamente (libera o contexto WebGL) ao
+    // sair da tela Mapa — ver mapview.js _unmountPlanta.
+    miniatura3DFecharAoSairMapa: false,
     // NOVO (03/09/2026) — "Configurações 2D": pedido do usuário, "nova
     // seção para escolher quais ferramentas continuam visíveis (apenas
     // como botão, fora da janela Ferramentas) mesmo durante o Modo
@@ -258,6 +393,66 @@ const MapConfig = {
     // pra INSTALAÇÕES NOVAS (sem nenhuma preferência salva ainda) — quem já
     // tem uma escolha salva no banco continua com ela, intocada.
     camada3DNovosItens: 'atual', // 'separada' (camada própria "Adicionados no 3D") | 'atual' (a que estava ativa no 2D, ATUAL padrão)
+    // ---------- [12/09/2026, RE-CORRIGIDO NESTA RODADA — ver nota abaixo]
+    // "Sair da câmera": o que acontece com o ponto de vista do personagem.
+    // Pedido verbatim original do usuário: "ao clicar em 'Sair da câmera', a
+    // perspectiva que o personagem tinha quando foi clicado em 'Ver
+    // através dessa câmera' deve ser preservada [...] deve ter uma seção
+    // do objeto 'Câmera' [...] é possível definir se ao clicar em 'Sair da
+    // câmera', o personagem 'permanece com o ponto de vista da câmera que
+    // está sendo vista naquele momento' ou se 'voltar ao ponto de vista
+    // original do personagem [...]'. Deve haver uma seção para o 'Orb de
+    // câmera', também, com as mesmas opções. Por padrão, para a câmera e
+    // para o 'orb de foto' deve ser 'permanece com o ponto de vista da
+    // câmera'." Ver view3d.js `_exitCameraOrbView()`/`_exitFotoCameraView()`.
+    //
+    // HISTÓRICO desta chave (para não repetir as mesmas idas-e-vindas numa
+    // rodada futura):
+    // 1) 1ª implementação: UMA chave (`cameraExitViewMode`) compartilhada
+    //    entre "Câmeras" E "orb de foto", por engano ("orb de câmera" =
+    //    "Câmeras" — ERRADO).
+    // 2) CORRIGIDO: usuário esclareceu que "orb de câmera" é sinônimo de
+    //    "orb de foto", não de "Câmeras" — viraram 2 chaves independentes
+    //    (`cameraExitViewMode` + `fotoOrbExitViewMode` NOVA), com 2 seções
+    //    de UI totalmente independentes (mudar uma não afeta a outra).
+    // 3) ESTA RODADA (pedido novo, verbatim): "a seção 'Câmera — Sair da
+    //    câmera' e a seção 'Orb de câmera — Sair da câmera', na verdade
+    //    devem ser uma só, pois já não existe mais 'Orb da câmera' e
+    //    'Câmera' (no mapa 2D foi unificado)". INVESTIGAÇÃO FEITA ANTES DE
+    //    MEXER (arquivos recém-lidos do disco do usuário, que confirmou ter
+    //    editado o projeto FORA desta conversa antes desta rodada): NO
+    //    CÓDIGO ATUAL, os 2 tipos de objeto CONTINUAM genuinamente
+    //    separados — `js/mapping.js` ainda tem `map.cameras` (tipo
+    //    "Câmeras", kind:'camera', caixa+cone) E `map.fotos` (tipo "orb de
+    //    foto", esfera+cone+placa, via `DB.addAmbientePhoto`) como arrays
+    //    DIFERENTES; `js/mapview.js` ainda tem 2 ferramentas separadas na
+    //    barra do mapa 2D ("📷 Câmera" e "🖼️ Orb de foto", linha ~4107);
+    //    `js/view3d.js` ainda tem 2 code-paths totalmente separados
+    //    (`_enterCameraOrbView`/`_exitCameraOrbView` travando a câmera DE
+    //    VERDADE vs. `_enterFotoCameraView`/`_exitFotoCameraView` em modo
+    //    espectador) — nenhuma ocorrência de "unific" encontrada em
+    //    `mapping.js`/`view3d.js`/`engine3d.js`/`mapconfig.js`. Ou seja, a
+    //    unificação descrita pelo usuário NÃO está refletida no código
+    //    staged nesta rodada — pode ter sido uma mudança que não chegou a
+    //    ser salva, uma confusão de terminologia (mesmo risco já documentado
+    //    2x neste arquivo), ou um plano ainda não executado.
+    //    DECISÃO (conforme instrução explícita do usuário, mesmo com a
+    //    discrepância documentada acima — não deixar as 2 seções
+    //    silenciosamente como estavam): as 2 SEÇÕES DE UI foram fundidas
+    //    numa só ("Ver através desta câmera — 'Sair da câmera'"), com UM
+    //    ÚNICO grupo de radio. Por baixo, para não arriscar quebrar nenhum
+    //    dos 2 code-paths (que continuam de fato distintos), a chave
+    //    `fotoOrbExitViewMode` foi REMOVIDA dos DEFAULTS e
+    //    `view3d.js _fotoOrbExitViewMode()` passou a delegar direto pra
+    //    `_cameraExitViewMode()` (mesma leitura de `cameraExitViewMode`) —
+    //    ou seja, hoje EXISTE DE FATO só 1 chave persistida
+    //    (`cameraExitViewMode`), controlando os 2 code-paths a partir de 1
+    //    única seção de UI, exatamente como o usuário pediu. Se uma rodada
+    //    futura confirmar que os 2 tipos de objeto foram mesmo unificados
+    //    no código (não só seria bom fundir a UI — o código-fonte também
+    //    deveria ganhar um tipo só), ou o oposto (usuário volta a querer 2
+    //    controles independentes), ajustar aqui e nos 2 lugares citados.
+    cameraExitViewMode: 'lockedView', // ÚNICA chave agora (ver histórico acima) — controla tanto "Câmeras" quanto "orb de foto"/"orb de câmera". 'lockedView' (permanece no ponto de vista da câmera — PADRÃO) | 'originalView' (volta ao ponto de vista do personagem de antes de "Ver através desta câmera")
     // ---------- Método de interação de camadas (mapa 2D) — pedido do
     // usuário (03/09/2026): "Percebi que os elementos estão interagindo
     // entre as camadas, eles devem ficar isolados por camada [...] 'isolado
@@ -844,14 +1039,45 @@ const MapConfig = {
     // refletir o valor mais recente. Consumida em mapview.js
     // `_placePhotoPinAtWorld`.
     const fotosMarcarAquiAcao = (opts.context === '2d') ? await DB.getSetting('fotosMarcarAquiAcao', 'permanecer') : 'permanecer';
+    // NOVO (07/09/2026) — snap de rotação do mapa 2D (ver seção "🔄 Rotação
+    // do mapa 2D" abaixo) — mesmo padrão de leitura "solta"/fora do blob
+    // `mapa3dConfig` de `fotosMarcarAquiAcao` acima (chave própria, lida de
+    // novo/sem cache toda vez que o modal abre). Espelha
+    // `MapView._mapRotationSnapGraus` (ver mapview.js _mountPlanta, que lê a
+    // MESMA chave 1x no mount) — os dois lados ficam sincronizados porque
+    // ambos leem/gravam a mesma chave do DB.
+    const mapRotacaoSnapGraus = (opts.context === '2d') ? await DB.getSetting('mapa2dRotacaoSnapGraus', 15) : 15;
     const rdCustom = !this.RENDER_DISTANCE_PRESETS.includes(Number(cfg.renderDistance));
     const fpsCustom = Number(cfg.fpsLimite) > 0 && !this.FPS_LIMITE_PRESETS.includes(Number(cfg.fpsLimite));
     const modal = document.createElement('div');
     modal.className = 'modal-backdrop';
+    // [09/09/2026] Ajuste solicitado pelo usuário: "Em 'Configurações 2D',
+    // todos os textos devem ser selecionáveis" — classe extra só quando
+    // `opts.context === '2d'` (não mexe em "Configurações 3D", que usa o
+    // MESMO template/CSS `.mapconfig-sheet`), consumida pelo override em
+    // css/style.css (ver comentário lá, perto da regra genérica de
+    // `user-select:none` do "cromo" da interface que hoje bloqueia a
+    // seleção também aqui).
     modal.innerHTML = `
-      <div class="modal-sheet mapconfig-sheet">
+      <div class="modal-sheet mapconfig-sheet${opts.context === '2d' ? ' mapconfig-sheet--2d' : ''}">
         <div class="handle"></div>
-        <h3 style="margin-top:0">⚙️ Configurações do mapa</h3>
+        <!-- NOVO (07/09/2026), pedido verbatim: "melhorar interação 3D para
+             o celular [...] Deve ter um botão de 'fechar' nas
+             'configurações 2D' e nas 'configurações 3D'." -- já EXISTIA um
+             botão "Fechar" (id mc-close, ver mais abaixo), só que só no FIM
+             da folha de configurações -- num celular, com a lista de
+             configs 3D bem longa (dezenas de seções), fechar exigia rolar
+             até o fim toda vez (ou tocar fora do modal, que no toque some
+             conflita com o scroll). Este cabeçalho fica GRUDADO no topo
+             (position:sticky) enquanto rola a folha inteira, com um botão
+             "✕" sempre visível e alcançável, chamando o MESMO close() de
+             sempre (nenhum fluxo de fechamento novo, só um atalho a mais).
+             O botão "Fechar" original no fim permanece (não removido) --
+             quem já rolou até lá continua com o de sempre também. -->
+        <div style="position:sticky; top:-16px; z-index:1; background:var(--bg-elev); margin:-16px -16px 0; padding:16px 16px 8px; display:flex; align-items:center; justify-content:space-between; gap:8px">
+          <h3 style="margin:0">⚙️ Configurações do mapa</h3>
+          <button type="button" class="icon-btn sm" id="mc-close-top" title="Fechar configurações" style="flex:none">✕</button>
+        </div>
 
         <div class="mapconfig-section">
           <label class="radio-opt">
@@ -896,6 +1122,15 @@ const MapConfig = {
           <label class="radio-opt">
             <input type="checkbox" id="mc-miniatura3d" ${cfg.miniatura3DAtiva ? 'checked' : ''}>
             <span><span class="t">Mostrar miniatura 3D sobre a grade</span><br><span class="d">Uma janelinha com o mesmo "Ver em 3D" em resolução bem menor (largura = 1/10 da tela do 3D), acompanhando ao vivo a posição/direção do boneco enquanto anda em "🧭 Modo Navegação". Aparece por padrão no canto superior direito DA GRADE — pode ser arrastada pra outro lugar.</span></span>
+          </label>
+          <!-- NOVO (07/09/2026), pedido verbatim: "Nas 'configurações 2D',
+               na seção 'Miniatura 3D', deve haver uma opção para 'fechar
+               janela de miniatura ao sair do Mapa'. Por padrão, fica
+               desabilitada." Ver DEFAULTS.miniatura3DFecharAoSairMapa acima
+               e mapview.js _unmountPlanta. -->
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-miniatura3d-fechar-ao-sair" ${cfg.miniatura3DFecharAoSairMapa ? 'checked' : ''}>
+            <span><span class="t">Fechar janela de miniatura ao sair do Mapa</span><br><span class="d">Desabilitada por padrão: a miniatura 3D continua aberta/renderizando mesmo trocando pra outra aba do app (Tabela, Cartões, Fotos, Buscar). Ligue esta opção pra fechá-la automaticamente sempre que sair da tela Mapa.</span></span>
           </label>
         </div>
         <!-- NOVO (05/09/2026), pedido verbatim: "No mapa 2D, o 'Réguas' da
@@ -987,6 +1222,22 @@ const MapConfig = {
             <span><span class="t">Buffer secundário (canvas off-screen)</span><br><span class="d">Desenha cada quadro num canvas escondido primeiro, e só copia pra tela quando ele estiver pronto — evita um piscar/"rasgar" ocasional em mapas muito grandes/cheios, ao custo de um pouco mais de memória. Deixe desligado se não notar diferença: em mapas pequenos/médios só desperdiça memória à toa.</span></span>
           </label>
         </div>
+        <!-- NOVO (07/09/2026), pedido verbatim: "No mapa 2D, o limite de
+             mover qualquer item deve ser a grade de pontos no zoom máximo.
+             Isso pode até ficar como informação em uma seção 'Zoom' nas
+             'configurações 2D'. A informação fica, então: 'O limite de
+             mover qualquer objeto na grade do mapa 2D é a grade de pontos
+             no zoom máximo.'." Seção só INFORMATIVA (sem controle nenhum
+             pra configurar aqui — o pedido só fala em "informação"): o
+             comportamento de verdade é implementado em
+             mapview.js Map2DRenderer.screenToWorld/isAtMaxZoom/
+             _gridDotStepAtMaxZoomMeters (arrastar com o MOUSE) e
+             MapView._efetivoSnapMetrosMouse/_arrowKeyMoveSelected (setas do
+             teclado) — ver os comentários grandes lá. -->
+        <div class="mapconfig-section">
+          <h4>🔍 Zoom</h4>
+          <span class="d" style="display:block">O limite de mover qualquer objeto na grade do mapa 2D é a grade de pontos no zoom máximo.</span>
+        </div>
         <!-- Seção "🧱 Parede" no contexto 2D (pedido do usuário: "nas
              configurações 2D deve ter uma seção também chamada 'parede' e
              uma subseção idêntica à das configurações 3D, a subseção
@@ -1072,9 +1323,12 @@ const MapConfig = {
              DB.getSetting/setSetting (ver 'fotosMarcarAquiAcao' acima, e
              mapview.js '_placePhotoPinAtWorld'), fora do blob 'mapa3dConfig'
              — segue o padrão de outras prefs "soltas" do mapa 2D (ex.
-             'mapa2dSnapGrade'), não o padrão do resto deste arquivo. -->
+             'mapa2dSnapGrade'), não o padrão do resto deste arquivo.
+             NOVO (06/09/2026), pedido verbatim: "Na seção 'Fotos' das
+             'configurações 2D', em vez do ícone '📍', coloque o ícone '📷'."
+             — troca simples de emoji do cabeçalho desta seção. -->
         <div class="mapconfig-section">
-          <h4>📍 Fotos</h4>
+          <h4>📷 Fotos</h4>
           <span class="d" style="display:block; margin-bottom:5px">Ao confirmar "✅ Marcar aqui" (vincular uma foto a uma posição no mapa, em "Fotos" → tirar/escolher foto → 🗺️), o que fazer depois:</span>
           <label class="radio-opt">
             <input type="radio" name="mc-fotos-marcar-aqui" value="permanecer" ${fotosMarcarAquiAcao !== 'fotos' ? 'checked' : ''}>
@@ -1169,6 +1423,77 @@ const MapConfig = {
           <label class="radio-opt">
             <input type="checkbox" id="mc-traco2d-reposicionar" ${cfg.traco2DReposicionarExtremidadesAtivo ? 'checked' : ''}>
             <span><span class="t">Reposicionar traços feitos pelas suas extremidades</span><br><span class="d">Com a ferramenta "✏️ Traço guia" ativa, passe o cursor sobre uma ponta de um traço já feito (ela é destacada) e toque nela — ela passa a seguir o cursor até o próximo toque, que a solta ali. Desligado por padrão — um traço já inserido fica fixo, sem jeito de mexer nas pontas sem querer.</span></span>
+          </label>
+        </div>
+
+        <!-- NOVO (07/09/2026), pedido verbatim: "Nas 'configurações 2D',
+             deve haver uma seção para 'Rotação do mapa 2D'. Nela os ícones
+             presentes na parte de rotação devem estar exatamente como
+             aparecem no canto inferior direito da grade. Deve ser possível
+             definir o valor do snap de rotação ali. O botão de 'Norte' pode
+             ser clicado ali e o mapa inteiro se orienta para o norte. A
+             rotação atual do mapa pode ser definida por ali também. Os
+             mesmos botões de 'girar para a esquerda' e de 'girar para a
+             direita' podem ser clicados ali também." Ícone do cabeçalho:
+             MESMO SVG do botão "🧭 Norte" já usado no canto inferior direito
+             da grade (ver mapview.js '#map-rotate-north'), copiado aqui pelo
+             mesmo motivo já documentado na seção "📷 Foto" acima (MapConfig
+             é um módulo à parte, sem acesso direto ao HTML de MapView).
+             Os 4 botões (Norte/CCW/CW/Girar-arrastando) chamam DIRETO os
+             métodos já existentes em window.MapView (_giroMapa2D*/
+             _toggleMapDragRotate — MapView é um objeto global, ver
+             "window.MapView = MapView" no fim de mapview.js: MapConfig só é
+             aberto a partir da tela "Planta baixa" já montada — ver
+             opts.context==='2d'/mapview.js MapConfig.open —, então
+             MapView._renderer sempre existe quando este modal está de pé),
+             então agem no MAPA DE VERDADE, não numa cópia — os 2 lugares
+             (aqui e o canto inferior direito da grade) ficam sempre
+             sincronizados/refletem o mesmo estado. Campo "Rotação atual" e
+             o botão de snap são wireados logo abaixo (ver comentário grande
+             perto de "mc-rot2d-north", mesmo padrão de leitura "ao vivo" já
+             usado pelo campo de snap da grade na bandeja — ver mapview.js
+             #map2d-drawer-gridsnap-val). -->
+        <div class="mapconfig-section">
+          <h4><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="vertical-align:-4px; margin-right:2px"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.3" opacity="0.55"/><path d="M12 4 L15 12 L12 12 Z" fill="#ff5a5f"/><path d="M12 4 L9 12 L12 12 Z" fill="#ff5a5f"/><path d="M12 12 L15 12 L12 20 Z" fill="currentColor" opacity="0.55"/><path d="M12 12 L9 12 L12 20 Z" fill="currentColor" opacity="0.55"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg> Rotação do mapa 2D</h4>
+          <span class="d" style="display:block; margin-bottom:8px">Mesmos controles do canto inferior direito da grade (Mapa → Planta baixa) — agem direto no mapa aberto agora.</span>
+          <div class="mc-rot2d-botoes" style="display:flex; align-items:center; gap:8px; margin-bottom:10px">
+            <button type="button" class="icon-btn" id="mc-rot2d-north" title="Orientar para o norte (0°)">
+              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.3" opacity="0.55"/><path d="M12 4 L15 12 L12 12 Z" fill="#ff5a5f"/><path d="M12 4 L9 12 L12 12 Z" fill="#ff5a5f"/><path d="M12 12 L15 12 L12 20 Z" fill="currentColor" opacity="0.55"/><path d="M12 12 L9 12 L12 20 Z" fill="currentColor" opacity="0.55"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg>
+            </button>
+            <button type="button" class="icon-btn" id="mc-rot2d-ccw" title="Girar a grade no sentido anti-horário">↺</button>
+            <button type="button" class="icon-btn" id="mc-rot2d-cw" title="Girar a grade no sentido horário">↻</button>
+            <button type="button" class="icon-btn" id="mc-rot2d-dragmode" title="Girar arrastando: ative e depois clique-e-arraste na grade — mesmo botão do canto inferior direito">
+              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 a9 9 0 1 1 -7.79 4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M3.2 3.2 v6 h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+            </button>
+          </div>
+          <label class="radio-opt" style="display:block">
+            <span class="t">Rotação atual do mapa (°)</span><br>
+            <span class="d">Ângulo geral da grade agora — editar aqui gira o mapa direto pra esse valor.</span>
+            <input type="number" step="1" id="mc-rot2d-atual" value="${Math.round(((window.MapView?._renderer?.view?.rot || 0) * 180 / Math.PI))}" style="margin-top:4px; display:block; max-width:120px">
+          </label>
+          <label class="radio-opt" style="display:block; margin-top:10px">
+            <span class="t">Snap de rotação</span><br>
+            <span class="d">De quantos em quantos graus a rotação do mapa "encaixa" ao girar (botões ↺/↻ acima e o "Girar arrastando"). Clique no botão pra digitar o valor (1° a 180°), ou clique e ARRASTE pra variar de 1 em 1 grau (cursor infinito).</span>
+            <button type="button" class="btn secondary sm" id="mc-rot2d-snap-btn" style="margin-top:4px" title="Clique: digitar o valor. Clique e arraste: variar de 1 em 1 grau.">🔄 ${mapRotacaoSnapGraus}°</button>
+          </label>
+          <!-- NOVO (07/09/2026), pedido verbatim: "Deve ter um botão
+               habilitador de snap para a rotação da grade do mapa 2D [...]
+               Este botão habilitador de snap deve estar presente, também,
+               na seção 'Rotação do mapa 2D' das 'configurações 2D'." —
+               espelho do 5º botão da bandeja do canto inferior direito
+               (#map-rotate-snap-toggle, ver mapview.js) — sincronizado com
+               ele porque os dois leem/gravam a MESMA chave do DB
+               (mapa2dRotacaoSnapAtivo, ver mapview.js
+               _mapRotationSnapAtivo/_setMapRotationSnapAtivo).
+               NOVO (07/09/2026), pedido verbatim: "o 'Habilitar snap de
+               rotação' deve ter o mesmo ícone do ímã vermelho também." —
+               mesmo emoji 🧲 usado em TODO o resto do app pra qualquer snap
+               (grade/rotação/parede/etc., ver #map-rotate-snap-toggle acima
+               e as várias ocorrências de "🧲 Snap..." em mapview.js), só
+               que este rótulo específico ainda não tinha o ícone. -->
+          <label class="radio-opt" style="display:block; margin-top:10px">
+            <input type="checkbox" id="mc-rot2d-snap-toggle" ${window.MapView?._mapRotationSnapAtivo !== false ? 'checked' : ''}>
+            <span><span class="t">🧲 Habilitar snap de rotação</span><br><span class="d">Ligado (padrão): os botões ↺/↻ e o "Girar arrastando" encaixam a rotação no valor de snap configurado acima. Desligado: a rotação fica livre, sem arredondar pra nenhum múltiplo.</span></span>
           </label>
         </div>` : ''}
 
@@ -1272,6 +1597,35 @@ const MapConfig = {
             </select>
           </label>
         </div>
+        <!-- NOVO (07/09/2026), pedido verbatim: "scripts para os objetos
+             como no Unity... Faça esse código de exemplo e deixe um botão
+             para isso em uma seção nas 'configurações 3D'." — ver
+             js/scripting.js (window.Scripting.runDemoWallBuild) pro
+             exemplo completo (botão descendo + parede de tijolos se
+             empilhando). Só aparece com o 3D já aberto, já que o exemplo
+             precisa da cena Three.js ativa pra colocar as malhas
+             temporárias — ver wiring de mc-scripting-demo mais abaixo
+             (usa window.View3D._engine.scene). -->
+        <div class="mapconfig-section">
+          <h4>🎬 Scripts (exemplo)</h4>
+          <span class="d" style="display:block; margin-bottom:8px">Motor de scripts por objeto, estilo Unity, em JavaScript puro (ver botão "🎬 Script"/"▶️ Executar script" no painel de propriedades de qualquer objeto). Este botão roda um exemplo pronto, direto na cena atual: um "botão" (cubo esticado) desce e, ao terminar, uma parede de tijolos se empilha em cima dele, animada.</span>
+          <button type="button" class="btn secondary block" id="mc-scripting-demo">▶️ Demo: botão + parede de tijolos</button>
+        </div>
+        <!-- NOVO (07/09/2026), pedido verbatim: "carregar materiais e
+             definir luz ambiente [...]" — completando o que ficou de fora
+             da rodada anterior (materiais por objeto ja existiam; isto e
+             luz AMBIENTE da CENA). Ver DEFAULTS.luzAmbienteIntensidade/
+             luzAmbienteCor acima e engine3d.js _updateSky. -->
+        <div class="mapconfig-section">
+          <h4>💡 Luz ambiente</h4>
+          <span class="d" style="display:block; margin-bottom:8px">Ajusta a luz ambiente da cena (ilumina tudo por igual, sem sombra/direção) por cima do ciclo dia/noite automático — não substitui o Sol/Lua, só realça ou escurece o conjunto.</span>
+          <label class="field">
+            <span class="lbl">Intensidade — <span id="mc-luzambiente-int-label">${(cfg.luzAmbienteIntensidade ?? 1).toFixed(2)}x</span></span>
+            <input type="range" id="mc-luzambiente-intensidade" min="0" max="3" step="0.05" value="${cfg.luzAmbienteIntensidade ?? 1}">
+          </label>
+          <label class="map-panel-field" style="margin-top:8px"><span>Cor</span><input type="color" id="mc-luzambiente-cor" value="${cfg.luzAmbienteCor || '#ffffff'}"></label>
+          <button type="button" class="btn secondary sm" id="mc-luzambiente-reset" style="margin-top:8px">Restaurar padrão (1x, branco)</button>
+        </div>
         <!-- Seção "🔗 Item associado" (pedido do usuário, 26/08/2026) — mesmo
              destaque azul do mapa 2D (contorno + selo) pra objetos com um
              patrimônio associado (obj.itemId, ver o novo botão "📍 Adicionar
@@ -1331,6 +1685,23 @@ const MapConfig = {
           <span style="display:block; font-size:12.5px; color:var(--text-dim); margin-bottom:5px">Parede/porta/janela/objeto criados aqui dentro vão para</span>
           <label class="radio-opt"><input type="radio" name="mc-camada3d" value="separada" ${cfg.camada3DNovosItens !== 'atual' ? 'checked' : ''}><span><span class="t">Uma camada separada, "Adicionados no 3D"</span><br><span class="d">Criada automaticamente na primeira vez — fácil de achar/organizar/ocultar depois, sem misturar com o resto do desenho.</span></span></label>
           <label class="radio-opt"><input type="radio" name="mc-camada3d" value="atual" ${cfg.camada3DNovosItens === 'atual' ? 'checked' : ''}><span><span class="t">A camada que estava ativa no 2D</span><br><span class="d">A mesma camada selecionada na Planta baixa no momento em que "Ver em 3D" foi clicado.</span></span></label>
+        </div>
+        <!-- [12/09/2026 — FUNDIDA NESTA RODADA, ver nota grande em
+             DEFAULTS.cameraExitViewMode acima para o histórico completo.
+             Pedido verbatim: "a seção 'Câmera — Sair da câmera' e a seção
+             'Orb de câmera — Sair da câmera', na verdade devem ser uma só,
+             pois já não existe mais 'Orb da câmera' e 'Câmera' [...] nas
+             'configurações 3D' deve ter só o que permaneceu também." Antes
+             desta rodada havia 2 seções/2 chaves independentes
+             (cameraExitViewMode/fotoOrbExitViewMode); agora é 1 seção só,
+             1 grupo de radios, 1 chave (cameraExitViewMode) — controla os 2
+             code-paths internos (Câmeras/orb de foto) a partir de um único
+             controle visível, como pedido. -->
+        <div class="mapconfig-section">
+          <h4>Ver através desta câmera — "Sair da câmera"</h4>
+          <span style="display:block; font-size:12.5px; color:var(--text-dim); margin-bottom:5px">Ao clicar "👁️ Ver através desta câmera"/"✖ Sair da câmera" (numa "Câmera" ou num "orb de foto"), o que acontece com o ponto de vista do personagem ao sair:</span>
+          <label class="radio-opt"><input type="radio" name="mc-cam-exitview" data-exitview-group="camera" value="lockedView" ${cfg.cameraExitViewMode !== 'originalView' ? 'checked' : ''}><span><span class="t">Permanece com o ponto de vista da câmera (padrão)</span><br><span class="d">O personagem continua vendo exatamente de onde a câmera estava mostrando no momento em que "Sair da câmera" foi clicado — a transição fica contínua, só que agora livre pra olhar em volta/andar dali.</span></span></label>
+          <label class="radio-opt"><input type="radio" name="mc-cam-exitview" data-exitview-group="camera" value="originalView" ${cfg.cameraExitViewMode === 'originalView' ? 'checked' : ''}><span><span class="t">Volta ao ponto de vista original do personagem</span><br><span class="d">O personagem volta pra onde/como estava olhando no instante EXATO em que "Ver através desta câmera" foi clicado, antes de travar na câmera.</span></span></label>
         </div>
         <div class="mapconfig-section">
           <h4>🧲 Física de colocação</h4>
@@ -1414,6 +1785,20 @@ const MapConfig = {
               placeholder="tamanho do bloco em metros" title="Tamanho de cada bloco/chunk, em metros (mínimo 2m)">
           </label>
         </div>
+        <!-- NOVO (07/09/2026), seção "🖥️ Efeitos de tela" — pedido verbatim
+             do usuário: "Coloque nas 'configurações 3D', em uma seção de
+             'Efeitos de tela' este efeito de escurecimento, quando está sem
+             o 'colorSpace: THREE.SRGBColorSpace' como opção nesta seção."
+             Ver DEFAULTS.efeitoTelaEscurecida3D acima pro significado
+             completo e engine3d.js pra como é aplicado no render target de
+             cada "olho". -->
+        <div class="mapconfig-section">
+          <h4>🖥️ Efeitos de tela</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-efeito-tela-escurecida3d" ${cfg.efeitoTelaEscurecida3D ? 'checked' : ''}>
+            <span><span class="t">Escurecimento (sem correção de cor sRGB)</span><br><span class="d">Desligado (padrão): cores/brilho normais, corretos. Ligado: um visual mais escuro/dramático, resultado de pular a correção de cor que normalmente deixa a cena com o brilho certo — puramente estético, não afeta desempenho. Se a mudança não aparecer na hora com o 3D já aberto, saia da tela do 3D e entre novamente para aplicar o efeito.</span></span>
+          </label>
+        </div>
         <!-- Seção "🧊 Cubo" (pedido do usuário, 28/08/2026 — ver
              DEFAULTS.cuboOrigemCentro acima pro significado completo). -->
         <div class="mapconfig-section">
@@ -1444,7 +1829,18 @@ const MapConfig = {
              acima pro que cada guia visual faz. -->
         <div class="mapconfig-section">
           <h4>🐞 Debug</h4>
+          <!-- [12/09/2026] NOVO — pedido verbatim: "Em 'configurações 3D', na
+               seção 'Debug', coloque um botão para ativar o debug. Ativando
+               o debug, todas as suas opções entram em execução." Interruptor
+               MESTRE: desligado por padrão (diferente dos 4 abaixo, que são
+               'checked' por padrão) — com ele desligado, NENHUMA das opções
+               de debug abaixo executa de verdade, mesmo se marcadas (ver
+               DEFAULTS.debugModoAtivo acima e _isDebugAtivo(), view3d.js). -->
           <label class="radio-opt">
+            <input type="checkbox" id="mc-debug-modo-ativo" ${cfg.debugModoAtivo ? 'checked' : ''}>
+            <span><span class="t"><b>Ativar modo Debug</b></span><br><span class="d">Interruptor mestre desta seção — desligado por padrão. Com ele desligado, nenhuma das opções de debug abaixo (mesmo marcadas) é exibida de verdade; ligue-o para que as opções marcadas abaixo entrem em execução.</span></span>
+          </label>
+          <label class="radio-opt" style="margin-top:8px">
             <input type="checkbox" id="mc-debug-transferidor" ${cfg.debugTransferidorAtivo !== false ? 'checked' : ''}>
             <span><span class="t">Transferidor (anel de rotação)</span><br><span class="d">Anel pontilhado de 8 divisões desenhado no chão ao girar porta/janela/objeto (Modo Padrão ou Giro Livre) — mostra visualmente onde o giro vai travar a cada 45°.</span></span>
           </label>
@@ -1455,6 +1851,14 @@ const MapConfig = {
           <label class="radio-opt" style="margin-top:8px">
             <input type="checkbox" id="mc-debug-alvo-orbital" ${cfg.modeladorMostrarAlvoOrbital !== false ? 'checked' : ''}>
             <span><span class="t"><svg class="mc-alvo-orbital-ic" width="14" height="14" viewBox="0 0 14 14" style="vertical-align:-2px;margin-right:4px" aria-hidden="true"><circle cx="7" cy="7" r="4" fill="rgba(80,220,255,0.9)" stroke="#003a4d" stroke-width="1.5"/><line x1="7" y1="0" x2="7" y2="2" stroke="#003a4d" stroke-width="1.5"/><line x1="7" y1="12" x2="7" y2="14" stroke="#003a4d" stroke-width="1.5"/><line x1="0" y1="7" x2="2" y2="7" stroke="#003a4d" stroke-width="1.5"/><line x1="12" y1="7" x2="14" y2="7" stroke="#003a4d" stroke-width="1.5"/></svg>Ponto-alvo da câmera orbital (Modelador)</span><br><span class="d">No Modelador 3D, com a câmera no modo "Órbita", ela sempre mira um ponto fixo no espaço — esta opção desenha uma bolinha nesse ponto (igual ao ícone ao lado, mesmas cores da que aparece na câmera), pra deixar visível onde ele está. Não aparece no modo de câmera "Livre" (que não mira ponto nenhum).</span></span>
+          </label>
+          <!-- [11/09/2026] NOVO — pedido verbatim: "Nas 'configurações 3D', na
+               seção 'debug', coloque mais uma opção na lista de ativações
+               deste modo que é o 'Enquadramento de câmera'. Ativo, por
+               padrão." -->
+          <label class="radio-opt" style="margin-top:8px">
+            <input type="checkbox" id="mc-debug-enquadramento-camera" ${cfg.debugEnquadramentoCameraAtivo !== false ? 'checked' : ''}>
+            <span><span class="t">Enquadramento de câmera</span><br><span class="d">O "retângulo amarelo" que representa os limites/enquadramento de uma câmera calibrada (📷 Câmeras/orbs de foto) — visível ao selecionar a câmera e em "Ver através desta câmera".</span></span>
           </label>
         </div>
         <!-- Seção "🧱 Parede" (pedido do usuário, 24/08/2026) — snaps da
@@ -1642,10 +2046,13 @@ const MapConfig = {
 
     const close = () => { opts.onClose?.(); modal.remove(); };
     modal.querySelector('#mc-close').onclick = close;
+    modal.querySelector('#mc-close-top').onclick = close; // NOVO (07/09/2026) — ✕ do cabeçalho fixo, ver comentário na criação do HTML
     modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
 
     modal.querySelector('#mc-dup-itens-colar').onchange = async (e) => { await this.set({ duplicarItensAoColar: e.target.checked }); };
     modal.querySelector('#mc-miniatura3d')?.addEventListener('change', async (e) => { await this.set({ miniatura3DAtiva: e.target.checked }); });
+    // NOVO (07/09/2026) — ver DEFAULTS.miniatura3DFecharAoSairMapa acima.
+    modal.querySelector('#mc-miniatura3d-fechar-ao-sair')?.addEventListener('change', async (e) => { await this.set({ miniatura3DFecharAoSairMapa: e.target.checked }); });
     // BUG CORRIGIDO (05/09/2026), pedido verbatim — teste do usuário:
     // "desabilitei o Retículo métrico e desabilitei a Trena, depois,
     // habilitei a Trena e o Retículo métrico apareceu junto." Causa raiz:
@@ -1698,6 +2105,16 @@ const MapConfig = {
     modal.querySelectorAll('input[name="mc-camada3d"]').forEach((r) => {
       r.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ camada3DNovosItens: e.target.value }); });
     });
+    // [12/09/2026 — FUNDIDA NESTA RODADA] a seção "Câmera"/"Orb de câmera"
+    // virou 1 seção só ("Ver através desta câmera", ver HTML acima e nota
+    // grande em DEFAULTS.cameraExitViewMode) — 1 único grupo de radios
+    // (data-exitview-group="camera"), 1 única chave (cameraExitViewMode).
+    modal.querySelectorAll('input[data-exitview-group="camera"]').forEach((r) => {
+      r.addEventListener('change', async (e) => {
+        if (!e.target.checked) return;
+        await this.set({ cameraExitViewMode: e.target.value });
+      });
+    });
     modal.querySelectorAll('input[name="mc-fisica-colocacao"]').forEach((r) => {
       r.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ ignorarFisica: e.target.value === 'livre' }); });
     });
@@ -1722,11 +2139,94 @@ const MapConfig = {
     modal.querySelector('#mc-medida2d-reposicionar')?.addEventListener('change', async (e) => { await this.set({ medida2DReposicionarExtremidadesAtivo: e.target.checked }); });
     // NOVO (04/09/2026) — seção "✏️ Traço guia" (ver HTML acima).
     modal.querySelector('#mc-traco2d-reposicionar')?.addEventListener('change', async (e) => { await this.set({ traco2DReposicionarExtremidadesAtivo: e.target.checked }); });
+    // NOVO (07/09/2026) — seção "🔄 Rotação do mapa 2D" (ver HTML acima):
+    // os 3 botões de girar chamam DIRETO os métodos já existentes em
+    // MapView (mesmos usados pelo canto inferior direito da grade) e depois
+    // atualizam o campo "Rotação atual" pra refletir o novo valor — só faz
+    // sentido enquanto o mapa 2D está de fato montado (`opts.context ===
+    // '2d'`, ver comentário grande no HTML), então `window.MapView?.` é só
+    // uma precaução extra (nunca deveria faltar aqui).
+    const rot2dAtualInput = modal.querySelector('#mc-rot2d-atual');
+    const syncRot2dAtual = () => {
+      if (!rot2dAtualInput) return;
+      const graus = Math.round(((window.MapView?._renderer?.view?.rot || 0) * 180 / Math.PI));
+      rot2dAtualInput.value = graus;
+    };
+    modal.querySelector('#mc-rot2d-north')?.addEventListener('click', () => { window.MapView?._giroMapa2DResetarNorte?.(); syncRot2dAtual(); });
+    modal.querySelector('#mc-rot2d-ccw')?.addEventListener('click', () => { window.MapView?._giroMapa2DAntihorario?.(); syncRot2dAtual(); });
+    modal.querySelector('#mc-rot2d-cw')?.addEventListener('click', () => { window.MapView?._giroMapa2DHorario?.(); syncRot2dAtual(); });
+    // "Rotação atual" editável direto — grava em `view.rot` (radianos) na hora.
+    rot2dAtualInput?.addEventListener('input', (e) => {
+      if (!window.MapView?._renderer) return;
+      const graus = parseFloat(e.target.value);
+      if (!Number.isFinite(graus)) return;
+      window.MapView._renderer.view.rot = graus * Math.PI / 180;
+    });
+    // "🔄 Girar arrastando" — mesmo toggle do botão do canto inferior
+    // direito (ver mapview.js _toggleMapDragRotate); espelha o estado
+    // "active" aqui também, pro botão dentro do modal refletir se o modo já
+    // estava ligado (ex.: a pessoa abriu as configurações COM o modo já
+    // ativo de antes).
+    const dragModeBtn = modal.querySelector('#mc-rot2d-dragmode');
+    if (dragModeBtn) dragModeBtn.classList.toggle('active', !!window.MapView?._mapDragRotateAtivo);
+    // BUG CORRIGIDO (07/09/2026), pedido verbatim: "o botão 'Girar
+    // arrastando' ao ser clicado, deve fazer a janela de 'configurações 2D'
+    // ficar ocultada e ser possível girar o mapa com o 'clicar e arrastar'.
+    // Ao 'soltar', conclui-se o giro e a janela [...] ressurge, no mesmo
+    // nível de rolagem que estava [...] ela não é recriada [...] Este
+    // processo é só para quando se acessa o botão 'Girar arrastando' pela
+    // janela de 'configurações 2D'. Se o botão [...] for ativado no seu
+    // local no canto inferior direito da grade, então, continua procedendo
+    // normalmente [toggle liga/desliga de sempre]." CAUSA: antes, este
+    // botão só fazia o MESMO toggle liga/desliga do botão do canto da
+    // grade — clicar aqui ligava o modo, mas o modal continuava por cima
+    // cobrindo a grade inteira, então "clicar e arrastar" nunca alcançava o
+    // mapa de verdade por trás (o pedido do usuário é justamente resolver
+    // isso). Corrigido: um clique aqui que LIGA o modo agora (não um que
+    // desliga — ver `jaAtivo` abaixo) esconde o `.modal-backdrop` INTEIRO
+    // via `style.display='none'` (NÃO `.remove()`/fechar — o DOM do modal
+    // continua vivo, só invisível, preservando o `scrollTop` de
+    // `.modal-sheet`) até o `pointerup`/`pointercancel` GLOBAL seguinte,
+    // quando desliga o modo de novo e reexibe o modal restaurando aquele
+    // scroll exato.
+    dragModeBtn?.addEventListener('click', () => {
+      const jaAtivo = !!window.MapView?._mapDragRotateAtivo;
+      window.MapView?._toggleMapDragRotate?.();
+      const agoraAtivo = !!window.MapView?._mapDragRotateAtivo;
+      dragModeBtn.classList.toggle('active', agoraAtivo);
+      if (jaAtivo || !agoraAtivo) return; // este clique DESLIGOU o modo (ou algo incoerente) — comportamento normal de toggle, sem esconder nada
+      const sheetEl = modal.querySelector('.modal-sheet');
+      const scrollTop = sheetEl?.scrollTop || 0;
+      modal.style.display = 'none';
+      const restaurar = () => {
+        window.removeEventListener('pointerup', restaurar, true);
+        window.removeEventListener('pointercancel', restaurar, true);
+        if (window.MapView?._mapDragRotateAtivo) window.MapView._toggleMapDragRotate?.();
+        modal.style.display = '';
+        if (sheetEl) sheetEl.scrollTop = scrollTop;
+        dragModeBtn.classList.toggle('active', !!window.MapView?._mapDragRotateAtivo);
+        syncRot2dAtual();
+      };
+      window.addEventListener('pointerup', restaurar, true);
+      window.addEventListener('pointercancel', restaurar, true);
+    });
+    // Botão de snap de rotação (1°–180°) — ver _wireMapRotationSnapBtn abaixo.
+    this._wireMapRotationSnapBtn(modal.querySelector('#mc-rot2d-snap-btn'));
+    // NOVO (07/09/2026) — checkbox "Habilitar snap de rotação" (ver HTML
+    // acima) — espelha/sincroniza com o 5º botão da bandeja do canto
+    // inferior direito da grade (#map-rotate-snap-toggle, ver mapview.js
+    // _setMapRotationSnapAtivo, que já cuida de gravar no DB e sincronizar
+    // o outro lado sozinho).
+    modal.querySelector('#mc-rot2d-snap-toggle')?.addEventListener('change', (e) => {
+      window.MapView?._setMapRotationSnapAtivo?.(e.target.checked);
+    });
     // ITEM A1 (rodada 57/v311)
     modal.querySelector('#mc-foto-fmt-atual')?.addEventListener('change', async (e) => { await this.set({ fotoDownloadFormatoAtual: e.target.value }); });
     modal.querySelector('#mc-foto-fmt-todas')?.addEventListener('change', async (e) => { await this.set({ fotoDownloadFormatoTodas: e.target.value }); });
     modal.querySelector('#mc-resolucao3d')?.addEventListener('change', async (e) => { await this.set({ resolucao3D: e.target.value }); });
     modal.querySelector('#mc-antialiasing3d')?.addEventListener('change', async (e) => { await this.set({ antialiasing3D: e.target.checked }); });
+    // NOVO (07/09/2026) — ver DEFAULTS.efeitoTelaEscurecida3D acima.
+    modal.querySelector('#mc-efeito-tela-escurecida3d')?.addEventListener('change', async (e) => { await this.set({ efeitoTelaEscurecida3D: e.target.checked }); });
     modal.querySelector('#mc-cubo-origem-centro')?.addEventListener('change', async (e) => { await this.set({ cuboOrigemCentro: e.target.checked }); });
     // Wiring compartilhado dos dois pares <select>+<input type="number"> com
     // opção "Personalizada(o)…" (distância de renderização e limite de FPS,
@@ -1772,9 +2272,15 @@ const MapConfig = {
     });
     // Seção "🐞 Debug" — ver DEFAULTS.debugTransferidorAtivo/
     // debugProlongamentoAtivo acima.
+    // [12/09/2026] NOVO — handler do interruptor mestre `debugModoAtivo`
+    // (ver comentário no HTML/DEFAULTS acima). Pedido verbatim: "coloque um
+    // botão para ativar o debug. Ativando o debug, todas as suas opções
+    // entram em execução."
+    modal.querySelector('#mc-debug-modo-ativo')?.addEventListener('change', async (e) => { await this.set({ debugModoAtivo: e.target.checked }); });
     modal.querySelector('#mc-debug-transferidor')?.addEventListener('change', async (e) => { await this.set({ debugTransferidorAtivo: e.target.checked }); });
     modal.querySelector('#mc-debug-prolongamento')?.addEventListener('change', async (e) => { await this.set({ debugProlongamentoAtivo: e.target.checked }); });
     modal.querySelector('#mc-debug-alvo-orbital')?.addEventListener('change', async (e) => { await this.set({ modeladorMostrarAlvoOrbital: e.target.checked }); });
+    modal.querySelector('#mc-debug-enquadramento-camera')?.addEventListener('change', async (e) => { await this.set({ debugEnquadramentoCameraAtivo: e.target.checked }); });
     // Pedido do usuário (03/09/2026) — ver DEFAULTS.bussola3DAtiva/seção "🧭
     // Bússola 3D" acima.
     modal.querySelector('#mc-bussola3d')?.addEventListener('change', async (e) => { await this.set({ bussola3DAtiva: e.target.checked }); });
@@ -1816,6 +2322,39 @@ const MapConfig = {
       window.View3D?._toggleGlobalXRay?.(readXrayFlags());
     });
     modal.querySelector('#mc-scene-flythrough')?.addEventListener('click', () => { window.View3D?._startSceneFlythrough?.(); close(); });
+    // NOVO (07/09/2026), pedido verbatim: "Faça esse código de exemplo e
+    // deixe um botão para isso em uma seção nas 'configurações 3D'." — usa
+    // `window.View3D._engine.scene` (mesmo padrão singleton de
+    // `window.View3D?._startSceneFlythrough?.()` logo acima — View3D é um
+    // objeto único, não uma classe instanciada, então a cena ativa sempre
+    // mora ali) em vez de `opts.view3d`, que ficaria desatualizado se o
+    // modal continuasse aberto entre uma troca de mapa/fechar-reabrir o 3D.
+    modal.querySelector('#mc-scripting-demo')?.addEventListener('click', () => {
+      window.Scripting?.runDemoWallBuild?.(window.View3D?._engine?.scene);
+    });
+    // NOVO (07/09/2026), pedido verbatim: "definir luz ambiente" — grava
+    // direto (this.set), MESMO padrao de qualquer outro campo desta janela;
+    // 'onChange' (MapConfig, ja existente) propaga pro Engine3D.setConfig
+    // ativo (ver view3d.js), entao ligar/desligar com o 3D ja aberto ja
+    // aplica na hora (mesma mecanica da intensidade da luz direcional/hemi,
+    // que ja reage a config sem precisar reabrir a tela).
+    modal.querySelector('#mc-luzambiente-intensidade')?.addEventListener('input', async (e) => {
+      const v = parseFloat(e.target.value) || 0;
+      modal.querySelector('#mc-luzambiente-int-label').textContent = `${v.toFixed(2)}x`;
+      await this.set({ luzAmbienteIntensidade: v });
+    });
+    modal.querySelector('#mc-luzambiente-cor')?.addEventListener('input', async (e) => {
+      await this.set({ luzAmbienteCor: e.target.value });
+    });
+    modal.querySelector('#mc-luzambiente-reset')?.addEventListener('click', async () => {
+      await this.set({ luzAmbienteIntensidade: 1, luzAmbienteCor: '#ffffff' });
+      const intInput = modal.querySelector('#mc-luzambiente-intensidade');
+      const corInput = modal.querySelector('#mc-luzambiente-cor');
+      if (intInput) intInput.value = 1;
+      if (corInput) corInput.value = '#ffffff';
+      const lbl = modal.querySelector('#mc-luzambiente-int-label');
+      if (lbl) lbl.textContent = '1.00x';
+    });
     // NOVO (04/09/2026), item 5 — os 3 rádios do "🚀 Modo de voo 3D" (ver
     // HTML acima) gravam direto em `modoVoo3D`, lido por App.verNoMapa3D.
     modal.querySelectorAll('input[name="mc-modovoo3d"]').forEach((el) => {
@@ -1939,6 +2478,107 @@ const MapConfig = {
     // Modo de alinhamento — mesmo wiring (`wireModoAlinhamento`) da seção
     // "🚪 Porta / Janela" acima, ver DEFAULTS.objetoModoAlinhamento.
     wireModoAlinhamento(modal.querySelector('#mc-objeto-modo-alinhamento'), 'mc-objeto-modo-desc-', 'objetoModoAlinhamento');
+  },
+
+  /** NOVO (07/09/2026), pedido verbatim: "Deve haver um botão para definir
+   *  o snap [de rotação do mapa 2D] que varia de 1 grau até 180 graus. Ao
+   *  clicar nesse botão e arrastar o valor é alterado com o passo de 1 grau.
+   *  O cursor infinito deve ficar ativo para isso. Ao clicar, apenas,
+   *  abre-se uma janelinha de diálogo para definir o valor de snap de
+   *  rotação do mapa." — liga o botão `#mc-rot2d-snap-btn` (ver HTML da
+   *  seção "🔄 Rotação do mapa 2D" em `open()`) aos 2 gestos: um
+   *  clique-e-ARRASTE ajusta de 1 em 1 grau por `PX_POR_GRAU` pixels
+   *  arrastados, com Pointer Lock ("cursor infinito" — mesmo padrão/mesma
+   *  técnica já usada pelo preview de rotação da roda de fotos, ver
+   *  mapview.js `_wireFotoPinPreviewOrbit`/`opts.infiniteCursor`); um
+   *  CLIQUE simples (sem arrastar — `moved` continua `false`) abre o
+   *  diálogo numérico (`_openMapRotationSnapDialog` abaixo). Grava direto
+   *  via `DB.setSetting` (chave `mapa2dRotacaoSnapGraus`, mesma lida em
+   *  `open()`/mapview.js `_mountPlanta`), fora do blob `mapa3dConfig` —
+   *  mesmo padrão de `fotosMarcarAquiAcao`. */
+  _wireMapRotationSnapBtn(btn) {
+    if (!btn || btn.dataset.snapWired) return; // nunca religa 2x no mesmo botão (modal pode reabrir)
+    btn.dataset.snapWired = '1';
+    const PX_POR_GRAU = 6; // sensibilidade do arrasto — 6px arrastados = 1°
+    let dragging = false, moved = false, accumPx = 0, lastClientX = 0;
+    let valorAtual = parseInt((btn.textContent.match(/\d+/) || [15])[0], 10) || 15;
+    const commitValor = async (graus) => {
+      valorAtual = Utils.clamp(Math.round(graus) || 1, 1, 180);
+      btn.textContent = `🔄 ${valorAtual}°`;
+      if (window.MapView) window.MapView._mapRotationSnapGraus = valorAtual;
+      await DB.setSetting('mapa2dRotacaoSnapGraus', valorAtual);
+      return valorAtual;
+    };
+    btn.style.touchAction = 'none';
+    btn.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      dragging = true; moved = false; accumPx = 0; lastClientX = e.clientX;
+      try { btn.requestPointerLock?.(); } catch (_) { /* navegador sem suporte — cai pro arrasto normal, com fronteira de tela */ }
+      e.preventDefault();
+    });
+    btn.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const usandoLock = document.pointerLockElement === btn;
+      const dx = usandoLock ? (e.movementX || 0) : (e.clientX - lastClientX);
+      lastClientX = e.clientX;
+      accumPx += dx;
+      if (Math.abs(accumPx) >= PX_POR_GRAU) {
+        const passos = Math.trunc(accumPx / PX_POR_GRAU);
+        accumPx -= passos * PX_POR_GRAU;
+        moved = true;
+        commitValor(valorAtual + passos);
+      }
+    });
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      if (document.pointerLockElement === btn) { try { document.exitPointerLock(); } catch (_) { /* ignorado */ } }
+      // Clique PARADO (sem arrastar de verdade) — abre o diálogo numérico
+      // em vez de só soltar o arrasto (pedido verbatim: "Ao clicar, apenas,
+      // abre-se uma janelinha de diálogo").
+      if (!moved) this._openMapRotationSnapDialog(valorAtual, commitValor);
+    };
+    btn.addEventListener('pointerup', endDrag);
+    btn.addEventListener('pointercancel', () => {
+      dragging = false;
+      if (document.pointerLockElement === btn) { try { document.exitPointerLock(); } catch (_) { /* ignorado */ } }
+    });
+  },
+
+  /** Janelinha simples (mesmo padrão visual de outros modais pequenos do
+   *  app, ex. ambientephotos.js `_openMedidaValorModal`) com um campo
+   *  numérico único pra digitar o snap de rotação direto (1°–180°). */
+  _openMapRotationSnapDialog(valorInicial, commitValor) {
+    document.getElementById('mc-rot2d-snap-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'mc-rot2d-snap-modal';
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal-sheet" style="max-width:320px">
+        <div class="handle"></div>
+        <h3 style="margin-top:0">🔄 Snap de rotação do mapa</h3>
+        <label class="field">
+          <span class="lbl">De quantos em quantos graus (1° a 180°)</span>
+          <input type="number" id="mc-rot2d-snap-input" min="1" max="180" step="1" value="${valorInicial}">
+        </label>
+        <div style="display:flex; gap:10px; margin-top:6px">
+          <button type="button" class="btn secondary" id="mc-rot2d-snap-cancelar" style="flex:1">Cancelar</button>
+          <button type="button" class="btn" id="mc-rot2d-snap-salvar" style="flex:1">✅ Salvar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    const input = modal.querySelector('#mc-rot2d-snap-input');
+    setTimeout(() => { input.focus(); input.select(); }, 30);
+    const fechar = () => modal.remove();
+    modal.querySelector('#mc-rot2d-snap-cancelar').onclick = fechar;
+    modal.addEventListener('pointerdown', (e) => { if (e.target === modal) fechar(); });
+    const salvar = async () => {
+      const v = parseInt(input.value, 10);
+      if (Number.isFinite(v)) await commitValor(v);
+      fechar();
+    };
+    modal.querySelector('#mc-rot2d-snap-salvar').onclick = salvar;
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') salvar(); });
   },
 };
 

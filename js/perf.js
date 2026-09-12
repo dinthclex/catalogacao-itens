@@ -34,11 +34,6 @@ const Perf = {
   _lastFpsT: 0,
   _busyAccum: 0,
 
-  async init() {
-    this.enabled = await DB.getSetting('hudAtivo', false);
-    this._buildHud();
-  },
-
   async setEnabled(v) {
     this.enabled = v;
     await DB.setSetting('hudAtivo', v);
@@ -71,8 +66,30 @@ const Perf = {
       this._hudEl.classList.remove('perf-hud-canvas');
     }
   },
-  // Mantido por compatibilidade (não usado mais — ver setCanvasAnchor acima).
+  // BUG CORRIGIDO (07/09/2026), pedido verbatim: "No mapa 2D, o hud está
+  // fixo na horizontal e, em vez de ser movido, está aumentando de
+  // tamanho." — CAUSA RAIZ: `#perf-hud.perf-hud-topright` (ver style.css)
+  // fixa `top`/`right`/`transform` com `!important`, que sempre VENCE o
+  // `left`/`top`/`transform` aplicados via JS inline pelo arraste (ver
+  // `_applyPos`/`_wireDrag`, NOVO desta mesma rodada) — `right:8px
+  // !important` continuava "grudado" na borda direita (por isso "fixo na
+  // horizontal") enquanto o `left` mudava por baixo (arraste): com `left` E
+  // `right` definidos ao mesmo tempo, o navegador ESTICA a largura da caixa
+  // entre os dois em vez de só deslocá-la — daí o "aumentando de tamanho"
+  // ao arrastar. mapview.js chama este método (`_mountPlanta`, comentário
+  // "NOVO 03/09/2026: deixe o hud no canto superior direito") — o comentário
+  // velho aqui embaixo ("não usado mais") estava desatualizado, ele SEMPRE
+  // continuou em uso. Corrigido: só aplica o "canto superior direito"
+  // forçado quando o usuário AINDA NÃO arrastou o HUD pra nenhum lugar
+  // (`this._hudPos` nulo) — assim que ele arrasta (em QUALQUER tela, não só
+  // o Mapa 2D), a posição escolhida por ele passa a valer sempre, inclusive
+  // da próxima vez que entrar no Mapa 2D (sem isso, reabrir o Mapa 2D
+  // reaplicava a classe de novo, "esquecendo" o arraste feito na sessão
+  // anterior). Desligar (`on:false`, ao SAIR do Mapa 2D) continua
+  // incondicional — sem custo, e garante que a classe nunca fique "presa"
+  // fora do Mapa 2D mesmo num caso extremo de dessincronia.
   setTopRightCorner(on) {
+    if (on && this._hudPos) return; // posição customizada já existe — não força mais o canto
     this._hudEl?.classList.toggle('perf-hud-topright', !!on);
   },
 
@@ -111,6 +128,24 @@ const Perf = {
     (containerEl || document.body).appendChild(this._hudEl);
   },
 
+  // NOVO (07/09/2026), pedido verbatim: "Deve ser possível clicar em cima
+  // do hud e movê-lo." — posição SALVA (sobrevive a recarregar a página,
+  // mesmo padrão de `hudAtivo` acima: DB.getSetting/setSetting). `null`
+  // significa "ainda na posição padrão" (borda direita, centralizado na
+  // vertical, ver `_buildHud`) — só vira um {left,top} de verdade depois do
+  // 1º arraste (ver `_wireDrag`), gravado em PIXELS de tela absolutos
+  // (`position:fixed`, não depende do tamanho da janela ter mudado desde a
+  // última vez — se a janela encolheu e o HUD ficaria fora da tela, ver
+  // `_clampToViewport` chamado tanto ao aplicar a posição salva quanto a
+  // cada arraste).
+  _hudPos: null,
+
+  async init() {
+    this.enabled = await DB.getSetting('hudAtivo', false);
+    this._hudPos = await DB.getSetting('hudPos', null);
+    this._buildHud();
+  },
+
   _buildHud() {
     if (this._hudEl) return;
     const el = document.createElement('div');
@@ -125,12 +160,118 @@ const Perf = {
     // borda direita é a região mais livre em qualquer tela: topo e rodapé
     // são onde ficam as barras de ferramentas/controles (topbar, bottomnav,
     // joystick/pular/correr do 3D, controles da câmera).
-    el.style.cssText = 'position:fixed; right:8px; top:50%; transform:translateY(-50%); z-index:60;'
+    // BUG CORRIGIDO (07/09/2026), pedido verbatim: "Deve ser possível
+    // clicar em cima do hud e movê-lo." — causa raiz: `pointer-events:none`
+    // (linha de baixo) fazia QUALQUER clique/toque atravessar o HUD direto
+    // pro que estivesse embaixo (de propósito, até agora — pra nunca
+    // atrapalhar cliques na grade/canvas por baixo dele). Trocado pra
+    // `pointer-events:auto` só neste elemento (o resto da tela continua
+    // 100% clicável normalmente, o HUD é pequeno e fica numa borda) e
+    // adicionado arraste de verdade (ver `_wireDrag`, chamado logo abaixo).
+    // `cursor:move` avisa visualmente que dá pra arrastar.
+    // [14/09/2026] CORRIGIDO — pedido verbatim: "ao marcar 'Mostrar HUD', o
+    // HUD não está aparecendo. Se no código está tudo certo, então, deve
+    // ser z-index ou alguma outra trave de impressão [...]. O HUD deve
+    // aparecer por cima de tudo, o que está acontecendo é que ele fica
+    // atrás da tela das 'configurações do app' e só depois de fechá-la é
+    // que o HUD mostra-se." CAUSA RAIZ CONFIRMADA (exatamente z-index, como
+    // o usuário suspeitou): `z-index:60` aqui é MUITO menor que
+    // `.settings-fullscreen-overlay` (css/style.css, `z-index:950`, fundo
+    // OPACO) — o HUD sempre esteve lá, visível/atualizando normalmente por
+    // trás, só coberto inteiramente pela tela de Configurações (irmã dele
+    // dentro de `document.body`, ambos `position:fixed`). Não era
+    // `display:none`/`opacity:0`/tamanho zero nem nada relacionado à lógica
+    // de liga/desliga em si (`setEnabled`/`.hidden` continuam corretos).
+    // CORRIGIDO: `z-index:99999` — mesmo valor "acima de tudo" já usado
+    // noutros elementos que precisam escapar de qualquer contexto de
+    // empilhamento do app (ver `#bbm-unit-dropdown`, mapview.js), maior que
+    // qualquer overlay de tela cheia existente (Configurações:950,
+    // Organizar/Fotos:900, toasts:999).
+    el.style.cssText = 'position:fixed; right:8px; top:50%; transform:translateY(-50%); z-index:99999;'
       + 'background:rgba(10,12,16,.82); border:1px solid #2a303a; border-radius:8px; padding:6px 9px;'
-      + 'font-family:monospace; font-size:11px; color:#baffce; line-height:1.5; pointer-events:none; min-width:118px;';
+      + 'font-family:monospace; font-size:11px; color:#baffce; line-height:1.5; pointer-events:auto; min-width:118px; cursor:move; user-select:none; touch-action:none;';
     document.body.appendChild(el);
     this._hudEl = el;
+    // Posição salva de uma sessão anterior (ver `init`, `_hudPos`) — aplica
+    // ANTES do 1º `requestAnimationFrame` pra não "piscar" na posição padrão
+    // por um quadro.
+    if (this._hudPos) this._applyPos(this._hudPos);
+    this._wireDrag(el);
     requestAnimationFrame((t) => this._tick(t));
+  },
+
+  /** Aplica `{left,top}` (px de tela) no HUD, substituindo o posicionamento
+   *  padrão (right/top/transform) por left/top absolutos — chamado tanto ao
+   *  restaurar a posição salva quanto a cada quadro de arraste (ver
+   *  `_wireDrag`). `_clampToViewport` evita o HUD ficar preso fora da tela
+   *  visível (ex.: posição salva numa janela maior, depois reaberta numa
+   *  menor/celular). */
+  _applyPos(pos) {
+    if (!this._hudEl || !pos) return;
+    // BUG CORRIGIDO (07/09/2026) — reforço do fix de `setTopRightCorner`
+    // (ver comentário grande lá): remove as classes que forçam `top`/
+    // `right`/`transform` com `!important` (`.perf-hud-topright`, Mapa 2D;
+    // `.perf-hud-canvas`, Modelador 3D) TODA VEZ que uma posição de verdade
+    // é aplicada — não só na hora de ligar/desligar essas classes. Cobre o
+    // 1º arraste de todos (antes de qualquer `_hudPos` existir, quando
+    // `setTopRightCorner(true)` já tinha acabado de adicionar a classe):
+    // sem isto, mesmo com `right:auto` aplicado aqui embaixo, o
+    // `right:8px !important` da classe continuaria "ganhando" durante
+    // aquele 1º arraste específico (só o PRÓXIMO, depois de `_hudPos` já
+    // salvo, se beneficiaria do guard em `setTopRightCorner`).
+    this._hudEl.classList.remove('perf-hud-topright', 'perf-hud-canvas');
+    const clamped = this._clampToViewport(pos);
+    this._hudEl.style.right = 'auto';
+    this._hudEl.style.top = `${clamped.top}px`;
+    this._hudEl.style.left = `${clamped.left}px`;
+    this._hudEl.style.transform = 'none';
+  },
+
+  _clampToViewport(pos) {
+    const el = this._hudEl;
+    const w = el?.offsetWidth || 130, h = el?.offsetHeight || 70;
+    const maxLeft = Math.max(0, window.innerWidth - w - 4);
+    const maxTop = Math.max(0, window.innerHeight - h - 4);
+    return { left: Utils.clamp(pos.left, 0, maxLeft), top: Utils.clamp(pos.top, 0, maxTop) };
+  },
+
+  /** Arraste por clique-e-segurar (mouse) ou toque, com Pointer Events
+   *  (mesmo padrão de baixo nível já usado noutros pontos do app —
+   *  `setPointerCapture` garante que o `pointermove`/`pointerup` continuam
+   *  chegando aqui mesmo que o cursor saia por cima de outro elemento no
+   *  meio do arraste). Grava a posição nova em `DB.setSetting('hudPos',...)`
+   *  só no SOLTAR (não a cada quadro do arraste) — evita gravação em disco
+   *  excessiva enquanto arrasta. */
+  _wireDrag(el) {
+    let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button != null && e.button !== 0) return; // só botão esquerdo/toque — mesmo cuidado de outros arrastes do app
+      dragging = true;
+      el.setPointerCapture(e.pointerId);
+      const rect = el.getBoundingClientRect();
+      startX = e.clientX; startY = e.clientY; startLeft = rect.left; startTop = rect.top;
+      e.preventDefault();
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const left = startLeft + (e.clientX - startX);
+      const top = startTop + (e.clientY - startY);
+      this._applyPos({ left, top });
+    });
+    const finish = async (e) => {
+      if (!dragging) return;
+      dragging = false;
+      try { el.releasePointerCapture(e.pointerId); } catch (_e) { /* já solto, ignora */ }
+      const rect = el.getBoundingClientRect();
+      this._hudPos = { left: rect.left, top: rect.top };
+      await DB.setSetting('hudPos', this._hudPos);
+    };
+    el.addEventListener('pointerup', finish);
+    el.addEventListener('pointercancel', finish);
+    // Janela redimensionada com o HUD numa posição salva perto de uma borda
+    // que "sumiu" (ex.: girar o celular) — reaplica com o clamp de novo pra
+    // ele nunca ficar preso de vez fora da área visível.
+    window.addEventListener('resize', () => { if (this._hudPos) this._applyPos(this._hudPos); });
   },
 
   /** Chame no início do trabalho pesado do frame (render/física) e markFrameEnd() no fim,

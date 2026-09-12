@@ -14,6 +14,162 @@
  * .centerRay(), .pickFromRay()) é EXATAMENTE a mesma de antes — view3d.js
  * (movimento, mouse-look, toque, pulo, colisão, HUD, flashcard) não precisou
  * mudar nada além de chamar engine.dispose() ao desmontar.
+ *
+ * ---------------------------------------------------------------------
+ * [11/09/2026] CABEÇALHO COM ÍNDICE DE FUNÇÕES (pedido recorrente do
+ * usuário, "evitar buscas exaustivas") — arquivo grande (~380KB): índice
+ * pragmático, agrupado por assunto (não é toda função interna de closure,
+ * só topo-de-arquivo/métodos de `class Engine3D`). Consumido quase
+ * inteiramente por `js/view3d.js` (a "cola" entre jogador/UI e este motor).
+ *
+ * Funções soltas (fora da classe), matemática pura reaproveitada por
+ * view3d.js/mapping.js:
+ * - rotY(p,a)/rotX(p,a) — rotaciona um ponto 3D em torno do eixo Y/X.
+ * - cameraForward(cam)/cameraForwardFlat(cam)/cameraRightFlat(cam) —
+ *   vetores de direção da câmera (3D completo / projetado no plano
+ *   horizontal), base de todo movimento/mira do jogador.
+ * - objectPointerForward(dirAngulo,pitch) — [22/09/2026, NOVO] vetor de
+ *   direção de APONTAMENTO de um OBJETO câmera/orb de foto (cone/seta,
+ *   placa, retângulo amarelo/frustum — todos usam este mesmo vetor, ver
+ *   `setScene`) — DISTINTO de `cameraForward` (direção de VISÃO do
+ *   personagem/câmera de navegação): corrige uma inversão de 180° no eixo
+ *   Z entre a convenção do mapa 2D (`dirAngulo`) e `cameraForward`, ver
+ *   comentário grande dela.
+ * - lerpAngle(a,b,t) — interpolação angular curta (nunca "dá a volta
+ *   longa"), usada em transições suaves de yaw/pitch.
+ * - buildSmoothedTriGeometry(...) — geometria de triângulos com normais
+ *   suavizadas (sombreamento Gouraud-like em malhas customizadas).
+ * - WALL_THICKNESS_3D/THREE_GLOBAL_URL/RECTAREA_UNIFORMS_URL — constantes
+ *   de módulo (espessura de parede 3D, URLs dos scripts vendorizados do
+ *   Three.js carregados sob demanda).
+ *
+ * `class Engine3D` — construção/inicialização:
+ * - constructor(canvas, initialConfig, opts) — cria a instância, carrega
+ *   Three.js sob demanda (libloader.js) e chama `_initThree`.
+ * - _initThree(THREE) — monta cena/câmera/renderer/luzes base do zero.
+ * - _maxLuzesReais()/_maxLuzesAtivas() — limites de luzes de verdade
+ *   (sombra) vs. ativas (sem sombra), conforme `resolucao3D` da config.
+ * - _buildCheckerTexture()/_buildGlassShineTexture()/_buildGlassPane(w,h)
+ *   — texturas/malha procedurais (piso xadrez, brilho de vidro, painel de
+ *   vidro de janela).
+ *
+ * Fantasmas/guias de construção (ferramenta de posicionar no "Ver em 3D"):
+ * - _initHoverHighlight/_initBuildGhosts — cria as malhas reutilizáveis de
+ *   destaque/fantasma.
+ * - hideAllGhosts() — esconde todos os fantasmas.
+ * - showGhostWallSection/showWallSpringGhost/showSmartGuides/
+ *   showGhostWall/showGhostObject/showGhostItem/showGhostDoorWindow/
+ *   showRotationProtractor/showGhostFootprintShadow/
+ *   hideGhostFootprintShadow — cada um posiciona/mostra UM tipo de
+ *   fantasma (parede, objeto, item, porta/janela, sombra de contorno,
+ *   transferidor de rotação) enquanto o jogador mira o ponto de
+ *   colocação.
+ * - objectFootprint(tipoKey) — pegada (contorno base) de um tipo de
+ *   objeto, usada pelos fantasmas acima.
+ *
+ * Raio-X / oclusão / culling:
+ * - setXRayTarget(objId)/setGlobalXRay(flags) — "ver através das paredes"
+ *   (de 1 objeto específico ou global, por categoria).
+ * - _setupCullMeshes()/_setupWallOcclusionMeshes()/
+ *   _updateDistanceCulling(camera) — culling por distância/oclusão de
+ *   paredes (desempenho).
+ * - _addWireframeOcclusion() — malhas de wireframe usadas só pra ocluir
+ *   (sem desenhar), no modo "sólido+wireframe".
+ * - _setupHybridMeshes()/updateHybridQuality(camera,fpsAtual,fpsAlvo) —
+ *   modo híbrido de qualidade adaptativa (LOD por raio ao redor do
+ *   jogador).
+ * - _segmentsIntersect2D(...) — teste geométrico auxiliar (interseção de
+ *   segmentos 2D), usado por detecção de cantos de parede.
+ *
+ * Personagem/câmera do jogador:
+ * - _buildPlayerFigure(THREE,scene)/updatePlayerFigure(...)/
+ *   setPlayerFigureVisible(visible) — malha "boneco palito" do jogador
+ *   (modos espectador) e seu controle de visibilidade.
+ * - setFov(deg) — campo de visão da câmera de render.
+ * - setClipPlanes(nearM,farM)/clearClipPlanes() — override de
+ *   near/far (ver comentário grande junto delas — "Camera Match").
+ * - setCameraMeshVisible(camId,visible) — [11/09/2026, NOVO] esconde/
+ *   mostra a malha caixa+cone de UMA câmera específica (usado por
+ *   view3d.js `_enterCameraOrbView`/`_exitCameraOrbView`).
+ * - setFotoMeshVisible(fotoId,visible) — [12/09/2026, NOVO] mesma ideia
+ *   acima, mas pra malha esfera+cone(+placa) de UM "orb de foto" (usado
+ *   por view3d.js `_enterFotoCameraView`/`_exitFotoCameraView`).
+ * - updateActiveLights(camera) — recalcula quais luzes de luminária estão
+ *   "ativas" (com sombra) mais perto da câmera.
+ * - setMode(mode) — troca o modo de renderização (ex. wireframe).
+ *
+ * Céu/iluminação ambiente:
+ * - _pixelRatioCap()/_colorSpaceEfeito()/_applyColorSpaceEfeito() —
+ *   ajustes de qualidade de imagem conforme config.
+ * - _renderDistance()/_fogNear(rd) — distância de renderização/neblina.
+ * - _horaAtualConfigurada()/_skyPalette(THREE)/_buildCelestialBodies(THREE)/
+ *   _updateSky() — ciclo dia/noite (cor do céu, sol/lua).
+ * - setConfig(cfg) — aplica uma config nova (chamada quando o painel ⚙️
+ *   muda algo).
+ *
+ * Construção da cena (a partir do mapa):
+ * - setScene(mapData) — MÉTODO PRINCIPAL, reconstrói a cena 3D inteira a
+ *   partir do mapa (paredes/portas/janelas/objetos/itens/câmeras/fotos/
+ *   luminárias/postes/tijolos) — a maior função do arquivo.
+ * - _buildOneObjectMesh(obj,wireframe,colWireframe) — malha de UM objeto
+ *   comum (despacha pro builder certo conforme o tipo/perfil).
+ * - _buildItemBadgeTexture/_buildCountBadgeTexture/
+ *   _buildOrdinalBadgeTexture — texturas dos selos/plaquinhas 3D (item
+ *   associado, contagem, ordinal de duplicidade).
+ * - _addItemAssociadoDestaque/_addBeaconDestaque/_buildAnelDouradoTexture/
+ *   _addAnelDouradoDestaque3D — destaques visuais de patrimônio associado
+ *   (selo, feixe de luz, anel dourado).
+ * - addObjectIncremental(obj) — adiciona UM objeto novo à cena já
+ *   montada, sem reconstruir tudo (colocação ao vivo no "Ver em 3D").
+ * - _detectWallCorners(walls)/_buildCornerFillMesh(...)/
+ *   _buildPrismFromPolygon(...) — preenchimento de cantos/junções de
+ *   parede (evita "buracos" nas quinas).
+ * - _tintForLight(colorHex,x,y,z) — matiz de cor por proximidade de luz
+ *   (usado em vertex colors).
+ * - _buildStandardMaterialForObj(...) — material padrão (cor/textura) de
+ *   um objeto.
+ * - _rebuildTijolos(mapData)/rebuildTijolos(mapData) — malha mesclada dos
+ *   "tijolos" (blocos de construção livre).
+ * - _buildCustomMeshObject/_buildMoldeMesh/_buildTypeMoldeMesh/
+ *   _buildMesaMesh/_buildEscadaMesh/_buildImagemMesh/
+ *   _buildObjImportMesh/_buildLuminariaMesh/_buildPosteMesh — um builder
+ *   de malha por TIPO/perfil de objeto especial (molde importado,
+ *   mesa, escada, imagem/quadro, .obj importado, luminária, poste).
+ * - _disposeGroupContents() — descarta toda a geometria/material/textura
+ *   da cena anterior (evita vazamento de memória de GPU a cada
+ *   setScene/troca de modo).
+ *
+ * Loop de render:
+ * - _resize()/_presentToCanvas()/_presentFrame()/render(camera) — pipeline
+ *   de redimensionamento e desenho de UM quadro (chamado por view3d.js a
+ *   cada frame do rAF).
+ * - _updateItemBadgeOcclusion(camera) — esconde selos "atrás" de
+ *   paredes/portas/janelas quando "Plaquinhas" está com oclusão ligada.
+ * - spawnCollectEffect/spawnDemolishEffect/_updateEffects — efeitos
+ *   visuais temporários (coletar item, demolir).
+ *
+ * Raycasting (seleção/mira/colocação):
+ * - centerRay(camera) — raio saindo do centro da tela (mira).
+ * - raycastWall/raycastFloor/raycastPlaneY/raycastSurface/raycastLateral
+ *   — cada um testa o raio contra um tipo de alvo (parede, chão, plano Y
+ *   arbitrário, qualquer superfície, lateral de objeto).
+ * - snapToFloorTileCenter(x,z)/gridIntersectionNear(x,z) — encaixe no
+ *   centro/interseção de ladrilho do chão.
+ * - pickFromRay(origin,dir) — pick genérico (o que usa `this.pickables`),
+ *   base de toda seleção por clique/mira.
+ * - _rayPickableT/_raySphereT/_rayPlaneT/_rayBoxT — testes de interseção
+ *   raio×forma usados por `pickFromRay`.
+ * - _hoverPickPixelPerfect(camera)/hoverPick(camera) — pick "sob o
+ *   cursor" (modo pixel-perfect via THREE.Raycaster real, ou hitbox
+ *   aproximada), usado pelo destaque ao mirar/passar o mouse.
+ * - clearHoverHighlight()/_updateHoverHighlight(camera) — liga/desliga o
+ *   destaque visual do alvo sob mira.
+ * - _outlineLocalPoints/_convexHull2D/_drawOutline2D — contorno pontilhado
+ *   2D do alvo (estilo `raycastHighlightStyle: 'outline2d'`).
+ *
+ * - dispose() — libera tudo (geometria/textura/listeners) ao desmontar o
+ *   "Ver em 3D" — chamado por view3d.js.
+ * ---------------------------------------------------------------------
  */
 
 // ---------- Cam3DMath: matemática pura de direção da câmera ----------
@@ -47,6 +203,53 @@ function cameraForwardFlat(cam) { return rotY({ x: 0, y: 0, z: 1 }, cam.yaw); }
 // mira (cameraForward, usada por lookAt/picking, que sempre esteve correta).
 function cameraRightFlat(cam) { return rotY({ x: -1, y: 0, z: 0 }, cam.yaw); }
 
+// [22/09/2026] NOVO — pedido verbatim do usuário: "No mapa 2D, ao colocar
+// um objeto câmera sua seta aponta para o norte. O mapa 3D está com o
+// norte apontando para o sul, conforme a roda de pontos cardeais (no canto
+// superior direito). Deve girar 180 graus para apontar para o lado certo
+// (tomando como referência o mapa 2D)." Direção de APONTAMENTO de um
+// OBJETO câmera/orb de foto (cone/seta 3D que indica pra onde ele "olha")
+// — DISTINTA de `cameraForward` acima, que é a direção de VISÃO do
+// PERSONAGEM/câmera de navegação (yaw do jogador, nunca teve nenhum
+// problema relatado, NÃO TOCADA por esta correção).
+//
+// CAUSA RAIZ ENCONTRADA (comparação numérica, não só suspeita): a posição
+// de um objeto no mapa 2D vira posição 3D SEM NENHUM sinal invertido
+// (`orb.position.set(foto.x, baseY, foto.y)`, engine3d.js `setScene` —
+// mapY vira Z direto) e `Map2DRenderer.worldToScreen` (mapview.js) também
+// NUNCA inverte o eixo Y (`dy=(y-cy)*zoom`, sem rotação do mapa) — ou
+// seja, "para cima" na tela do mapa 2D (Y de tela menor) corresponde a
+// mapY MENOR, que corresponde a Z do mundo MENOR (mundo -Z). O ângulo do
+// objeto (`foto.dirAngulo`) tem seu 0° JÁ VALIDADO como "para cima" no
+// mapa 2D — comentário grande em mapview.js `_drawFotoPinPreview`
+// confirma numericamente: dirAngulo=0°→tela CIMA, 90°→ESQUERDA,
+// 180°→BAIXO, 270°→DIREITA. Ou seja, o vetor de mundo esperado em função
+// de `dirAngulo` é `(x,z) = (-sin(dirAngulo), -cos(dirAngulo))` (checado
+// nos 4 ângulos cardeais contra a lista acima). Mas o cone 3D
+// (`engine3d.js`, antes desta correção) calculava sua direção via
+// `cameraForward({yaw:dirAngulo,...})`, que dá `(x,z) =
+// (-sin(dirAngulo), +cos(dirAngulo))` — o componente Z (profundidade,
+// "para frente/para trás" no mundo) sai com o SINAL TROCADO em relação ao
+// que o mapa 2D define — uma inversão de 180° especificamente no eixo Z,
+// não nos dois eixos (não é uma simples reflexão em torno da origem, é um
+// "espelhamento" de profundidade — mesma classe de bug documentada mais
+// acima nesta função, em `cameraRightFlat`, sobre `THREE.Camera.lookAt()`
+// construir a base com uma "handedness" diferente da convenção original
+// deste app). CORRIGIDO: usa `cameraForward` (mantida intacta, continua a
+// única fonte de verdade da composição yaw+pitch/gimbal) e depois nega SÓ
+// o componente Z do resultado — pitch/inclinação vertical (`y`) nunca fez
+// parte do bug relatado e fica intocado. Usada em TODO lugar que precisa
+// saber "pra onde este objeto câmera/orb de foto aponta" (cone/seta,
+// placa da foto, retângulo amarelo/frustum — todos compartilham a mesma
+// variável `dirVec` em `setScene`, ver comentário lá) — e também na POSE
+// de "Ver através desta câmera" (`view3d.js _computeFotoCamPose`, que
+// precisa devolver um `yaw` de CÂMERA DE VISÃO equivalente a este mesmo
+// vetor, ver comentário grande lá pra a álgebra que prova a equivalência).
+function objectPointerForward(dirAngulo, pitch) {
+  const d = cameraForward({ yaw: dirAngulo || 0, pitch: pitch || 0 });
+  return { x: d.x, y: d.y, z: -d.z };
+}
+
 // `objAnguloToRotY` (ângulo de objeto do mapa -> mesh.rotation.y do
 // Three.js) mudou de casa na rodada 51 — ver js/engine3d-profiles.js
 // (pedido do usuário: "Coloque em um arquivo separado do restante do
@@ -70,7 +273,55 @@ function lerpAngle(a, b, t) {
   return a + diff * t;
 }
 
-window.Cam3DMath = { rotY, rotX, cameraForward, cameraForwardFlat, cameraRightFlat, lerpAngle };
+// [11/09/2026] NOVO — pedido verbatim: "O enquadramento deve ter medidas
+// limite que são a forma do quadrado (assim como no Blender). Com a
+// resolução com largura maior do que a altura, então, em cima e em baixo
+// do retângulo amarelo ficam com as medidas iguais as do quadrado limite.
+// Com resolução com altura maior do que a largura, então, as medidas das
+// laterais do retângulo amarelo ficam iguais as medidas do quadrado
+// limite." Mesma convenção do "Sensor Fit: Auto" do Blender: o valor único
+// de "Propriedades da câmera" › FOV (`camProps.fov`, radianos) passa a
+// valer sempre para a MAIOR dimensão da resolução (X ou Y) — como se
+// houvesse um sensor QUADRADO do tamanho da maior dimensão, e o
+// enquadramento de verdade (retângulo proporcional à resolução) fosse
+// RECORTADO de dentro desse quadrado, sempre TOCANDO as bordas dele no
+// eixo maior (por isso "em cima/embaixo" ficam do tamanho do quadrado
+// quando a largura manda, e "nas laterais" quando a altura manda — são
+// exatamente os 2 lados que SOBRAM do quadrado pro retângulo mais estreito
+// caber dentro). ANTES desta correção, `camProps.fov` era tratado sempre
+// como o FOV VERTICAL (convenção padrão do `THREE.PerspectiveCamera`),
+// não importa a proporção da resolução — então uma câmera em paisagem
+// (resX > resY) tinha as medidas de CIMA/BAIXO do retângulo amarelo
+// SEMPRE do tamanho do quadrado (correto, é o caso vertical=eixo maior por
+// coincidência só quando resY>=resX) mas as LATERAIS variavam com a
+// proporção sem nenhum limite — o comportamento pedido (Blender) é o
+// OPOSTO nesse caso: são as LATERAIS que deveriam bater no quadrado, e
+// cima/baixo que deveriam ser recortados. `camPropsVFovRad` (abaixo)
+// devolve o FOV VERTICAL DE VERDADE a usar (pra `THREE.PerspectiveCamera.
+// fov`, retângulo amarelo — [19/09/2026] "plano do backdrop 'Trás'" também
+// consumia isto antes desta rodada; plano REMOVIDO — todo lugar que hoje
+// consome um FOV vertical, ver `_activeCamPropsVFovRad`/`_camOrbFovDeg` em
+// view3d.js e o bloco `vFovRad` do retângulo amarelo abaixo, em
+// `setScene`), já fazendo essa conversão — chamadores não precisam saber
+// se o FOV governa a largura ou a altura, só chamam esta função uma vez
+// com `fovParamRad` (o valor CRU salvo em `camProps.fov`) e a proporção. */
+function camPropsVFovRad(fovParamRad, resX, resY) {
+  const fov = fovParamRad || (Math.PI / 3);
+  const rx = resX || 1920, ry = resY || 1080;
+  if (rx >= ry) {
+    // Paisagem/quadrado — `fov` é o FOV HORIZONTAL do quadrado limite (o
+    // eixo maior); deriva o vertical a partir dele + da proporção (mesma
+    // fórmula padrão pra converter FOV entre eixos: tan(metade) escala
+    // linearmente com a proporção da tela/sensor).
+    const aspect = rx / Math.max(1, ry);
+    return 2 * Math.atan(Math.tan(fov / 2) / aspect);
+  }
+  // Retrato — `fov` já É o FOV VERTICAL do quadrado limite (o eixo maior
+  // aqui é a altura) — usado direto, sem conversão nenhuma.
+  return fov;
+}
+
+window.Cam3DMath = { rotY, rotX, cameraForward, cameraForwardFlat, cameraRightFlat, lerpAngle, camPropsVFovRad, objectPointerForward };
 
 // CORRIGIDO (01/09/2026) — pedido verbatim: "O 'editar' dos modelos 3D
 // parece estar com baixíssima resolução tanto para o preenchimento do
@@ -85,14 +336,27 @@ window.Cam3DMath = { rotY, rotX, cameraForward, cameraForwardFlat, cameraRightFl
 // mapa/objeto salvo ficaria facetada mesmo com muitos segmentos, apesar de
 // já aparecer lisa DENTRO do Modelador (que usa a mesma função na cópia
 // acima) — o objeto salvo/fora de edição precisava do mesmo tratamento.
-function buildSmoothedTriGeometry(THREE, verts, faces) {
+// NOVO (07/09/2026), pedido verbatim: "Também a possibilidade de mudar de
+// cor as faces. [...] Definir cor para as faces." — parâmetro NOVO
+// `faceColorsRGB` (opcional; `{ [indiceDaFace]: [r,g,b] }`, 0..1 cada,
+// mais uma chave especial `__default` pra faces SEM override — sempre
+// preenchida por quem chama, ver `_buildCustomMeshObject`) — quando
+// presente, a geometria ganha um atributo `color` por VÉRTICE (cada
+// triângulo herda a cor da FACE de origem, `triFaceIdx` abaixo), pra a
+// malha poder usar `vertexColors:true` no material (ver
+// `_buildStandardMaterialForObj`). `faceColorsRGB` ausente/`null` = MESMO
+// comportamento de sempre, sem nenhum atributo `color` (objeto sem cor por
+// face customizada continua exatamente como era antes).
+function buildSmoothedTriGeometry(THREE, verts, faces, faceColorsRGB) {
   const tris = [];
-  (faces || []).forEach((face) => {
+  const triFaceIdx = [];
+  (faces || []).forEach((face, fi) => {
     if (!face || face.length < 3) return;
     for (let k = 1; k < face.length - 1; k++) {
       const ia = face[0], ib = face[k], ic = face[k + 1];
       if (!verts[ia] || !verts[ib] || !verts[ic]) continue;
       tris.push([ia, ib, ic]);
+      triFaceIdx.push(fi);
     }
   });
   const geo = new THREE.BufferGeometry();
@@ -113,8 +377,10 @@ function buildSmoothedTriGeometry(THREE, verts, faces) {
   const limiarCos = Math.cos(40 * Math.PI / 180);
   const positions = [];
   const normals = [];
+  const colors = faceColorsRGB ? [] : null;
   tris.forEach((t, ti) => {
     const nEste = triNormals[ti];
+    const corFace = colors ? (faceColorsRGB[triFaceIdx[ti]] || faceColorsRGB.__default || [1, 1, 1]) : null;
     t.forEach((vi) => {
       let sx = 0, sy = 0, sz = 0;
       trisPorVertice.get(vi).forEach((tj) => {
@@ -126,10 +392,12 @@ function buildSmoothedTriGeometry(THREE, verts, faces) {
       normals.push(sx / len, sy / len, sz / len);
       const p = verts[vi];
       positions.push(p[0], p[1], p[2]);
+      if (colors) colors.push(corFace[0], corFace[1], corFace[2]);
     });
   });
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  if (colors) geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   return geo;
 }
 
@@ -275,8 +543,155 @@ class Engine3D {
   static LUZ_POSTE_INTENSITY = Engine3D.LUZ_LUMINARIA_INTENSITY * 3;
   static LUZ_POSTE_DISTANCE = Engine3D.LUZ_LUMINARIA_DISTANCE * 3;
 
-  constructor(canvas, initialConfig) {
+  // NOVO (07/09/2026), pedido verbatim do usuário: "modularizar tudo, para
+  // fazer divisões de tela como no blender reaproveitando os códigos como
+  // instâncias de partes do app. Desse jeito, é possível tornar tão simples
+  // quanto colocar um retângulo em algum lugar sendo exibido nele a
+  // renderização 3D na resolução daquele retângulo [...] Ou também, por
+  // exemplo, dá para fazer vários retângulos, cada um exibindo a
+  // perspectiva de uma câmera. Com isso, deve ser possível resolver um
+  // problema atual na 'miniatura 3D' no mapa 2D [...] Faça a modularização
+  // do app de tal jeito que cada parte do app possa ser como um app a
+  // parte."
+  //
+  // ==================== MODO "EYE" (opts.eye === true) ====================
+  //
+  // Changelog da versão anterior (setViewport/setScissor num canvas global
+  // único), preservado abaixo:
+  // REESCRITO (07/09/2026, mesmo dia — 2ª tentativa): a 1ª versão deste
+  // modo compartilhado (`opts.shared`, ver changelog do sw.js v386/v387 pra
+  // histórico) usava um <canvas> OCULTO fora do DOM + `drawImage` pra
+  // copiar o resultado pro canvas visível de cada instância. Funcionava em
+  // teoria, mas o usuário mandou o código de referência que ELE queria (um
+  // .html de exemplo com "Sala de Monitoramento 3D — Múltiplas Câmeras"),
+  // usando a técnica CLÁSSICA e muito mais simples/robusta do próprio
+  // Three.js pra múltiplos viewports num contexto só:
+  // `renderer.setViewport(...)` + `renderer.setScissor(...)` +
+  // `renderer.setScissorTest(true)` antes de cada `renderer.render(...)`,
+  // TUDO no MESMO <canvas> físico, sem canvas intermediário nenhum, sem
+  // `drawImage`. Isso usava UM `<canvas>` global fixo cobrindo a janela
+  // inteira (`Engine3D._globalCanvas`), com cada "olho" desenhando no
+  // retângulo definido por `getBoundingClientRect()` do seu próprio canvas
+  // "moldura" (nunca recebia contexto WebGL). Gerou uma sequência de bugs
+  // ao longo de várias rodadas (tela azul residual ao fechar, "Ver em 3D"
+  // não voltando pro mapa 2D, `display:none` sendo ignorado por
+  // `!important` no CSS, piscada na tela toda ao ter "Ver em 3D" + miniatura
+  // 3D simultâneos) — todos com a mesma raiz: coordenar POSIÇÃO NA TELA e
+  // DPR de múltiplos "olhos" independentes disputando o MESMO canvas/buffer
+  // físico é frágil por natureza (thrashing de dpr entre olhos com loops de
+  // render independentes, mismatch de coordenadas, cascata de CSS).
+  //
+  // NOVA ARQUITETURA (07/09/2026, pedido verbatim do usuário, após enviar
+  // arquivo de referência 'index2 (várias câmeras com resoluções
+  // diferentes).html' e um prompt detalhado de engenharia especificando uso
+  // de `THREE.WebGLRenderTarget`): "Sim, parta para a integração do
+  // WebGLRenderTarget e abandonando setViewport/setScissor. Implemente tudo
+  // e depois nos falamos." — `setViewport`/`setScissor`/`setScissorTest` e o
+  // canvas global compartilhado (`#engine3d-global-canvas`) foram
+  // COMPLETAMENTE ABANDONADOS. Cada "olho" agora tem seu próprio
+  // framebuffer off-screen isolado (`THREE.WebGLRenderTarget`), com
+  // resolução interna 100% independente dos outros "olhos" — sem nenhuma
+  // disputa de buffer/dpr compartilhado, sem nenhuma dependência da posição
+  // do elemento na tela.
+  //
+  // Como funciona agora:
+  //
+  // 1. Existe UM `THREE.WebGLRenderer` só (`Engine3D._sharedRenderer`),
+  //    criado uma única vez, desenhando num <canvas> OFF-SCREEN que NUNCA é
+  //    anexado ao DOM (nunca aparece na tela diretamente) — ele é só uma
+  //    "fábrica de frames", nunca visível por si só. Este é o ÚNICO
+  //    contexto WebGL que o app inteiro usa, ponto final (ver
+  //    `_ensureSharedRenderer`).
+  //
+  // 2. Cada instância "eye" de Engine3D (`new Engine3D(canvasOlho, cfg,
+  //    { eye: true })`) cria seu PRÓPRIO `THREE.WebGLRenderTarget(w, h)` —
+  //    um framebuffer off-screen com resolução em pixels totalmente
+  //    independente das outras instâncias (cada uma usa seu próprio teto de
+  //    `RESOLUCAO_DPR` × o tamanho CSS do seu canvas). `canvasOlho` (o
+  //    `<canvas>` que já existia no HTML de cada tela — `#map-minimap3d-
+  //    canvas`, `#v3d-canvas`, etc.) agora recebe um contexto 2D comum
+  //    (`getContext('2d')`, ver `this._displayCtx`) — não é mais WebGL nem
+  //    uma "moldura" transparente: é a TELA final onde o resultado do
+  //    render target é desenhado a cada frame.
+  //
+  // 3. A cada `render(camera)` desta instância: renderiza a cena NO SEU
+  //    PRÓPRIO render target (`renderer.setRenderTarget(this.renderTarget)`
+  //    → `renderer.render(scene, camera3)` → `renderer.setRenderTarget(null)`
+  //    devolve o renderer ao estado neutro pro próximo "olho" usar), depois
+  //    lê os pixels de volta pra CPU (`readRenderTargetPixels`) e desenha no
+  //    `<canvas>` 2D visível daquele "olho" (`_presentToCanvas`, com um
+  //    espelhamento vertical — WebGL usa origem embaixo-à-esquerda, Canvas2D
+  //    usa origem em cima-à-esquerda). Como cada "olho" tem seu PRÓPRIO
+  //    render target E seu PRÓPRIO canvas 2D de saída, não existe mais
+  //    NENHUMA dependência de `getBoundingClientRect()`/posição na tela, nem
+  //    NENHUMA disputa de buffer/dpr entre "olhos" simultâneos — o tamanho
+  //    do render target vem só do tamanho CSS (`clientWidth`/`clientHeight`)
+  //    do próprio canvas daquele "olho", igual ao modo não-eye de sempre.
+  //
+  // 4. Configurações que dependem da CRIAÇÃO do WebGLRenderer (antialiasing)
+  //    continuam GLOBAIS — um recurso único compartilhado não pode ter "um
+  //    antialiasing por instância" (sempre `false`, ver
+  //    `_ensureSharedRenderer`). Mas a RESOLUÇÃO (`RESOLUCAO_DPR`) volta a
+  //    ser 100% por instância, sem nenhum "por quadro, por quem renderizou
+  //    por último" — cada "olho" tem seu próprio render target do tamanho
+  //    que quiser, sempre, mesmo com vários "olhos" desenhando "ao mesmo
+  //    tempo" (loops de rAF independentes, ex.: "Ver em 3D" + miniatura 3D).
+  //    Cada instância continua tendo sua PRÓPRIA cena/câmera/config (luzes,
+  //    distância de renderização, nº de luminárias reais, etc.) — só o
+  //    contexto WebGL em si (e as opções fixas na criação dele) é que é
+  //    compartilhado.
+  //
+  // Trade-off aceito conscientemente (avisado ao usuário no chat, não
+  // testável sem navegador real): `readRenderTargetPixels` é uma leitura
+  // SÍNCRONA da GPU pra CPU, que pode ter um custo de performance real,
+  // principalmente pro "Ver em 3D" em tela cheia com dpr alto (mais pixels
+  // pra ler por frame que a miniatura, que é pequena).
+  //
+  // Todos os 3 pontos do app que criam Engine3D usam `{ eye: true }` agora:
+  // mapview.js (miniatura 3D), view3d.js ("Ver em 3D" em tela cheia — e o
+  // Modelador 3D, que reaproveita a MESMA instância), e modelos3d.js
+  // (prévia/editor de molde de objeto). Não existe mais nenhum caminho
+  // "não-eye" ativo no app — mantido só como código morto documentado (ver
+  // `_initThree`/`_resize`) caso algum consumidor futuro precise de um
+  // contexto isolado de verdade por algum motivo (ex.: exportar uma
+  // imagem/thumbnail offscreen sem afetar o que está na tela).
+  constructor(canvas, initialConfig, opts) {
     this.canvas = canvas;
+    this._eye = !!(opts && opts.eye);
+    // [11/09/2026] NOVO — estado do gizmo "enquadramento" (retângulo
+    // amarelo, ver setCameraFrustumsVisible/_fotoFrustumMeshesById).
+    // [15/09/2026] o padrão tinha virado `true` (temporário, "pelo
+    // momento": "No 'Ver em 3D', deixe, pelo momento, o enquadramento
+    // (retângulo amarelo) de todas as câmeras sempre ativo").
+    // [12/09/2026, RODADA SEGUINTE] REVERTIDO — pedido verbatim:
+    // "Desabilite a impressão do amarrado amarelo de todas as câmeras.
+    // Era só para testes." Confirma que a mudança de 15/09 era mesmo
+    // temporária/de teste, como já documentado acima. Volta ao padrão
+    // original: `false` — cada retângulo amarelo nasce OCULTO, só
+    // ficando visível se o usuário ligar manualmente o botão
+    // "🟨 Enquadramento" daquela câmera específica (aba lateral "Câmera",
+    // ver view3d.js).
+    this._frustumGizmosEnabled = false;
+    // [10/09/2026] NOVO — pedido verbatim: "ao clicar em uma câmera e
+    // selecionar 'Ver através desta câmera' [...] o clique está pegando a
+    // própria câmera. O clique nela mesma deve ser desativado". Guarda
+    // qual pickable (type+id) deve ser IGNORADO por `pickFromRay`/
+    // `hoverPick`/`_hoverPickPixelPerfect` enquanto "vendo através" dela —
+    // view3d.js liga isto ao entrar em `_fotoCamMode`/`_orbCamMode`
+    // (`setPickExclude('fotoPin', fotoId)`/`setPickExclude('camera', camId)`)
+    // e desliga ao sair (`clearPickExclude()` — ver _resetCamZoom). Sem
+    // isto, o próprio orb/câmera calibrado (visível no cenário mesmo
+    // enquanto se olha "através" dele) sempre "ganhava" da mira/clique por
+    // estar bem na frente da câmera renderizada.
+    this._pickExclude = null; // { type, id } | null
+    // [10/09/2026] NOVO — ponto de tela (NDC -1..1) onde o MOUSE está,
+    // enquanto `_fotoCamMode`/`_orbCamMode` ativos (ver view3d.js
+    // `_pickAtClientPoint`/onMouseMove) — usado por `_updateHoverHighlight`
+    // pra desenhar o MESMO destaque de mira (contorno pontilhado/hitbox/
+    // tightbox, conforme a config) sob o CURSOR do mouse em vez de sob o
+    // crosshair central (que nem aparece nesses modos). `null` = usa o
+    // crosshair central de sempre (comportamento padrão, navegação normal).
+    this._hoverScreenNdc = null;
     this.mode = 'solido'; // wireframe | solido | colorido
     this.pickables = []; // { id, pos:{x,y,z}, radius, ref, obb:{half:{x,y,z}, rotY} }
     this._ready = false;
@@ -341,6 +756,10 @@ class Engine3D {
       destaqueExtra3DRaioAtivo: true, destaqueExtra3DDouradoAtivo: false,
       itemBadge3DAtravesParedesAtivo: true,
       anelDourado3DAtravesParedesAtivo: true, raioAzul3DAtravesParedesAtivo: true,
+      // NOVO (07/09/2026) — ver mapconfig.js DEFAULTS.efeitoTelaEscurecida3D
+      // e o comentário grande em `_initThree`/`_applyColorSpaceEfeito` pra
+      // como isto é aplicado.
+      efeitoTelaEscurecida3D: false,
       ...initialConfig,
     };
     this._loadPromise = Engine3D._loadThree()
@@ -461,6 +880,55 @@ class Engine3D {
     if (this._ready && this.mapData) this.setScene(this.mapData);
   }
 
+  /** NOVO (07/09/2026), reescrito na rodada da arquitetura WebGLRenderTarget
+   *  — ver comentário grande "MODO EYE" no construtor. Cria (só na 1ª vez —
+   *  cache estático, igual `Engine3D._threePromise`) o ÚNICO WebGLRenderer
+   *  que o app inteiro usa em modo "eye" (`Engine3D._sharedRenderer`),
+   *  desenhando num `<canvas>` OFF-SCREEN que nunca é anexado ao DOM (só
+   *  serve de "fábrica de frames" pros render targets de cada "olho" — quem
+   *  aparece na tela de verdade é sempre o `<canvas>` 2D de cada instância,
+   *  ver `_presentToCanvas`). Reaproveitado por QUALQUER número de
+   *  instâncias "eye" — é exatamente isto que evita o bug "Cannot read
+   *  properties of null (reading 'precision')" (criar um 2º/3º/N-ésimo
+   *  contexto WebGL simultâneo, que falha nesse hardware/driver — ver
+   *  comentário grande no construtor): com o contexto compartilhado, só
+   *  existe UM contexto WebGL na vida inteira da aba, não importa quantos
+   *  "olhos" (miniatura, "Ver em 3D", prévia de molde, futuras câmeras)
+   *  estejam ativos ao mesmo tempo.
+   *  `antialias`/`outputColorSpace` são decisões GLOBAIS agora (só podem
+   *  ser escolhidas na criação do renderer — não dá pra ter "um
+   *  antialiasing por olho" com um contexto só) — usa sempre
+   *  `antialias:false` (o padrão do app inteiro desde a rodada do
+   *  Modelador, ver comentário grande em `_initThree` sobre isso, JÁ era a
+   *  escolha da maioria dos usuários mesmo antes deste modo existir).
+   *  Diferente da versão anterior (canvas global visível +
+   *  setViewport/setScissor), este canvas NUNCA precisa de resize/dpr
+   *  global nenhum — cada "olho" tem seu próprio `THREE.WebGLRenderTarget`
+   *  com resolução independente (ver `_initThree`/`_resize`), então não
+   *  existe mais `_resizeGlobalCanvas`/`_setGlobalCanvasVisible`/
+   *  `_eyeViewportRect` nem contagem de "olhos" ativos — cada instância é
+   *  totalmente isolada das outras. */
+  static _ensureSharedRenderer(THREE) {
+    if (!Engine3D._sharedRenderer) {
+      // Canvas OFF-SCREEN de propósito: nunca é inserido no DOM
+      // (`document.body.appendChild`/`insertBefore` nunca são chamados aqui)
+      // — só existe pra dar um contexto WebGL ao renderer compartilhado.
+      // `alpha:true` + `setClearColor(0x000000,0)` continuam necessários:
+      // cada render target herda o alpha do renderer que o desenha, e sem
+      // isso as áreas fora dos objetos da cena ficariam pretas em vez de
+      // transparentes ao serem lidas de volta (`readRenderTargetPixels`) e
+      // desenhadas no canvas 2D de cada "olho".
+      const offscreenCanvas = document.createElement('canvas');
+      offscreenCanvas.width = 1;
+      offscreenCanvas.height = 1;
+      Engine3D._sharedRenderer = new THREE.WebGLRenderer({ canvas: offscreenCanvas, antialias: false, alpha: true, powerPreference: 'high-performance' });
+      Engine3D._sharedRenderer.setClearColor(0x000000, 0);
+      Engine3D._sharedRenderer.outputColorSpace = THREE.SRGBColorSpace;
+      Engine3D._sharedRenderer.setPixelRatio(1); // sempre 1 aqui — o "dpr" de verdade de cada "olho" é aplicado no TAMANHO do seu próprio render target (ver _resize), nunca neste renderer
+    }
+    return Engine3D._sharedRenderer;
+  }
+
   _initThree(THREE) {
     this.THREE = THREE;
     // Antialiasing só pode ser decidido na CRIAÇÃO do WebGLRenderer (não dá
@@ -484,10 +952,170 @@ class Engine3D {
     // incondicionalmente — quem já tinha essa opção LIGADA explicitamente
     // continua vendo antialiasing fora do modelador, e a pedra de toque do
     // pedido ("não use antialiasing") vale para quem nunca mexeu na opção.
-    const renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: this._config.antialiasing3D !== false, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(this._pixelRatioCap());
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // REESCRITO (07/09/2026), arquitetura WebGLRenderTarget — ver
+    // comentário grande "MODO EYE" no construtor. Em modo "eye", NUNCA
+    // chama `this.canvas.getContext('webgl...')` — `this.canvas` (o
+    // `<canvas>` desta instância, já existente no HTML de cada tela) recebe
+    // um contexto 2D comum (`this._displayCtx`), pois é nele que o
+    // resultado do render target é DESENHADO a cada frame (via
+    // `_presentToCanvas`), nunca renderizado diretamente. Quem renderiza de
+    // verdade é sempre `Engine3D._sharedRenderer` (off-screen, nunca visível
+    // por si só — ver `_ensureSharedRenderer`), desenhando no
+    // `THREE.WebGLRenderTarget` PRÓPRIO desta instância (`this.renderTarget`
+    // — criado com tamanho 1x1 aqui, redimensionado de verdade por
+    // `_resize()` na primeira vez que o tamanho CSS do canvas for conhecido).
+    const renderer = this._eye
+      ? Engine3D._ensureSharedRenderer(THREE)
+      : new THREE.WebGLRenderer({ canvas: this.canvas, antialias: this._config.antialiasing3D !== false, powerPreference: 'high-performance' });
+    if (!this._eye) {
+      renderer.setPixelRatio(this._pixelRatioCap());
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+    }
     this.renderer = renderer;
+    if (this._eye) {
+      // `depthBuffer:true`/`stencilBuffer:false` — mesmas opções que o
+      // WebGLRenderer padrão usa por baixo dos panos; `RGBAFormat`+
+      // `UnsignedByteType` — formato de pixel padrão de 8 bits por canal,
+      // compatível com `readRenderTargetPixels` lendo direto pra um
+      // `Uint8Array` (ver `_presentToCanvas`). `NearestFilter`/`LinearFilter`
+      // aqui são IRRELEVANTES pro resultado final: como o caminho é
+      // CPU-readback (não uma textura sendo amostrada por outro shader/quad
+      // na GPU), `readRenderTargetPixels` sempre lê os texels 1:1, sem
+      // filtragem nenhuma — o efeito "pixelizado" da miniatura (dpr baixo)
+      // continua vindo só do CSS (`image-rendering:pixelated` em
+      // `.map2d-minimap3d canvas`, ver style.css), pelo mesmo motivo de
+      // sempre (canvas com poucos pixels de verdade, esticado por CSS).
+      // BUG CORRIGIDO (07/09/2026), pedido verbatim: "Percebe-se na imagem
+      // que as coisa estão mais claras. Atualmente, as coisas ficaram mais
+      // escuras [...] As coisas devem voltar a ficar claras apenas." CAUSA
+      // RAIZ: no Three.js, a conversão de espaço de cor linear -> sRGB
+      // (`renderer.outputColorSpace = THREE.SRGBColorSpace`, ver logo acima
+      // em `_ensureSharedRenderer`) só é aplicada automaticamente quando o
+      // renderer desenha DIRETO no canvas de tela (`_currentRenderTarget
+      // === null`) — ao desenhar num `WebGLRenderTarget` (nosso caso agora,
+      // arquitetura desta mesma rodada), o Three.js usa o `colorSpace` da
+      // TEXTURA do próprio render target pra decidir a conversão, que por
+      // padrão NÃO é sRGB. Sem isto, os pixels lidos de volta por
+      // `readRenderTargetPixels` saíam em espaço LINEAR (mais escuro), mas
+      // eram exibidos pelo `<canvas>` 2D como se já fossem sRGB (mais claro)
+      // — daí a cena inteira aparecer mais escura do que antes (quando o
+      // WebGLRenderer desenhava direto no canvas global visível, aplicando
+      // a conversão sozinho). Corrigido: `colorSpace: THREE.SRGBColorSpace`
+      // na textura do render target — a MESMA conversão que o canvas de
+      // tela sempre aplicou sozinho.
+      //
+      // NOVO (07/09/2026), rodada seguinte, pedido verbatim: "Coloque nas
+      // 'configurações 3D', em uma seção de 'Efeitos de tela' este efeito
+      // de escurecimento, quando está sem o 'colorSpace:
+      // THREE.SRGBColorSpace' como opção nesta seção." — em vez de deixar
+      // `colorSpace` fixo aqui, o valor inicial já vem de
+      // `_colorSpaceEfeito()` (lê `this._config.efeitoTelaEscurecida3D`,
+      // já disponível neste ponto — `_initThree` roda DEPOIS do
+      // `initialConfig` ser mesclado no construtor). `setConfig()` também
+      // reaplica isto (`_applyColorSpaceEfeito`, ver lá).
+      // BUG CORRIGIDO/RESSALVA (07/09/2026), rodada seguinte, pedido
+      // verbatim: "Está sendo necessário sair e entra no 'Ver em 3D' para
+      // que seja aplicado [...] Se não for possível aplicar direto, coloque
+      // uma informação dizendo 'saia da tela do 3D e entre novamente para
+      // aplicar o efeito'." — na prática, só trocar
+      // `this.renderTarget.texture.colorSpace` (via `_applyColorSpaceEfeito`)
+      // NÃO bastou pra atualizar a cena já em tela, mesmo essa troca sendo a
+      // forma documentada/correta do Three.js — o motivo mais provável
+      // (não confirmável sem navegador de verdade nesta sessão, sem
+      // Playwright) é o renderer reaproveitar o PROGRAM/shader já compilado
+      // de cada material entre quadros, sem perceber que o `colorSpace` do
+      // render target mudou. Continua tentando aplicar ao vivo aqui (não
+      // atrapalha, e cobre o caminho "documentado"), mas o painel de
+      // configurações (mapconfig.js, `mc-efeito-tela-escurecida3d`) agora
+      // avisa a limitação real: sair/entrar no "Ver em 3D" de novo (que
+      // recria esta instância inteira do zero, com o render target já na
+      // config certa desde `_initThree`) SEMPRE aplica corretamente.
+      this.renderTarget = new THREE.WebGLRenderTarget(1, 1, {
+        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
+        colorSpace: this._colorSpaceEfeito(),
+        depthBuffer: true, stencilBuffer: false,
+      });
+      this._rtPixelW = 1; this._rtPixelH = 1;
+      this._rtPixelBuffer = new Uint8Array(4);
+      // Contexto 2D do <canvas> visível desta instância (a saída final) +
+      // um canvas AUXILIAR off-screen (nunca anexado ao DOM), necessário
+      // porque `putImageData` (única forma de jogar um `Uint8Array` de
+      // pixels crus num canvas 2D) NÃO respeita `ctx.setTransform` — pra
+      // aplicar o espelhamento vertical (WebGL: linha 0 embaixo; Canvas2D:
+      // linha 0 em cima) é preciso primeiro `putImageData` num canvas
+      // "cru" (sem transformar) e DEPOIS `drawImage` dele pro canvas visível
+      // COM a transformação — `drawImage` (ao contrário de `putImageData`)
+      // respeita `ctx.setTransform`. Ver `_presentToCanvas`.
+      this._displayCtx = this.canvas.getContext('2d');
+      this._rtOffscreen = document.createElement('canvas');
+      this._rtOffscreen.width = 1; this._rtOffscreen.height = 1;
+      this._rtOffCtx = this._rtOffscreen.getContext('2d');
+      // [12/09/2026] NOVO — ver `setFotoCamBackdropMask`/`_presentToCanvas`
+      // logo abaixo, pro motivo completo desta máscara existir.
+      this._fotoCamMask = null;
+      // [13/09/2026] NOVO — pedido verbatim: "A transparência do vidro
+      // ainda está rosa, use um buffer a parte, se for ajudar a resolver
+      // isso. Renderize o vidro em um buffer a parte e depois imprima-o
+      // ali para que não fique rosa e sim 'normal'." Ver comentário grande
+      // em `_renderGlassPass`/`_presentToCanvas` (mais abaixo) pra
+      // arquitetura completa — resumo: o vidro é escondido (`visible=false`)
+      // durante o render PRINCIPAL (`this.renderTarget`, nunca mais toca o
+      // marcador magenta) e renderizado sozinho, DEPOIS, neste 2º render
+      // target (`this._glassRenderTarget`) — TRANSPARENTE de verdade
+      // (limpo com alfa=0), testando profundidade contra o que já foi
+      // desenhado no 1º passo (`this._glassDepthTexture`, COMPARTILHADA
+      // entre os 2 render targets — técnica padrão do Three.js pra reusar
+      // profundidade entre passes sem re-renderizar a cena inteira de
+      // novo). O resultado é composto por cima do canvas final (depois da
+      // foto/máscara) em `_presentToCanvas`, com alfa de verdade — vidro
+      // nunca mais "vê" o magenta, então nunca mais mistura com ele.
+      this._glassDepthTexture = new THREE.DepthTexture(1, 1);
+      this.renderTarget.depthTexture = this._glassDepthTexture;
+      this._glassRenderTarget = new THREE.WebGLRenderTarget(1, 1, {
+        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
+        colorSpace: this._colorSpaceEfeito(),
+        depthBuffer: true, stencilBuffer: false,
+        depthTexture: this._glassDepthTexture,
+      });
+      this._glassPixelBuffer = new Uint8Array(4);
+      // [22/09/2026] NOVO — pedido verbatim: "ao estar selecionado 'Trás'
+      // e variar a opacidade [...] nem o chão e nem a neblina aparecem
+      // atrás da imagem (aparece apenas a cor do céu) [...] Ao colocar a
+      // opacidade = 0, então, deve ser possível ver tudo que está atrás da
+      // imagem (como ver através de uma janela)." — CORREÇÃO EM 2 ROUNDS:
+      // a 1ª tentativa desligava o oclusor/máscara com opacidade<1 e
+      // botava a foto por CIMA de tudo (translúcida) — o usuário corrigiu:
+      // "a imagem deve continuar atrás dos objetos [reais]. Você colocou
+      // ela para frente." SOLUÇÃO DE VERDADE (sem tocar em nada da
+      // ordem de empilhamento/oclusão principal, que fica 100% intacta):
+      // um 3º render target — `_backdropEnvRenderTarget` — mesmo padrão de
+      // `_glassRenderTarget`/`_renderGlassOnlyPass` (2 passes), só que
+      // AO CONTRÁRIO na intenção: em vez de mostrar algo que foi ESCONDIDO
+      // do passe principal (o vidro), este mostra a cena SEM o
+      // oclusor/máscara do 'Trás' — ou seja, o ambiente real (chão,
+      // neblina, paredes distantes) exatamente como apareceria se o
+      // backdrop 'Trás' estivesse desligado. `_presentToCanvas` compõe
+      // este resultado por CIMA da imagem já finalizada (foto+objetos
+      // reais, intocados), mas SÓ dentro do retângulo da foto e com
+      // `ctx.globalAlpha=(1-opacidade)` — recuo proporcional: opacidade=1
+      // não muda nada (alfa 0, comportamento de sempre); opacidade=0
+      // revela o ambiente real por completo ali (alfa 1, efeito
+      // "janela"); opacidades intermediárias misturam os dois. Não precisa
+      // compartilhar profundidade com o passe principal (ao contrário do
+      // vidro) — é uma renderização COMPLETA e independente da cena
+      // (inclusive objetos reais mais perto continuam ocluindo o chão/
+      // paredes normalmente ali dentro, por conta própria).
+      this._backdropEnvRenderTarget = new THREE.WebGLRenderTarget(1, 1, {
+        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat, type: THREE.UnsignedByteType,
+        colorSpace: this._colorSpaceEfeito(),
+        depthBuffer: true, stencilBuffer: false,
+      });
+      this._backdropEnvPixelBuffer = new Uint8Array(4);
+      this._backdropEnvPassActive = false;
+    }
 
     // Céu/luz de acordo com o horário REAL do relógio do dispositivo (pedido
     // do usuário: "faça o céu ficar de acordo com o período do dia... agora
@@ -644,7 +1272,75 @@ class Engine3D {
     const mat = new THREE.MeshBasicMaterial({
       map: this._glassShineTexture, transparent: true, side: THREE.DoubleSide, depthWrite: false,
     });
-    return new THREE.Mesh(geo, mat);
+    const mesh = new THREE.Mesh(geo, mat);
+    // [12/09/2026] NOVO, [13/09/2026] REVERTIDO (tentativa de desligar o
+    // vidro inteiro), [13/09/2026 — RODADA SEGUINTE] SUBSTITUÍDO DE VEZ —
+    // pedido verbatim: "A transparência do vidro ainda está rosa, use um
+    // buffer a parte, se for ajudar a resolver isso. Renderize o vidro em
+    // um buffer a parte e depois imprima-o ali para que não fique rosa e
+    // sim 'normal'." A tolerância de cor (rodada anterior) não bastou — o
+    // vidro continuava rosa em partes com mais alfa (bordas mais opacas).
+    // CORRIGIDO DE VERDADE, seguindo a sugestão do usuário: guarda a MALHA
+    // aqui (`this._glassMeshesAtivos`, limpa a cada rebuild — ver
+    // `_disposeGroupContents`) pra `_renderGlassPass` poder escondê-la do
+    // render PRINCIPAL (nunca mais toca o marcador magenta) e desenhá-la
+    // SOZINHA, depois, num render target à parte — ver comentário grande
+    // em `_renderGlassPass`/`_presentToCanvas` pra arquitetura completa.
+    if (!this._glassMeshesAtivos) this._glassMeshesAtivos = [];
+    this._glassMeshesAtivos.push(mesh);
+    return mesh;
+  }
+
+  /** [12/09/2026] NOVO, [13/09/2026] AJUSTADO 2x — pedido verbatim
+   *  (13/09/2026, 1ª correção): "Confirmado, não precisa aparecer mais o
+   *  chão quando está marcado 'Trás'." — 1ª tentativa desligava
+   *  `colorWrite` do chão INTEIRO (toda a tela) enquanto 'Trás' ativo.
+   *  Pedido verbatim de correção (13/09/2026, 2ª rodada): "O 'desligar' do
+   *  chão, quando está marcado 'Trás' é só na região de impressão da
+   *  imagem para não ter aquele problema de ser impresso só a parte de
+   *  cima dela. Desligar a impressão do chão fez com que resolvesse o
+   *  problema, porém o chão deve ser 'desligado', só na região de
+   *  impressão da imagem para não bloqueá-la." — desligar a tela INTEIRA
+   *  escondia o chão até em partes da tela fora do quadro da foto, onde
+   *  ele deveria continuar aparecendo normalmente. CORRIGIDO DE VERDADE:
+   *  o chão não usa mais `colorWrite` global nenhum — ver
+   *  `_updateFloorMaskUniform` (chamado todo quadro, ANTES do render, por
+   *  `_presentFrame`) e o `onBeforeCompile` do material do chão (criado
+   *  junto com ele, em `setScene`): um pedaço de shader a mais, no
+   *  FRAGMENT shader, compara `gl_FragCoord.xy` (posição do pixel na
+   *  tela) contra o MESMO retângulo usado por `_presentToCanvas`
+   *  (`_computeFotoCamMaskRawRect`, fonte única) — só DENTRO desse
+   *  retângulo o chão pinta a cor-marcadora (pra máscara poder "furar" e
+   *  revelar a foto ali) em vez da sua textura quadriculada normal; FORA
+   *  dele, pinta normalmente, sem nenhuma mudança. Esta função só guarda
+   *  a flag (`this._fotoCamBackdropMaskAtiva`) que `_updateFloorMaskUniform`
+   *  usa; NÃO mexe mais no vidro (ver `_buildGlassPane`, acima — o vidro é
+   *  resolvido pela tolerância de cor em `_presentToCanvas`, técnica
+   *  diferente — ver item 19 do progresso do projeto pro motivo de usar 2
+   *  técnicas diferentes pra 2 problemas parecidos).*/
+  setFotoCamBackdropMaskActive(active) {
+    this._fotoCamBackdropMaskAtiva = !!active;
+  }
+
+  /** [13/09/2026] NOVO — ver comentário grande em
+   *  `setFotoCamBackdropMaskActive`, acima. Chamado por `_presentFrame`
+   *  (mesmo lugar de sempre, ANTES de `renderer.render()` — o shader
+   *  precisa dos uniforms JÁ atualizados pro quadro que está prestes a
+   *  desenhar; atualizar DEPOIS não adiantaria nada). Sem custo
+   *  perceptível (só matemática, nenhum acesso à GPU além de já ir
+   *  atualizar os uniforms de qualquer jeito). */
+  _updateFloorMaskUniform() {
+    const shader = this._floorMesh?.material?.userData?.fotoCamMaskShader;
+    if (!shader) return;
+    const rawRect = this._fotoCamBackdropMaskAtiva ? this._computeFotoCamMaskRawRect() : null;
+    if (rawRect && this._fotoCamMask?.color) {
+      shader.uniforms.uFotoCamMaskAtiva.value = 1;
+      shader.uniforms.uFotoCamMaskRect.value.set(rawRect.maskLeftPx, rawRect.maskRawTopPx, rawRect.maskWPx, rawRect.maskHPx);
+      const [mr, mg, mb] = this._fotoCamMask.color;
+      shader.uniforms.uFotoCamMaskCor.value.set(mr / 255, mg / 255, mb / 255);
+    } else {
+      shader.uniforms.uFotoCamMaskAtiva.value = 0;
+    }
   }
 
   /** Malhas reaproveitadas (criadas UMA vez aqui, nunca recriadas por
@@ -752,6 +1448,32 @@ class Engine3D {
     this._ghostObject.visible = false;
     scene.add(this._ghostObject);
 
+    // [22/09/2026] NOVO — pedido verbatim: "o ghost do objeto 'Escada'
+    // está aparecendo como uma caixa grande. Não deveria ser assim.
+    // Deveria ser o próprio modelo 3D da escada azulado (para caracterizar
+    // o ghost)." Até aqui, `showGhostObject` (abaixo) usava SEMPRE
+    // `_ghostObject` — uma única caixa escalada pra caixa DELIMITADORA do
+    // tipo (`objectFootprint`) — pra QUALQUER tipo de objeto, sem nenhum
+    // caso especial pros tipos com malha PRÓPRIA (escada/mesa/luminária,
+    // ver `_buildEscadaMesh`/etc.) — pra escada, essa caixa delimitadora é
+    // bem maior/diferente da silhueta real (degraus), daí "caixa grande"
+    // em vez de parecer uma escada. CORRIGIDO: grupo de degraus
+    // PRÉ-CONSTRUÍDO (MESMO material `ghostMat()` — já nasce azulado/
+    // translúcido, 0x7fe0ff/opacity .35, nada a mudar na cor pedida),
+    // reaproveitando a MESMA fórmula de empilhamento de `_buildEscadaMesh`
+    // (ver `showGhostObject`, mais abaixo, onde os degraus são posicionados/
+    // escalados a cada quadro). Quantidade FIXA de degraus (padrão do
+    // catálogo, 11) — o ghost aparece ANTES do objeto existir de verdade
+    // (sem `obj.escadaDegraus` customizado pra ler ainda); a pessoa pode
+    // ajustar a quantidade depois, pelo painel, como sempre.
+    this._GHOST_ESCADA_DEGRAUS = 11;
+    this._ghostEscada = new THREE.Group();
+    for (let i = 0; i < this._GHOST_ESCADA_DEGRAUS; i++) {
+      this._ghostEscada.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), ghostMat()));
+    }
+    this._ghostEscada.visible = false;
+    scene.add(this._ghostEscada);
+
     this._ghostItem = new THREE.Mesh(new THREE.ConeGeometry(0.26 * Math.SQRT2, 0.6, 4), ghostMat());
     this._ghostItem.visible = false;
     scene.add(this._ghostItem);
@@ -759,6 +1481,30 @@ class Engine3D {
     this._ghostDoorWindow = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), ghostMat());
     this._ghostDoorWindow.visible = false;
     scene.add(this._ghostDoorWindow);
+
+    // NOVO (08/09/2026, 38a rodada), pedido verbatim: "os tijolos devem
+    // ter ghost." -- MESMO padrão/material (`ghostMat()`) dos ghosts acima,
+    // caixa unitária escalada em showGhostTijolo (view3d.js `_updateBuildGhost`,
+    // ramo 'tijolo').
+    this._ghostTijolo = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), ghostMat());
+    this._ghostTijolo.visible = false;
+    scene.add(this._ghostTijolo);
+
+    // CORRIGIDO (08/09/2026, 39a rodada), pedido verbatim: "O ghost da
+    // cunha deve ter a forma dela. Atualmente tem a forma da Caixa." --
+    // 'this._ghostTijolo' acima sempre foi uma BoxGeometry unitaria
+    // escalada (certo pro formato 'caixa', errado pra 'cunha', que tem 5
+    // faces com uma rampa inclinada, nao 6 faces retas). Ghost dedicado
+    // pra cunha, com geometria PROPRIA reconstruida a cada quadro (barato
+    // -- pura matematica, ver Tijolos.buildWedgeGeometry, sem custo de
+    // criar/destruir objetos Three.js alem de atualizar os atributos do
+    // BufferGeometry) em vez de escala/rotacao do THREE.Mesh (a geometria
+    // de buildWedgeGeometry ja vem com posicao/rotacao EMBUTIDAS nos
+    // vertices -- ver comentario dela em tijolos.js -- entao este mesh
+    // fica sempre em position/rotation (0,0,0), so a geometria muda).
+    this._ghostTijoloCunha = new THREE.Mesh(new THREE.BufferGeometry(), ghostMat());
+    this._ghostTijoloCunha.visible = false;
+    scene.add(this._ghostTijoloCunha);
 
     // ---------- "Linhas-Guia Inteligentes" (pedido do usuário, "🧱 Parede" —
     // feedback visual do sistema de snap ao desenhar parede, ver view3d.js
@@ -867,7 +1613,10 @@ class Engine3D {
   }
 
   hideAllGhosts() {
-    [this._ghostWall, this._ghostWallSeg, this._ghostWallSection, this._ghostObject, this._ghostItem, this._ghostDoorWindow, this._ghostSpringDot, this._ghostSnapSphere, this._protractorRing, this._footprintOutline, ...(this._guideLines || []), ...(this._footprintDrops || [])].forEach((m) => { if (m) m.visible = false; });
+    // [22/09/2026] `_ghostEscada` (ver comentário grande no construtor) incluído
+    // nesta lista — senão ficaria "preso" visível trocando de ferramenta com um
+    // 'escada' mirado antes.
+    [this._ghostWall, this._ghostWallSeg, this._ghostWallSection, this._ghostObject, this._ghostEscada, this._ghostItem, this._ghostDoorWindow, this._ghostTijolo, this._ghostTijoloCunha, this._ghostSpringDot, this._ghostSnapSphere, this._protractorRing, this._footprintOutline, ...(this._guideLines || []), ...(this._footprintDrops || [])].forEach((m) => { if (m) m.visible = false; });
   }
 
   /** "Ghost de seccionamento" (pedido do usuário) — mostrado por
@@ -991,7 +1740,65 @@ class Engine3D {
     return computeObjectFootprint(tipoKey);
   }
 
+  /** NOVO (08/09/2026, 38a rodada), pedido verbatim: "os tijolos devem ter
+   *  ghost." -- caixa semitransparente do TAMANHO/POSIÇÃO/ROTAÇÃO exatos de
+   *  onde o próximo tijolo cairia (mesmo cálculo de view3d.js
+   *  `_tijoloAimTarget`, refeito aqui de forma síncrona a cada quadro pra
+   *  não depender de `await Tijolos.getConfig()` — ver comentário grande em
+   *  `_updateBuildGhost`, ramo 'tijolo'). `rotY` em graus (0/90/180/270,
+   *  só relevante pra 'cunha' — ver Tijolos.buildWedgeGeometry). */
+  showGhostTijolo(x, y, z, sx, sy, sz, rotY, formato) {
+    // CORRIGIDO (08/09/2026, 39a rodada) -- ver comentario grande no
+    // construtor do ghost 'this._ghostTijoloCunha', acima: formato 'cunha'
+    // usa geometria PROPRIA (5 faces, rampa) em vez da caixa escalada.
+    if (formato === 'cunha') {
+      if (!this._ghostTijoloCunha || !window.Tijolos?.buildWedgeGeometry) return;
+      if (this._ghostTijolo) this._ghostTijolo.visible = false;
+      const geo = window.Tijolos.buildWedgeGeometry({ x, y, z, sx, sy, sz, rotY: rotY || 0 });
+      const bg = this._ghostTijoloCunha.geometry;
+      bg.setAttribute('position', new THREE.BufferAttribute(geo.positions, 3));
+      bg.setAttribute('normal', new THREE.BufferAttribute(geo.normals, 3));
+      bg.computeBoundingSphere();
+      this._ghostTijoloCunha.position.set(0, 0, 0);
+      this._ghostTijoloCunha.rotation.set(0, 0, 0);
+      this._ghostTijoloCunha.visible = true;
+      return;
+    }
+    if (!this._ghostTijolo) return;
+    if (this._ghostTijoloCunha) this._ghostTijoloCunha.visible = false;
+    this._ghostTijolo.scale.set(sx, sy, sz);
+    this._ghostTijolo.position.set(x, y, z);
+    this._ghostTijolo.rotation.y = ((rotY || 0) * Math.PI) / 180;
+    this._ghostTijolo.visible = true;
+  }
+
   showGhostObject(x, z, angulo, tipoKey, elevacao = 0) {
+    // [22/09/2026] NOVO — ver comentário grande no construtor
+    // (`_ghostEscada`) pro pedido/causa raiz completa: escada usa um
+    // ghost de DEGRAUS empilhados (silhueta real), não a caixa genérica.
+    if (tipoKey === 'escada') {
+      if (!this._ghostEscada) return;
+      this._ghostObject.visible = false;
+      const { w: largura, d: profundidadeTotal } = this.objectFootprint(tipoKey);
+      const alturaTotal = 2.0; // fixa — mesmo valor/motivo de _buildEscadaMesh
+      const nDegraus = this._GHOST_ESCADA_DEGRAUS;
+      const stepDepth = profundidadeTotal / nDegraus;
+      const stepHeight = alturaTotal / nDegraus;
+      const rotY = objAnguloToRotY(angulo);
+      const cos = Math.cos(rotY), sin = Math.sin(rotY);
+      this._ghostEscada.children.forEach((step, i) => {
+        const h = stepHeight * (i + 1);
+        const lx = 0, lz = -profundidadeTotal / 2 + stepDepth * (i + 0.5);
+        const wx = x + lx * cos + lz * sin;
+        const wz = z - lx * sin + lz * cos;
+        step.scale.set(largura, h, stepDepth);
+        step.position.set(wx, elevacao + h / 2, wz);
+        step.rotation.y = rotY;
+      });
+      this._ghostEscada.visible = true;
+      return;
+    }
+    if (this._ghostEscada) this._ghostEscada.visible = false;
     if (!this._ghostObject) return;
     const { w, d, h } = this.objectFootprint(tipoKey);
     this._ghostObject.scale.set(w, h, d);
@@ -1346,6 +2153,293 @@ class Engine3D {
     this.camera3.updateProjectionMatrix();
   }
 
+  /** [10/09/2026] NOVO -- CORRECAO do pan panoramico (Shift+botao-do-meio
+   *  em "ver atraves desta camera", ver view3d.js onMouseMove). Pedido
+   *  verbatim do usuario, com 2 capturas do Blender comparando antes/
+   *  depois: "O shift+ botao do meio do mouse nao pode mudar a
+   *  perspectiva. A perspectiva deve ser preservada [...] Na 1a imagem
+   *  esta mais a esquerda. Na 2a imagem [...] a mesma perspectiva e
+   *  mantida, mas todo o desenho e transladado para o lado [...] E como
+   *  pegar uma foto e so move-la para o lado, a foto nao muda, mas a
+   *  posicao sim." A 1a tentativa (v433) deslocava a POSICAO real de
+   *  'camera3' no mundo -- isso MUDA a perspectiva de verdade (paralaxe:
+   *  objetos em profundidades diferentes na cena se deslocam por
+   *  quantidades DIFERENTES na tela quando a camera se move no espaco),
+   *  o oposto do pedido -- alem de quebrar a calibracao da camera/orb
+   *  ("ver atraves desta camera" existe justamente pra comparar o render
+   *  com uma foto de referencia calibrada; mover a posicao real invalida
+   *  essa comparacao). A tecnica CORRETA (a mesma do "View > Pan" do
+   *  Blender quando a vista esta travada numa camera, e de uma lente de
+   *  "descentramento"/"tilt-shift" de verdade): deslocar so a JANELA do
+   *  frustum de projecao (equivalente a descentralizar o sensor/filme),
+   *  SEM mover a camera nem girar/mudar o FOV -- a cena inteira desloca
+   *  dentro do quadro, preservando 100% das linhas de fuga/paralaxe
+   *  (exatamente como arrastar uma foto por baixo de uma janela/mascara
+   *  fixa: o que se ve muda de POSICAO dentro da janela, mas a "foto" em
+   *  si -- a perspectiva -- nunca muda). Implementado via
+   *  'PerspectiveCamera.setViewOffset' nativo do Three.js (mecanismo de
+   *  "lens shift"/tiled rendering): com 'fullWidth === width' e
+   *  'fullHeight === height' (nenhum corte/recorte, nenhuma mudanca de
+   *  FOV/zoom aparente -- so o CENTRO do frustum se desloca). Formula:
+   *  a matriz de projecao off-axis do Three.js soma 'offsetX' direto em
+   *  'left'/'right' (em unidades fisicas do plano near, proporcionais a
+   *  'near * tan(fov/2)') quando 'width === fullWidth' -- por isso aqui
+   *  'W'/'H' (a largura/altura do frustum no plano near) sao recalculados
+   *  a cada chamada a partir do FOV/aspect/near ATUAIS de 'camera3' (que
+   *  mudam com o zoom da roda do mouse, ver onWheel/_CAMVIEW_ZOOM_FOV_*),
+   *  entao o pan continua correto em qualquer nivel de zoom. 'xFrac'/
+   *  'yFrac' sao adimensionais (fracao da largura/altura do quadro,
+   *  tipicamente pequenos, acumulados a partir do movimento do mouse em
+   *  'view3d.js' onMouseMove) -- sinal invertido de proposito: mover o
+   *  CENTRO do frustum pra direita ('offsetX' positivo) faz a CENA
+   *  parecer deslocar pra ESQUERDA na tela (o oposto do que "arrastar uma
+   *  foto pra direita" deve parecer), entao aqui a cena desloca na MESMA
+   *  direcao do arrasto do mouse. xFrac=0/yFrac=0 limpa o offset
+   *  (camera3.clearViewOffset()) -- sempre chamado ao entrar/sair de
+   *  '_fotoCamMode'/'_orbCamMode' (ver view3d.js _resetCamZoom) pra nunca
+   *  vazar pan pra a navegacao normal/Modelador (que reaproveitam o
+   *  MESMO 'camera3'). */
+  setCamPanFrac(xFrac, yFrac) {
+    if (!this.camera3) return;
+    const cam = this.camera3;
+    if (!xFrac && !yFrac) { cam.clearViewOffset(); return; }
+    const halfH = cam.near * Math.tan((cam.fov * Math.PI / 180) / 2) / (cam.zoom || 1);
+    const halfW = halfH * (cam.aspect || 1);
+    const W = 2 * halfW, H = 2 * halfH;
+    cam.setViewOffset(W, H, -(xFrac || 0) * W, -(yFrac || 0) * H, W, H);
+  }
+
+  /** Liga a exclusão de pick (ver comentário grande em `this._pickExclude`,
+   *  constructor) — chamado por view3d.js ao ENTRAR em `_fotoCamMode`/
+   *  `_orbCamMode` com o `type`/`id` do próprio orb/câmera sendo visto
+   *  através. */
+  setPickExclude(type, id) {
+    this._pickExclude = (type && id != null) ? { type, id } : null;
+  }
+
+  /** Desliga a exclusão de pick — chamado ao SAIR de `_fotoCamMode`/
+   *  `_orbCamMode` (ver view3d.js `_resetCamZoom`), senão o próprio
+   *  orb/câmera ficaria pra sempre impossível de selecionar depois. */
+  clearPickExclude() {
+    this._pickExclude = null;
+  }
+
+  /** true quando `type`/`id` batem com a exclusão ativa no momento (ver
+   *  `setPickExclude`) — usado por `pickFromRay`/`hoverPick`/
+   *  `_hoverPickPixelPerfect` pra pular o próprio orb/câmera calibrado. */
+  _isPickExcluded(type, id) {
+    const ex = this._pickExclude;
+    return !!(ex && ex.type === type && ex.id === id);
+  }
+
+  /** Liga/desliga o ponto de tela usado por `_updateHoverHighlight` (ver
+   *  comentário grande em `this._hoverScreenNdc`, constructor) — chamado
+   *  por view3d.js `_pickAtClientPoint` (mousemove/click reais) enquanto
+   *  `_fotoCamMode`/`_orbCamMode` ativos, e limpo (`clearHoverScreenPoint`)
+   *  ao sair desses modos (ver `_resetCamZoom`). */
+  setHoverScreenPoint(ndcX, ndcY) {
+    this._hoverScreenNdc = { x: ndcX, y: ndcY };
+  }
+
+  clearHoverScreenPoint() {
+    this._hoverScreenNdc = null;
+  }
+
+  /** [10/09/2026] NOVO — pedido verbatim: "No objeto câmera e no 'orb da
+   *  foto' deve ser possível definir as propriedades da câmera tanto no 2D
+   *  quanto no 3D. São as mesmas do Blender [...] Clipping: Start/End." Sem
+   *  isto, `camera3.far` seria sempre recalculado a partir da neblina/
+   *  distância de renderização a cada `render()` (ver o bloco "this.scene
+   *  .fog" logo abaixo/updateProjectionMatrix), sobrescrevendo qualquer
+   *  valor de recorte calibrado — os 2 campos `_clipNearOverride`/
+   *  `_clipFarOverride` guardam a intenção explícita (setada só enquanto
+   *  "vendo através" de uma câmera/orb calibrada — ver view3d.js
+   *  _enterCameraOrbView/_exitCameraOrbView) e o bloco do fog abaixo respeita
+   *  o override quando presente. `null`/valor <= 0 em qualquer um dos dois
+   *  desativa aquele override específico (mantém o comportamento padrão). */
+  setClipPlanes(nearM, farM) {
+    if (!this.camera3) return;
+    this._clipNearOverride = (typeof nearM === 'number' && nearM > 0) ? nearM : null;
+    this._clipFarOverride = (typeof farM === 'number' && farM > 0) ? farM : null;
+    if (this._clipNearOverride != null) this.camera3.near = this._clipNearOverride;
+    if (this._clipFarOverride != null) this.camera3.far = this._clipFarOverride;
+    this.camera3.updateProjectionMatrix();
+  }
+
+  /** Sai do override de recorte (ver setClipPlanes acima) — volta o `near`
+   *  padrão de fábrica do Three.js/`_initThree` e deixa `far` de novo a
+   *  cargo do cálculo dinâmico de neblina (bloco "this.scene.fog", abaixo). */
+  clearClipPlanes() {
+    this._clipNearOverride = null;
+    this._clipFarOverride = null;
+    if (this.camera3) { this.camera3.near = 0.1; this.camera3.updateProjectionMatrix(); } // 0.1 = mesmo valor de fábrica de _initThree (new THREE.PerspectiveCamera(72, 1, 0.1, ...))
+  }
+
+  /** [11/09/2026] NOVO — esconde/mostra a malha caixa+cone de UMA câmera
+   *  específica (ver índice `this._cameraMeshesById`, montado em setScene).
+   *  Chamada por view3d.js `_enterCameraOrbView`/`_exitCameraOrbView`:
+   *  quando a visão do jogador está travada exatamente na pose de uma
+   *  câmera "Câmeras", a malha DELA PRÓPRIA (que fica no mesmo ponto do
+   *  olho de render, com o cone se estendendo pra FORA na direção de
+   *  apontamento — ou seja, na direção pra onde o jogador está agora
+   *  olhando A PARTIR DE) acaba renderizando dentro do próprio frustum,
+   *  aparecendo como uma forma indevida "na frente" da câmera (mesma ideia
+   *  de um jogo em 1ª pessoa esconder a malha do próprio corpo do jogador
+   *  da câmera dele mesmo). `camId` null/inexistente é um no-op seguro. */
+  setCameraMeshVisible(camId, visible) {
+    const meshes = camId != null ? this._cameraMeshesById?.[camId] : null;
+    if (!meshes) return;
+    meshes.forEach((m) => { if (m) m.visible = visible; });
+    // [14/09/2026] CORRIGIDO — pedido verbatim: "ao clicar em uma câmera e
+    // selecionar 'Ver através desta câmera' [...] o cone da câmera
+    // selecionada acaba voltando a parecer e fica na frente da tela." BUG
+    // CONFIRMADO via Playwright (live): não era só ao entrar/sair do
+    // Modelador — a malha voltava a aparecer sozinha em MENOS DE 100ms,
+    // sempre, mesmo sem tocar no Modelador. Causa raiz de verdade:
+    // `_updateDistanceCulling` (chamada TODO QUADRO, ver `render()`) trata
+    // câmeras como qualquer outro objeto "elegível pro corte por
+    // distância" (`_setupCullMeshes`, `tipo === 'camera'`) e reatribui
+    // `mesh.visible = distância <= alcance` sem saber de
+    // `setCameraMeshVisible`/`setFotoMeshVisible` — como a câmera sendo
+    // "vista através" está a distância ZERO do próprio olho de render,
+    // `0 <= alcance` é sempre verdadeiro, então o culling FORÇAVA
+    // `visible=true` de volta no quadro seguinte, não importa quantas vezes
+    // este método fosse chamado antes. CORRIGIDO NA RAIZ (não aqui — ver
+    // `_updateDistanceCulling`/`_forcedHiddenMeshes` abaixo): este método
+    // agora também mantém um Set global `this._forcedHiddenMeshes` com toda
+    // malha atualmente escondida "à força" (por este método OU por
+    // `setFotoMeshVisible`) — é esse Set que `_updateDistanceCulling`
+    // consulta pra NUNCA reverter estas malhas de volta pra visível, não
+    // importa a distância calculada.
+    if (!this._forcedHiddenMeshes) this._forcedHiddenMeshes = new Set();
+    meshes.forEach((m) => {
+      if (!m) return;
+      if (visible) this._forcedHiddenMeshes.delete(m); else this._forcedHiddenMeshes.add(m);
+    });
+  }
+
+  /** [12/09/2026] NOVO — mesmo bug do cone "na frente da câmera" (ver
+   *  `setCameraMeshVisible` acima), agora pro "orb de foto": esconde/mostra
+   *  a malha esfera+cone (e a placa texturizada da foto, quando existe) de
+   *  UM orb de foto específico (ver índice `this._fotoMeshesById`, montado
+   *  em setScene, bloco "fotos vinculadas ao mapa"). Chamada por
+   *  view3d.js `_enterFotoCameraView`/`_exitFotoCameraView`: diferente do
+   *  "orb de câmera" (`_orbCamMode`, câmera travada DE VERDADE), "ver
+   *  através desta câmera" de um orb de foto é um modo ESPECTADOR
+   *  (`_fotoCamMode` — só a pose RENDERIZADA é sobrescrita, `this._camera`
+   *  continua livre) — mas o olho de render fica no mesmo ponto do orb do
+   *  mesmo jeito, então a própria malha dele (cone se estendendo pra FORA,
+   *  na direção de apontamento — pra onde o render agora está "olhando A
+   *  PARTIR DE") sofre exatamente o mesmo problema. `fotoId` null/
+   *  inexistente é um no-op seguro. */
+  setFotoMeshVisible(fotoId, visible) {
+    const meshes = fotoId != null ? this._fotoMeshesById?.[fotoId] : null;
+    if (!meshes) return;
+    meshes.forEach((m) => { if (m) m.visible = visible; });
+    // [14/09/2026] NOVO — mesmo mecanismo de `setCameraMeshVisible` (ver
+    // comentário grande lá), espelhado aqui por consistência/segurança:
+    // `_setupCullMeshes` hoje só inclui `tipo 'object'/'item'/'camera'` no
+    // corte por distância (orb de foto é `tipo:'fotoPin'`, de fora dessa
+    // lista) — então este orb, sozinho, não sofre o bug de "reaparecer"
+    // sozinho HOJE, mas registrar aqui do mesmo jeito custa nada e blinda
+    // contra qualquer mudança futura em `_setupCullMeshes` que passe a
+    // incluir `'fotoPin'`.
+    if (!this._forcedHiddenMeshes) this._forcedHiddenMeshes = new Set();
+    meshes.forEach((m) => {
+      if (!m) return;
+      if (visible) this._forcedHiddenMeshes.delete(m); else this._forcedHiddenMeshes.add(m);
+    });
+  }
+
+  /** [10/09/2026] NOVO — pedido verbatim: "Deve aparecer um retângulo
+   *  amarelo representado o enquadramento da câmera de acordo com as
+   *  propriedades da câmera ('campo de visão', aspect ratio no x e no y).
+   *  O retângulo amarelo pode ser habilitado e desabilitado por um botão
+   *  em algum lugar." Liga/desliga TODOS os gizmos de enquadramento
+   *  (retângulo amarelo + 4 linhas até o canto, um conjunto por "orb de
+   *  foto"/"Câmera" com `camProps` — ver `this._fotoFrustumMeshesById`,
+   *  montado em `setScene`, bloco "fotos vinculadas ao mapa") de uma vez
+   *  só — chamada por view3d.js (botão "🟨 Enquadramento", ver
+   *  `_toggleFrustumGizmos`). Guarda o estado em `this._frustumGizmosEnabled`
+   *  pra qualquer `setScene` FUTURO (troca de andar, nova edição) já nascer
+   *  com a visibilidade certa, sem precisar o usuário clicar de novo. */
+  setCameraFrustumsVisible(visible) {
+    this._frustumGizmosEnabled = !!visible;
+    Object.values(this._fotoFrustumMeshesById || {}).forEach((meshes) => {
+      (meshes || []).forEach((m) => { if (m) m.visible = this._frustumGizmosEnabled; });
+    });
+  }
+
+  /** [10/09/2026] NOVO — CORRIGIDO por pedido verbatim: "O botão de
+   *  enquadramento deve ser só para a câmera atual, deve aparecer junto
+   *  na barra em baixo (onde tem o botão 'Sair da câmera')." O botão
+   *  global "🟨 Enquadramento" (barra superior, ligava/desligava TODAS as
+   *  câmeras via `setCameraFrustumsVisible` acima) foi removido de
+   *  view3d.js — substituído por este par de métodos, que mexem só no(s)
+   *  gizmo(s) de UM `foto.id` por vez (o da câmera atualmente "vista
+   *  através", ver `_renderFotoCamOverlay`/botão novo no rodapé). Não
+   *  existe gizmo pra todo `foto.id` (só fotos/orbs com `camProps` — ver
+   *  `this._fotoFrustumMeshesById`, montado em `setScene`) — daí
+   *  `hasCameraFrustum` (view3d.js usa pra decidir se mostra o botão). */
+  setCameraFrustumVisible(fotoId, visible) {
+    const meshes = this._fotoFrustumMeshesById?.[fotoId];
+    if (!meshes) return;
+    meshes.forEach((m) => { if (m) m.visible = !!visible; });
+  }
+
+  isCameraFrustumVisible(fotoId) {
+    const meshes = this._fotoFrustumMeshesById?.[fotoId];
+    return !!(meshes && meshes[0] && meshes[0].visible);
+  }
+
+  hasCameraFrustum(fotoId) {
+    return !!this._fotoFrustumMeshesById?.[fotoId];
+  }
+
+  /** [15/09/2026] NOVO — pedido verbatim: "Ao acessar 'Propriedades da
+   *  câmera' e mudar os valores de largura e altura da resolução, a foto
+   *  não deve ser mexida, pois estes valores são para a câmera, ou seja,
+   *  ao alterá-los, o enquadramento é que muda. Ao vivo e imediatamente,
+   *  devem ser aplicadas as alterações no retângulo amarelo." Recalcula
+   *  só os 4 cantos (`linhaRet`/`linhasCantos`, já existentes — nunca
+   *  recria a malha) a partir do `camProps` ATUAL, reaproveitando a
+   *  origem/direção congeladas em `_fotoFrustumBasisById` (setScene) —
+   *  MESMA fórmula usada lá (mantida em sincronia de propósito: qualquer
+   *  mudança numa precisa ser espelhada na outra). Chamada por
+   *  view3d.js `_activeCamPropsEditTarget()` a cada edição em
+   *  "Propriedades", tanto pra `_fotoCamMode` (orb de foto) quanto pra
+   *  `_orbCamMode` (câmera legada — vira no-op inofensivo, já que esse
+   *  tipo nunca teve gizmo de frustum, ver `hasCameraFrustum` acima). */
+  updateCameraFrustumGeometry(fotoId, camProps) {
+    const meshes = this._fotoFrustumMeshesById?.[fotoId];
+    const basis = this._fotoFrustumBasisById?.[fotoId];
+    if (!meshes || !basis || !this.THREE) return;
+    const THREE = this.THREE;
+    const [linhaRet, linhasCantos] = meshes;
+    const cp = camProps || {};
+    const resX = cp.resolutionX ?? 1920;
+    const resY = cp.resolutionY ?? 1080;
+    const vFovRad = window.Cam3DMath.camPropsVFovRad(cp.fov, resX, resY);
+    const aspectXY = resX / Math.max(1, resY);
+    const FRUSTUM_DIST = 1.0;
+    const halfH = FRUSTUM_DIST * Math.tan(vFovRad / 2);
+    const halfW = halfH * aspectXY;
+    const origemFr = basis.origem;
+    const dirVec = basis.dirVec;
+    const alvoFr = origemFr.clone().add(dirVec);
+    const upMundo = Math.abs(dirVec.y) > 0.999 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+    const m4Fr = new THREE.Matrix4().lookAt(origemFr, alvoFr, upMundo);
+    const rightFr = new THREE.Vector3().setFromMatrixColumn(m4Fr, 0);
+    const upFr = new THREE.Vector3().setFromMatrixColumn(m4Fr, 1);
+    const centroFr = origemFr.clone().addScaledVector(dirVec, FRUSTUM_DIST);
+    const c1 = centroFr.clone().addScaledVector(rightFr, -halfW).addScaledVector(upFr, halfH);
+    const c2 = centroFr.clone().addScaledVector(rightFr, halfW).addScaledVector(upFr, halfH);
+    const c3 = centroFr.clone().addScaledVector(rightFr, halfW).addScaledVector(upFr, -halfH);
+    const c4 = centroFr.clone().addScaledVector(rightFr, -halfW).addScaledVector(upFr, -halfH);
+    linhaRet.geometry.setFromPoints([c1, c2, c3, c4, c1]);
+    linhasCantos.geometry.setFromPoints([origemFr, c1, origemFr, c2, origemFr, c3, origemFr, c4]);
+  }
+
   /** Só as `Engine3D.MAX_LUMINARIAS_ATIVAS` luzes de luminária mais PRÓXIMAS
    *  de `camera` ficam ACESAS (`.visible`, que o Three.js já respeita no
    *  cálculo de iluminação sem precisar remontar nenhuma malha) — pedido do
@@ -1374,6 +2468,44 @@ class Engine3D {
   _pixelRatioCap() {
     const teto = Engine3D.RESOLUCAO_DPR[this._config.resolucao3D] || Engine3D.RESOLUCAO_DPR.alta;
     return Math.min(window.devicePixelRatio || 1, teto);
+  }
+
+  /** NOVO (07/09/2026) — ver "⚙️ Configurações 3D › Efeitos de tela" no
+   *  mapconfig.js (DEFAULTS.efeitoTelaEscurecida3D). Só usado em modo "eye"
+   *  (o modo não-eye desenha direto no canvas de tela, onde
+   *  `renderer.outputColorSpace` já resolve a conversão sozinho — este
+   *  método só decide o `colorSpace` da TEXTURA do `this.renderTarget`
+   *  desta instância). `THREE.SRGBColorSpace` (padrão, `efeitoTelaEscurecida3D`
+   *  desligado) = visual correto/claro de sempre. `THREE.NoColorSpace`
+   *  (opção ligada) = pula a conversão de propósito, reproduzindo o efeito
+   *  "escurecido" que era um BUG antes de virar uma opção pedida pelo
+   *  usuário (ver changelog do sw.js v398/v399 pro histórico completo). */
+  _colorSpaceEfeito() {
+    return this._config.efeitoTelaEscurecida3D ? this.THREE.NoColorSpace : this.THREE.SRGBColorSpace;
+  }
+
+  /** NOVO (07/09/2026) — chamado por `setConfig()` sempre que a config
+   *  muda, pra reaplicar `_colorSpaceEfeito()` na textura do render target
+   *  já existente, sem precisar recriá-lo. Não faz nada em modo não-eye
+   *  (não existe `this.renderTarget` nesse modo — a conversão fica só em
+   *  `renderer.outputColorSpace`, fixo desde `_initThree`, sem opção de
+   *  "efeito escurecido" nesse modo por enquanto).
+   *
+   *  RESSALVA (07/09/2026), pedido verbatim do usuário: "Está sendo
+   *  necessário sair e entra no 'Ver em 3D' para que seja aplicado." — na
+   *  prática, esta troca sozinha NÃO é suficiente pra atualizar a cena já
+   *  em tela (confirmado pelo usuário) — o mais provável é o Three.js
+   *  reaproveitar o PROGRAM/shader já compilado de cada material entre
+   *  quadros sem perceber a mudança. Sem navegador de verdade nesta sessão
+   *  pra confirmar/corrigir a causa exata dentro do Three.js com segurança
+   *  (sem Playwright, restrição do projeto), este método continua sendo
+   *  chamado (não atrapalha, cobre o caminho "documentado" do Three.js),
+   *  mas quem garante o efeito de verdade é sair/entrar no "Ver em 3D"
+   *  (recria a instância do zero, com o render target já correto desde
+   *  `_initThree`) — ver aviso correspondente no painel de configurações
+   *  (mapconfig.js, `mc-efeito-tela-escurecida3d`). */
+  _applyColorSpaceEfeito() {
+    if (this._eye && this.renderTarget) this.renderTarget.texture.colorSpace = this._colorSpaceEfeito();
   }
 
   _renderDistance() { return Math.max(3, this._config.renderDistance || 42); }
@@ -1467,12 +2599,26 @@ class Engine3D {
     const sunMat = new THREE.MeshBasicMaterial({ color: 0xfff6d8, fog: false, toneMapped: false });
     this._sunMesh = new THREE.Mesh(sunGeo, sunMat);
     this._sunMesh.visible = false; // _updateSky decide visibilidade real (acima/abaixo do horizonte) antes do 1º render
+    // [13/09/2026 — ITEM B] `depthWrite:false`+`renderOrder:-2000` tinham
+    // sido adicionados aqui pelo MESMO motivo do chão (ver comentário
+    // grande em `setScene`, criação do `floor`) — nunca bloquear o plano 3D
+    // do backdrop 'Trás'. [19/09/2026] REVERTIDO — plano removido naquela
+    // rodada. [22/09/2026 — RODADA SEGUINTE] REAPLICADO — o plano 3D do
+    // backdrop 'Trás' foi RESTAURADO (pedido do usuário: "volte a colocar a
+    // imagem lá no fundo"); Sol/Lua fazem parte do "céu" (item B, ordem de
+    // camadas pedida em 13/09/2026: "1º céu; [...] 3º foto") — nunca
+    // deveriam ocluir a foto, mesmo estando geometricamente "na frente" do
+    // plano (a uma distância R bem maior que o plano da foto).
+    this._sunMesh.material.depthWrite = false;
+    this._sunMesh.renderOrder = -2000;
     this.scene.add(this._sunMesh);
 
     const moonGeo = new THREE.SphereGeometry(1, 16, 12);
     const moonMat = new THREE.MeshBasicMaterial({ color: 0xd7deed, fog: false, toneMapped: false });
     this._moonMesh = new THREE.Mesh(moonGeo, moonMat);
     this._moonMesh.visible = false;
+    this._moonMesh.material.depthWrite = false;
+    this._moonMesh.renderOrder = -2000;
     this.scene.add(this._moonMesh);
   }
 
@@ -1516,7 +2662,16 @@ class Engine3D {
     this._hemiLight.intensity = sky.hemiI;
     this._dirLight.color.setHex(sky.dir);
     this._dirLight.intensity = sky.dirI;
-    this._ambientLight.intensity = sky.amb;
+    // NOVO (07/09/2026), pedido verbatim: "carregar materiais e definir luz
+    // ambiente [...]" — ver mapconfig.js DEFAULTS.luzAmbienteIntensidade/
+    // luzAmbienteCor. `luzAmbienteIntensidade` é um MULTIPLICADOR em cima do
+    // `sky.amb` calculado pelo ciclo dia/noite (1 = sem mudança nenhuma, o
+    // comportamento de sempre) — não substitui o ciclo, só ajusta por cima
+    // dele, então continua escurecendo à noite mesmo com a intensidade
+    // aumentada de propósito.
+    const luzAmbienteMult = this._config?.luzAmbienteIntensidade ?? 1;
+    this._ambientLight.intensity = sky.amb * luzAmbienteMult;
+    this._ambientLight.color.setHex(_hexToThreeColor(this._config?.luzAmbienteCor) ?? 0xffffff);
 
     // NOVO (03/09/2026) — usa `_horaAtualConfigurada()` (real OU manual, ver
     // comentário grande em _skyPalette acima) em vez de `new Date()` direto,
@@ -1557,16 +2712,37 @@ class Engine3D {
   setConfig(cfg) {
     this._config = { ...this._config, ...cfg };
     if (this.renderer) {
-      this.renderer.setPixelRatio(this._pixelRatioCap());
+      // BUG CORRIGIDO (07/09/2026), arquitetura WebGLRenderTarget: em modo
+      // "eye", `this.renderer` é `Engine3D._sharedRenderer` (compartilhado
+      // entre TODOS os "olhos") — chamar `setPixelRatio` nele aqui afetaria
+      // TODAS as instâncias, não só esta. A resolução de cada "olho" agora
+      // vem do TAMANHO do seu próprio `this.renderTarget` (ver `_resize`),
+      // nunca do pixelRatio do renderer compartilhado (que fica sempre 1,
+      // ver `_ensureSharedRenderer`) — por isso o `setPixelRatio` só faz
+      // sentido no modo não-eye (renderer próprio de verdade).
+      if (!this._eye) this.renderer.setPixelRatio(this._pixelRatioCap());
       // força o _resize() do próximo quadro a reaplicar mesmo sem o
-      // tamanho do canvas ter mudado (ele só age quando w/h mudam)
-      this._lastW = 0; this._lastH = 0;
+      // tamanho do canvas ter mudado (ele só age quando w/h mudam) — em modo
+      // eye, `_lastDpr` também precisa zerar (o teto de RESOLUCAO_DPR pode
+      // ter mudado sem o tamanho CSS do canvas mudar).
+      this._lastW = 0; this._lastH = 0; this._lastDpr = 0;
+      // NOVO (07/09/2026) — ver "⚙️ Configurações 3D › Efeitos de tela"
+      // (mapconfig.js DEFAULTS.efeitoTelaEscurecida3D) e a RESSALVA no
+      // comentário grande em `_applyColorSpaceEfeito`: garante o valor
+      // certo pra próxima vez que a tela 3D for aberta, mas sozinho não é
+      // garantia de efeito imediato na cena já em tela.
+      this._applyColorSpaceEfeito();
     }
     if (this.scene?.fog && this.camera3) {
       const rd = this._renderDistance();
       this.scene.fog.near = this._fogNear(rd);
       this.scene.fog.far = rd;
-      this.camera3.far = Math.max(rd * 2.4, 60);
+      // [10/09/2026] NOVO — respeita `setClipPlanes` (ver comentário grande
+      // lá) enquanto um override de recorte estiver ativo (câmera/orb
+      // calibrada "Camera Match"), em vez de sobrescrever `far` sempre a
+      // partir da distância de renderização/neblina.
+      this.camera3.far = (this._clipFarOverride != null) ? this._clipFarOverride : Math.max(rd * 2.4, 60);
+      if (this._clipNearOverride != null) this.camera3.near = this._clipNearOverride;
       this.camera3.updateProjectionMatrix();
       // NOVO (01/09/2026), item "Sol e Lua": a posição dos dois depende do
       // `far` da câmera (ver _updateSky, R = far*0.85) — sem isto, mudar a
@@ -1609,6 +2785,59 @@ class Engine3D {
     // _disposeGroupContents logo abaixo) se o modo mudar depois.
     this._hybridMeshes = [];
     this._hybridRadius = null; // null = sem raio nenhum restringindo ainda (ver updateHybridQuality)
+    // [11/09/2026] NOVO — item 1 do pedido "parte do cone aparece na frente
+    // da câmera" em "Ver através desta câmera": índice camId -> [malhas
+    // caixa+cone] daquela câmera, repovoado do zero a cada setScene (mesmo
+    // padrão de `_itemBadgeGroups`/`_hybridMeshes` acima) — usado por
+    // `setCameraMeshVisible` (ver mais abaixo, chamada por
+    // `_enterCameraOrbView`/`_exitCameraOrbView` em view3d.js) pra
+    // esconder/mostrar a malha da PRÓPRIA câmera cujo ponto de vista está
+    // sendo usado como a câmera de render — sem isto, o cone (que se
+    // estende do centro da caixa PARA FORA, na direção de apontamento —
+    // exatamente a direção onde o olho de render agora está posicionado)
+    // acaba entre o near plane e o resto da cena, aparecendo como uma forma
+    // indevida "na frente" de tudo.
+    this._cameraMeshesById = {};
+    // [14/09/2026] NOVO — `this._forcedHiddenMeshes` (ver
+    // `setCameraMeshVisible`/`setFotoMeshVisible`/`_updateDistanceCulling`)
+    // guarda REFERÊNCIAS às malhas antigas — sem limpar aqui, um `setScene`
+    // (troca de andar, edição, saída do Modelador) deixaria o Set cheio de
+    // malhas ÓRFÃS (já descartadas, nunca mais no `_group`) pra sempre,
+    // crescendo sem limite. Quem ainda estiver "vendo através" de uma
+    // câmera/orb quando este `setScene` rodar reconstrói o Set do zero (com
+    // as malhas NOVAS) logo em seguida — ver view3d.js `_rebuildScene`.
+    this._forcedHiddenMeshes = new Set();
+    // [12/09/2026] NOVO — mesma ideia de `_cameraMeshesById` acima, agora
+    // pro "orb de foto": índice fotoId -> [malhas esfera+cone(+placa)]
+    // daquele orb, repovoado do zero a cada setScene. Usado por
+    // `setFotoMeshVisible` (ver mais abaixo) pra esconder a malha do
+    // PRÓPRIO orb de foto sendo visto através dele em `_enterFotoCameraView`
+    // (view3d.js) — mesmo bug do cone "na frente da câmera" já corrigido
+    // pro orb de câmera (`_cameraMeshesById`/`setCameraMeshVisible`).
+    this._fotoMeshesById = {};
+    // [10/09/2026] NOVO — índice fotoId -> [linha do retângulo, linhas dos
+    // 4 cantos] do gizmo de "enquadramento" (retângulo amarelo, ver
+    // `setCameraFrustumsVisible` acima) — MESMO padrão de índice de
+    // `_fotoMeshesById`/`_cameraMeshesById`, repovoado do zero a cada
+    // `setScene`. Visibilidade inicial de cada mesh já sai de
+    // `this._frustumGizmosEnabled` (ver bloco "fotos vinculadas ao mapa"),
+    // então trocar de andar/reabrir o mapa preserva o estado do botão "🟨".
+    this._fotoFrustumMeshesById = {};
+    // [15/09/2026] NOVO — pedido verbatim: "Ao acessar 'Propriedades da
+    // câmera' e mudar os valores de largura e altura da resolução [...]
+    // Ao vivo e imediatamente, devem ser aplicadas as alterações no
+    // retângulo amarelo." Antes desta correção a geometria do retângulo
+    // amarelo (linhaRet/linhasCantos, bloco "fotos vinculadas ao mapa"
+    // abaixo) só era calculada UMA VEZ aqui em `setScene` — editar
+    // FOV/Resolução em "Propriedades" enquanto already dentro de "Ver
+    // através desta câmera" não recalculava a malha 3D de verdade (só o
+    // retângulo/box da FOTO, em view3d.js, reagia — o oposto do pedido).
+    // Este índice guarda origem+direção (fixas, só mudam se o orb for
+    // movido — o que reconstrói a cena via `setScene` de qualquer jeito)
+    // de cada frustum, pra `updateCameraFrustumGeometry` (abaixo) poder
+    // recalcular só os 4 cantos a partir do `camProps` atual, sem precisar
+    // de um `setScene` inteiro.
+    this._fotoFrustumBasisById = {};
     if (!this._ready) { this._pendingScene = mapData; return; } // Three.js ainda carregando (1ª vez) — aplica assim que estiver pronto
     const THREE = this.THREE;
     // Raio X (ver setXRayTarget) — as malhas atravessadas (`_xrayMeshes`)
@@ -1713,10 +2942,81 @@ class Engine3D {
         mod1(-(centroZ + floorProfundidade / 2) / cell),
       );
       floorMat = new THREE.MeshLambertMaterial({ map: tex });
+      // [13/09/2026] NOVO — ver comentário grande em
+      // `setFotoCamBackdropMaskActive`/`_updateFloorMaskUniform` (mais
+      // abaixo nesta classe) pro motivo completo: o chão precisa "sumir"
+      // (virar cor-marcadora, pra máscara poder furar) só DENTRO do
+      // retângulo da foto, nunca na tela inteira. `onBeforeCompile` injeta
+      // um pedaço a mais no FRAGMENT shader padrão do Lambert: compara
+      // `gl_FragCoord.xy` (posição do pixel NA TELA, origem embaixo-à-
+      // esquerda — mesma convenção "crua" de `_computeFotoCamMaskRawRect`/
+      // `_rtPixelBuffer`, sem precisar inverter nada aqui) contra o
+      // retângulo (`uFotoCamMaskRect`, atualizado todo quadro por
+      // `_updateFloorMaskUniform` — ANTES do render, senão o shader
+      // desenharia com o retângulo do quadro ANTERIOR); só dentro dele,
+      // com a máscara ativa (`uFotoCamMaskAtiva`), substitui a cor final
+      // pela cor-marcadora EXATA (`uFotoCamMaskCor`) — fora do retângulo,
+      // ou com a máscara desligada, o chão pinta normalmente, sem nenhuma
+      // mudança. Guardado em `material.userData.fotoCamMaskShader` (Three.js
+      // pode recompilar o shader — troca de nº de luzes, p.ex — cada
+      // recompilação chama este callback de novo com um objeto NOVO;
+      // guardar aqui garante que `_updateFloorMaskUniform` sempre acha a
+      // referência mais recente).
+      floorMat.onBeforeCompile = (shader) => {
+        shader.uniforms.uFotoCamMaskAtiva = { value: 0 };
+        shader.uniforms.uFotoCamMaskRect = { value: new THREE.Vector4(0, 0, 0, 0) };
+        shader.uniforms.uFotoCamMaskCor = { value: new THREE.Vector3(1, 0, 1) };
+        shader.fragmentShader = `uniform float uFotoCamMaskAtiva;\nuniform vec4 uFotoCamMaskRect;\nuniform vec3 uFotoCamMaskCor;\n${shader.fragmentShader}`;
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <dithering_fragment>',
+          `#include <dithering_fragment>
+          if (uFotoCamMaskAtiva > 0.5) {
+            vec2 fc = gl_FragCoord.xy;
+            if (fc.x >= uFotoCamMaskRect.x && fc.x < (uFotoCamMaskRect.x + uFotoCamMaskRect.z)
+                && fc.y >= uFotoCamMaskRect.y && fc.y < (uFotoCamMaskRect.y + uFotoCamMaskRect.w)) {
+              gl_FragColor = vec4(uFotoCamMaskCor, 1.0);
+            }
+          }`,
+        );
+        floorMat.userData.fotoCamMaskShader = shader;
+      };
+      // Força o material a "precisar" recompilar (garante que
+      // `onBeforeCompile` acima roda pelo menos 1x, mesmo que o Three.js
+      // decida reaproveitar um programa de shader já compilado antes).
+      floorMat.needsUpdate = true;
     }
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(centroX, 0, centroZ);
+    // [13/09/2026 — ITEM B] `depthWrite:false`+`renderOrder:-2000` foram
+    // adicionados aqui EXCLUSIVAMENTE por causa do plano 3D do backdrop
+    // 'Trás' (view3d.js `_ensureFotoCamBackdropPlane`, transparente,
+    // `depthTest:true`) — sem isso, o chão (opaco, cobrindo quase toda a
+    // tela) preenchia o z-buffer e bloqueava o backdrop na maior parte do
+    // quadro. [19/09/2026] REVERTIDO — o plano 3D do backdrop foi removido
+    // (arquitetura simplificada pra desenho 2D em canvas), então o chão
+    // tinha voltado ao comportamento padrão do Three.js.
+    // [22/09/2026 — RODADA SEGUINTE] REAPLICADO — pedido verbatim do
+    // usuário: "Volte a colocar a imagem lá no fundo, pois os objetos que
+    // deveriam estar à frente da imagem não estão" — o plano 3D do
+    // backdrop 'Trás' foi RESTAURADO (ver view3d.js
+    // `_ensureFotoCamBackdropPlane`/`_updateFotoCamBackdropPlane`), então a
+    // mesma razão de 13/09/2026 volta a valer: sem isto, o chão (opaco,
+    // cobrindo quase toda a tela) escreve no z-buffer e bloqueia o plano
+    // transparente da foto ('Trás') na maior parte do quadro, mesmo sem
+    // nenhum objeto de verdade na frente. `depthTest` continua `true` (o
+    // chão continua sendo ocluído normalmente por qualquer objeto real na
+    // frente dele) — só `depthWrite` muda, então o chão nunca mais IMPEDE
+    // outra coisa (a foto) de aparecer atrás dele, mas continua aparecendo
+    // normalmente atrás de paredes/objetos reais.
+    floor.material.depthWrite = false;
+    floor.renderOrder = -2000;
+    // [13/09/2026] NOVO — pedido verbatim: "Confirmado, não precisa
+    // aparecer mais o chão quando está marcado 'Trás'." Guarda a
+    // referência pra `_updateFloorMaskUniform` (ver `onBeforeCompile` do
+    // material, acima, e comentário grande em `setFotoCamBackdropMaskActive`)
+    // achar o shader dele todo quadro.
+    this._floorMesh = floor;
     this._group.add(floor);
     floor.userData.pick = { type: 'floor' };
     this._pickMeshes.push(floor);
@@ -1780,12 +3080,21 @@ class Engine3D {
       for (let z = firstZ; z <= gMaxZ + 1e-6; z += tile) pts.push(new THREE.Vector3(gMinX, 0, z), new THREE.Vector3(gMaxX, 0, z));
       const gridGeo = new THREE.BufferGeometry().setFromPoints(pts);
       const gridMat = new THREE.LineBasicMaterial({ color: colWireframe });
+      // [11/09/2026] `gridMat.depthWrite = false`/`floorGrid.renderOrder =
+      // -2000` tinham sido adicionados aqui pelo MESMO motivo do `floor`
+      // sólido acima (não bloquear o plano 3D do backdrop 'Trás').
+      // [19/09/2026] REVERTIDO junto — plano removido naquela rodada.
+      // [22/09/2026 — RODADA SEGUINTE] REAPLICADO junto com o `floor`
+      // sólido acima — o plano 3D do backdrop 'Trás' foi RESTAURADO, mesma
+      // razão de sempre (não bloquear o plano transparente da foto).
+      gridMat.depthWrite = false;
       // Pequeno deslocamento em Y evita "z-fighting" com o `floor` de baixo
       // (tremedeira de duas malhas coplanares disputando o mesmo pixel) —
       // pontos já em coordenadas de MUNDO (não locais), então a malha em si
       // fica na origem, só a altura Y é ajustada aqui.
       const floorGrid = new THREE.LineSegments(gridGeo, gridMat);
       floorGrid.position.set(0, 0.002, 0);
+      floorGrid.renderOrder = -2000;
       this._group.add(floorGrid);
     }
     // Guardado pro destaque de raycasting no chão (hoverPick) — precisa saber
@@ -2342,7 +3651,19 @@ class Engine3D {
     const ALTURA_CAMERA = 1.6;
     (mapData.cameras || []).forEach((cam) => {
       const baseY = (cam.piso || 0) * 2.8;
-      const dirX = Math.cos(cam.angulo || 0), dirZ = Math.sin(cam.angulo || 0);
+      // [11/09/2026] CORRIGIDO — pedido verbatim, com repro exato: "crie um
+      // câmera, então o desenho 2D dela tem uma seta que aponta para
+      // norte. Depois, vou para o 'Ver em 3D' e a câmera (modelo 3D) e
+      // também o 'Ver através dessa câmera' estão apontando para o sul."
+      // A malha 3D (caixa+lente, abaixo) usava `cos(angulo)`/`sin(angulo)`
+      // direto — o mapa 2D (`Map2DRenderer._drawCameraShape`, mapview.js,
+      // referência que NÃO muda) também usa `cam.angulo` puro, mas com
+      // sinal invertido (`-cos`/`-sin`, mesma correção aplicada em
+      // view3d.js `_computeWatchCameraPose`/`_enterCameraOrbView` —
+      // ver comentário grande lá pro contexto completo) — os 3
+      // consumidores de `cam.angulo` (mapa 2D, esta malha, e a pose de
+      // "assistir"/"ver através") precisam apontar pro MESMO lado.
+      const dirX = -Math.cos(cam.angulo || 0), dirZ = -Math.sin(cam.angulo || 0);
       const rotY = Math.atan2(dirX, dirZ); // mesma convenção das paredes (atan2(dx,dz))
       const matCam = wireframe
         ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
@@ -2351,10 +3672,58 @@ class Engine3D {
       body.position.set(cam.x, baseY + ALTURA_CAMERA, cam.y);
       body.rotation.y = rotY;
       this._group.add(body);
-      const lens = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.16, 10), matCam);
-      lens.rotation.x = Math.PI / 2; // aponta a ponta do cone ao longo do +Z local...
-      lens.rotation.y = rotY; // ...que esta rotação leva pra direção (dirX,dirZ) do mundo
-      lens.position.set(cam.x + dirX * 0.18, baseY + ALTURA_CAMERA, cam.y + dirZ * 0.18);
+      // [10/09/2026] RE-DERIVADO DO ZERO (3ª tentativa — pedido verbatim:
+      // "a ponta do cone deve ficar alinhado ao centro da caixa e dentro
+      // dela [...] a base do cone deve apontar para a direção de
+      // apontamento [...] a superfície da base do cone deve ficar paralela
+      // com a superfície da lateral da caixa em que a ponta do cone
+      // 'entrou'"). As 2 tentativas anteriores (ver histórico logo acima,
+      // mantido só como referência) usavam ângulos de Euler manuais
+      // (`rotation.x`/`rotation.y` combinados à mão) — frágil, alto risco
+      // de sinal trocado (foi exatamente o que já deu errado 2x aqui, e o
+      // mesmo tipo de bug já tinha acontecido no "orb de foto" logo abaixo
+      // antes de ser trocado por quaternion). Reaproveitando aqui o MESMO
+      // padrão já verificado correto no "orb de foto" (`cone.quaternion.
+      // setFromUnitVectors`, ver comentário grande mais abaixo neste
+      // arquivo) em vez de inventar uma 3ª variação de Euler.
+      //
+      // Geometria, derivada explicitamente:
+      // - `ConeGeometry` nasce com a PONTA em +Y local e a BASE em −Y local
+      //   (raio no plano XZ em Y=−altura/2) — documentado no comentário do
+      //   orb de foto, confirmado na doc do Three.js.
+      // - `body.rotation.y = rotY` já faz o eixo local +Z da caixa (a face
+      //   "da frente") apontar exatamente para `dirVec` no mundo (mesma
+      //   conta que `rotY = atan2(dirX, dirZ)` já usava pra `dirX,dirZ` — ver
+      //   comentário grande acima, "mesma convenção das paredes"). Ou seja,
+      //   a face da caixa por onde a câmera "aponta" já tem sua NORMAL
+      //   exatamente igual a `dirVec` — não precisa recalcular nada extra
+      //   pra achar "a face certa".
+      // - `setFromUnitVectors((0,-1,0), dirVec)` gira o cone de forma que o
+      //   eixo local (0,-1,0) — a direção do CENTRO até a BASE — passe a
+      //   apontar pra `dirVec` no mundo. Como o eixo do cone é uma reta só,
+      //   isso automaticamente deixa o eixo do cone PARALELO a `dirVec` —
+      //   logo perpendicular à face da caixa (já que a normal da face É
+      //   `dirVec`) — a base fica PARALELA a essa face, exatamente o pedido.
+      // - Só falta posicionar: quer-se a PONTA (não o centro do cone, que é
+      //   o que `mesh.position` de fato ancora) exatamente no centro da
+      //   caixa. Depois da rotação, o deslocamento LOCAL da ponta
+      //   (0,+altura/2,0) vira, no mundo, `-dirVec * altura/2` (sinal
+      //   invertido — a ponta é o lado OPOSTO ao eixo usado no
+      //   `setFromUnitVectors`). Pra ponta = centro da caixa:
+      //   `posição do mesh = centroCaixa − (−dirVec·altura/2) = centroCaixa + dirVec·altura/2`.
+      //   A base cai em `posição do mesh + dirVec·altura/2 = centroCaixa + dirVec·altura`.
+      // - Com `altura = 0.16` (mesma medida de antes, proporção já lida como
+      //   "lente" razoável pro corpo de 0.22×0.16×0.16) e meia-profundidade
+      //   da caixa = 0.08: a ponta fica EXATAMENTE no centro (0.08 dentro da
+      //   face — "dentro dela", não só na superfície) e a base sobra ~0.08
+      //   além da face (pra fora, lendo como uma lente saliente, sem ficar
+      //   nem grande nem pequena demais em relação à caixa).
+      const lensH = 0.16;
+      const lens = new THREE.Mesh(new THREE.ConeGeometry(0.07, lensH, 10), matCam);
+      const dirVecCam = new THREE.Vector3(dirX, 0, dirZ).normalize();
+      const camCenter = new THREE.Vector3(cam.x, baseY + ALTURA_CAMERA, cam.y);
+      lens.position.copy(camCenter).addScaledVector(dirVecCam, lensH / 2);
+      lens.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dirVecCam);
       this._group.add(lens);
       const camPos = { x: cam.x, y: baseY + ALTURA_CAMERA, z: cam.y };
       const camPick = { id: cam.id, type: 'camera', pos: camPos, center: camPos, radius: 0.3, ref: cam, obb: { half: { x: 0.11, y: 0.08, z: 0.08 }, rotY, shape: 'box' } };
@@ -2362,6 +3731,9 @@ class Engine3D {
       body.userData.pick = camPick;
       lens.userData.pick = camPick;
       this._pickMeshes.push(body, lens);
+      // [11/09/2026] registra as 2 malhas desta câmera pro índice usado por
+      // `setCameraMeshVisible` (ver comentário grande no topo de setScene).
+      this._cameraMeshesById[cam.id] = [body, lens];
     });
 
     // --- fotos vinculadas ao mapa (Parte 5, mapview.js this._map.fotos) —
@@ -2386,7 +3758,10 @@ class Engine3D {
     // dois lugares do código nunca divirjam na convenção de ângulo.
     (mapData.fotos || []).forEach((foto) => {
       const baseY = (foto.piso || 0) * 2.8 + (foto.altura || 0);
-      const dir = cameraForward({ yaw: foto.dirAngulo || 0, pitch: foto.rotPerp || 0 });
+      // [22/09/2026] CORRIGIDO — era `cameraForward({yaw:foto.dirAngulo,...})`
+      // direto, uma inversão de 180° no eixo Z relativo ao mapa 2D (ver
+      // comentário grande de `objectPointerForward`, topo do arquivo).
+      const dir = objectPointerForward(foto.dirAngulo || 0, foto.rotPerp || 0);
       const matFoto = wireframe
         ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
         : new THREE.MeshLambertMaterial({ color: 0x7cffb2 });
@@ -2399,19 +3774,186 @@ class Engine3D {
       // direção `dir` (mesmo truque de `body.rotation.y = rotY` da câmera
       // logo acima, generalizado pros 3 eixos com atan2/asin em vez de só Y).
       const cone = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.22, 10), matFoto);
-      const meio = { x: foto.x + dir.x * 0.16, y: baseY + dir.y * 0.16, z: foto.y + dir.z * 0.16 };
+      // [09/09/2026] Bug relatado pelo usuário: "o orb de foto é
+      // representado no 3D como uma caixa e um cone, mas as posições não
+      // parecem uma câmera [...] a ponta do cone deve ficar voltada para
+      // dentro da caixa (encaixada), e a base do cone (que representa a
+      // lente) deve apontar para o horizonte" — MESMO pedido/MESMA correção
+      // de alinhamento já aplicada à ferramenta "Câmeras" logo acima (a
+      // "caixa" aqui é a esfera do orb, ver `orb` acima — geometria
+      // diferente, mesma ideia de "corpo da câmera"). Antes, a PONTA do
+      // cone (+Y local, offset 0.16 do centro + meia-altura 0.11 = 0.27)
+      // apontava pra FORA (no sentido de `dir`, ou seja, pro horizonte) e a
+      // BASE ficava a 0.05 do centro do orb — DENTRO do raio da esfera
+      // (0.09), mas ainda assim exatamente invertido do pedido (base
+      // encaixada, ponta pra fora, em vez de ponta encaixada, base pra
+      // fora). `meio` de 0.16 -> 0.14 e `cone.rotation.z = Math.PI` (extra,
+      // aplicado no eixo Z — que a ordem 'YXZ' resolve PRIMEIRO, antes do
+      // X/Y que apontam o eixo local pra `dir` — vira as duas pontas do
+      // cone sem precisar recalcular yaw/pitch) fazem a ponta terminar em
+      // 0.14-0.11=0.03 do centro do orb (bem DENTRO da esfera de raio 0.09,
+      // "encaixada") e a base em 0.14+0.11=0.25 (pro lado de fora, "no
+      // horizonte" — distância final bem próxima da ponta antiga, 0.27, o
+      // "alcance" visual da seta não muda).
+      const meio = { x: foto.x + dir.x * 0.14, y: baseY + dir.y * 0.14, z: foto.y + dir.z * 0.14 };
       cone.position.set(meio.x, meio.y, meio.z);
-      // Orienta o cone (ponta em +Y local) pra apontar em `dir`: yaw em
-      // torno de Y (atan2 no plano XZ) seguido de um "pitch" que inclina o
-      // eixo do cone pra cima/baixo — mesma ideia de `cameraForward`, só
-      // invertida (de vetor -> ângulos) pra alimentar `cone.rotation`.
-      const yawCone = Math.atan2(dir.x, dir.z);
-      const planoXZ = Math.sqrt(dir.x * dir.x + dir.z * dir.z);
-      const pitchCone = Math.atan2(dir.y, planoXZ);
-      cone.rotation.order = 'YXZ';
-      cone.rotation.y = yawCone;
-      cone.rotation.x = -pitchCone;
+      // [09/09/2026] Bug relatado de novo pelo usuário (a tentativa acima,
+      // via `cone.rotation.x/y` com `atan2`, NÃO resolveu — "a ponta do
+      // cone ainda está apontando para baixo"): re-investigado do zero,
+      // sem assumir que a conta de yaw/pitch acima estivesse certa. Causa
+      // raiz de verdade: `yawCone`/`pitchCone` eram recalculados com
+      // `Math.atan2` assumindo a MESMA convenção de sinal da função
+      // `rotY`/`rotX` (topo do arquivo) usada pra montar `dir` — só que
+      // `rotY(p,a)` (`x'=x·cosa − z·sina`) gira no sentido CONTRÁRIO da
+      // rotação padrão que `cone.rotation.y = ângulo` de verdade aplica
+      // (a do Three.js, right-handed: `x'=x·cosa + z·sina`) — as duas
+      // funções não são inversas uma da outra. Resultado, conferido conta
+      // por conta: com `foto.rotPerp` (pitch) perto de 0 — o caso mais
+      // comum, foto tirada quase na horizontal — o eixo final do cone
+      // acabava apontando pra (0,1,0)/(0,-1,0) do MUNDO (reto pra
+      // cima/baixo) não importa o `yaw`, batendo exatamente com o relato
+      // ("a ponta do cone está apontando para baixo").
+      // CORRIGIDO: em vez de reconstruir ângulos de Euler (frágil — exige
+      // as duas convenções de rotação baterem exatamente), alinha o cone
+      // por QUATERNION direto, do jeito que o Three.js foi feito pra
+      // fazer: `setFromUnitVectors(de, para)` gira o eixo LOCAL `de` até
+      // apontar pro vetor `para`, sem nenhuma conversão de ângulo no meio
+      // (imune a qualquer mismatch de convenção/ordem de eixos). O eixo
+      // local usado como "de" é (0,-1,0) — a BASE do cone (padrão do
+      // `ConeGeometry`, ponta em +Y/base em −Y) — apontada pro vetor `dir`
+      // (direção real da câmera/horizonte): a base (lente) fica voltada
+      // pro horizonte, e a ponta (+Y local, lado oposto) automaticamente
+      // fica voltada pro CENTRO do orb (−dir) — exatamente o pedido: "a
+      // ponta do cone deve entrar na bola e a base do cone deve estar
+      // apontando para o horizonte". Sem precisar de nenhum
+      // `rotation.order`/flip extra em Z (removido — não faz mais
+      // sentido, a orientação já sai certa direto do quaternion).
+      const dirVec = new THREE.Vector3(dir.x, dir.y, dir.z).normalize();
+      cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dirVec);
       this._group.add(orb, cone);
+      // [12/09/2026] registra as malhas deste orb de foto pro índice usado
+      // por `setFotoMeshVisible` (ver comentário grande no topo de
+      // setScene) — a placa (quando existe foto), logo abaixo, entra neste
+      // MESMO array depois de criada.
+      this._fotoMeshesById[foto.id] = [orb, cone];
+
+      // [10/09/2026] NOVO — pedido verbatim: "Deve aparecer um retângulo
+      // amarelo representado o enquadramento da câmera de acordo com as
+      // propriedades da câmera ('campo de visão', aspect ratio no x e no
+      // y)." Reaproveita `foto.camProps` (mapview.js `_refreshFotosNoMapa`
+      // -> `mapaCamProps`, já usado pelo fieldset "Propriedades da câmera",
+      // ver `_camPropsFieldsetHtml`/`_wireCamPropsFieldset` em mapview.js)
+      // pra desenhar um retângulo (o "quadro"/passe-partout da câmera, como
+      // no Blender) + 4 linhas até os cantos, na MESMA direção `dirVec`
+      // já calculada acima pro cone. Sem `camProps` ainda definido (orb
+      // recém-criado, nunca aberto em "Propriedades da câmera"), cai nos
+      // mesmos padrões de fábrica do fieldset em vez de não desenhar nada —
+      // sempre há um enquadramento pra mostrar, só não calibrado ainda.
+      // [11/09/2026] REESCRITO — pedido verbatim: "apague todas as
+      // propriedades [da câmera]. Deixe apenas FOV. [...] uma seção de
+      // 'Resolução' [...] Estes [...] valores influenciam no tamanho do
+      // retângulo amarelo." O fieldset Blender (foco/sensor mm) SUMIU —
+      // `camProps.fov` (radianos, vertical, direto) e
+      // `camProps.resolutionX/resolutionY` (proporção) são as ÚNICAS fontes
+      // agora — MESMA correção espelhada em view3d.js
+      // `_activeCamPropsVFovRad`/`_activeCamFrameAspect` (busque por
+      // "resolutionX" lá pra conferir que bate 100%, exigência de sempre
+      // entre os dois arquivos).
+      {
+        const cp = foto.camProps || {};
+        const resX = cp.resolutionX ?? 1920;
+        const resY = cp.resolutionY ?? 1080;
+        // [11/09/2026] CORRIGIDO — pedido verbatim: "O enquadramento deve
+        // ter medidas limite que são a forma do quadrado (assim como no
+        // Blender) [...]" — `camProps.fov` deixou de ser tratado sempre
+        // como o FOV VERTICAL direto; agora passa por `camPropsVFovRad`
+        // (ver comentário grande dela, logo acima de `window.Cam3DMath`),
+        // que aplica o FOV salvo ao eixo MAIOR da resolução (convenção
+        // "Sensor Fit: Auto" do Blender) e devolve o vertical de verdade a
+        // usar aqui.
+        const vFovRad = window.Cam3DMath.camPropsVFovRad(cp.fov, resX, resY);
+        const aspectXY = resX / Math.max(1, resY);
+        const FRUSTUM_DIST = 1.0; // metros — só um tamanho de visualização, não afeta o FOV real usado em "ver através desta câmera"
+        const halfH = FRUSTUM_DIST * Math.tan(vFovRad / 2);
+        const halfW = halfH * aspectXY;
+        const origemFr = new THREE.Vector3(foto.x, baseY, foto.y);
+        const alvoFr = origemFr.clone().add(dirVec);
+        const upMundo = Math.abs(dirVec.y) > 0.999 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+        const m4Fr = new THREE.Matrix4().lookAt(origemFr, alvoFr, upMundo);
+        const rightFr = new THREE.Vector3().setFromMatrixColumn(m4Fr, 0);
+        const upFr = new THREE.Vector3().setFromMatrixColumn(m4Fr, 1);
+        const centroFr = origemFr.clone().addScaledVector(dirVec, FRUSTUM_DIST);
+        const c1 = centroFr.clone().addScaledVector(rightFr, -halfW).addScaledVector(upFr, halfH);
+        const c2 = centroFr.clone().addScaledVector(rightFr, halfW).addScaledVector(upFr, halfH);
+        const c3 = centroFr.clone().addScaledVector(rightFr, halfW).addScaledVector(upFr, -halfH);
+        const c4 = centroFr.clone().addScaledVector(rightFr, -halfW).addScaledVector(upFr, -halfH);
+        // [13/09/2026 — ITEM B] pedido verbatim (ordem de camadas do painel
+        // "🖼️ Imagem"): "[...] 5º retângulo amarelo" — sempre por cima de
+        // TUDO (céu/chão/foto/resto), nos 2 modos ('Trás' e 'Frente'). Este
+        // é o MESMO retângulo amarelo referenciado pelo item D ("os botões
+        // 'Esticar'/'Caber'/'Cortar' são em relação ao retângulo amarelo que
+        // representa os limites da câmera") — dentro de "Ver através desta
+        // câmera", a câmera de render fica exatamente na origem/direção/FOV
+        // desta foto, então este quadro (desenhado a `FRUSTUM_DIST`=1m à
+        // frente, no aspect ratio do sensor) projeta na tela como o
+        // "letterbox" exato do enquadramento da câmera. `depthTest:false`
+        // (nunca ocluído por nenhum objeto entre a câmera e o quadro) +
+        // `transparent:true` (empurra pro passe TRANSPARENTE do Three.js,
+        // que roda depois do passe opaco inteiro) + `renderOrder:9000`
+        // (bem alto) garantem que este retângulo sempre desenha por ÚLTIMO,
+        // por cima de tudo. [19/09/2026 — RODADA SEGUINTE] este `renderOrder`
+        // era escolhido "maior que o do plano do backdrop 'Trás' (-1000)" —
+        // esse plano 3D foi removido (a foto agora vive só num `<canvas>` 2D
+        // de overlay, sempre acima deste `<canvas>` WebGL/2D via CSS, ver
+        // view3d.js `_updateFotoCamOverlayZoomScale`); este retângulo (o
+        // guia de calibração, legítimo por si só, independente do backdrop)
+        // continua com `depthTest:false`/`renderOrder:9000` normalmente,
+        // sem relação nenhuma com a foto.
+        const matAmarelo = new THREE.LineBasicMaterial({ color: 0xffee00, depthTest: false, depthWrite: false, transparent: true, toneMapped: false });
+        const geomRet = new THREE.BufferGeometry().setFromPoints([c1, c2, c3, c4, c1]);
+        const linhaRet = new THREE.LineLoop(geomRet, matAmarelo);
+        const geomCantos = new THREE.BufferGeometry().setFromPoints([
+          origemFr, c1, origemFr, c2, origemFr, c3, origemFr, c4,
+        ]);
+        const linhasCantos = new THREE.LineSegments(geomCantos, matAmarelo);
+        linhaRet.visible = !!this._frustumGizmosEnabled;
+        linhasCantos.visible = !!this._frustumGizmosEnabled;
+        linhaRet.renderOrder = 9000;
+        linhasCantos.renderOrder = 9000;
+        this._group.add(linhaRet, linhasCantos);
+        this._fotoFrustumMeshesById[foto.id] = [linhaRet, linhasCantos];
+        // [15/09/2026] NOVO — ver comentário grande em
+        // `this._fotoFrustumBasisById` (início de `setScene`) e em
+        // `updateCameraFrustumGeometry` (mais abaixo).
+        this._fotoFrustumBasisById[foto.id] = { origem: origemFr.clone(), dirVec: dirVec.clone() };
+      }
+
+      // [11/09/2026] CORRIGIDO — bug relatado pelo usuário: "só está sendo
+      // possível acessar um objeto 'Orb de foto', se tem uma foto anexada
+      // (vinculada)." Causa raiz: o registro do pickable (`pickables.push`/
+      // `userData.pick`/`_pickMeshes.push`, o que faz `Engine3D.pickFromRay`
+      // — e portanto o raycasting de seleção em view3d.js `_tryPick` —
+      // conseguir "achar" o orb) vivia TODO dentro do bloco `if
+      // (foto.thumbDataUrl || foto.dataUrl)` logo abaixo, junto com a placa
+      // 3D texturizada da foto. Ou seja: a esfera+cone (`orb`/`cone`, linhas
+      // acima) SEMPRE eram desenhados na cena, mas só ganhavam interação
+      // quando havia imagem — um "orb de foto" recém-criado sem foto
+      // vinculada ainda (ver view3d.js `_placeWithBuildTool`, ferramenta
+      // 'orbfoto-novo': agora cria o registro direto, sem modal, sem
+      // dataUrl) aparecia mas era invisível ao clique/seleção. CORRIGIDO
+      // movendo o registro do pickable pra FORA do `if` — agora usa sempre
+      // o `orb` (esfera) como malha "dona" do pick, e a placa da foto
+      // (quando existe) GANHA o MESMO `fotoPick` (mesmo `id`, mesmo `ref`)
+      // em vez de criar um pickable duplicado — clicar na placa OU na
+      // esfera/cone leva ao mesmo cartão 3D (`view3d.js
+      // _showFotoPinCard3D`), onde o usuário pode então vincular uma foto
+      // (como qualquer outra propriedade) se ainda não houver uma.
+      const fotoPos = { x: foto.x, y: baseY, z: foto.y };
+      const fotoPick = { id: foto.id, type: 'fotoPin', pos: fotoPos, center: fotoPos, radius: 0.28, ref: foto };
+      this.pickables.push(fotoPick);
+      orb.userData.pick = fotoPick;
+      cone.userData.pick = fotoPick;
+      this._pickMeshes.push(orb, cone);
 
       // NOVO (03/09/2026), pedido verbatim: "No 'Ver em 3D', deve ser
       // possível interagir com o objeto da foto tirada. E o objeto da foto
@@ -2428,33 +3970,50 @@ class Engine3D {
       // fica bem na frente dela, na mesma direção, dando a impressão pedida
       // de "uma seta saindo da foto". MESMO padrão de textura de
       // `_buildImagemMesh` (TextureLoader.load(dataURL), sem cache entre
-      // reconstruções de cena — ver comentário grande lá) e MESMO padrão de
-      // pickable+obb da câmera logo acima (raycasting/seleção via
-      // `Engine3D.pickFromRay`, tratado em view3d.js `_tryPick`, tipo
-      // 'fotoPin' — ver `_showFotoPinCard3D`). Tamanho fixo (não lê a
-      // proporção real da imagem — mesma simplificação documentada em
-      // outros pontos deste arquivo, "sem navegador pra calibrar
-      // visualmente"): 0,42m x 0,3m (~4:3), plano o bastante pra não
-      // atravessar paredes próximas na maioria dos casos.
+      // reconstruções de cena — ver comentário grande lá). Tamanho fixo
+      // (não lê a proporção real da imagem — mesma simplificação
+      // documentada em outros pontos deste arquivo, "sem navegador pra
+      // calibrar visualmente"): 0,42m x 0,3m (~4:3), plano o bastante pra
+      // não atravessar paredes próximas na maioria dos casos.
       if (foto.thumbDataUrl || foto.dataUrl) {
         const FW = 0.42, FH = 0.3;
         const texFoto = new THREE.TextureLoader().load(foto.thumbDataUrl || foto.dataUrl);
         const matPlaca = new THREE.MeshBasicMaterial({ map: texFoto, color: 0xffffff, side: THREE.DoubleSide, transparent: true });
         const placa = new THREE.Mesh(new THREE.PlaneGeometry(FW, FH), matPlaca);
         placa.position.set(foto.x, baseY, foto.y);
-        // MESMA composição de rotação do cone acima (yaw em Y, depois pitch
-        // em X, ordem 'YXZ') — a normal padrão do PlaneGeometry (+Z local)
-        // fica alinhada a `dir`, então o cone (que sai do centro na direção
-        // `dir`) aparece bem na frente da foto, "saindo" dela.
-        placa.rotation.order = 'YXZ';
-        placa.rotation.y = yawCone;
-        placa.rotation.x = -pitchCone;
+        // [09/09/2026] CORRIGIDO — bug que quebrava o carregamento inteiro do
+        // motor 3D ("Não consegui abrir o 'Ver em 3D'" / "não consegui
+        // carregar o motor 3D" ao tentar entrar de novo). Causa raiz: a
+        // reescrita do cone da foto pra quaternion (`setFromUnitVectors`,
+        // comentário grande logo acima) apagou o cálculo de `yawCone`/
+        // `pitchCone` (não precisava mais deles pro cone), mas este trecho
+        // — a "placa" 3D da foto, escrito ANTES da reescrita — continuou
+        // lendo essas duas variáveis, que não existem mais nesta função:
+        // `ReferenceError: yawCone is not defined`, lançado de dentro de
+        // `setScene()` pra QUALQUER mapa com ao menos um orb de foto
+        // posicionado. Como `setScene()` roda tanto direto (dentro do
+        // `await` de `view3d.js` mount()) quanto dentro do `.then()` de
+        // `Engine3D._loadPromise` (ver o `_pendingScene` no fim de
+        // `_initThree`, logo acima), o erro aparecia embrulhado nas DUAS
+        // mensagens que o usuário relatou ao mesmo tempo. Corrigido girando
+        // a placa pelo MESMO método por quaternion do cone (a normal padrão
+        // do `PlaneGeometry`, +Z local, apontada pro vetor `dir`) — sem
+        // reintroduzir nenhuma variável de ângulo solta.
+        placa.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dirVec);
         this._group.add(placa);
-        const fotoPos = { x: foto.x, y: baseY, z: foto.y };
-        const fotoPick = { id: foto.id, type: 'fotoPin', pos: fotoPos, center: fotoPos, radius: Math.max(FW, FH) * 0.7, ref: foto };
-        this.pickables.push(fotoPick);
+        // [11/09/2026] `fotoPick` já foi criado/registrado ACIMA (fora
+        // deste `if`, ver comentário grande) — a placa só GANHA o mesmo
+        // pickable (não cria um novo `pickables.push` duplicado), pra
+        // clicar na foto texturizada continuar funcionando exatamente como
+        // antes, agora só compartilhando o pick com a esfera/cone.
         placa.userData.pick = fotoPick;
         this._pickMeshes.push(placa);
+        // [12/09/2026] a placa também entra no índice `_fotoMeshesById`
+        // deste orb (ver registro de orb/cone logo acima) — sem isto, "Ver
+        // através desta câmera" continuaria mostrando a placa da própria
+        // foto flutuando na frente da visão travada, mesmo com a
+        // esfera/cone já escondidos.
+        if (this._fotoMeshesById[foto.id]) this._fotoMeshesById[foto.id].push(placa);
       }
     });
 
@@ -2463,7 +4022,19 @@ class Engine3D {
     // mapview.js._pickObjectType/_openObjectPanel) — nesse caso o "perfil" é
     // montado na hora a partir dos campos do próprio objeto (largura/
     // profundidade ou raio/lados, altura, cor) em vez de vir da tabela fixa. ---
-    (mapData.objects || []).forEach((obj) => this._buildOneObjectMesh(obj, wireframe, colWireframe));
+    (mapData.objects || []).forEach((obj) => {
+      const childrenBefore = this._group.children.length;
+      this._buildOneObjectMesh(obj, wireframe, colWireframe);
+      this._applyObjMaterialOverride(obj, childrenBefore);
+    });
+
+    // NOVO (07/09/2026), pedido verbatim: "blocos de construção" (tijolos
+    // autofundíveis) — ver js/tijolos.js pro algoritmo de fusão/culling de
+    // face. Construído AQUI (depois dos objetos normais, antes dos
+    // pós-passos de modo híbrido/oclusão abaixo — DECISÃO DE ESCOPO: os
+    // tijolos não passam pelos pós-passos de wireframe/híbrido/oclusão
+    // desta rodada, só objetos "normais" — ver `_rebuildTijolos`).
+    this._rebuildTijolos(mapData);
 
     // Pedido do usuário: "deve haver modos híbridos de visualização" — os
     // dois PÓS-PASSOS abaixo varrem `this._group` já pronto (todas as malhas
@@ -2554,10 +4125,22 @@ class Engine3D {
       // medida de volume deve ser 1mm." Largura/profundidade (w/d) já vêm
       // certas (mesmos `obj.largura`/`obj.profundidade` usados pra desenhar
       // o retângulo no 2D, ver mapview.js _drawFormaShape) — só a altura
-      // (h, sempre 0.5m de `_reticuloStamp()`, nunca editável no 2D pra
-      // este tipo de objeto) é sobrescrita pra 1mm, virando uma "placa"
-      // fina em vez de um bloco de meio metro.
-      if (obj.reticuloMetrico) perfil.h = 0.001;
+      // (h) é sobrescrita pra 1mm, virando uma "placa" fina em vez de um
+      // bloco de meio metro.
+      // [09/09/2026] Bug relatado pelo usuário: "ao mudar a altura do
+      // 'Retículo métrico' na janela de propriedades dele, ao clicar em
+      // 'Ver em 3D' essa altura não é refletida na posição vertical do
+      // retículo na cena 3D." O campo "Altura (m)" do painel (ver
+      // mapview.js _openObjectPanel, `#obj-altura`, salva em `obj.altura`)
+      // é o MESMO usado como espessura do bloco pra um retângulo comum —
+      // mas o retículo já tem espessura fixa em 1mm (linha acima), então
+      // esse valor ficava sem nenhum uso pra ele (nem 2D, que é vista de
+      // cima, nem 3D). Reaproveitado aqui como ELEVAÇÃO (posição vertical
+      // acima do chão, `perfil.y0` — mesmo campo que já empurra pra cima
+      // objetos como a imagem/luminária de teto, ver `centerY = baseY +
+      // perfil.y0 + perfil.h/2` logo abaixo), que é a única leitura que faz
+      // sentido pro usuário pra uma "placa" fininha.
+      if (obj.reticuloMetrico) { perfil.h = 0.001; perfil.y0 = obj.altura || 0; }
     } else if (obj.forma === 'poligono') {
       perfil = { shape: 'cylinder', r: obj.raio || 0.3, h: obj.altura || 0.5, y0: 0, color: _hexToThreeColor(obj.cor), segments: Math.max(3, Math.round(obj.lados || 24)) };
     } else {
@@ -3062,7 +4645,9 @@ class Engine3D {
     if (!this._ready || !this._group || !this.mapData) return false;
     const wireframe = this.mode === 'wireframe';
     const colWireframe = 0x78c8ff; // MESMA constante de `setScene`, ver lá
+    const childrenBefore = this._group.children.length;
     this._buildOneObjectMesh(obj, wireframe, colWireframe);
+    this._applyObjMaterialOverride(obj, childrenBefore);
     // Mantém `this.mapData.objects` (a cópia própria do motor, já filtrada
     // por camada visível em view3d.js _rebuildScene) em sincronia — sem
     // isto, uma 2ª colocação incremental em seguida (antes de qualquer
@@ -3155,6 +4740,23 @@ class Engine3D {
     if (!lista?.length) return;
     const rd = this._renderDistance();
     const modo = this._config.objetoRenderModo || 'objeto';
+    // [14/09/2026] CORRIGIDO — pedido verbatim: "ao clicar em uma câmera e
+    // selecionar 'Ver através desta câmera' [...] o cone da câmera
+    // selecionada acaba voltando a parecer e fica na frente da tela." BUG
+    // CONFIRMADO (via Playwright, live): este método roda TODO QUADRO e
+    // trata câmeras como qualquer objeto normal sujeito a corte por
+    // distância (`_setupCullMeshes`, `tipo === 'camera'`) — a câmera "vista
+    // através" está a distância ZERO do olho de render, então `0 <= rd`
+    // sempre dá verdadeiro, e este método reatribuía `mesh.visible = true`
+    // TODO QUADRO, desfazendo `setCameraMeshVisible(camId,false)`
+    // (view3d.js `_enterCameraOrbView`) segundos (na prática, quadros)
+    // depois de chamado — nunca ficava escondido por muito tempo, só
+    // parecia "sumir e voltar". CORRIGIDO: `this._forcedHiddenMeshes` (Set
+    // mantido por `setCameraMeshVisible`/`setFotoMeshVisible`, ver
+    // comentário grande lá) tem prioridade ABSOLUTA sobre o cálculo de
+    // distância — uma malha nele NUNCA é marcada visível por este método,
+    // não importa a distância.
+    const forcado = this._forcedHiddenMeshes;
     if (modo === 'chunk') {
       const tam = Math.max(2, Number(this._config.objetoChunkTamanho) || 10);
       if (!this._cullChunks || this._cullChunksTam !== tam) {
@@ -3176,10 +4778,13 @@ class Engine3D {
         const nx = Utils.clamp(camera.x, chunk.minX, chunk.maxX);
         const nz = Utils.clamp(camera.z, chunk.minZ, chunk.maxZ);
         const visivel = Math.hypot(camera.x - nx, camera.z - nz) <= rd;
-        chunk.items.forEach((m) => { m.visible = visivel; });
+        chunk.items.forEach((m) => { m.visible = (forcado && forcado.has(m)) ? false : visivel; });
       });
     } else {
-      lista.forEach((c) => { c.mesh.visible = Math.hypot(c.x - camera.x, c.z - camera.z) <= rd; });
+      lista.forEach((c) => {
+        const visivel = Math.hypot(c.x - camera.x, c.z - camera.z) <= rd;
+        c.mesh.visible = (forcado && forcado.has(c.mesh)) ? false : visivel;
+      });
     }
   }
 
@@ -3628,6 +5233,208 @@ class Engine3D {
    *  1º vértice — funciona pra qualquer polígono convexo, que é o único caso
    *  que o modelador produz: triângulo/quad/faces criadas por inset/subdivide
    *  continuam convexas). */
+  /** NOVO (07/09/2026), pedido verbatim: "carregar imagens como texturas
+   *  [...] a possibilidade de mudar de cor as faces. [...] carregar
+   *  materiais e definir luz ambiente, configurar rugosidade da superfície,
+   *  etc. [...] A Three.js fornece funções prontas para diversas
+   *  modificações dos objetos em cena. [...] Se o Three.js já fornece
+   *  funções para isso tudo, então use-as." — monta um `MeshStandardMaterial`
+   *  (já era o material usado nestes dois caminhos — `_buildCustomMeshObject`
+   *  e `_buildMoldeMesh`/`_buildTypeMoldeMesh`, ver chamadores abaixo) lendo
+   *  as propriedades NOVAS do objeto (`obj.rugosidade`/`obj.metalico`/
+   *  `obj.opacidade`/`obj.texturaUrl`), em vez dos valores fixos que
+   *  existiam antes (`roughness:0.85, metalness:0.05`, sempre opacos, sem
+   *  textura nenhuma) — todos campos do THREE.MeshStandardMaterial de
+   *  verdade (roughness/metalness/opacity/map), a biblioteca já provendo
+   *  tudo que é preciso, como pedido.
+   *
+   *  DECISÃO DE ESCOPO TRANSPARENTE: cobre os dois caminhos "genéricos" de
+   *  material (objetos modelados/"Novo Cubo 3D" via _buildCustomMeshObject,
+   *  e objetos com molde customizado salvo via _buildMoldeMesh/
+   *  _buildTypeMoldeMesh) — NÃO cobre as dezenas de builders de móveis
+   *  específicos por tipo (_buildMesaMesh, _buildCadeiraMesh etc., cada um
+   *  com sua própria geometria/material hard-coded) nem pintura POR FACE
+   *  (a textura/cor aqui é do OBJETO INTEIRO, não de faces individuais) —
+   *  ambos ficaram de fora desta rodada por decisão explícita do usuário
+   *  ("Tentar os dois nesta rodada" com escopo mais enxuto, ver changelog do
+   *  sw.js), não por esquecimento.
+   *
+   *  `obj` pode ser `null` (chamado de contextos sem um objeto de mapa de
+   *  verdade — nesse caso usa só os valores padrão). Textura carregada via
+   *  `THREE.TextureLoader` (MESMO padrão já usado em `_buildImagemMesh`/
+   *  placa de foto orb — sem cache entre reconstruções de cena, igual aos
+   *  outros usos de TextureLoader deste arquivo). */
+  _buildStandardMaterialForObj(color, obj, side, vertexColors) {
+    const THREE = this.THREE;
+    const opts = {
+      color,
+      roughness: Utils.clamp(obj?.rugosidade ?? 0.85, 0, 1),
+      metalness: Utils.clamp(obj?.metalico ?? 0.05, 0, 1),
+      side: side ?? THREE.DoubleSide,
+    };
+    const opacidade = obj?.opacidade;
+    if (typeof opacidade === 'number' && opacidade < 1) { opts.transparent = true; opts.opacity = Utils.clamp(opacidade, 0, 1); }
+    if (obj?.texturaUrl) opts.map = new THREE.TextureLoader().load(obj.texturaUrl);
+    // NOVO (07/09/2026), pedido verbatim: "a possibilidade de mudar de cor
+    // as faces [...] Definir cor para as faces." — quando a geometria tem
+    // um atributo `color` por vértice (ver `buildSmoothedTriGeometry`
+    // `faceColorsRGB`), `vertexColors:true` faz o Three.js MULTIPLICAR essa
+    // cor por vértice pela `color` base do material — API nativa do
+    // MeshStandardMaterial, nenhuma lógica de shader escrita à mão.
+    if (vertexColors) opts.vertexColors = true;
+    return new THREE.MeshStandardMaterial(opts);
+  }
+
+  /** NOVO (07/09/2026), pedido verbatim (completando o que ficou de fora da
+   *  rodada anterior, quando o usuário pediu explicitamente "implemente o
+   *  que faltou [...] por completo [...] tanto sobre os scripts quanto
+   *  sobre as texturas/materiais"): a rodada anterior só aplicava
+   *  `_buildStandardMaterialForObj` em 2 caminhos "genéricos" (objeto
+   *  modelado/"Novo Cubo 3D" e molde 3D customizado salvo) — as DEZENAS de
+   *  builders de móveis por tipo (`_buildMesaMesh`/`_buildLuminariaMesh`/
+   *  perfil genérico de caixa/cilindro, etc.) continuavam com material
+   *  fixo, sem ler `obj.rugosidade`/`metalico`/`opacidade`/`texturaUrl`.
+   *  Em vez de editar CADA UM dos builders (dezenas de funções, risco alto
+   *  de quebrar alguma geometria especial no meio do caminho), este método
+   *  é chamado pelos 2 PONTOS DE ENTRADA únicos que despcham pra qualquer
+   *  builder (`setScene`/`addObjectIncremental`, ver os 2 chamadores) —
+   *  compara `this._group.children` ANTES/DEPOIS de `_buildOneObjectMesh`
+   *  rodar e aplica os campos de material do objeto em CADA malha nova
+   *  criada (`node.traverse`, cobre grupos/LOD/sub-meshes também), sem
+   *  precisar saber nada sobre a geometria específica de cada tipo.
+   *
+   *  SÓ MEXE em material que já é `MeshStandardMaterial`/
+   *  `MeshPhysicalMaterial` (o que TODOS os builders de perfil/mesa/
+   *  luminária/etc. já usam — ver `OBJECT3D_PROFILES`/`_buildMesaMesh` etc.,
+   *  todos com PBR) — nunca em `MeshBasicMaterial` (nuvem de pontos,
+   *  wireframe, a "imagem" colada, que tem seu próprio mapa de textura já
+   *  intencional) nem em `PointsMaterial`, preservando o visual desses
+   *  casos especiais. SÓ RODA quando o objeto tem PELO MENOS UM campo de
+   *  material definido (painel "🧪 Material 3D" já usado) — objeto sem
+   *  nenhum campo tocado não sofre NENHUMA mudança, zero risco de regressão
+   *  visual pros milhares de objetos já existentes sem material customizado. */
+  _applyObjMaterialOverride(obj, childrenBefore) {
+    if (!obj || !this._group) return;
+    const temOverride = obj.rugosidade != null || obj.metalico != null || obj.opacidade != null || !!obj.texturaUrl;
+    if (!temOverride) return;
+    const THREE = this.THREE;
+    const novos = this._group.children.slice(childrenBefore);
+    novos.forEach((node) => {
+      if (!node || typeof node.traverse !== 'function') return;
+      node.traverse((n) => {
+        if (!n.isMesh || !n.material) return;
+        const mats = Array.isArray(n.material) ? n.material : [n.material];
+        mats.forEach((mat) => {
+          if (!mat.isMeshStandardMaterial && !mat.isMeshPhysicalMaterial) return;
+          if (obj.rugosidade != null) mat.roughness = Utils.clamp(obj.rugosidade, 0, 1);
+          if (obj.metalico != null) mat.metalness = Utils.clamp(obj.metalico, 0, 1);
+          if (obj.opacidade != null) {
+            const op = Utils.clamp(obj.opacidade, 0, 1);
+            mat.transparent = op < 1;
+            mat.opacity = op;
+          }
+          if (obj.texturaUrl && mat.userData?._texturaUrlAplicada !== obj.texturaUrl) {
+            mat.map = new THREE.TextureLoader().load(obj.texturaUrl);
+            mat.userData = mat.userData || {};
+            mat.userData._texturaUrlAplicada = obj.texturaUrl;
+            mat.needsUpdate = true;
+          }
+        });
+      });
+    });
+  }
+
+  /** NOVO (07/09/2026), pedido verbatim: "blocos de construção" (tijolos
+   *  autofundíveis) — reconstrói TODA a malha combinada dos tijolos do mapa
+   *  (`mapData.tijolos`, ver js/tijolos.js `Tijolos.buildAll`), removendo a
+   *  anterior primeiro (dispose de geometria/material — evita vazamento de
+   *  memória de vídeo a cada reconstrução, mesmo padrão já usado alhures
+   *  neste arquivo). Chamado por `setScene` (montagem inicial) e também
+   *  publicamente por view3d.js a cada tijolo colocado/removido
+   *  (`Engine3D.rebuildTijolos`, alias público logo abaixo) — SEM precisar
+   *  remontar a cena inteira, só a malha de tijolos. Registra a(s) malha(s)
+   *  em `this._pickMeshes` com `userData.pick.type:'tijolo'` — extensão de
+   *  `raycastSurface` (ver esse método) já sabe considerar essas malhas
+   *  como "superfície pra pousar em cima", permitindo empilhar tijolo sobre
+   *  tijolo. NÃO entra em `this.pickables` (a lista usada por
+   *  `pickFromRay`/clique de seleção) DE PROPÓSITO — tijolo não deve abrir
+   *  o cartão de "objeto" genérico ao ser clicado nesta rodada (decisão de
+   *  escopo — editar/remover um tijolo específico fica pelo próprio menu
+   *  da ferramenta, não por um cartão de clique). */
+  _rebuildTijolos(mapData) {
+    if (this._tijoloMeshes?.length) {
+      this._tijoloMeshes.forEach((mesh) => {
+        this._group.remove(mesh);
+        const idx = this._pickMeshes.indexOf(mesh);
+        if (idx >= 0) this._pickMeshes.splice(idx, 1);
+        mesh.geometry?.dispose?.();
+        mesh.material?.dispose?.();
+      });
+    }
+    // NOVO (08/09/2026, 38a rodada), pedido verbatim: "o objeto que foi
+    // formado pelo aglomerado de tijolos deve ser um objeto no mundo,
+    // podendo ser exluido." -- remove a entrada pickable ANTIGA do
+    // aglomerado (id fixo 'tijolos-merged'), se houver -- recriada mais
+    // abaixo com o bounding box atualizado (a malha é reconstruída do
+    // zero a cada chamada, então o pickable também precisa ser).
+    this.pickables = (this.pickables || []).filter((p) => p.id !== 'tijolos-merged');
+    this._tijoloMeshes = [];
+    const tijolos = mapData?.tijolos;
+    if (!tijolos || !tijolos.length || typeof window.Tijolos === 'undefined') return;
+    // CORRIGIDO (08/09/2026, 38a rodada), pedido verbatim: "os tijolos
+    // devem ter vista de wireframe ao selecionar o modo 'Wireframe'." --
+    // Tijolos.buildAll ganhou um 3o parâmetro (ver js/tijolos.js) — antes
+    // o material da malha de tijolos era sempre sólido, nunca lia
+    // `this.mode` (MESMO padrão de `wireframeMode`/`colWireframe` usado
+    // em toda malha "normal" construída por este arquivo).
+    const wireframeMode = this.mode === 'wireframe';
+    const built = window.Tijolos.buildAll(this.THREE, tijolos, wireframeMode);
+    built.forEach(({ mesh, textured, tijoloId }) => {
+      mesh.userData.pick = { type: 'tijolo', id: textured ? tijoloId : 'tijolos-merged' };
+      this._group.add(mesh);
+      this._pickMeshes.push(mesh);
+      this._tijoloMeshes.push(mesh);
+    });
+    // NOVO (08/09/2026, 38a rodada), pedido verbatim: "o objeto que foi
+    // formado pelo aglomerado de tijolos deve ser um objeto no mundo,
+    // podendo ser exluido." — registra UM pickable cobrindo o bounding box
+    // de TODOs os tijolos 'caixa' SEM textura fundidos na malha única
+    // acima (mesmo id fixo 'tijolos-merged' já usado em `userData.pick`,
+    // ver `built.forEach` acima) em `this.pickables` — assim
+    // `Engine3D.hoverPick()` (usada tanto pela ferramenta "🗑️ Remover"
+    // quanto pelo popup de confirmação do DEL, ver view3d.js
+    // `_removeWithTool`/`_openDeleteConfirmPopup`) passa a enxergar o
+    // aglomerado inteiro como MAIS UM objeto do mundo, sem precisar
+    // duplicar nenhuma lógica de seleção/raycast — só
+    // `_confirmDeleteHit` (view3d.js) precisou de 1 ramo novo pro
+    // `hit.type === 'tijolo'`. Tijolos individuais (cunha/com textura, que
+    // viram mesh própria com `tijoloId` real em vez de 'tijolos-merged')
+    // ficam DE FORA deste pickable de propósito — a exclusão de UM tijolo
+    // específico já tem seu próprio fluxo dedicado (botão direito com a
+    // ferramenta "🔘 Tijolo" ativa, ver view3d.js `_deleteTijoloClick`).
+    const mesclaveis = tijolos.filter((t) => (t.formato || 'caixa') === 'caixa' && !t.texturaUrl);
+    if (mesclaveis.length) {
+      let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      mesclaveis.forEach((t) => {
+        minX = Math.min(minX, t.x - t.sx / 2); maxX = Math.max(maxX, t.x + t.sx / 2);
+        minY = Math.min(minY, t.y - t.sy / 2); maxY = Math.max(maxY, t.y + t.sy / 2);
+        minZ = Math.min(minZ, t.z - t.sz / 2); maxZ = Math.max(maxZ, t.z + t.sz / 2);
+      });
+      const center = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 };
+      const half = { x: (maxX - minX) / 2, y: (maxY - minY) / 2, z: (maxZ - minZ) / 2 };
+      const radius = Math.hypot(half.x, half.y, half.z);
+      this.pickables.push({ id: 'tijolos-merged', type: 'tijolo', pos: center, center, radius, obb: { half, rotY: 0, shape: 'box' } });
+    }
+  }
+
+  /** Alias público de `_rebuildTijolos` — view3d.js chama isto (nome sem
+   *  underscore, convenção do resto da API pública desta classe) depois de
+   *  cada `Tijolos.add`/`Tijolos.remove`, sem precisar remontar a cena
+   *  inteira (`setScene`) só por causa de um tijolo. */
+  rebuildTijolos(mapData) {
+    this._rebuildTijolos(mapData);
+  }
+
   _buildCustomMeshObject(obj, baseY, wireframe, colWireframe) {
     const THREE = this.THREE;
     const cm = obj.customMesh;
@@ -3636,7 +5443,30 @@ class Engine3D {
     // CORRIGIDO (01/09/2026) — ver comentário grande em buildSmoothedTriGeometry
     // (topo do arquivo): normais agora suavizadas por ângulo de vinco, em vez
     // de sempre facetadas por triângulo isolado.
-    let geo = buildSmoothedTriGeometry(THREE, verts, cm.faces || []);
+    // NOVO (07/09/2026), pedido verbatim: "a possibilidade de mudar de cor
+    // as faces [...] Definir cor para as faces." — `cm.faceColors` (objeto
+    // `{ "<indiceDaFace>": "#rrggbb" }`, chaves string por serem índices de
+    // array salvos como JSON) é opcional/novo; monta `faceColorsRGB` (0..1
+    // por canal, formato que `buildSmoothedTriGeometry` espera) SÓ quando
+    // há pelo menos 1 face com cor própria — objeto sem nenhuma face
+    // customizada continua exatamente como antes (sem atributo `color` na
+    // geometria, sem custo extra nenhum). Faces SEM override usam
+    // `__default: [1,1,1]` (branco) DE PROPÓSITO — a cor base do objeto
+    // (`obj.cor`) já vai no `material.color` (não aqui), e
+    // `vertexColors:true` MULTIPLICA os dois; branco*obj.cor = obj.cor sem
+    // tingir, então uma face SEM override mostra a cor do objeto
+    // normalmente, e uma face COM override mostra a cor dela exatamente
+    // como escolhida (sem misturar com `obj.cor`).
+    const corPorFace = cm.faceColors && Object.keys(cm.faceColors).length ? cm.faceColors : null;
+    let faceColorsRGB = null;
+    if (corPorFace) {
+      faceColorsRGB = { __default: [1, 1, 1] };
+      Object.keys(corPorFace).forEach((idx) => {
+        const c = new THREE.Color(corPorFace[idx] || '#ffffff');
+        faceColorsRGB[idx] = [c.r, c.g, c.b];
+      });
+    }
+    let geo = buildSmoothedTriGeometry(THREE, verts, cm.faces || [], faceColorsRGB);
     if (!geo.attributes.position) {
       // Malha sem nenhuma face (só vértices/arestas soltos, ex.: no meio de
       // uma edição) — evita BufferGeometry vazia (Three.js não gosta) sem
@@ -3647,7 +5477,7 @@ class Engine3D {
     const color = _hexToThreeColor(obj.cor) ?? 0x8a92a3;
     const mat = wireframe
       ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05, side: THREE.DoubleSide });
+      : this._buildStandardMaterialForObj(color, obj, undefined, !!faceColorsRGB);
     const mesh = new THREE.Mesh(geo, mat);
     // `obj.elevacao`/`baseY` é sempre a altura da BASE do objeto — mas a
     // ORIGEM local (0,0,0) do `customMesh` pode estar no MEIO do cubo agora
@@ -3723,17 +5553,41 @@ class Engine3D {
    *  (a malha única, ou o `THREE.LOD` que a contém). Extraído da lógica de
    *  `_buildCustomMeshObject` pra ser reaproveitado duas vezes (nível
    *  detalhado E nível low poly) sem duplicar a triangulação. */
-  _buildMoldeMesh(meshData, wireframe, colWireframe, color) {
+  _buildMoldeMesh(meshData, wireframe, colWireframe, color, obj) {
     const THREE = this.THREE;
     const verts = meshData.vertices || [];
     // CORRIGIDO (01/09/2026) — ver comentário grande em buildSmoothedTriGeometry.
-    let geo = buildSmoothedTriGeometry(THREE, verts, meshData.faces || []);
+    const geo = buildSmoothedTriGeometry(THREE, verts, meshData.faces || []);
     if (!geo.attributes.position) {
-      geo = new THREE.BoxGeometry(0.02, 0.02, 0.02); // molde vazio/quebrado — ponto minúsculo em vez de travar a cena (mesmo critério de _buildCustomMeshObject)
+      // NOVO (07/09/2026), pedido verbatim: "Mesmo que seja um arquivo com
+      // apenas um grupo de vértices, sem definição de faces e ligação para
+      // definir arestas. Nesse caso, emitir uma notificação a respeito
+      // disso, mas renderizar a forma mesmo assim." — molde SEM nenhuma face
+      // (ex.: modelo externo carregado só com vértices, ver modelos3d.js
+      // `_carregarModeloExterno`/`_parseOBJ`/`_parseSTL`) agora vira uma
+      // NUVEM DE PONTOS (THREE.Points) com os vértices de verdade, em vez do
+      // antigo "ponto minúsculo" de fallback (que escondia a malha por
+      // completo, pensado só pra molde vazio/quebrado de propósito) — só
+      // cai no fallback antigo de verdade quando NÃO HÁ NENHUM vértice
+      // também (molde realmente vazio/quebrado, nunca o caso de um arquivo
+      // "só com vértices" carregado de propósito).
+      if (verts.length > 0) {
+        const pgeo = new THREE.BufferGeometry();
+        const positions = new Float32Array(verts.length * 3);
+        verts.forEach((v, i) => { positions[i * 3] = v[0]; positions[i * 3 + 1] = v[1]; positions[i * 3 + 2] = v[2]; });
+        pgeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const pmat = new THREE.PointsMaterial({ color, size: 0.05, sizeAttenuation: true });
+        return new THREE.Points(pgeo, pmat);
+      }
+      const geoFallback = new THREE.BoxGeometry(0.02, 0.02, 0.02); // molde vazio/quebrado — ponto minúsculo em vez de travar a cena (mesmo critério de _buildCustomMeshObject)
+      const matFallback = wireframe
+        ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+        : this._buildStandardMaterialForObj(color, obj);
+      return new THREE.Mesh(geoFallback, matFallback);
     }
     const mat = wireframe
       ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05, side: THREE.DoubleSide });
+      : this._buildStandardMaterialForObj(color, obj);
     return new THREE.Mesh(geo, mat);
   }
 
@@ -3773,11 +5627,11 @@ class Engine3D {
       // objeto ficar minúsculo na tela. Sem opção pra pessoa ajustar isto de
       // propósito — a decisão do usuário foi "automático", não "manual
       // configurável" (ver a outra opção descartada na mesma pergunta).
-      lod.addLevel(this._buildMoldeMesh(detalhado, wireframe, colWireframe, color), 0);
-      lod.addLevel(this._buildMoldeMesh(lowpoly, wireframe, colWireframe, color), 12);
+      lod.addLevel(this._buildMoldeMesh(detalhado, wireframe, colWireframe, color, obj), 0);
+      lod.addLevel(this._buildMoldeMesh(lowpoly, wireframe, colWireframe, color, obj), 12);
       raiz = lod;
     } else {
-      raiz = this._buildMoldeMesh(detalhado || lowpoly, wireframe, colWireframe, color);
+      raiz = this._buildMoldeMesh(detalhado || lowpoly, wireframe, colWireframe, color, obj);
     }
     // Origem-na-base ajustada pelo minY do nível mais detalhado disponível —
     // mesma conta de `_buildCustomMeshObject` (o editor de modelos usa o
@@ -3973,8 +5827,38 @@ class Engine3D {
    *  genérico em vez de travar. */
   _buildObjImportMesh(obj, baseY, wireframe, colWireframe) {
     const data = window.ObjImport?.getGeometryData(obj.tipo);
-    if (!data || !data.positions || data.positions.length < 9) return false;
+    if (!data) return false;
     const THREE = this.THREE;
+    // NOVO (07/09/2026), pedido verbatim: "Mesmo que seja um arquivo com
+    // apenas um grupo de vértices, sem definição de faces [...] renderizar
+    // a forma mesmo assim." — `data.positions === null` (ver objimport.js
+    // `_parseObjText`) é exatamente esse caso: .obj só com linhas "v", sem
+    // nenhum "f". Antes isso fazia esta função devolver `false` (nada
+    // aparecia — caía no perfil genérico do dispatcher). Agora vira uma
+    // NUVEM DE PONTOS (THREE.Points) com os vértices crus (`data.points`,
+    // já achatado por `_parseObjText`), recentralizada pela mesma caixa
+    // delimitadora usada pro caminho normal (mesh triangulada) logo abaixo
+    // — mesmo posicionamento/rotação, só a geometria/material que mudam.
+    if (!data.positions) {
+      if (!data.points || data.points.length < 3) return false; // nada mesmo (nem 1 vértice) — cai no perfil genérico
+      const pgeo = new THREE.BufferGeometry();
+      pgeo.setAttribute('position', new THREE.Float32BufferAttribute(data.points, 3));
+      const bb = data.bbox;
+      pgeo.translate(-(bb.minX + bb.maxX) / 2, -bb.minY, -(bb.minZ + bb.maxZ) / 2);
+      const pmat = new THREE.PointsMaterial({ color: _hexToThreeColor(obj.cor || '#9aa4b2'), size: 0.05, sizeAttenuation: true });
+      const points = new THREE.Points(pgeo, pmat);
+      points.position.set(obj.x, baseY, obj.y);
+      points.rotation.y = objAnguloToRotY(obj.angulo);
+      this._group.add(points);
+      const objPos = { x: obj.x, y: baseY, z: obj.y };
+      const w = Math.max(0.05, bb.maxX - bb.minX), d = Math.max(0.05, bb.maxZ - bb.minZ);
+      const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.6, ref: obj, obb: { half: { x: w / 2, y: 0.05, z: d / 2 }, rotY: points.rotation.y, shape: 'box', segments: 14 } };
+      this.pickables.push(objPick);
+      points.userData.pick = objPick;
+      this._pickMeshes.push(points);
+      return true;
+    }
+    if (data.positions.length < 9) return false;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(data.positions, 3));
     if (data.normals) geo.setAttribute('normal', new THREE.Float32BufferAttribute(data.normals, 3));
@@ -4185,6 +6069,12 @@ class Engine3D {
    *  _glassShineTexture/_buildGlassPane) todo mundo do grupo da cena. */
   _disposeGroupContents() {
     if (!this._group) return;
+    // [12/09/2026] Limpa a lista de malhas de vidro ANTES do rebuild — ver
+    // `_buildGlassPane`/`_renderGlassPass`: as malhas antigas serão
+    // descartadas (`dispose()`) logo abaixo, então manter referência a
+    // elas na lista serviria só pra apontar pra lixo; os novos vidros (se
+    // a cena reconstruída tiver algum) se registram de novo sozinhos.
+    this._glassMeshesAtivos = [];
     this._group.children.slice().forEach((obj) => {
       this._group.remove(obj);
       // NOVO (01/09/2026), item GRANDE #5 — um THREE.LOD (ver
@@ -4233,6 +6123,56 @@ class Engine3D {
   _resize() {
     if (!this.renderer) return;
     const dpr = this._pixelRatioCap();
+    // REESCRITO (07/09/2026), arquitetura WebGLRenderTarget — ver "MODO EYE"
+    // no construtor. Em modo eye, o tamanho vem do próprio tamanho CSS de
+    // `this.canvas` (`clientWidth`/`clientHeight`), EXATAMENTE como no modo
+    // não-eye logo abaixo — não depende mais de `getBoundingClientRect()`
+    // (posição na tela é irrelevante agora, só o TAMANHO importa) nem de
+    // nenhum canvas/buffer global compartilhado entre "olhos". Quem
+    // redimensiona é o `THREE.WebGLRenderTarget` PRÓPRIO desta instância
+    // (`this.renderTarget.setSize`), na resolução `tamanho CSS × dpr desta
+    // instância` — cada "olho" cresce/encolhe seu próprio buffer sem afetar
+    // nenhum outro "olho" ativo ao mesmo tempo.
+    if (this._eye) {
+      const w = this.canvas.clientWidth || 1, h = this.canvas.clientHeight || 1;
+      if (w === this._lastW && h === this._lastH && dpr === this._lastDpr) return;
+      this._lastW = w; this._lastH = h; this._lastDpr = dpr;
+      const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr));
+      this.renderTarget.setSize(pw, ph);
+      this._rtPixelW = pw; this._rtPixelH = ph;
+      this._rtPixelBuffer = new Uint8Array(pw * ph * 4);
+      // [13/09/2026] NOVO — ver comentário grande em `_initThree`/
+      // `_renderGlassPass` sobre o 2º render target (vidro isolado): mesmo
+      // tamanho do principal, sempre — a textura de profundidade
+      // compartilhada (`_glassDepthTexture`) também é redimensionada
+      // automaticamente por `setSize` (é a MESMA textura usada pelos 2
+      // render targets).
+      if (this._glassRenderTarget) {
+        this._glassRenderTarget.setSize(pw, ph);
+        this._glassPixelBuffer = new Uint8Array(pw * ph * 4);
+      }
+      // [22/09/2026] NOVO — ver comentário grande em `_initThree` sobre
+      // `_backdropEnvRenderTarget` (2º passe do backdrop 'Trás', sem
+      // relação com o vidro) — mesmo tamanho dos outros 2, sempre.
+      if (this._backdropEnvRenderTarget) {
+        this._backdropEnvRenderTarget.setSize(pw, ph);
+        this._backdropEnvPixelBuffer = new Uint8Array(pw * ph * 4);
+      }
+      // Canvas de saída (visível) em resolução NATIVA de verdade (igual ao
+      // render target) — o navegador escala isso pra caber no tamanho CSS
+      // sozinho (mesmo comportamento de sempre de um <canvas> WebGL, e
+      // combina com `image-rendering:pixelated` já aplicado em CSS pra
+      // reproduzir o efeito "pixelizado" da miniatura, ver style.css).
+      this.canvas.width = pw; this.canvas.height = ph;
+      // Canvas auxiliar off-screen (nunca no DOM) na MESMA resolução — ver
+      // comentário grande em `_initThree` sobre o motivo dele existir
+      // (putImageData não respeita setTransform, drawImage respeita).
+      this._rtOffscreen.width = pw; this._rtOffscreen.height = ph;
+      this.camera3.aspect = w / h;
+      this.camera3.updateProjectionMatrix();
+      if (this._outlineCanvas) { this._outlineCanvas.width = w; this._outlineCanvas.height = h; }
+      return;
+    }
     const w = this.canvas.clientWidth || 1, h = this.canvas.clientHeight || 1;
     if (w === this._lastW && h === this._lastH) return;
     this._lastW = w; this._lastH = h;
@@ -4245,6 +6185,667 @@ class Engine3D {
     // pixel em _drawOutline2D pode usar width/height direto, sem precisar
     // saber do dpr separadamente.
     if (this._outlineCanvas) { this._outlineCanvas.width = w; this._outlineCanvas.height = h; }
+  }
+
+  /** NOVO (07/09/2026), arquitetura WebGLRenderTarget — ver "MODO EYE" no
+   *  construtor. Chamado por `render()` logo depois de desenhar no
+   *  `this.renderTarget` desta instância: lê os pixels de volta pra CPU
+   *  (`readRenderTargetPixels`, síncrono — trade-off de performance aceito,
+   *  ver changelog do sw.js) e desenha no `<canvas>` 2D VISÍVEL desta
+   *  instância (`this._displayCtx`).
+   *
+   *  Espelhamento vertical: o WebGL guarda a imagem com a linha 0 (topo dos
+   *  dados) correspondendo ao canto INFERIOR da imagem (convenção OpenGL,
+   *  origem embaixo-à-esquerda) — mas `ImageData`/`putImageData` do Canvas2D
+   *  espera a linha 0 no TOPO visual (origem em cima-à-esquerda, convenção
+   *  padrão de imagem). `putImageData` sozinho NÃO tem como aplicar nenhuma
+   *  transformação (ignora `ctx.setTransform`/`ctx.scale` por completo) —
+   *  por isso o pulo do gato é em duas etapas: 1) `putImageData` dos pixels
+   *  CRUS (ainda de cabeça para baixo) num canvas AUXILIAR off-screen
+   *  (`this._rtOffscreen`, sem nenhuma transformação); 2) `drawImage` desse
+   *  canvas auxiliar pro canvas visível de verdade, com uma matriz de
+   *  transformação que inverte o eixo Y (`setTransform(1,0,0,-1,0,h)` — escala
+   *  Y por -1 e desloca por `h` pra compensar, exatamente a técnica padrão
+   *  pra espelhar verticalmente num `<canvas>` 2D) — `drawImage`, ao
+   *  contrário de `putImageData`, RESPEITA a matriz de transformação atual
+   *  do contexto. */
+  /** [12/09/2026] NOVO — pedido verbatim: "Agora, o 'Trás' não está
+   *  aparecendo a imagem." CAUSA RAIZ: a rodada anterior (ver comentário
+   *  grande em `View3D._ensureFotoCamBackdropPlane`) trocou o plano do
+   *  backdrop 'Trás' por um "oclusor invisível" (`colorWrite:false`) — a
+   *  ideia era que, onde ele vencesse o depth-test contra o ambiente real
+   *  (mais distante), o pixel ficasse TRANSPARENTE (alfa=0, a cor de
+   *  limpeza do frame) e deixasse o `<canvas>` da foto (empilhado por
+   *  BAIXO via CSS) aparecer. MAS a cena SEMPRE tem `scene.background`
+   *  definido como uma `THREE.Color` sólida (o céu — ver `_updateSky`,
+   *  linha ~2472) — o Three.js pinta esse fundo OPACO em TODO pixel não
+   *  coberto por outro objeto, ANTES de desenhar qualquer objeto da cena
+   *  (não é afetado por depth-test nenhum, nem pelo `colorWrite:false` do
+   *  oclusor) — ou seja, o pixel "reservado" pelo oclusor nunca ficava
+   *  transparente de verdade: ficava com a cor do céu, sempre opaca,
+   *  escondendo o `<canvas>` da foto por baixo (dava a impressão de "a
+   *  imagem não aparece", só o céu/cenário normal).
+   *  CORRIGIDO: o oclusor (`_ensureFotoCamBackdropPlane`) voltou a ter
+   *  `colorWrite:true`, mas pintando uma cor-MARCADORA sólida e reservada
+   *  (magenta puro, `0xff00ff` — ver lá) em vez de textura nenhuma. Este
+   *  método agora recebe essa máscara (`this._fotoCamMask`, setada por
+   *  `setFotoCamBackdropMask`/limpa por `clearFotoCamBackdropMask`, ambos
+   *  chamados por `View3D`/`Modeler3D` só quando 'Trás' está ativo) e,
+   *  ANTES de desenhar no canvas visível, zera o ALFA de todo pixel que
+   *  bater com essa cor-marcadora — só dentro do retângulo do quadro
+   *  calibrado (`mask.rectPx`, barato, delimitado, nunca a tela inteira).
+   *  Como esses pixels de marcador só existem onde o AMBIENTE de verdade
+   *  era mais distante que a "foto" (o oclusor só vence o depth-test
+   *  ali — onde há um objeto real mais perto, ele desenha por cima do
+   *  marcador normalmente, sem ser afetado), zerar o alfa exatamente
+   *  onde a cor bate reproduz o "buraco" que o `colorWrite:false` deveria
+   *  ter feito sozinho, agora contornando o preenchimento opaco do céu.
+   *  `clearRect` no retângulo da máscara (convertido pra pixels do
+   *  RENDER TARGET, incluindo a inversão de linha OpenGL — ver comentário
+   *  grande logo abaixo) evita "fantasma" do quadro anterior nesses
+   *  pixels agora transparentes (sem isso, `drawImage` com alfa=0 nesses
+   *  pontos preservaria o conteúdo OPACO do quadro anterior ali, por
+   *  composição `source-over` padrão — o comentário antigo, preservado
+   *  antes desta correção, dizia não precisar de `clearRect` porque a
+   *  imagem SEMPRE cobria o canvas inteiro com alfa=1; deixou de ser
+   *  verdade só nesta região da máscara). */
+  /** [13/09/2026] NOVO — extraído de dentro de `_presentToCanvas` (fonte
+   *  única, ver armadilha #4 do projeto) pra também ser usado por
+   *  `_updateFloorMaskUniform` (abaixo): converte `mask.rectPx` (pixels de
+   *  CSS, origem topo-esquerda) pro espaço de pixel do RENDER TARGET, já
+   *  na convenção "crua" (origem embaixo-à-esquerda, linha crescendo pra
+   *  CIMA) — mesma convenção de `this._rtPixelBuffer` E de `gl_FragCoord.xy`
+   *  no shader (as 2 são "window coordinates" do WebGL, origem
+   *  embaixo-à-esquerda — por isso o MESMO retângulo cru serve pros 2 sem
+   *  nenhuma conta extra). Devolve `null` se não há máscara ativa. */
+  // [12/09/2026] CORRIGIDO — pedido verbatim: "Independente do nível de
+  // zoom, ao segurar shift e clicar com o botão do meio do mouse e
+  // arrastar, de modo que tudo todo o cenário vá em direção a parte de
+  // cima da tela, acaba se revelando um retângulo preto ao fundo com
+  // largura igual ao da imagem e quando se está marcado 'Trás'. Este preto
+  // deve ser removido ou tornar-se transparente." CAUSA RAIZ: a versão
+  // antiga fazia `topPx = Math.max(0, Math.min(h, Math.round(mask.rectPx.top
+  // * dpr)))` ANTES de calcular a altura — quando o pan (lens-shift, ver
+  // `Engine3D.setCamPanFrac`/`View3D._camViewPanOffset`) empurra o quadro
+  // calibrado pra FORA da tela por cima (`mask.rectPx.top` fica NEGATIVO,
+  // ex.: -435px), esse clamp "grudava" o topo em 0 — e a altura calculada
+  // a partir daí (`Math.min(h - 0, height*dpr)`) dava sempre o MESMO
+  // resultado errado, não importa o quanto o quadro continuasse subindo
+  // (`top` cada vez mais negativo). O retângulo da MÁSCARA (onde o alfa é
+  // zerado, revelando o "buraco" transparente) ficava assim CONGELADO numa
+  // posição/altura fixa, enquanto o marcador magenta de verdade (pintado
+  // por um plano 3D real, projetado pela `camera3.projectionMatrix" já com
+  // o lens-shift aplicado — acompanha o pan livremente, sem nenhum teto)
+  // continuava se movendo pra cima normalmente — o resultado era o
+  // retângulo da foto e a área onde o alfa é zerado DESALINHADOS: pixels
+  // do marcador ficavam sem máscara nenhuma em cima deles, revelando a
+  // cor-marcadora sólida (o "retângulo preto"/escuro reportado) em vez do
+  // "buraco" esperado. CORRIGIDO: em vez de fixar só o canto
+  // esquerdo/superior e assumir que o TAMANHO original continua válido,
+  // agora recorta (clip) as 2 BORDAS de cada eixo (esquerda E direita,
+  // topo E fundo) contra os limites do render target — preservando a
+  // INTERSEÇÃO de verdade entre o retângulo (que pode estar parcialmente
+  // ou totalmente fora da tela) e a área visível, do mesmo jeito que
+  // qualquer recorte 2D padrão (min/max nos 2 cantos, não só num). */
+  _computeFotoCamMaskRawRect() {
+    const w = this._rtPixelW, h = this._rtPixelH;
+    const mask = this._fotoCamMask;
+    if (w < 1 || h < 1 || !mask || !mask.rectPx || !mask.color) return null;
+    const dpr = this._lastDpr || 1;
+    const left0 = mask.rectPx.left * dpr;
+    const top0 = mask.rectPx.top * dpr;
+    const right0 = left0 + mask.rectPx.width * dpr;
+    const bottom0 = top0 + mask.rectPx.height * dpr;
+    // [12/09/2026 — RODADA "linha preta persiste"] MUDADO — pedido verbatim:
+    // "Continua a linha preta do lado de cima e do lado esquerdo da imagem
+    // (às vezes), quando está marcado 'Trás'. Verifique a medida em pixels
+    // considerando a imagem já impressa ou faça o preto ficar transparente
+    // para não aparecer." CAUSA RAIZ: mesmo já vindo de uma fonte única
+    // (`_activeCamFrameRectPx`, corrigida na rodada anterior), `mask.rectPx`
+    // ainda chega aqui em pixels de CSS fracionários (o `dpr` multiplica de
+    // novo, reintroduzindo casas decimais) — antes, `Math.round()` em CADA
+    // borda (esquerda/direita/topo/fundo) podia arredondar o lado
+    // esquerdo/topo pra CIMA (ex.: 120.5 -> 121) e o direito/fundo pra BAIXO,
+    // encolhendo o "buraco" em até ~1px do render target em relação à foto
+    // JÁ IMPRESSA no canvas 2D por baixo (que ocupa o pixel de CSS inteiro,
+    // sem arredondar) — sobrava uma faixa fina, sem foto por baixo
+    // alinhada, mostrando a cor-marcadora crua (o "preto"/magenta
+    // reportado) em vez do buraco. CORRIGIDO: arredonda pra FORA em vez de
+    // pro mais próximo — esquerda/topo com `Math.floor`, direita/fundo com
+    // `Math.ceil` — garantindo que o buraco SEMPRE cubra ao menos a área
+    // exata da foto (nunca menos), no máximo crescendo ~1px pra dentro da
+    // própria foto (imperceptível, mesma técnica de "sempre estourar um
+    // pouco em vez de faltar" já aceita no projeto — ver tolerância de cor
+    // logo abaixo).
+    // [12/09/2026 — RODADA "ainda aparece em cima/esquerda"] NOVO — pedido
+    // verbatim (com capturas de tela comparando 'Frente' x 'Trás' no zoom
+    // out máximo): "Alinha preta aparece em cima e à esquerda, quando está
+    // marcado 'Trás'." O `floor`/`ceil` acima já garante que o retângulo
+    // (em pixels INTEIROS) cobre no mínimo a área exata da foto — mas o
+    // plano 3D real do oclusor (`_ensureFotoCamBackdropPlane`) é rasterizado
+    // pela GPU com antialiasing (MSAA): a borda GEOMÉTRICA dele cai numa
+    // posição de sub-pixel (dada pela projeção 3D de verdade, não pelos
+    // mesmos números arredondados usados aqui), deixando uma faixa de ~1px
+    // de pixels MISTURADOS (cor-marcadora borrada com o céu/chão ao fundo)
+    // ao redor da borda — pixels que não batem nem com o magenta puro nem
+    // com a tolerância de cor (ver `MASK_COLOR_TOLERANCIA`, abaixo), então
+    // nem o `floor`/`ceil` (que só arredonda o retângulo do LADO DE FORA)
+    // nem a tolerância cobrem esse anel de mistura, sobrando a linha
+    // escura/magenta reportada. CORRIGIDO: soma uma MARGEM extra de 1px
+    // (raw, já em pixels do render target) pra DENTRO em todos os lados —
+    // erra sempre pra mais (o buraco fica ligeiramente maior que a foto, o
+    // suficiente pra engolir o anel de antialiasing), nunca pra menos,
+    // seguindo o pedido explícito de preferir "tornar transparente" a
+    // deixar a linha aparecer.
+    // [12/09/2026 — RODADA "agora embaixo/laterais"] MUDADO — pedido
+    // verbatim: "Resolveu em cima, porém, agora, é em baixo e, nas duas
+    // laterais, do meio para baixo (as tiras pretas). Se for questão de
+    // tamanho do buffer, verifique a largura e a altura da imagem
+    // considerando ela já impressa no canvas após o redimensionar de
+    // acordo com o nível de zoom, depois, define o buffer para não ter
+    // problema com arredondamentos." CAUSA: a margem fixa de 1 pixel BRUTO
+    // (`MARGEM_ANTIALIASING_PX`, rodada anterior) resolveu o topo por
+    // coincidência, mas é medida em pixels do RENDER TARGET (já
+    // multiplicados por `dpr`) — em telas com `dpr` fracionário/alto (ex.:
+    // 1.25/1.5/2, comum no Windows, "já impressa" no canvas depois do
+    // `_resize` — ver `_rtPixelW`/`_rtPixelH`), 1px BRUTO cobre MENOS que 1
+    // pixel de CSS de verdade (`1/dpr` px de CSS), então o anel de
+    // antialiasing (que se forma na resolução NATIVA da tela, ~1px de CSS
+    // de largura) continuava maior que a margem em qualquer `dpr > 1` —
+    // sobrando a tira, agora visível embaixo/nas laterais (a mesma conta
+    // de antes, só que insuficiente nessas bordas também, mascarada antes
+    // só porque o teste ocorreu por acaso num nível de zoom/posição onde a
+    // folga sobrando ali era um pouco maior). CORRIGIDO: a margem agora
+    // acompanha o `dpr` (`Math.ceil(dpr)` pixels BRUTOS — sempre o
+    // suficiente pra cobrir pelo menos 1 pixel INTEIRO de CSS de largura,
+    // não importa a densidade da tela/o zoom atual), garantindo a mesma
+    // folga de segurança nos 4 lados em qualquer resolução.
+    // [12/09/2026 — RODADA "diminua o retângulo preto"] MUDADO — pedido
+    // verbatim: "Agora está sempre com 1 pixels de contorno: no lado
+    // direito, no lado esquerdo e em baixo. [...] considere isso no
+    // cálculo para diminuir esse retângulo preto." CAUSA: a rodada
+    // anterior (`view3d.js`, `_fotoCamDrawnRectPx`) já corrigiu a causa
+    // RAIZ do desalinhamento — `mask.rectPx` agora vem SEMPRE recortado
+    // (clip) contra a área real do `<canvas>` da foto, então já não pode
+    // mais ser MAIOR que a foto de verdade. A margem extra somada AQUI
+    // (`MARGEM_ANTIALIASING_PX`, pensada pra engolir antialiasing da GPU
+    // antes daquela correção existir) agora só faz o buraco crescer pra
+    // ALÉM da área real da foto de propósito — sobrando exatamente 1px de
+    // contorno (`Math.ceil(dpr)` com `dpr=1` dá 1) nos lados onde a foto
+    // já termina, revelando o fundo escuro do visualizador atrás dela.
+    // CORRIGIDO: removida — o `floor`/`ceil` abaixo (arredondar as 2
+    // BORDAS de cada eixo pra FORA) já é o suficiente e MATEMATICAMENTE
+    // comprovado (testado ao vivo/Playwright, rodada anterior) pra nunca
+    // deixar o buraco menor que a foto, sem mais precisar estourar pra
+    // fora dela.
+    const left = Math.max(0, Math.min(w, Math.floor(left0)));
+    const right = Math.max(0, Math.min(w, Math.ceil(right0)));
+    const top = Math.max(0, Math.min(h, Math.floor(top0)));
+    const bottom = Math.max(0, Math.min(h, Math.ceil(bottom0)));
+    const maskWPx = Math.max(0, right - left);
+    const maskHPx = Math.max(0, bottom - top);
+    if (maskWPx <= 0 || maskHPx <= 0) return null;
+    const maskRawTopPx = h - bottom;
+    return { maskLeftPx: left, maskRawTopPx, maskWPx, maskHPx, w, h };
+  }
+
+  _presentToCanvas() {
+    const w = this._rtPixelW, h = this._rtPixelH;
+    if (w < 1 || h < 1) return;
+    Engine3D._sharedRenderer.readRenderTargetPixels(this.renderTarget, 0, 0, w, h, this._rtPixelBuffer);
+    const mask = this._fotoCamMask;
+    let maskLeftPx = 0, maskRawTopPx = 0, maskWPx = 0, maskHPx = 0, hasMask = false;
+    if (mask && mask.rectPx && mask.color) {
+      const buf = this._rtPixelBuffer;
+      const [mr, mg, mb] = mask.color;
+      // [12/09/2026] Converte o retângulo (em pixels de CSS, mesma
+      // convenção de `_activeCamFrameRectPx`/`_fotoCamPhotoCanvasRectPx` —
+      // origem no topo-esquerda, Y crescendo pra baixo) pra pixels do
+      // RENDER TARGET (`w×h` = tamanho CSS × `dpr`, ver `_resize`) — E pra
+      // convenção de LINHA do próprio `this._rtPixelBuffer` (origem
+      // embaixo-à-esquerda, OpenGL — mesma inversão feita mais abaixo pro
+      // `drawImage`, ver comentário grande da função): a linha visual
+      // `vy` (0=topo) corresponde à linha CRUA `ry = h-1-vy` — um
+      // retângulo visual `[top, top+height)` vira `[h-top-height, h-top)`
+      // na numeração crua. [13/09/2026] Conta agora vem de
+      // `_computeFotoCamMaskRawRect` (fonte única, ver comentário lá).
+      const rawRect = this._computeFotoCamMaskRawRect();
+      if (rawRect) { ({ maskLeftPx, maskRawTopPx, maskWPx, maskHPx } = rawRect); }
+      else { maskWPx = 0; maskHPx = 0; }
+      // [13/09/2026] NOVO — pedido verbatim: "Dê um jeito de os vidros das
+      // janelas continuarem a ser impressos [...] Faça de um jeito que não
+      // volte a ficar aquele rosa choque". O vidro (`_buildGlassPane`)
+      // voltou a pintar sempre (ver comentário lá) — mas ele é
+      // `transparent:true`, desenhado DEPOIS da fila opaca, e faz
+      // alpha-blend da sua textura (quase toda transparente, só uma borda/
+      // listra de brilho com alfa baixo) com a cor-marcadora já presente.
+      // Isso desloca o pixel resultante um pouco pra longe do magenta puro
+      // — a igualdade EXATA de antes nunca mais bate ali, deixando o pixel
+      // "preso" opaco (rosa). CORRIGIDO: em vez de exigir igualdade exata,
+      // aceita uma TOLERÂNCIA (distância Manhattan nos 3 canais) — cobre o
+      // caso comum de um blend de baixo alfa (a maior parte do vidro,
+      // quase 100% transparente, continua batendo EXATO — alfa~0 no
+      // `source-over` não muda nada; só a borda/listra com alfa perceptível
+      // se desvia o suficiente pra precisar da tolerância). Só usada DENTRO
+      // do retângulo do quadro (nunca a tela toda), e a cor-marcadora
+      // (magenta puro) já é deliberadamente reservada/improvável na cena
+      // real (ver `_FOTOCAM_BACKDROP_MASK_COLOR`) — a tolerância aumenta
+      // um pouco esse risco de colisão (armadilha #7 do progresso do
+      // projeto), aceito como troca consciente pra resolver o rosa sem
+      // apagar o vidro.
+      const MASK_COLOR_TOLERANCIA = 90;
+      // [12/09/2026 — RODADA "torne o preto transparente"] NOVO — pedido
+      // verbatim: "Você pode tornar o preto transparente, se isso não
+      // impedir que o 'Trás' funcione. Deste modo o problema é resolvido
+      // de algum jeito." Mesmo com o retângulo já matematicamente correto
+      // (ver teste ao vivo/Playwright da rodada anterior — o "buraco"
+      // sempre cobre a foto inteira, em qualquer zoom/DPR testado), pode
+      // sobrar uma linha fina ESCURA bem na borda por causa de
+      // antialiasing da GPU do usuário (variável por placa/driver, fora do
+      // alcance de qualquer conta de retângulo) — a tolerância de cor
+      // acima só cobre proximidade do MAGENTA (`mask.color`), não do
+      // preto. CORRIGIDO: dentro de uma FAIXA fina (`BORDA_PRETO_PX`) bem
+      // na borda externa do retângulo da máscara (onde a foto acaba e o
+      // "resto do cenário" começa — exatamente onde esse tipo de artefato
+      // de antialiasing se forma), qualquer pixel quase-preto TAMBÉM tem o
+      // alfa zerado (fica transparente, revelando a foto/o ambiente real
+      // por baixo, nunca pintando preto). Deliberadamente restrito a essa
+      // faixa estreita (não ao retângulo INTEIRO): objetos 3D reais e
+      // ESCUROS que devem continuar ocluindo a foto (o propósito central
+      // de 'Trás') ficam no MEIO do retângulo, longe da borda, então
+      // continuam opacos/ocluindo normalmente — só a fina moldura externa
+      // ganha essa rede de segurança extra.
+      const BORDA_PRETO_PX = Math.max(2, Math.ceil((this._lastDpr || 1) * 2));
+      const LIMIAR_PRETO = 40;
+      if (maskWPx > 0 && maskHPx > 0) {
+        hasMask = true;
+        for (let ry = maskRawTopPx; ry < maskRawTopPx + maskHPx; ry++) {
+          const localRy = ry - maskRawTopPx;
+          const pertoBordaV = localRy < BORDA_PRETO_PX || localRy >= maskHPx - BORDA_PRETO_PX;
+          let idx = (ry * w + maskLeftPx) * 4;
+          for (let rx = 0; rx < maskWPx; rx++, idx += 4) {
+            const dr = Math.abs(buf[idx] - mr), dg = Math.abs(buf[idx + 1] - mg), db = Math.abs(buf[idx + 2] - mb);
+            if (dr + dg + db <= MASK_COLOR_TOLERANCIA) { buf[idx + 3] = 0; continue; }
+            const pertoBorda = pertoBordaV || rx < BORDA_PRETO_PX || rx >= maskWPx - BORDA_PRETO_PX;
+            if (pertoBorda && buf[idx] <= LIMIAR_PRETO && buf[idx + 1] <= LIMIAR_PRETO && buf[idx + 2] <= LIMIAR_PRETO) {
+              buf[idx + 3] = 0;
+            }
+          }
+        }
+      }
+    }
+    const imgData = new ImageData(new Uint8ClampedArray(this._rtPixelBuffer.buffer, this._rtPixelBuffer.byteOffset, this._rtPixelBuffer.length), w, h);
+    this._rtOffCtx.putImageData(imgData, 0, 0);
+    // Sem `clearRect` antes do `drawImage`, EXCETO no retângulo da máscara
+    // (ver comentário grande acima): fora dela a imagem cobre o canvas
+    // INTEIRO com alfa=1 sempre, então já sobrescreve 100% do conteúdo
+    // anterior sozinha — um `clearRect` ali exigiria contas extras por
+    // causa da transformação Y invertida abaixo sem trazer nenhum
+    // benefício real.
+    const ctx = this._displayCtx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, -1, 0, h);
+    if (hasMask) ctx.clearRect(maskLeftPx, maskRawTopPx, maskWPx, maskHPx);
+    ctx.drawImage(this._rtOffscreen, 0, 0);
+    // [13/09/2026] NOVO — pedido verbatim: "A transparência do vidro ainda
+    // está rosa, use um buffer a parte [...] Renderize o vidro em um
+    // buffer a parte e depois imprima-o ali para que não fique rosa e sim
+    // 'normal'." Ver `_renderGlassOnlyPass`/`_presentFrame` pra como este
+    // buffer é preenchido (vidro renderizado SOZINHO, num render target
+    // à parte, nunca vendo o marcador magenta). Aqui só COMPÕE o
+    // resultado por cima da imagem já finalizada acima — mesmo
+    // `putImageData`+`drawImage` (canvas auxiliar `_rtOffscreen`
+    // reaproveitado) com o alfa de VERDADE do vidro (a maior parte do
+    // buffer é 100% transparente — só o vidro tem pixel — `scene.background`
+    // foi desligado durante aquele passe justamente pra garantir isso), o
+    // navegador faz o alpha-blend NORMAL (`source-over`) sozinho — sem
+    // marcador nenhum envolvido, sem risco nenhum de ficar rosa.
+    if (this._glassPassActive) {
+      const glassImgData = new ImageData(new Uint8ClampedArray(this._glassPixelBuffer.buffer, this._glassPixelBuffer.byteOffset, this._glassPixelBuffer.length), w, h);
+      this._rtOffCtx.putImageData(glassImgData, 0, 0);
+      ctx.drawImage(this._rtOffscreen, 0, 0);
+    }
+    // [22/09/2026] NOVO — ver comentário grande em `_renderBackdropEnvPass`
+    // (arquitetura completa) — compõe o ambiente real (chão/neblina, sem o
+    // oclusor/máscara do 'Trás') por CIMA do resultado já finalizado
+    // acima (foto + objetos reais, intocados — a foto continua atrás de
+    // qualquer objeto real mais perto, exatamente como sempre), mas só
+    // DENTRO do retângulo da foto (`ctx.clip`, mesmo retângulo `hasMask`
+    // já calculado acima) e com alfa proporcional a `(1 - opacidade)`:
+    // opacidade=1 não muda nada (nunca entra aqui — `usarPasseAmbiente`
+    // em `_presentFrame` já filtra isso); opacidade=0 revela o ambiente
+    // real por completo; opacidades intermediárias misturam os dois —
+    // exatamente o pedido ("ao colocar a opacidade = 0 [...] como ver
+    // através de uma janela").
+    if (this._backdropEnvPassActive && hasMask) {
+      const opacidadeMistura = this._fotoCamMask?.opacity != null ? this._fotoCamMask.opacity : 1;
+      const envImgData = new ImageData(new Uint8ClampedArray(this._backdropEnvPixelBuffer.buffer, this._backdropEnvPixelBuffer.byteOffset, this._backdropEnvPixelBuffer.length), w, h);
+      this._rtOffCtx.putImageData(envImgData, 0, 0);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(maskLeftPx, maskRawTopPx, maskWPx, maskHPx);
+      ctx.clip();
+      ctx.globalAlpha = Math.max(0, Math.min(1, 1 - opacidadeMistura));
+      ctx.drawImage(this._rtOffscreen, 0, 0);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  /** [12/09/2026] NOVO — ver comentário grande em `_presentToCanvas`, acima,
+   *  pro motivo completo. `rectPx` — `{left,top,width,height}` em pixels de
+   *  CSS (mesma convenção de `View3D._activeCamFrameRectPx`/
+   *  `_fotoCamPhotoCanvasRectPx`). `color` — `[r,g,b]` (0-255) da cor-
+   *  marcadora sólida usada pelo material do oclusor
+   *  (`View3D._ensureFotoCamBackdropPlane`) — precisa bater EXATAMENTE
+   *  (mesmos números) com a cor do material, senão a máscara nunca
+   *  encontra pixel nenhum pra apagar. Chamado todo quadro, só quando
+   *  'Trás' está realmente ativo (ver `View3D._loop`/`Modeler3D._renderFrame`) —
+   *  `clearFotoCamBackdropMask()` desliga (nenhum pixel é tocado). */
+  // [22/09/2026] NOVO — `opacity` (0-1, `View3D._getFotoCamOpacidade()`)
+  // ganhou um 3º parâmetro opcional aqui — ver comentário grande em
+  // `_initThree` (`_backdropEnvRenderTarget`) pro motivo completo: usado
+  // por `_renderBackdropEnvPass`/`_presentToCanvas` pra saber o quanto
+  // misturar o ambiente real (chão/neblina) por cima do resultado de
+  // sempre, sem tocar em NADA da máscara/oclusão binária já existente
+  // (que continua sempre ativa, em qualquer opacidade — ver
+  // `View3D._loop`). Default 1 (comportamento de sempre — sem mistura
+  // nenhuma) quando quem chama não passa nada.
+  setFotoCamBackdropMask(rectPx, color, opacity) {
+    this._fotoCamMask = rectPx && color ? { rectPx, color, opacity: opacity != null ? opacity : 1 } : null;
+  }
+
+  clearFotoCamBackdropMask() {
+    this._fotoCamMask = null;
+  }
+
+  // [22/09/2026] NOVO — ver comentário grande em `_initThree`
+  // (`_backdropEnvRenderTarget`): `_renderBackdropEnvPass` precisa saber
+  // qual malha é o oclusor invisível do 'Trás' (`View3D._ensureFotoCamBackdropPlane`)
+  // pra escondê-la SÓ durante o passe de ambiente (sem afetar o passe
+  // principal) — chamado uma vez por `View3D` logo depois de criar a
+  // malha (ela nunca é recriada depois, então basta guardar a referência
+  // 1x; chamadas seguintes só re-confirmam a mesma referência, inofensivo).
+  registerFotoCamBackdropOcclusor(mesh) {
+    this._fotoCamBackdropOcclusorMesh = mesh || null;
+  }
+
+  /** [22/09/2026] NOVO — ver comentário grande em `_initThree`
+   *  (`_backdropEnvRenderTarget`) pro pedido/arquitetura completa. Chamado
+   *  por `_presentFrame`, DEPOIS do passe principal (+ vidro, se houver) —
+   *  só quando o backdrop 'Trás' está ativo E a opacidade < 1 (custo zero
+   *  no caso comum, MESMO espírito de `_renderGlassOnlyPass`: só paga o
+   *  passe extra quando o resultado dele de fato vai aparecer). Esconde o
+   *  oclusor (nunca aparece de verdade — só existe pra bloquear o
+   *  ambiente farther que a foto no passe PRINCIPAL) e desliga a máscara
+   *  do chão (`_fotoCamBackdropMaskAtiva`) — as DUAS coisas que impedem o
+   *  ambiente real de ser desenhado normalmente — renderiza a cena
+   *  INTEIRA de novo (independente, profundidade própria — objetos reais
+   *  mais perto continuam ocluindo o chão/paredes aqui dentro por conta
+   *  própria, sem precisar de nada compartilhado com o passe principal) e
+   *  lê de volta pra `_backdropEnvPixelBuffer`. Restaura tudo ao sair —
+   *  próximo quadro, `_updateFloorMaskUniform` (chamado ANTES do passe
+   *  PRINCIPAL, no início de `_presentFrame`) já recalcula do zero mesmo
+   *  assim, mas restaurar aqui evita qualquer leitura acidental do estado
+   *  "desligado" por outro código entre um quadro e outro. */
+  _renderBackdropEnvPass() {
+    const occlusor = this._fotoCamBackdropOcclusorMesh;
+    const savedOcclusorVisible = occlusor ? occlusor.visible : null;
+    if (occlusor) occlusor.visible = false;
+    const savedMaskAtiva = this._fotoCamBackdropMaskAtiva;
+    this._fotoCamBackdropMaskAtiva = false;
+    this._updateFloorMaskUniform();
+    this.renderer.setRenderTarget(this._backdropEnvRenderTarget);
+    this.renderer.setViewport(0, 0, this._rtPixelW, this._rtPixelH);
+    this.renderer.render(this.scene, this.camera3);
+    Engine3D._sharedRenderer.readRenderTargetPixels(this._backdropEnvRenderTarget, 0, 0, this._rtPixelW, this._rtPixelH, this._backdropEnvPixelBuffer);
+    if (occlusor) occlusor.visible = savedOcclusorVisible;
+    this._fotoCamBackdropMaskAtiva = savedMaskAtiva;
+    this._updateFloorMaskUniform();
+    this._backdropEnvPassActive = true;
+  }
+
+  /** NOVO (08/09/2026), pedido verbatim (ITENS 5 e 6 da rodada de 11
+   *  itens — reinvestigação do zero do bug "cenário preto"/"cenário
+   *  congelado" no Modelador 3D, depois que a correção da rodada anterior
+   *  (try/catch/finally em `Modeler3D._renderLoop`, ver modeler-core.js)
+   *  se mostrou insuficiente/sintoma diferente do relatado).
+   *
+   *  CAUSA RAIZ ENCONTRADA (análise estática de código — sem navegador
+   *  real disponível nesta sessão pra confirmar interativamente,
+   *  restrição já conhecida do projeto): desde a arquitetura "MODO EYE"
+   *  (07/09/2026, ver comentário grande no construtor desta classe, "Todos
+   *  os 3 pontos do app que criam Engine3D usam `{ eye: true }` agora [...]
+   *  Não existe mais nenhum caminho 'não-eye' ativo no app"), o
+   *  `<canvas>` visível de CADA instância (incluindo `view3d.js`, cuja
+   *  engine é REAPROVEITADA pelo Modelador — ver `state.canvas`/
+   *  `state.scene`/`state.camera` em `modeler-core.js enter()`) deixou de
+   *  ser um canvas WebGL de verdade: virou um `<canvas>` com contexto 2D
+   *  puro (`this._displayCtx`), e o resultado do render só chega nele
+   *  através de `_presentToCanvas()` (lê o `WebGLRenderTarget` PRÓPRIO
+   *  desta instância de volta pra CPU e desenha com `drawImage` — ver
+   *  comentário grande lá) — chamado só a partir DAQUI (`render(camera)`,
+   *  dentro do bloco `if (this._eye) { [...] this._presentToCanvas(); }`).
+   *
+   *  `Modeler3D._renderFrame` (modeler-core.js), porém, NUNCA chamava
+   *  `render(camera)` — chamava `renderer.render(state.scene, state.camera)`
+   *  DIRETO (só com `_resize()` antes, ver comentário histórico que ainda
+   *  fica logo abaixo desta função). Isso desenha no `WebGLRenderTarget`
+   *  que estiver setado no `Engine3D._sharedRenderer` NAQUELE instante
+   *  (compartilhado entre TODAS as instâncias — Ver em 3D, miniatura do
+   *  Mapa, prévia de Modelos3D — todas renderizam SEQUENCIALMENTE, nunca
+   *  em paralelo de verdade) — nunca no `<canvas>` 2D visível de verdade,
+   *  já que `_presentToCanvas()` (o ÚNICO código que sabe copiar o
+   *  render target pro canvas 2D) nunca era chamado por esse caminho.
+   *  Ou seja: o Modelador desenhava "no vazio" — o `<canvas>` visível
+   *  simplesmente parava de ser atualizado a partir do instante em que
+   *  `Modeler3D.enter()` rodava, ficando "preso" no último quadro
+   *  desenhado pelo `View3D._loop` normal (pausado durante o Modelador —
+   *  ver guarda `Modeler3D.isActive()` em view3d.js) — exatamente o
+   *  sintoma "cenário atrás fica [...] como se [...] um 'screenshot' [...]
+   *  fica sendo exibido 'atrás', imóvel" relatado. `_resize()` (chamado
+   *  todo quadro pelo Modelador) reatribui `this.canvas.width/height`
+   *  no ramo `_eye` (linha ~4950 acima) — o que LIMPA o bitmap do canvas
+   *  instantaneamente — explicando por que redimensionar a divisão
+   *  enquanto o Modelador está ativo deixa a tela TOTALMENTE preta (o
+   *  último quadro "congelado" é apagado pelo resize, e nada volta a
+   *  desenhar por cima, já que o caminho que desenharia —
+   *  `_presentToCanvas()` — nunca era chamado).
+   *
+   *  Isso também explica a ASSIMETRIA relatada entre Modo Objeto ("o
+   *  objeto não aparece, o cenário também fica congelado") e Modo Edição
+   *  ("aparece e funciona, mas o cenário [...] fica todo congelado"):
+   *  o overlay 2D do Modelador (`ModelerRender.drawFrame`, um `<canvas>`
+   *  2D TOTALMENTE SEPARADO, transparente, por cima do canvas WebGL/2D
+   *  principal — ver comentário no topo de modeler-render.js) desenha
+   *  vértices/arestas/faces/contorno de seleção só em Modo Edição (e o
+   *  contorno dourado do objeto selecionado, sempre) — esse overlay
+   *  SEMPRE funcionou (é Canvas2D puro, desenhado diretamente por JS,
+   *  nunca dependeu do `renderer.render()` quebrado) e por isso dava a
+   *  falsa impressão de "o objeto aparece e a interação funciona" em
+   *  Modo Edição — só o CENÁRIO DE FUNDO (e a malha SÓLIDA do objeto,
+   *  ambos desenhados só pelo WebGL, nunca pelo overlay 2D) é que nunca
+   *  chegava na tela, em NENHUM dos 2 modos.
+   *
+   *  CORRIGIDO extraindo o trecho "resize + desenha no render target +
+   *  devolve o renderer neutro + copia pro canvas visível" (que já
+   *  existia aqui dentro, linhas logo abaixo) pra um método PRÓPRIO
+   *  reutilizável, `_presentFrame()` — chamado tanto por `render(camera)`
+   *  (fluxo normal, depois de posicionar `camera3` a partir do objeto
+   *  `camera` no formato {x,y,z,yaw,pitch} do app) quanto DIRETO por
+   *  `Modeler3D._renderFrame` (modeler-core.js), que já posiciona
+   *  `camera3` (== `state.camera`) sozinho via `_updateOrbitCamera`/
+   *  `_updateFreeCamera` ANTES de chamar isto — não faz sentido (nem seria
+   *  correto: `camera` ali é um `THREE.Camera` de verdade, não o objeto
+   *  {x,y,z,yaw,pitch} que `render(camera)` espera) reconstruir a pose a
+   *  partir de um objeto que este método completo não tem. `_presentFrame`
+   *  deliberadamente NÃO inclui o resto do trabalho de `render(camera)`
+   *  (atualização de céu/LOD/culling por distância/oclusão de selo/
+   *  destaque de mira) — mesmo espírito "leve" que o Modelador já tinha
+   *  antes (ver comentário histórico abaixo, "`_resize()` sozinho [...]
+   *  já resolve, e é barato"), nada disso é relevante durante uma sessão
+   *  do Modelador.
+   *
+   *  HONESTIDADE (convenção já estabelecida neste projeto): esta é uma
+   *  correção por ANÁLISE ESTÁTICA de código, sem navegador real
+   *  disponível nesta sessão pra confirmar visualmente — a cadeia de
+   *  causa/efeito (renderer.render() direto nunca alcançava o canvas
+   *  visível no modo "eye") está bem fundamentada no próprio código-fonte
+   *  (comentário do construtor + `_presentToCanvas`/`render()` originais),
+   *  mas AINDA PRECISA de confirmação visual (abrir o Modelador, trocar
+   *  Modo Objeto/Edição, redimensionar a divisão) antes de considerar o
+   *  bug 100% fechado. */
+  _presentFrame() {
+    if (!this._ready) return;
+    this._resize();
+    // [13/09/2026] NOVO — ver comentário grande em `_updateFloorMaskUniform`:
+    // precisa rodar ANTES de `renderer.render()` (a chamada de verdade,
+    // logo abaixo), senão o shader do chão desenharia este quadro com o
+    // retângulo/estado do quadro ANTERIOR (1 quadro atrasado).
+    this._updateFloorMaskUniform();
+    if (this._eye) {
+      // [13/09/2026] NOVO — ver comentário grande em `_renderGlassOnlyPass`
+      // pra arquitetura completa: só entra no passe extra do vidro quando
+      // 'Trás' está de verdade ativo E existe vidro na cena (custo zero
+      // no caso comum — 'Frente'/sem câmera/sem janela nenhuma — que
+      // continua exatamente como antes, um render só).
+      const meshesVidro = this._glassMeshesAtivos;
+      const usarPasseVidro = this._fotoCamBackdropMaskAtiva && !!(meshesVidro && meshesVidro.length);
+      let visibilidadeOriginalVidro = null;
+      if (usarPasseVidro) {
+        // esconde o vidro do passe PRINCIPAL — ele nunca mais participa
+        // deste render, então nunca mais pode misturar com o marcador
+        // magenta do oclusor 'Trás' (ver `_ensureFotoCamBackdropPlane`,
+        // view3d.js).
+        visibilidadeOriginalVidro = meshesVidro.map((m) => m.visible);
+        meshesVidro.forEach((m) => { m.visible = false; });
+      }
+      this.renderer.setRenderTarget(this.renderTarget);
+      this.renderer.setViewport(0, 0, this._rtPixelW, this._rtPixelH);
+      this.renderer.render(this.scene, this.camera3);
+      if (usarPasseVidro) {
+        // devolve a visibilidade REAL de cada vidro antes do passe
+        // isolado — `_renderGlassOnlyPass` decide sozinho quem fica
+        // visível ali (só o vidro, mas respeitando o `visible` de
+        // verdade de cada um — um vidro que o usuário/código escondeu
+        // por outro motivo continua escondido também no passe isolado).
+        meshesVidro.forEach((m, i) => { m.visible = visibilidadeOriginalVidro[i]; });
+        this._renderGlassOnlyPass(meshesVidro);
+      } else {
+        this._glassPassActive = false;
+      }
+      // [22/09/2026] NOVO — ver comentário grande em `_renderBackdropEnvPass`
+      // pro pedido/arquitetura completa: 3º passe (independente do vidro),
+      // só quando o backdrop 'Trás' está de fato ativo E a opacidade < 1
+      // (custo zero no caso comum — opacidade=1, sem 'Trás', ou nenhuma
+      // câmera aberta — que continua exatamente como sempre).
+      const opacidadeMask = this._fotoCamMask?.opacity;
+      const usarPasseAmbiente = this._fotoCamBackdropMaskAtiva && opacidadeMask != null && opacidadeMask < 1;
+      if (usarPasseAmbiente) {
+        this._renderBackdropEnvPass();
+      } else {
+        this._backdropEnvPassActive = false;
+      }
+      this.renderer.setRenderTarget(null);
+      this._presentToCanvas();
+      return;
+    }
+    this.renderer.render(this.scene, this.camera3);
+  }
+
+  /** [13/09/2026] NOVO — pedido verbatim: "A transparência do vidro ainda
+   *  está rosa, use um buffer a parte, se for ajudar a resolver isso.
+   *  Renderize o vidro em um buffer a parte e depois imprima-o ali para
+   *  que não fique rosa e sim 'normal'." CAUSA RAIZ do rosa (ver rodada
+   *  anterior, tentativa de tolerância de cor — não bastou): o vidro
+   *  (`transparent:true`) sempre desenha DEPOIS de toda a fila opaca — se
+   *  o marcador magenta do backdrop 'Trás' já estiver no framebuffer
+   *  naquele pixel, o vidro faz alpha-blend com ELE, e o resultado nunca
+   *  mais bate exato (nem "tolerante") com a cor reservada.
+   *  CORRIGIDO DE VERDADE (arquitetura de 2 passes, sugestão do próprio
+   *  usuário): o vidro é escondido do passe PRINCIPAL (`_presentFrame`,
+   *  acima — nunca mais "vê" o marcador) e renderizado light AQUI,
+   *  SOZINHO (tudo o mais escondido, `scene.background` desligado pra
+   *  garantir alfa=0 de verdade fora do vidro), num 2º
+   *  `THREE.WebGLRenderTarget` (`this._glassRenderTarget`) TRANSPARENTE.
+   *  Pra continuar sendo ocluído corretamente por paredes/objetos reais
+   *  na frente (senão o vidro "vazaria" através deles), este passe
+   *  reaproveita a MESMA textura de profundidade do passe principal
+   *  (`this._glassDepthTexture`, compartilhada entre os 2 render targets —
+   *  ver `_initThree`) — `autoClearDepth=false` preserva os valores já
+   *  escritos pelo passe principal (paredes/chão/objetos, SEM o vidro,
+   *  que estava escondido) em vez de limpar pra "infinito"; só a COR é
+   *  limpa (`clear(true,false,false)`), com alfa 0. O resultado
+   *  (`this._glassPixelBuffer`) é composto por cima da imagem final em
+   *  `_presentToCanvas` — o vidro nunca mais toca o marcador, então nunca
+   *  mais fica rosa, e continua sendo ocluído certo por objetos reais. */
+  _renderGlassOnlyPass(meshesVidro) {
+    const THREE = this.THREE;
+    // [13/09/2026] `keep` inclui o vidro E todos os ANCESTRAIS dele (o
+    // grupo da porta/janela que o contém, etc.) — o Three.js pula a
+    // renderização de QUALQUER descendente cujo ancestral esteja
+    // `visible=false` (diferente de `traverse()`, que sempre visita a
+    // árvore inteira independente disso); sem incluir os ancestrais aqui,
+    // o vidro ficaria com `visible=true` mas ainda assim invisível de
+    // verdade, escondido pelo grupo-pai (não-vidro) que teria sido
+    // desligado junto com o resto da cena logo abaixo.
+    const keep = new Set();
+    meshesVidro.forEach((m) => { for (let n = m; n; n = n.parent) keep.add(n); });
+    const savedVisibility = [];
+    this.scene.traverse((obj) => {
+      if (obj === this.scene) return;
+      savedVisibility.push([obj, obj.visible]);
+      obj.visible = keep.has(obj);
+    });
+    const savedBackground = this.scene.background;
+    this.scene.background = null;
+    const prevClearColor = new THREE.Color();
+    this.renderer.getClearColor(prevClearColor);
+    const prevClearAlpha = this.renderer.getClearAlpha();
+    const prevAutoClearDepth = this.renderer.autoClearDepth;
+    this.renderer.setRenderTarget(this._glassRenderTarget);
+    this.renderer.setViewport(0, 0, this._rtPixelW, this._rtPixelH);
+    this.renderer.setClearColor(0x000000, 0);
+    // preserva a profundidade já escrita pelo passe principal (SEM o
+    // vidro) — é contra ELA que o vidro precisa ser testado, pra
+    // continuar corretamente ocluído atrás de paredes/objetos reais.
+    this.renderer.autoClearDepth = false;
+    this.renderer.clear(true, false, false);
+    this.renderer.render(this.scene, this.camera3);
+    this.renderer.autoClearDepth = prevAutoClearDepth;
+    this.renderer.setClearColor(prevClearColor, prevClearAlpha);
+    Engine3D._sharedRenderer.readRenderTargetPixels(this._glassRenderTarget, 0, 0, this._rtPixelW, this._rtPixelH, this._glassPixelBuffer);
+    this.scene.background = savedBackground;
+    savedVisibility.forEach(([obj, v]) => { obj.visible = v; });
+    // [12/09/2026] NOVO — pedido verbatim: "Você aplicou um outro jeito de
+    // renderizar o vidro, acaba ficando acinzentado, tente fazer com que
+    // fique esbranquiçado para que se assemelhe mais ao modo 'normal'."
+    // CAUSA RAIZ: o WebGL escreve nesse render target com blending "over"
+    // padrão sobre um fundo (0,0,0,0) — para um pixel parcialmente
+    // transparente do vidro, o valor de COR que fica gravado no buffer já
+    // sai "pré-multiplicado" (proporcional ao alfa, ex.: um branco a 40% de
+    // alfa grava um RGB ~40% da intensidade, não 100%). `ImageData`/
+    // `putImageData`+`drawImage` (usados em `_presentToCanvas` pra compor
+    // este buffer por cima da imagem final) tratam RGBA como alfa RETO
+    // (não-pré-multiplicado) — o `drawImage` aplica a mistura "over" de
+    // novo, multiplicando pelo alfa UMA SEGUNDA VEZ, escurecendo/
+    // acinzentando o resultado (um brilho branco vira cinza baço em vez de
+    // continuar branco). CORRIGIDO: reverte a pré-multiplicação aqui
+    // (`rgb = rgb * 255 / alfa`, só quando `0 < alfa < 255` — em alfa=0 não
+    // há cor visível pra corrigir, em alfa=255 a conta não muda nada) antes
+    // de `_presentToCanvas` compor o buffer, restaurando a cor "reta" que o
+    // `drawImage` espera.
+    const buf = this._glassPixelBuffer;
+    for (let i = 0; i < buf.length; i += 4) {
+      const a = buf[i + 3];
+      if (a > 0 && a < 255) {
+        const f = 255 / a;
+        buf[i] = Math.min(255, Math.round(buf[i] * f));
+        buf[i + 1] = Math.min(255, Math.round(buf[i + 1] * f));
+        buf[i + 2] = Math.min(255, Math.round(buf[i + 2] * f));
+      }
+    }
+    this._glassPassActive = true;
   }
 
   render(camera) {
@@ -4306,7 +6907,28 @@ class Engine3D {
     this._updateDistanceCulling(camera);
     this._updateItemBadgeOcclusion(camera);
     this._updateEffects();
-    this.renderer.render(this.scene, this.camera3);
+    // REESCRITO (07/09/2026), arquitetura WebGLRenderTarget — ver "MODO EYE"
+    // no construtor. Em modo eye, desenha no `THREE.WebGLRenderTarget`
+    // PRÓPRIO desta instância (framebuffer off-screen isolado, nunca
+    // compartilhado com outros "olhos") em vez do canvas global — sem
+    // nenhum `setScissor`/`setScissorTest` necessário (cada "olho" tem seu
+    // PRÓPRIO buffer inteiro, não precisa "recortar" um espaço dentro de um
+    // buffer maior compartilhado). Depois de renderizar, devolve o renderer
+    // pro estado neutro (`setRenderTarget(null)`) — necessário pro PRÓXIMO
+    // "olho" que for chamar `render()` (síncronos, nunca em paralelo de
+    // verdade) não continuar escrevendo sem querer no target deste aqui —
+    // e transfere o resultado pro canvas 2D visível via `_presentToCanvas`.
+    // CORRIGIDO (08/09/2026), ITENS 5/6: este trecho (resize já foi feito
+    // no topo desta função + desenha no render target + devolve o
+    // renderer neutro + copia pro canvas 2D visível) foi extraído pra
+    // `_presentFrame()` (novo método, ver comentário grande logo ACIMA
+    // desta função) — reaproveitado também por `Modeler3D._renderFrame`
+    // (modeler-core.js), que antes pulava exatamente este trecho
+    // (chamava `renderer.render()` direto, nunca `_presentToCanvas()`) —
+    // causa raiz encontrada do "cenário congelado"/"tela preta ao
+    // redimensionar" no Modelador (ver comentário grande em
+    // `_presentFrame`, acima).
+    this._presentFrame();
   }
 
   /** Chamado a cada quadro — decide se o selo "🔗 item associado"/flags de
@@ -4475,6 +7097,33 @@ class Engine3D {
     return { origin: { x: camera.x, y: camera.y, z: camera.z }, dir: cameraForward(camera) };
   }
 
+  /** [10/09/2026] NOVO — pedido verbatim: "ao clicar em uma câmera e
+   *  selecionar 'Ver através desta câmera', deve ser possível interagir
+   *  com o cenário, o cursor do mouse deve aparecer para ir apontando para
+   *  as coisas, poder selecioná-las". Diferente de `centerRay` (sempre a
+   *  MIRA/centro da tela — o modelo de "crosshair" usado pela navegação
+   *  normal em 1ª pessoa), este devolve o raio de verdade que passa por um
+   *  ponto QUALQUER da tela (coordenadas normalizadas -1..1, mesma
+   *  convenção de `THREE.Raycaster.setFromCamera`) — usado por view3d.js
+   *  `_pickAtClientPoint` (mousemove/click do mouse de verdade, não a mira
+   *  central) enquanto `_fotoCamMode`/`_orbCamMode` estão ativos (os 2
+   *  únicos modos que hoje saem do Pointer Lock e mostram o cursor de
+   *  verdade — ver `_enterFotoCameraView`/`_enterCameraOrbView`). Usa
+   *  `this.camera3` (a câmera Three.js de verdade, já com FOV/aspect/pose
+   *  do quadro mais recente — ver `render()`) em vez de reimplementar a
+   *  trigonometria de FOV/aspect manualmente; `updateMatrixWorld` explícito
+   *  porque isto pode ser chamado ENTRE quadros (evento de mouse), não só
+   *  de dentro do próprio `render()` como o resto do arquivo assume. */
+  rayFromScreenPoint(ndcX, ndcY) {
+    if (!this.THREE || !this.camera3) return null;
+    const THREE = this.THREE;
+    this.camera3.updateMatrixWorld(true);
+    const origin = new THREE.Vector3().setFromMatrixPosition(this.camera3.matrixWorld);
+    const dir = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(this.camera3).sub(origin).normalize();
+    if (!isFinite(dir.x) || !isFinite(dir.y) || !isFinite(dir.z)) return null;
+    return { origin: { x: origin.x, y: origin.y, z: origin.z }, dir: { x: dir.x, y: dir.y, z: dir.z } };
+  }
+
   /** Raio da mira contra as malhas de PAREDE de verdade (não os pickables
    *  esféricos de item/câmera/objeto/porta/janela testados por
    *  pickFromRay/hoverPick) — usado pelo modo de construção em 3D
@@ -4594,8 +7243,12 @@ class Engine3D {
       );
       // Só objetos — paredes são verticais (não servem de apoio horizontal)
       // e item/câmera são pequenos/já ocupados demais pra fazer sentido
-      // apoiar algo em cima.
-      const alvos = this._pickMeshes.filter((m) => m.userData?.pick?.type === 'object');
+      // apoiar algo em cima. NOVO (07/09/2026) — 'tijolo' incluído aqui:
+      // pedido verbatim dos "blocos de construção" precisa poder empilhar
+      // um tijolo em cima de outro (e em cima de objetos normais, e
+      // vice-versa — objetos normais pousando em cima de uma pilha de
+      // tijolos já existente, de graça, mesmo filtro).
+      const alvos = this._pickMeshes.filter((m) => m.userData?.pick?.type === 'object' || m.userData?.pick?.type === 'tijolo');
       const hits = this._raycaster.intersectObjects(alvos, false);
       for (const hit of hits) {
         const localNormal = hit.face?.normal;
@@ -4673,16 +7326,25 @@ class Engine3D {
         new THREE.Vector3(dir.x, dir.y, dir.z).normalize(),
       );
       const alvos = this._pickMeshes.filter((m) => {
-        const t = m.userData?.pick?.type;
+        const pick = m.userData?.pick;
+        const t = pick?.type;
         // 'fotoPin' incluído (03/09/2026) — ver o retângulo texturizado da
         // foto no bloco "fotos vinculadas ao mapa" de setScene, acima.
-        return t === 'item' || t === 'camera' || t === 'object' || t === 'fotoPin';
+        if (t !== 'item' && t !== 'camera' && t !== 'object' && t !== 'fotoPin') return false;
+        // [10/09/2026] NOVO — pula o próprio orb/câmera sendo visto
+        // através (ver this._pickExclude/setPickExclude) — pedido
+        // verbatim: "o clique está pegando a própria câmera [...] deve
+        // ser desativado".
+        if (this._isPickExcluded(t, pick.id)) return false;
+        return true;
       });
       const hits = this._raycaster.intersectObjects(alvos, false);
       return hits.length ? hits[0].object.userData.pick : null;
     }
     let best = null, bestT = Infinity;
     for (const p of this.pickables) {
+      // [10/09/2026] NOVO — ver this._pickExclude/setPickExclude acima.
+      if (this._isPickExcluded(p.type, p.id)) continue;
       const t = this._rayPickableT(p, origin, dir);
       if (t !== null && t < bestT) { bestT = t; best = p; }
     }
@@ -4762,15 +7424,24 @@ class Engine3D {
    *  'hitbox'. Mais exato nos cantos/bordas de formas não-esféricas (ex:
    *  acertar só a quina de uma caixa rotacionada), um pouco mais pesado por
    *  quadro — por isso é opcional, não o padrão. */
-  _hoverPickPixelPerfect(camera) {
+  _hoverPickPixelPerfect(camera, rayOverride) {
     if (!this._raycaster || !this._pickMeshes?.length) return null;
     const THREE = this.THREE;
-    const ray = this.centerRay(camera);
+    const ray = rayOverride || this.centerRay(camera);
     this._raycaster.set(
       new THREE.Vector3(ray.origin.x, ray.origin.y, ray.origin.z),
       new THREE.Vector3(ray.dir.x, ray.dir.y, ray.dir.z).normalize(),
     );
-    const hits = this._raycaster.intersectObjects(this._pickMeshes, false);
+    // [10/09/2026] NOVO — pula o próprio orb/câmera sendo visto através
+    // (ver this._pickExclude/setPickExclude): sem isto o destaque de mira
+    // (contorno pontilhado etc.) enquanto "vendo através" de uma câmera
+    // ficaria sempre preso na própria câmera, que fica bem na frente da
+    // câmera renderizada. Filtra ANTES de intersectar, não depois (senão
+    // um hit excluído em 1º lugar esconderia o que está atrás dele).
+    const pickMeshes = this._pickExclude
+      ? this._pickMeshes.filter((m) => !this._isPickExcluded(m.userData?.pick?.type, m.userData?.pick?.id))
+      : this._pickMeshes;
+    const hits = this._raycaster.intersectObjects(pickMeshes, false);
     if (!hits.length) return null;
     const hit = hits[0];
     const pick = hit.object.userData?.pick;
@@ -4798,14 +7469,21 @@ class Engine3D {
    *  Com raycastPrecision:'pixelperfect' (ver setConfig), delega inteiro pra
    *  _hoverPickPixelPerfect em vez do teste analítico por esfera/caixa/plano
    *  abaixo. */
-  hoverPick(camera) {
+  hoverPick(camera, rayOverride) {
     if (!this._ready || !this.mapData) return null;
-    if (this._config.raycastPrecision === 'pixelperfect') return this._hoverPickPixelPerfect(camera);
-    const ray = this.centerRay(camera);
+    if (this._config.raycastPrecision === 'pixelperfect') return this._hoverPickPixelPerfect(camera, rayOverride);
+    const ray = rayOverride || this.centerRay(camera);
     let best = null, bestT = Infinity;
     for (const p of this.pickables) {
+      // [10/09/2026] NOVO — ver this._pickExclude/setPickExclude acima.
+      if (this._isPickExcluded(p.type, p.id)) continue;
       const t = this._rayPickableT(p, ray.origin, ray.dir); // ver comentário em _rayPickableT — caixa justa, não esfera inchada
-      if (t !== null && t < bestT) { bestT = t; best = { type: p.type, ref: p.ref, radius: p.radius, pos: p.pos, center: p.pos, obb: p.obb, t }; }
+      // NOVO (08/09/2026, 38a rodada): `id` agora é copiado pro hit devolvido
+      // (antes só `ref`/`type` — os tijolos não usam `ref`, usam um `id`
+      // fixo 'tijolos-merged' pro aglomerado, ver `_rebuildTijolos` acima)
+      // — necessário pra `_confirmDeleteHit` (view3d.js) decidir o que
+      // excluir.
+      if (t !== null && t < bestT) { bestT = t; best = { type: p.type, id: p.id, ref: p.ref, radius: p.radius, pos: p.pos, center: p.pos, obb: p.obb, t }; }
     }
     const wallH = 2.6;
     (this.mapData.walls || []).forEach((w) => {
@@ -4883,7 +7561,19 @@ class Engine3D {
     this._hoverPick.visible = false;
     if (this._outlineCtx) this._outlineCtx.clearRect(0, 0, this._outlineCanvas.width, this._outlineCanvas.height);
     if (!this._config.raycastEnabled) return;
-    const hit = this.hoverPick(camera);
+    // [10/09/2026] NOVO — pedido verbatim: "Ao mirar em um objeto, ele deve
+    // ter o mesmo destaque que tem quando não se está nesse modo, por
+    // exemplo, 'contorno pontilhado'". Enquanto `_fotoCamMode`/
+    // `_orbCamMode` ativos, view3d.js mantém `this._hoverScreenNdc`
+    // atualizado com a posição real do MOUSE (não há crosshair central
+    // nesses modos — o cursor de verdade fica visível, ver
+    // `_pickAtClientPoint`) — usa esse ponto pra construir o raio de
+    // destaque em vez do raio central de sempre, através de
+    // `rayFromScreenPoint` (mesma função usada pelo clique/hover de
+    // cursor). `null` (navegação normal) cai no comportamento de sempre
+    // (raio central, via `centerRay` dentro de `hoverPick`).
+    const rayOverride = this._hoverScreenNdc ? this.rayFromScreenPoint(this._hoverScreenNdc.x, this._hoverScreenNdc.y) : null;
+    const hit = this.hoverPick(camera, rayOverride);
     if (!hit) return;
 
     const style = this._config.raycastHighlightStyle;
@@ -5089,6 +7779,13 @@ class Engine3D {
       m.geometry?.dispose?.();
       m.material?.dispose?.();
     });
+    // [22/09/2026] NOVO — `_ghostEscada` (ver comentário grande no
+    // construtor) é um `THREE.Group` (vários degraus), não uma `Mesh`
+    // única — não tem `.geometry`/`.material` PRÓPRIOS pra liberar aqui
+    // (a lista acima só chamaria em vão, via optional chaining), precisa
+    // percorrer os filhos, mesmo padrão já usado pro boneco-palito do
+    // player logo abaixo.
+    this._ghostEscada?.traverse?.((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
     // Boneco-palito do player (ver _buildPlayerFigure) — um Group com várias
     // malhas dentro (tronco/cabeça/braços/pernas), também fora de `_group`
     // pelo mesmo motivo dos ghosts acima; percorre os filhos em vez de uma
@@ -5101,9 +7798,35 @@ class Engine3D {
     this._outlineCanvas?.remove?.();
     this._outlineCanvas = null;
     this._outlineCtx = null;
-    this.renderer?.dispose?.();
-    this.renderer?.forceContextLoss?.();
-    this.renderer = null;
+    // REESCRITO (07/09/2026), arquitetura WebGLRenderTarget — ver "MODO EYE"
+    // no construtor. Em modo "eye", `this.renderer` continua sendo
+    // `Engine3D._sharedRenderer`, usado por QUALQUER OUTRO "olho" que ainda
+    // esteja vivo — nunca chama dispose()/forceContextLoss() nele; só solta
+    // a referência local. Toda a antiga complexidade de "limpar o retângulo
+    // certo no canvas global compartilhado" (getBoundingClientRect na hora,
+    // fallback pro último retângulo salvo, contagem de "olhos" vivos,
+    // esconder o canvas global inteiro) deixou de existir: como cada "olho"
+    // tem seu PRÓPRIO render target E seu PRÓPRIO canvas 2D de saída, não há
+    // nenhum recurso compartilhado "sujo" pra limpar — basta descartar o
+    // render target desta instância e limpar o SEU PRÓPRIO canvas 2D
+    // (`clearRect`, direto, sem nenhuma conta de viewport/scissor/dpr).
+    if (this._eye) {
+      this.renderTarget?.dispose?.();
+      this.renderTarget = null;
+      if (this._displayCtx && this.canvas) {
+        this._displayCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      }
+      this._displayCtx = null;
+      this._rtOffscreen = null;
+      this._rtOffCtx = null;
+      this._fotoCamMask = null;
+      this._rtPixelBuffer = null;
+      this.renderer = null;
+    } else {
+      this.renderer?.dispose?.();
+      this.renderer?.forceContextLoss?.();
+      this.renderer = null;
+    }
   }
 }
 

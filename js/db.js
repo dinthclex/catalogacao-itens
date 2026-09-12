@@ -37,6 +37,65 @@
  * nada: a sincronização via servidor (ver sync.js) chama DB.mergeFromRemote
  * normalmente, que atualiza o cache desta aba do jeito de sempre.
  *
+ * [11/09/2026] ÍNDICE DE FUNÇÕES — cabeçalho adicionado pra evitar buscas
+ * exaustivas (mesmo padrão de ambientephotos.js/mapping.js).
+ *
+ * Helpers de módulo (fora do objeto `DB`, no topo do arquivo):
+ * - openDB: abre/faz upgrade do IndexedDB (cria stores/índices na 1ª vez).
+ * - onSaveStatus/_emitSaveStatus: assinatura/emissão do indicador "salvando…
+ *   /salvo" da barra de status (ver infobar.js).
+ * - _notifyDbError: toast padronizado de erro de banco (storage cheio etc.).
+ * - tx: helper de transação IndexedDB (Promise em cima de `IDBTransaction`).
+ * - _flushMapSave/flushPendingMapSaves: força a gravação de um `saveMap`
+ *   debounced pendente (ex. antes de fechar a aba/trocar de tela).
+ * - reqToPromise: `IDBRequest` -> Promise.
+ * - uuid/nowISO: geração de id/timestamp ISO usados em todo registro novo.
+ * - tokenize: normaliza string pra índice de busca (search.js).
+ * - cloneRec: cópia rasa de um registro (nunca devolve a referência do cache).
+ * - makeStoreCache: fábrica do cache em RAM write-through (1 por store) —
+ *   núcleo do mecanismo descrito no comentário grande acima.
+ * - _chaveObjectModel: chave composta tipo+nível pra cache de modelos 3D.
+ *
+ * DB (objeto — API pública usada por toda a aplicação):
+ * - _invalidateDupCache/computeConferenciaId/getDuplicatePatrimonios: cache e
+ *   cálculo de patrimônios DUPLICADOS (mesmo número cadastrado 2x).
+ * - addItem/updateItem/deleteItem/putItemRaw: CRUD de um item catalogado.
+ * - addFotoMarcacaoAoItem/addMapaMarcacaoAoItem: anexa ao item uma marcação
+ *   feita numa foto/no mapa (ver ambientephotos.js/mapview.js).
+ * - mergeFromRemote: aplica um item vindo do servidor (sync.js), resolvendo
+ *   conflito por `modificadoEm` mais recente.
+ * - touchLastConsulted: atualiza "última vez visto" de um item (histórico).
+ * - getItem/getItemByPatrimonio/countItems/getItemsPage/searchItems/
+ *   getItemsSince/getItemsByAmbiente/getAllItems/getAllSummaries: leituras
+ *   de item — página/busca/filtro por ambiente/lista resumida pra tabela.
+ * - touchType/getAllTypes/deleteType, touchSector/getAllSectors/deleteSector:
+ *   CRUD de tipos e setores cadastrados (autocompletar do formulário).
+ * - saveMap (debounced)/getMapSaveDebounceMs/setMapSaveDebounceMs: grava o
+ *   mapa (2D/3D) — atrasado por padrão pra não regravar a cada pixel de
+ *   arraste; `_flushMapSave` acima força a gravação imediata quando preciso.
+ * - getMap/getAllMaps/getOrCreateSingleMap/addMap/setCurrentMap/deleteMap:
+ *   CRUD de mapas/ambientes (inclui hierarquia de sub-ambientes).
+ * - addAmbientePhoto/saveAmbientePhoto/getAmbientePhoto/getPhotosByAmbiente/
+ *   getAllAmbientePhotos: CRUD de fotos de ambiente ("orb de foto" no mapa
+ *   2D/3D e fotos de patrimônio — ver `tipo` no registro).
+ * - findOrbFotoByItem: acha a foto-orb (se houver) associada a um item.
+ * - deleteAmbientePhoto: remove uma foto (e desfaz vínculos dependentes).
+ * - getSetting/setSetting/deleteSetting/getAllSettings: preferências do app
+ *   (chave/valor) — usado por TODA tela pra persistir UI/config do usuário.
+ * - getObjectModel/getObjectModelsForTipo/getAllObjectModels/setObjectModel/
+ *   deleteObjectModel: modelos 3D customizados por tipo/nível de objeto.
+ * - requestPersistentStorage/isStoragePersisted/storageEstimate: API do
+ *   navegador pra armazenamento persistente/quota (ver storagestatus.js).
+ * - exportAll: monta o dump completo do banco (backup/exportação).
+ * - countMapConflicts/findMapConflicts/countLinkedToMap/importMaps/
+ *   importSupplementary: fluxo de IMPORTAÇÃO de mapas de um backup/outro
+ *   dispositivo, com detecção/resolução de conflito (mapa já existe etc.).
+ * - findImportConflict/applyImportDecision/countImportConflicts/importItems:
+ *   mesmo fluxo de conflito, só que pra ITENS (patrimônios) importados.
+ * - savePerspMatchSession/getPerspMatchSession/getPerspMatchSessionsForMapa/
+ *   deletePerspMatchSession: CRUD de sessões salvas do antigo "Camera Match"
+ *   (js/perspmatch.js — tela desligada, mas os dados/API continuam aqui).
+ *
  * ---- Erros sempre notificados ----
  * Toda operação (leitura OU gravação) passa por `tx()` abaixo — qualquer
  * falha aí (banco corrompido, quota estourada, transação abortada, etc.)
@@ -47,11 +106,14 @@
  */
 
 const DB_NAME = 'catalogacao_itens_db';
-// NOVO (01/09/2026), item GRANDE #5 do pedido de 12 itens: "Deve ser possível
-// editar o modelo dos objetos 3D padrão. Também devem ter dois modelos: um
-// mais detalhado e um low poly (para melhorar desempenho)." — bump de versão
-// pra criar a store nova `objectModels` (ver onupgradeneeded logo abaixo).
-const DB_VERSION = 4;
+// [10/09/2026] Implementação da spec 'Camera Matching / Persp Match'
+// solicitada pelo usuário: bump de versão (4 -> 5) pra criar a store nova
+// `perspMatchSessions` (ver onupgradeneeded logo abaixo) — guarda a sessão de
+// calibração (foto + EXIF + linhas de fuga + âncoras de escala + pose
+// calculada) à PARTE dos objetos normais do mapa, no mesmo espírito de
+// `mapPhotos` (fotos pesadas não devem viver dentro do documento do mapa,
+// que é salvo com muita frequência).
+const DB_VERSION = 5;
 
 const STORES = {
   items: 'items',
@@ -68,6 +130,11 @@ const STORES = {
   // dá pra ler/gravar cada nível independente sem precisar reescrever o
   // outro.
   objectModels: 'objectModels',
+  // [10/09/2026] Sessões de "📐 Camera Match" — ver js/perspmatch.js e a
+  // especificação salva no projeto ('spec-camera-matching-persp-match.md').
+  // Uma sessão é uma UNIDADE por foto (nunca um objeto do mapa em si — ver
+  // comentário grande no CRUD abaixo).
+  perspMatchSessions: 'perspMatchSessions',
 };
 
 let _dbPromise = null;
@@ -137,6 +204,15 @@ function openDB() {
         const objectModels = db.createObjectStore(STORES.objectModels, { keyPath: 'id' });
         objectModels.createIndex('tipo', 'tipo', { unique: false });
       }
+
+      // [10/09/2026] Implementação da spec 'Camera Matching / Persp Match':
+      // store nova para as sessões de calibração por foto — ver comentário
+      // grande em STORES.perspMatchSessions acima e no CRUD mais abaixo
+      // ('---------- PERSP MATCH ----------').
+      if (!db.objectStoreNames.contains(STORES.perspMatchSessions)) {
+        const perspMatch = db.createObjectStore(STORES.perspMatchSessions, { keyPath: 'id' });
+        perspMatch.createIndex('mapaId', 'mapaId', { unique: false });
+      }
     };
 
     req.onsuccess = () => {
@@ -197,8 +273,79 @@ function onSaveStatus(cb) {
   _saveStatusListeners.add(cb);
   return () => _saveStatusListeners.delete(cb);
 }
+
+// NOVO (07/09/2026), pedido verbatim: "já que está rodando em um servidor
+// local, então, deve guardar as coisas nele (na sua pasta de dados). E a
+// mensagem fica [...] 'Salvo - no dispositivo (banco de dados do servidor
+// local)'. Se os dois estiverem habilitados para guardar (ou seja, o
+// indexedDB também), então, a mensagem deve mencionar que foi nos dois
+// 'IndexedDB' e 'Dispositivo local'." — `_emitSaveStatus` roda a cada
+// gravação de verdade (`tx()` abaixo), SÍNCRONO, então não dá pra consultar
+// `DB.getSetting` (assíncrono, e é o PRÓPRIO IndexedDB) ali dentro. Este
+// cache em memória guarda as chaves relevantes, populado 1x quando o banco
+// abre e mantido atualizado por `setSetting()` sempre que uma delas muda
+// (ver mais abaixo).
+// MUDADO (07/09/2026), pedido verbatim: "além da opção 'Guardar no
+// IndexedDB', deve ter a opção de 'guardar no servidor'. Uma sempre deve
+// ficar ativa ou as duas. Por padrão, agora, o IndexedDB deve ficar
+// marcado e, mesmo rodando em um servidor, a opção de 'guardar no
+// servidor' fica desmarcada por padrão." — troca 'espelharIndexedDB' (a
+// ideia antiga era "servidor é o destino principal, IndexedDB é o mirror
+// opcional") por 2 chaves independentes: 'guardarIndexedDB' (novo,
+// 'guardarNoIndexedDB' — default true, ver settings.js/DEFAULTS) e
+// 'guardarServidor' (reaproveita a chave JÁ EXISTENTE 'autoSaveAtivo' —
+// "Salvar cada item automaticamente no servidor local", ver autosave.js —
+// em vez de criar uma 3ª chave fazendo a mesma coisa; settings.js agora
+// mostra um checkbox pra ela também dentro do card "Armazenamento no
+// servidor", além do já existente em "Salvamento automático em arquivo").
+const _saveDestinoCache = { servidorUrl: '', guardarIndexedDB: true, guardarServidor: false };
+// A população inicial deste cache (lendo `_settingsCache.ensure()`) fica
+// logo ABAIXO de `_settingsCache` ser declarado mais adiante neste arquivo
+// (é um `const`, então referenciá-lo aqui em cima ainda não existiria —
+// "temporal dead zone") — ver o bloco perto de `makeStoreCache(STORES.settings, 'key')`.
+
+// BUG CORRIGIDO (07/09/2026), pedido verbatim: "Quando estiver em um
+// servidor o backup automático de 'TUDO' não deve ser feito. O botão de
+// exportar já cumpre esta função (de fazer um backup)." + relato de
+// travamento real no console: "[SERVIDOR] _pushBackupCompleto:
+// JSON.stringify() concluído em 22842ms — payload de 195455KB [...] Deu
+// para ver que enviou ~195MB em 22s com o navegador travado (ficou
+// travado mesmo)." — a rodada anterior (v407) tinha trocado "espelhar TUDO
+// a cada gravação" por "acumular e enviar em LOTE" (por tamanho/tempo),
+// mas ainda assim, mais cedo ou mais tarde, o mesmo `DB.exportAll()` +
+// `JSON.stringify` de TUDO (itens+fotos em base64+mapas+modelos 3D) rodava
+// — só que com menos frequência, o payload ficou ENORME (195MB), e
+// `JSON.stringify` de um payload desse tamanho é MUITO mais lento que o
+// tempo total economizado por rodar com menos frequência (22.8s travado de
+// uma vez, pior do que travamentos menores e mais frequentes). CORRIGIDO
+// AGORA: o espelhamento automático de TUDO foi REMOVIDO POR COMPLETO (nem
+// em lote) — `_emitSaveStatus` não aciona mais nada no ServerPrefs. O
+// backup completo pro servidor só acontece por AÇÃO EXPLÍCITA da pessoa
+// (botão "📤 Gravar tudo no servidor", ver serverprefs.js
+// `enviarTodosParaServidor`/`_pushBackupCompleto`) — o "botão de exportar"
+// citado pelo usuário (⬇️ Exportar backup, download local) continua
+// cobrindo o caso de backup manual de tudo, sem depender do servidor.
+// Salvamentos automáticos de ITEM INDIVIDUAL continuam existindo
+// normalmente (ver `AutoSave.pushItem`, chamado em app.js só pro item que
+// acabou de ser confirmado — "para as coisas que estão em uso no
+// momento", pedido verbatim) — isto NUNCA foi o que travava (payload de 1
+// item é pequeno), só o espelho de TUDO.
 function _emitSaveStatus(status) {
-  const info = { where: 'IndexedDB (banco de dados do navegador)' };
+  // "Uma sempre deve ficar ativa ou as duas" (pedido verbatim, garantido
+  // pela UI em settings.js — não deixa desmarcar as duas ao mesmo tempo).
+  const guardarServidor = !!(_saveDestinoCache.servidorUrl && _saveDestinoCache.guardarServidor);
+  const guardarIndexedDB = !!_saveDestinoCache.guardarIndexedDB;
+  // ATENÇÃO: tecnicamente o IndexedDB continua sendo gravado SEMPRE (é o
+  // banco que TODA a interface do app lê pra mostrar tabela/busca/mapa —
+  // desligar isso de verdade quebraria o app inteiro, não é uma opção
+  // real) — o checkbox "Guardar no IndexedDB" (e a mensagem abaixo) reflete
+  // só QUAIS destinos contam como "oficiais" pra pessoa, não uma escolha
+  // técnica real de onde os dados ficam guardados.
+  let where;
+  if (guardarServidor && guardarIndexedDB) where = 'servidor local + IndexedDB (banco de dados do navegador)';
+  else if (guardarServidor) where = 'no dispositivo (banco de dados do servidor local)';
+  else where = 'IndexedDB (banco de dados do navegador)';
+  const info = { where, servidorAtivo: guardarServidor };
   _saveStatusListeners.forEach((cb) => {
     try { cb(status, info); } catch (e) { console.error('Erro num listener de DB.onSaveStatus:', e); }
   });
@@ -223,9 +370,21 @@ function _notifyDbError(err, contexto) {
   window.EventLog?.log?.(`Erro no banco de dados (${contexto}): ${msg}`, { tipo: 'erro' });
 }
 
+// NOVO (07/09/2026), pedido verbatim (debug): "para debug coloque no
+// console do navegador tudo o que está sendo feito pelo servidor e em
+// segundo plano para eu ver o que está travando." — cada transação do
+// IndexedDB (leitura OU escrita) agora loga início/duração no console, com
+// o prefixo "[DB]" — inclui o 1º "ensure()" de cada store (`makeStoreCache`
+// abaixo), que lê TUDO daquele store de uma vez (o candidato mais provável
+// pra "travar no início", se o catálogo tiver muitos itens/fotos em
+// base64). `performance.now()` (não `Date.now()`) pra precisão de
+// milissegundos sem depender do relógio do sistema.
 function tx(storeNames, mode, fn) {
   const isWrite = mode === 'readwrite'; // só grava de verdade nesse modo — leitura não dispara o aviso
   if (isWrite) _emitSaveStatus('saving');
+  const _dbgNomes = Array.isArray(storeNames) ? storeNames.join('+') : storeNames;
+  const _dbgInicio = performance.now();
+  console.log(`[DB] tx(${_dbgNomes}, ${mode}) iniciada...`);
   return openDB().then((db) => new Promise((resolve, reject) => {
     const t = db.transaction(storeNames, mode);
     let result;
@@ -235,10 +394,12 @@ function tx(storeNames, mode, fn) {
     t.onabort = () => reject(t.error || new Error('Transação abortada'));
   })).then((result) => {
     if (isWrite) _emitSaveStatus('saved');
+    console.log(`[DB] tx(${_dbgNomes}, ${mode}) concluída em ${(performance.now() - _dbgInicio).toFixed(0)}ms`);
     return result;
   }).catch((err) => {
     if (isWrite) _emitSaveStatus('error');
-    _notifyDbError(err, `${mode} em ${Array.isArray(storeNames) ? storeNames.join('+') : storeNames}`);
+    console.log(`[DB] tx(${_dbgNomes}, ${mode}) FALHOU após ${(performance.now() - _dbgInicio).toFixed(0)}ms:`, err);
+    _notifyDbError(err, `${mode} em ${_dbgNomes}`);
     throw err;
   });
 }
@@ -348,7 +509,31 @@ const _sectorsCache = makeStoreCache(STORES.sectors, 'nome');
 const _mapsCache = makeStoreCache(STORES.maps, 'id');
 const _mapPhotosCache = makeStoreCache(STORES.mapPhotos, 'id');
 const _settingsCache = makeStoreCache(STORES.settings, 'key');
+
+// NOVO (07/09/2026) — população inicial de `_saveDestinoCache` (declarado
+// mais acima, perto de `_emitSaveStatus`) — precisa vir AQUI, depois de
+// `_settingsCache` já existir. Roda 1x quando o banco abre; depois disso,
+// `setSetting()` mantém o cache atualizado sozinho a cada mudança de
+// 'servidorUrl'/'guardarIndexedDB'/'autoSaveAtivo' (ver mais abaixo).
+_settingsCache.ensure().then((map) => {
+  _saveDestinoCache.servidorUrl = map.get('servidorUrl')?.value || '';
+  // 'guardarIndexedDB' — NOVO (07/09/2026), default TRUE (pedido verbatim:
+  // "por padrão, agora, o IndexedDB deve ficar marcado") — precisa desse
+  // '?? true' explícito porque a chave pode nunca ter sido gravada ainda
+  // (instalação nova/pessoa que nunca abriu esta opção), e nesse caso
+  // 'map.get(...)' devolve 'undefined', que '!!undefined' resolveria pra
+  // 'false' (o OPOSTO do padrão pedido).
+  const guardarIndexedDBSalvo = map.get('guardarIndexedDB')?.value;
+  _saveDestinoCache.guardarIndexedDB = (guardarIndexedDBSalvo === undefined) ? true : !!guardarIndexedDBSalvo;
+  // 'guardarServidor' reaproveita a chave já existente 'autoSaveAtivo' (ver
+  // comentário grande acima de '_saveDestinoCache') — default false, igual
+  // sempre foi.
+  _saveDestinoCache.guardarServidor = !!map.get('autoSaveAtivo')?.value;
+}).catch(() => {});
 const _objectModelsCache = makeStoreCache(STORES.objectModels, 'id');
+// [10/09/2026] Cache da store nova de sessões Persp Match — mesmo padrão
+// makeStoreCache já usado por todas as outras stores neste arquivo.
+const _perspMatchCache = makeStoreCache(STORES.perspMatchSessions, 'id');
 
 // Chave de registro da store `objectModels` — ver comentário grande em
 // STORES.objectModels acima. Função central pra nunca montar essa string
@@ -1264,6 +1449,14 @@ const DBApi = {
     // servidor à toa — e, pior, `serverPrefsUltimaEm` reagendando A SI
     // MESMO criaria um laço infinito de reenvio a cada 4s pra sempre.
     if (window.SettingsView?.CHAVES_PREFERENCIA?.includes(key)) window.ServerPrefs?.scheduleSync?.();
+    // NOVO (07/09/2026) — mantém `_saveDestinoCache` (ver `_emitSaveStatus`
+    // acima) sempre atual, sem precisar reabrir o app: assim que a URL do
+    // servidor ou os checkboxes "Guardar no IndexedDB"/"Guardar no
+    // servidor" mudam em Configurações, a PRÓXIMA gravação já mostra a
+    // mensagem certa.
+    if (key === 'servidorUrl') _saveDestinoCache.servidorUrl = value || '';
+    if (key === 'guardarIndexedDB') _saveDestinoCache.guardarIndexedDB = !!value;
+    if (key === 'autoSaveAtivo') _saveDestinoCache.guardarServidor = !!value;
   },
 
   // NOVO (01/09/2026), item #4 do pedido de 12 itens: "Nas 'configurações do
@@ -1292,6 +1485,12 @@ const DBApi = {
     // ao arquivo de preferências do servidor (senão ele ficaria com valores
     // velhos depois de um reset).
     if (window.SettingsView?.CHAVES_PREFERENCIA?.includes(key)) window.ServerPrefs?.scheduleSync?.();
+    // NOVO (07/09/2026) — mesmo motivo do comentário grande em `setSetting`
+    // acima: chave apagada volta pro respectivo padrão (servidorUrl='',
+    // guardarIndexedDB=TRUE — pedido verbatim, autoSaveAtivo=false).
+    if (key === 'servidorUrl') _saveDestinoCache.servidorUrl = '';
+    if (key === 'guardarIndexedDB') _saveDestinoCache.guardarIndexedDB = true;
+    if (key === 'autoSaveAtivo') _saveDestinoCache.guardarServidor = false;
   },
 
   // ---------- MODELOS 3D CUSTOMIZADOS POR TIPO ----------
@@ -1666,6 +1865,45 @@ const DBApi = {
       }
     }
     return { criados, atualizados, ignorados };
+  },
+
+  // ---------- PERSP MATCH (sessões de "📐 Camera Match") ----------
+  // [10/09/2026] Implementação da spec 'Camera Matching / Persp Match'
+  // solicitada pelo usuário (ver doc do projeto
+  // 'spec-camera-matching-persp-match.md', seção 3 "Estrutura de Dados").
+  // Uma sessão preserva a FOTO original + toda a calibração (EXIF, linhas de
+  // fuga, âncoras de escala, objetos posicionados) para permitir reabrir e
+  // ajustar mais tarde sem repetir o trabalho manual — NUNCA é, ela mesma,
+  // um objeto do mapa (câmera/objeto calibrados são gravados à parte, via
+  // Mapping.addCamera/addObject, quando a sessão é confirmada — ver
+  // js/perspmatch.js `_confirmarSalvar`). Mesmo padrão de CRUD das outras
+  // stores deste arquivo (cache local + put/delete espelhando o cache).
+  async savePerspMatchSession(session) {
+    const rec = { ...session, atualizadoEm: nowISO() };
+    if (!rec.criadoEm) rec.criadoEm = rec.atualizadoEm;
+    await tx([STORES.perspMatchSessions], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.perspMatchSessions).put(rec)));
+    const map = await _perspMatchCache.ensure();
+    map.set(rec.id, rec);
+    return cloneRec(rec);
+  },
+
+  async getPerspMatchSession(id) {
+    const map = await _perspMatchCache.ensure();
+    return cloneRec(map.get(id));
+  },
+
+  /** Todas as sessões vinculadas a UM mapa — usado pra listar "sessões Persp
+   *  Match já feitas neste mapa" (reabrir/ajustar) na entrada da ferramenta. */
+  async getPerspMatchSessionsForMapa(mapaId) {
+    const map = await _perspMatchCache.ensure();
+    return [...map.values()].filter((r) => r.mapaId === mapaId).map(cloneRec)
+      .sort((a, b) => (b.atualizadoEm || '').localeCompare(a.atualizadoEm || ''));
+  },
+
+  async deletePerspMatchSession(id) {
+    await tx([STORES.perspMatchSessions], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.perspMatchSessions).delete(id)));
+    const map = await _perspMatchCache.ensure();
+    map.delete(id);
   },
 };
 

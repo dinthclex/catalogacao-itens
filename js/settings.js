@@ -1,6 +1,79 @@
 /**
  * settings.js — Painel de configurações: envio por email/servidor, e
  * backup/restauração dos dados.
+ *
+ * ---------------------------------------------------------------------
+ * [11/09/2026] CABEÇALHO COM ÍNDICE DE FUNÇÕES (pedido recorrente do
+ * usuário, "evitar buscas exaustivas") — `SettingsView` é um objeto único
+ * (`const SettingsView = {...}`). Listado na ordem em que aparece no
+ * arquivo; agrupado por assunto pra facilitar a busca visual.
+ *
+ * Estado/dados: `_container`, `SETTINGS_CATS` (as 4 abas do painel),
+ * `_activeSettingsCat`.
+ *
+ * Ciclo de vida do painel:
+ * - mount(container) — MÉTODO PRINCIPAL, monta o HTML inteiro da tela de
+ *   configurações (os ~17 `.settings-section` agrupados nas 4 abas) e liga
+ *   todos os handlers — a maior parte do arquivo (linhas ~129-1498) vive
+ *   dentro dela.
+ * - unmount() — limpeza ao sair da tela (cancela listeners/timers abertos
+ *   por mount).
+ * - _wireSettingsCats(container) — liga os botões das 4 abas de categoria
+ *   à troca de `_activeSettingsCat`/visibilidade dos cards.
+ * - _resetarPadroesDoApp() — botão "redefinir padrões" (zera todas as
+ *   configurações de todos os menus do app pro valor de fábrica).
+ *
+ * Permissões do navegador (câmera/geolocalização):
+ * - _permLabel(concedida) — rótulo textual (✅/❌) de um estado de permissão.
+ * - _cameraPermissionState()/_cameraPermissionGranted() — consulta o
+ *   estado atual da permissão de câmera.
+ * - _requestGeoPermission()/_requestCameraPermission() — dispara o prompt
+ *   nativo do navegador pra pedir cada permissão.
+ *
+ * Sincronização/servidor/rede:
+ * - _renderLastSync() — mostra a data/hora da última sincronização.
+ * - _renderServerPrefsStatus() — status atual das preferências de servidor
+ *   local/conexão direta.
+ * - _wireGuardarDestinos(container) / _syncGuardarServidorUI(container,
+ *   checked) — liga os checkboxes de "onde guardar" (local/servidor) e
+ *   sincroniza a UI dependente deles.
+ * - _serverInstructions(cenario) / _cenarioTexto(cenario) — texto de ajuda
+ *   passo-a-passo pra cada cenário de configuração de servidor
+ *   (HTTPS local, mkcert, etc.).
+ * - _svgTerminal() — ícone SVG usado nas instruções de terminal/servidor.
+ * - _wireServerTabs(container) / _wireNodeSubTabs(contentEl) — liga as
+ *   abas da seção "Servidor" e as sub-abas do guia Node.
+ * - _serverTabContent(tab) / _nodeSubTabContent(sub) — HTML de cada
+ *   aba/sub-aba do guia de servidor.
+ * - _downloadServerBundle() / _downloadServerBundleNode() /
+ *   _downloadServerBundleNodeSimples() / _downloadServerGuideText() —
+ *   geram/baixam os pacotes de arquivos e o guia em texto do servidor
+ *   local (versões PHP/Node completo/Node simples).
+ *
+ * Armazenamento/estrutura de arquivos:
+ * - _renderStorageSection() — monta a seção com a árvore de uso de
+ *   armazenamento.
+ * - _abrirModalEstruturaArquivos() — abre o modal explicando a estrutura
+ *   de pastas/arquivos usada pelo app.
+ * - _renderArvoreStorage(no, profundidade) — desenha recursivamente um nó
+ *   da árvore de armazenamento.
+ * - _formatBytes(n) — formata um tamanho em bytes pra texto legível
+ *   (KB/MB/GB).
+ *
+ * Exportação/importação/backup:
+ * - _downloadFullCatalog() — baixa o catálogo inteiro (backup completo).
+ * - _slugify(s) — normaliza um texto pra nome de arquivo seguro.
+ * - _pickerRowHtml(id, checked, label, thumbUrl) — HTML de uma linha do
+ *   seletor de itens a exportar.
+ * - _openExportModal(opts) — abre o modal de exportação (escolha de
+ *   itens/formato/destino) — bloco grande, concentra boa parte da lógica
+ *   de exportação.
+ * - showEventLog() — abre a janela do log de eventos do catálogo.
+ * - _importApplyAll(itens, onDuplicate) — aplica um import inteiro de uma
+ *   vez, tratando duplicados conforme `onDuplicate`.
+ * - _importReviewOneByOne(itens) — fluxo de revisão de import item a item
+ *   (confirmar/pular cada um manualmente).
+ * ---------------------------------------------------------------------
  */
 
 const SettingsView = {
@@ -103,13 +176,21 @@ const SettingsView = {
   // explicação completa do que entra/não entra e por quê.
   CHAVES_PREFERENCIA: [
     'cenarioServidor', 'autoSaveModoArquivo', 'emailDestino', 'emailAssunto', 'emailTextoPadrao', 'emailModo',
-    'servidorUrl', 'servidorIncluirImagens', 'autoSaveAtivo', 'autoSaveFormatoExtra', 'syncAutoAtivo',
+    'servidorUrl', 'servidorIncluirImagens', 'guardarIndexedDB', 'autoSaveAtivo', 'autoSaveFormatoExtra', 'syncAutoAtivo',
     'historySempreVisivel', 'mapa2dGrade', 'mapa2dReguas', 'mapa2dSnapGrade', 'mapa2dSnapGradeM', 'imaMagnetPx',
     'render3dModo', 'paredeUniaoDist', 'geoAtivo', 'mapaModoPadrao', 'hudAtivo', 'organizeOrder',
     'mapSaveDebounceMs', 'capturarIpPublico',
     'autoExportAtivo', 'autoExportIntervaloMin', 'autoExportDestinos', 'autoExportIncluirImagens',
     'iconesSvgAtivo', 'iconesSvgBaixarInternet', 'iconesSvgAliases', 'iconesSvgFallback',
     'mapa3dConfig',
+    // NOVO (09/09/2026) — ver js/classicmode.js: qual dos 2 modos de
+    // apresentação (Workspace/BSP OU Clássico) o app deve abrir da
+    // próxima vez. Resetar volta pro padrão (Workspace).
+    'layoutMode',
+    // [10/09/2026] — ver js/classicmode.js: liga/desliga a Tela de
+    // Abertura aparecer sozinha a cada boot. Resetar volta pro padrão
+    // (ligada — `cfg.splashSempreAoAbrir !== false`, ver checkbox acima).
+    'splashSempreAoAbrir',
   ],
 
   async _resetarPadroesDoApp() {
@@ -164,6 +245,11 @@ const SettingsView = {
       await DB.setSetting('cenarioServidor', cfg.cenarioServidor);
     }
     const semServidor = (v) => v === 'pc-sem-servidor' || v === 'celular-sem-servidor';
+
+    // NOVO (08/09/2026), pedido verbatim: "Isso deve ser configuravel
+    // em alguma secao das 'configuracoes do app', se ao selecionar a
+    // tela que sera exibida, ira abrir em tela cheia ou nao."
+    const wsFullscreen = cfg.workspaceFullscreenConfig || {};
 
     const geoConcedida = await Geo.isPermissionGranted();
     const camConcedida = await this._cameraPermissionGranted();
@@ -286,6 +372,45 @@ const SettingsView = {
           <h3>🔄 Atualização do app</h3>
           <p style="font-size:12.5px; color:var(--text-dim)">O app já verifica sozinho se há uma versão mais nova (a cada 20 min, ou ao voltar pra esta aba) e recarrega automaticamente quando encontra. Se mesmo assim a tela parecer "presa" numa versão antiga, force uma recarga completa abaixo — refaz o download de TODOS os arquivos do app direto do servidor, sem usar nada guardado (Service Worker + cache do app). Não apaga nenhum patrimônio/foto/mapa cadastrado.</p>
           <button class="btn secondary sm" id="st-force-reload" title="Descarta o Service Worker e o cache do app, e recarrega a página do zero, direto da rede">🔄 Forçar atualização (sem cache)</button>
+        </div>
+
+        <!-- NOVO (09/09/2026), pedido verbatim: "Coloque o antigo método
+             de apresentação das coisas sem o BSP splitter screen /
+             dockable [...] Essa alteração de layout pode ser feita pelas
+             'configurações do app' em uma seção para isso. Faça um
+             transicionador fácil e rápido entre os dois modos de
+             visualização do app BSP/dockable ou o outro jeito." — ver
+             js/classicmode.js (window.ClassicMode). Este toggle é
+             equivalente ao botão 🔀 do cabeçalho (mesma troca de modo,
+             mesmo estado salvo em "layoutMode") — só um 2º jeito de
+             acessar a mesma alternância, agora com uma explicação mais
+             longa do que cada modo faz, que não cabe no atributo title
+             de um ícone. -->
+        <div class="settings-section" data-cat="catalogo">
+          <h3>🖥️ Layout do app</h3>
+          <p style="font-size:12.5px; color:var(--text-dim)">
+            Como as telas do app são apresentadas. O botão 🔀 no cabeçalho (ao
+            lado de "⚙️ Configurações"/"❓ Ajuda") faz a MESMA troca, a
+            qualquer momento — este toggle é só mais um jeito de chegar nela.
+          </p>
+          <label class="radio-opt" style="margin-top:8px">
+            <input type="checkbox" id="st-layout-classico" ${ClassicMode?.isActive?.() ? 'checked' : ''}>
+            <span><span class="t">📱 Usar o layout Clássico (tela cheia, uma tela por vez, barra inferior)</span><br><span class="d">Desmarcado (padrão): 🧩 Workspace — blocos redimensionáveis estilo Blender, com a tela "Info"/"Botões" próprias. Marcado: o jeito antigo — Tabela/Cartões/Fotos/Mapa/Buscar em tela cheia, um de cada vez, com barra inferior fixa (igual o app era antes do Workspace existir).</span></span>
+          </label>
+          <!-- [10/09/2026] Pedido verbatim: "A splash screen deve sempre
+               aparecer. Uma opção nas 'configurações do app' deve servir
+               para habilitar/desabilitar que sempre aparece no boot." —
+               ver ClassicMode.openSplashScreen()/_SPLASH_SEMPRE_KEY em
+               js/classicmode.js, chamada (sem bloquear o boot) por
+               App._boot() em app.js. Desmarcar aqui NÃO apaga o modo já
+               escolhido ('Conferência de patrimônios'/'Mapeamento de
+               ambientes') — só para de mostrar a janela sozinha a cada
+               vez que o app abre; ainda dá pra reabri-la manualmente por
+               Ajuda ('?') → "Tela de Abertura" (ver js/mapview.js). -->
+          <label class="radio-opt" style="margin-top:8px">
+            <input type="checkbox" id="st-splash-sempre" ${cfg.splashSempreAoAbrir !== false ? 'checked' : ''}>
+            <span><span class="t">🎬 Mostrar a Tela de Abertura ao iniciar o app</span><br><span class="d">Marcado (padrão): a janela "Modo de operação" (Conferência de patrimônios / Mapeamento de ambientes) aparece toda vez que o app é aberto — feche com "✕" ou clicando fora dela sem precisar escolher nada. Desmarcado: o app abre direto, sem essa janela (ainda pode ser reaberta por Ajuda ('?') → "Tela de Abertura").</span></span>
+          </label>
         </div>
 
         <div class="settings-section" data-cat="catalogo">
@@ -519,13 +644,30 @@ const SettingsView = {
              uma conexão, então isso nunca mais dispara de fato; não removido
              do app inteiro de propósito, pra não mexer em mais arquivos do
              que o pedido pedia. -->
+        <!-- REORGANIZADO (07/09/2026), pedido verbatim: "separe o que é
+             servidor no sentido de o app estar rodando em um servidor local
+             e guardando arquivos localmente da ideia de servidor no sentido
+             de interagir com outros aparelhos." Antes desta rodada, um único
+             card "🖥️ Servidor local (opcional)" misturava 3 ideias
+             diferentes: (a) a CONEXÃO em si (URL, como montar o servidor);
+             (b) ARMAZENAMENTO em arquivo por este servidor (pasta de dados,
+             restaurar backup, estrutura de arquivos, IndexedDB duplo) —
+             pedido do usuário: "não depende do IndexedDB [de OUTROS
+             aparelhos], só pelo fato de não depender do IndexedDB [deste
+             aparelho]"; (c) SINCRONIZAÇÃO com outros aparelhos (já era um
+             card à parte). Viram 3 cards agora: (a) e (c) continuam com os
+             mesmos nomes de sempre; (b) é o card novo "💾 Armazenamento no
+             servidor" logo abaixo deste. -->
         <div class="settings-section" data-cat="servidor">
           <h3>🖥️ Servidor local (opcional)</h3>
           <p style="font-size:12.5px; color:var(--text-dim)">
-            Um site puro (HTML/CSS/JS) não acessa o disco do computador nem sincroniza
-            sozinho entre o PC e o celular. Configurando um servidor local (que você
-            mesmo hospeda), o mesmo endereço abaixo é usado por todos os aparelhos
-            envolvidos, e é isso que faz eles enxergarem o mesmo catálogo.
+            Um site puro (HTML/CSS/JS) não acessa o disco do computador sozinho —
+            sem um servidor, não dá para gravar em arquivo nem sincronizar entre
+            aparelhos. Esta seção é só sobre a CONEXÃO deste aparelho com um
+            servidor local (que você mesmo hospeda); o que ele guarda em arquivo
+            está no card "💾 Armazenamento no servidor" logo abaixo, e o uso com
+            vários aparelhos ao mesmo tempo está em "🔗 Sincronização entre
+            aparelhos", mais abaixo ainda.
           </p>
           <label class="field">
             <span class="lbl">Este aparelho é PC ou celular? E vai ter servidor ou não? (detectamos automaticamente o tipo de aparelho, e já deixamos "sem servidor" marcado)</span>
@@ -539,8 +681,21 @@ const SettingsView = {
           <div id="st-cenario-semservidor" class="${semServidor(cfg.cenarioServidor) ? '' : 'hidden'}" style="margin:4px 0 10px">
             <button class="btn secondary sm" id="st-baixar-tudo" title="Gera um arquivo para baixar com tudo que já foi catalogado neste aparelho">⬇️ Baixar tudo que já foi catalogado</button>
           </div>
+          <!-- NOVO (07/09/2026), pedido verbatim: "já que estou rodando em
+               um servidor local. O próprio app deve se comunicar com o
+               servidor. Usar caminhos padrão e fazer configurações
+               automaticamente de modo que se possa 'ligar' o app ir fazendo
+               as atividades e não se preocupar em 'Configurar a URL do
+               servidor local'." Ver ServerPrefs.autoDetectarServidorLocal
+               (js/serverprefs.js, chamada 1x no boot — app.js) — preenche
+               este campo sozinho quando o app é aberto por http(s)://  e
+               existe um receive.php/js respondendo na mesma pasta. O campo
+               continua editável normalmente pra quem quiser apontar pra
+               OUTRO endereço (ex.: servidor rodando em outro aparelho da
+               rede) — a detecção automática só age quando este campo está
+               vazio, nunca sobrescreve um valor já configurado. -->
           <label class="field ${semServidor(cfg.cenarioServidor) ? 'hidden' : ''}" id="st-webhook-url-field">
-            <span class="lbl">URL do servidor — ex: http://192.168.0.10/catalogo/receive.php (o mesmo campo serve tanto para um servidor rodando NESTE aparelho quanto para um servidor rodando em OUTRO aparelho da rede — veja as abas abaixo)</span>
+            <span class="lbl">URL do servidor — ex: http://192.168.0.10/catalogo/receive.php (o mesmo campo serve tanto para um servidor rodando NESTE aparelho quanto para um servidor rodando em OUTRO aparelho da rede — veja as abas abaixo). Se este app já foi aberto por um endereço http(s):// com um servidor respondendo na mesma pasta, este campo é preenchido sozinho.</span>
             <input type="url" id="st-webhook-url" value="${Utils.escapeHtml(cfg.servidorUrl || '')}" placeholder="http://SEU-SERVIDOR/receive.php">
           </label>
           <label class="radio-opt">
@@ -548,6 +703,43 @@ const SettingsView = {
             <span><span class="t">Incluir fotos/avatares nos envios ao servidor</span><br><span class="d">Aumenta bastante o tamanho enviado — desative em conexões lentas.</span></span>
           </label>
 
+          <div id="st-server-instructions" style="font-size:12.5px; color:var(--text-dim); margin-top:10px; white-space:pre-wrap; line-height:1.5; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:10px"></div>
+
+          <div id="st-servertabs-wrap" class="${semServidor(cfg.cenarioServidor) ? 'hidden' : ''}" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border)">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:8px">
+              <span style="font-size:13px; font-weight:600">Como montar o servidor — escolha uma forma:</span>
+              <button type="button" class="btn secondary sm" id="st-download-guia-texto" title="Baixa um arquivo de texto com o passo a passo completo das 4 formas (PHP, XAMPP, Node.js completo e Node.js simples), formatado igual a um guia">📄 Baixar guia (texto)</button>
+            </div>
+            <div class="st-servertabs" id="st-servertabs">
+              <button type="button" class="st-servertab active" data-tab="php" title="PHP embutido — usa o comando 'php -S', vem junto com qualquer instalação do PHP, sem instalar mais nada">🐘 PHP</button>
+              <button type="button" class="st-servertab" data-tab="xampp" title="XAMPP — pacote pronto com PHP + Apache, com painel gráfico (só PC)">🧩 XAMPP</button>
+              <button type="button" class="st-servertab" data-tab="node" title="Node.js — alternativa ao PHP, script pronto incluso neste app">🟢 Node.js</button>
+            </div>
+            <div id="st-servertab-content" class="st-servertab-content"></div>
+          </div>
+        </div>
+
+        <!-- NOVO (07/09/2026) — card separado, pedido verbatim: "O botão
+             que agora é 'Restaurar tudo a partir do servidor', o botão
+             'Guardar também no IndexedDB (além do servidor)', a 'Estrutura
+             de arquivos do servidor' e, se tiver outra coisa relacionada a
+             salvar as coisas localmente (sem a ideia de outros aparelhos,
+             só pelo fato de não depender do IndexedDB), devem ficar em um
+             card a parte." Também entrou aqui (mesma ideia, "não depende do
+             IndexedDB deste aparelho"): status de preferências/backup
+             automático e a pasta de dados no servidor — nenhum dos dois
+             tem relação com OUTROS aparelhos, só com este servidor guardando
+             arquivo. -->
+        <!-- REMOVIDO (07/09/2026), pedido verbatim do usuário: "exclua o
+             texto: 'O que o servidor local (card acima) guarda em ARQUIVO
+             neste aparelho — sem nenhuma relação com outros PCs/celulares
+             (isso é o card 🔗 Sincronização entre aparelhos, mais
+             abaixo).'" — o parágrafo de introdução deste card foi removido;
+             o comentário grande logo acima (fora deste template, ver
+             "REORGANIZADO (07/09/2026)") continua documentando por que o
+             card existe separado, só o TEXTO VISÍVEL na tela saiu. -->
+        <div class="settings-section" data-cat="servidor">
+          <h3>💾 Armazenamento no servidor</h3>
           <!-- NOVO (01/09/2026), item GRANDE #3 do pedido de 12 itens,
                verbatim: "Deve ser possível guardar direto em arquivo pelo
                servidor local, além do indexedDB [...] Deve ser possível
@@ -568,34 +760,101 @@ const SettingsView = {
                js/serverprefs.js), que por sua vez conversam com as ações
                "configurar-pasta-dados"/"status-armazenamento" novas em
                server/receive.js/receive.php. -->
+          <!-- MUDADO (07/09/2026), pedido verbatim: "E já deixe o nome do
+               pasta padrão. e um botão lateral para editar assim como se faz
+               com o nome dos mapas. Para evitar apagar sem querer e não se
+               lembrar tendo que reiniciar o app." — ANTES: um campo de
+               texto (input) sempre aberto/editável (risco de apagar o
+               caminho sem querer, e nada visível "de volta" até clicar
+               "Salvar pasta" — se a pessoa esquecesse o valor original,
+               reiniciar o app não ajudava, já que o campo não carregava
+               nada sozinho). AGORA: mesmo padrão de "✏️ Renomear este mapa"
+               (ver mapview.js, método _openMapSwitcherModal) — o caminho ATUAL
+               (sempre consultado de verdade no servidor, nunca perdido) fica
+               só como TEXTO ao lado de um botão ✏️; editar exige um clique
+               explícito, que abre uma janela "prompt" JÁ PREENCHIDA com o valor
+               atual (nunca em branco) — cancelar (Esc/Cancelar) não muda
+               nada. -->
           <div id="st-pastadados-wrap" class="${semServidor(cfg.cenarioServidor) ? 'hidden' : ''}" style="margin-bottom:10px">
-            <label class="field">
-              <span class="lbl">Pasta onde o servidor guarda os arquivos</span>
-              <input type="text" id="st-pastadados-input" placeholder="Padrão: uma pasta 'dados' dentro do servidor">
-              <span class="d">Deixe em branco para usar o padrão (pasta "dados" dentro da pasta do servidor). Pode ser um caminho relativo (à pasta do servidor) ou absoluto (ex: D:\Backups\catalogacao) — "pode ser em outro lugar", como pedido.</span>
-            </label>
-            <div style="display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap">
-              <button class="btn secondary sm" id="st-pastadados-salvar" title="Envia esta pasta para o servidor local usar a partir de agora">💾 Salvar pasta</button>
-              <span id="st-pastadados-atual" style="font-size:11.5px; color:var(--text-dim)"></span>
+            <div class="lbl" style="margin-bottom:4px">Pasta onde o servidor guarda os arquivos</div>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
+              <span id="st-pastadados-atual" style="font-size:12.5px; flex:1; min-width:140px">Consultando pasta atual no servidor…</span>
+              <button type="button" class="icon-btn sm" id="st-pastadados-editar" title="Editar a pasta onde o servidor guarda os arquivos (mesmo botão usado para renomear mapas)">✏️</button>
             </div>
+            <span class="d" style="display:block; margin-top:4px">Padrão: uma pasta "storage" dentro da pasta do servidor. Pode apontar para outro lugar (relativo à pasta do servidor, ou um caminho absoluto, ex: D:\Backups\catalogacao).</span>
           </div>
+          <!-- RENOMEADO (07/09/2026), pedido verbatim: "O botão 'Restaurar
+               tudo do servidor' deve ter o texto trocado para 'Restaurar
+               tudo a partir do servidor'." -->
+          <!-- NOVO (07/09/2026), pedido verbatim: "O botão 'Restaurar tudo
+               a partir do servidor' serve para carregar as informações do
+               servidor e copiar para o IndexedDB? Se sim, isso deve ficar
+               claro com uma descrição." — resposta: sim, exatamente isso;
+               descrição adicionada abaixo do botão (antes só existia como
+               "title", que exige passar o mouse por cima pra ler). -->
           <div id="st-serverprefs-actions" class="${semServidor(cfg.cenarioServidor) ? 'hidden' : ''}" style="margin-bottom:10px">
-            <button class="btn secondary sm" id="st-restaurar-servidor" title="Busca o backup completo mais recente salvo pelo servidor local (itens, tipos, setores, mapas, fotos e preferências) e importa aqui — útil se os dados do navegador foram apagados sem ter exportado antes">⬇️ Restaurar tudo do servidor</button>
+            <button class="btn secondary sm" id="st-restaurar-servidor" title="Busca o backup completo mais recente salvo pelo servidor local (itens, tipos, setores, mapas, fotos e preferências) e importa aqui — útil se os dados do navegador foram apagados sem ter exportado antes">⬇️ Restaurar tudo a partir do servidor</button>
+            <p class="d" style="margin-top:6px">Busca o backup completo mais recente que o servidor tem guardado e IMPORTA para o IndexedDB deste aparelho — mesmo fluxo de "⬆️ Importar backup" (pergunta o que fazer com cada item que já existir aqui, nada é apagado sem perguntar). Útil se os dados do navegador deste aparelho foram apagados sem antes exportar/restaurar.</p>
           </div>
 
-          <div id="st-server-instructions" style="font-size:12.5px; color:var(--text-dim); margin-top:10px; white-space:pre-wrap; line-height:1.5; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:10px"></div>
+          <!-- MUDADO (07/09/2026), pedido verbatim: "No botão 'Guardar
+               também no IndexedDB (além do servidor)', diz '...é o que faz
+               a tabela/busca/mapa aparecerem na tela...'. Não tem o
+               porquê disso, pois basta que as informações estejam
+               acessíveis, se for do IndexedDB ou de um arquivo carregado
+               via servidor não importa." + "Além da opção 'Guardar no
+               IndexedDB', deve ter a opção de 'guardar no servidor'. Uma
+               sempre deve ficar ativa ou as duas. Por padrão, agora, o
+               IndexedDB deve ficar marcado e, mesmo rodando em um
+               servidor, a opção de 'guardar no servidor' fica desmarcada
+               por padrão." — ANTES: 1 único toggle "Guardar também no
+               IndexedDB (além do servidor)", desligado por padrão, cuja
+               descrição justificava (de forma confusa/desnecessária,
+               removida agora) o IndexedDB sempre estar ativo citando
+               "é o que faz a tabela/busca/mapa aparecerem". AGORA: 2
+               checkboxes INDEPENDENTES — "Guardar no IndexedDB" (novo,
+               ligado por padrão) e "Guardar no servidor" (reaproveita a
+               MESMA chave 'autoSaveAtivo' já usada em "💾 Salvamento
+               automático em arquivo", mais abaixo nas Configurações — uma
+               coisa só, mostrada em 2 lugares, nunca 2 configurações
+               diferentes controlando o mesmo comportamento) — com uma
+               trava (ver _wireGuardarDestinos abaixo) que impede
+               desmarcar as duas ao mesmo tempo. Ver db.js
+               _emitSaveStatus/_saveDestinoCache. -->
+          <div class="${semServidor(cfg.cenarioServidor) ? 'hidden' : ''}" id="st-guardar-destinos-field" style="margin-bottom:10px">
+            <label class="radio-opt">
+              <input type="checkbox" id="st-guardar-indexeddb" ${cfg.guardarIndexedDB === false ? '' : 'checked'}>
+              <span><span class="t">Guardar no IndexedDB</span><br><span class="d">Ligado por padrão. Esta opção só muda se a mensagem "✅ Salvo" conta o IndexedDB (banco de dados do navegador deste aparelho) como destino oficial.</span></span>
+            </label>
+            <label class="radio-opt" style="margin-top:6px">
+              <input type="checkbox" id="st-guardar-servidor" ${cfg.autoSaveAtivo ? 'checked' : ''}>
+              <span><span class="t">Guardar no servidor</span><br><span class="d">Desligado por padrão, mesmo com um servidor configurado. Ligado, cada item confirmado na captura é enviado automaticamente para o servidor e gravado em arquivo — a MESMA opção de "💾 Salvamento automático em arquivo" mais abaixo nestas Configurações (as duas mudam a mesma coisa; marcar/desmarcar aqui já reflete lá, e vice-versa).</span></span>
+            </label>
+            <p class="d" style="margin-top:6px" id="st-guardar-destinos-aviso">Pelo menos uma das duas precisa ficar marcada — não é possível desmarcar as duas ao mesmo tempo.</p>
+          </div>
 
-          <div id="st-servertabs-wrap" class="${semServidor(cfg.cenarioServidor) ? 'hidden' : ''}" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border)">
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:8px">
-              <span style="font-size:13px; font-weight:600">Como montar o servidor — escolha uma forma:</span>
-              <button type="button" class="btn secondary sm" id="st-download-guia-texto" title="Baixa um arquivo de texto com o passo a passo completo das 4 formas (PHP, XAMPP, Node.js completo e Node.js simples), formatado igual a um guia">📄 Baixar guia (texto)</button>
-            </div>
-            <div class="st-servertabs" id="st-servertabs">
-              <button type="button" class="st-servertab active" data-tab="php" title="PHP embutido — usa o comando 'php -S', vem junto com qualquer instalação do PHP, sem instalar mais nada">🐘 PHP</button>
-              <button type="button" class="st-servertab" data-tab="xampp" title="XAMPP — pacote pronto com PHP + Apache, com painel gráfico (só PC)">🧩 XAMPP</button>
-              <button type="button" class="st-servertab" data-tab="node" title="Node.js — alternativa ao PHP, script pronto incluso neste app">🟢 Node.js</button>
-            </div>
-            <div id="st-servertab-content" class="st-servertab-content"></div>
+          <!-- NOVO (07/09/2026), pedido verbatim: "Se há algo no indexedDB
+               e o app está rodando em servidor e for verificado que o que
+               está no indexedDB não está no servidor, uma opção para
+               gravar tudo no servidor deve ficar disponível, em algum
+               lugar. Neste mesmo lugar que ficar este botão, a estrutura
+               de pastas deve ser mostrada (com ícones de pastas e clicável
+               e interagível)." Ver ServerPrefs.itensFaltandoNoServidor/
+               enviarTodosParaServidor/listarArquivos (js/serverprefs.js) e
+               a ação nova "listar-arquivos" (server/receive.js/receive.php). -->
+          <!-- MUDADO (07/09/2026), pedido verbatim: "Coloque a 'Estrutura
+               de arquivos do servidor' em um botão que quando clicado abre
+               uma janela e mostra a estrutura." — ANTES: a árvore ficava
+               sempre desenhada direto na tela de Configurações (podia ficar
+               grande, consultava o servidor toda vez que a tela abria,
+               mesmo se a pessoa não quisesse ver isso agora). AGORA: só um
+               botão aqui; a árvore é consultada e desenhada dentro de uma
+               janela modal (mesmo modal-backdrop/modal-sheet usado no
+               resto do app), aberta só quando a pessoa clica — ver
+               _abrirModalEstruturaArquivos abaixo. -->
+          <div id="st-storage-wrap" class="${semServidor(cfg.cenarioServidor) ? 'hidden' : ''}" style="margin:10px 0; padding-top:10px; border-top:1px solid var(--border)">
+            <div id="st-storage-discrepancia" style="font-size:12.5px; color:var(--text-dim); margin-bottom:8px">Verificando itens no servidor…</div>
+            <button type="button" class="btn secondary sm" id="st-storage-ver-arvore" title="Abre uma janela mostrando a estrutura de pastas/arquivos de verdade no servidor">📁 Ver estrutura de arquivos no servidor</button>
           </div>
         </div>
 
@@ -677,6 +936,47 @@ const SettingsView = {
           </label>
         </div>
 
+        <!-- NOVO (08/09/2026), pedido verbatim: "Isso deve ser configurável
+             em alguma seção das 'configurações do app', se ao selecionar a
+             tela que será exibida, irá abrir em tela cheia ou não. Para
+             todas que aparecem no dropdown [do Workspace]. [...] por
+             padrão, todas devem ocupar apenas o espaço da divisão, não a
+             tela cheia." Só as 4 ferramentas que HOJE têm um modo "tela
+             cheia" de verdade pra alternar aparecem aqui — 'Mapa 2D'/
+             'Ver em 3D'/'Buscar' sempre desenham DENTRO do painel que as
+             abriu (nunca tiveram um modo tela cheia pra começo de
+             conversa, então não haveria o que ligar/desligar). Lido por
+             js/bsplayout.js (EDITOR_TYPES.foto/organizar) e
+             js/mapview.js/view3d.js ('Acessar modelos'/Modelador,
+             ambos "pertencem" à tela que os abre — ver pedido verbatim
+             na mesma rodada). -->
+        <div class="settings-section" data-cat="mapa">
+          <h3>🧩 Workspace — abrir em tela cheia?</h3>
+          <p style="font-size:12.5px; color:var(--text-dim)">
+            Quando uma divisão de tela do "🧩 Workspace" (barra inferior do app)
+            está mostrando uma destas ferramentas, ela normalmente ocupa só o
+            espaço daquela divisão. Marque para que, em vez disso, ela sempre
+            abra por cima de tudo, cobrindo a tela inteira (como já era antes
+            do Workspace existir).
+          </p>
+          <label class="radio-opt" style="margin-top:8px">
+            <input type="checkbox" id="st-ws-fullscreen-foto" ${wsFullscreen.foto ? 'checked' : ''}>
+            <span><span class="t">🖼️ Foto</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="checkbox" id="st-ws-fullscreen-organizar" ${wsFullscreen.organizar ? 'checked' : ''}>
+            <span><span class="t">🗂️ Organizar</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="checkbox" id="st-ws-fullscreen-modelador" ${wsFullscreen.modelador ? 'checked' : ''}>
+            <span><span class="t">🛠️ Modelador</span><br><span class="d">Pertence à tela "🧊 Ver em 3D" — aberto de dentro dela (botão "Editar"/duplo-clique num objeto, "🧊 Novo Cubo").</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="checkbox" id="st-ws-fullscreen-acessarmodelos" ${wsFullscreen.acessarModelos ? 'checked' : ''}>
+            <span><span class="t">🛠️ Acessar modelos</span><br><span class="d">Pertence à tela "🗺️ Mapa 2D" — aberto de dentro dela (ferramenta "🪑 Objetos" → botão "🛠️").</span></span>
+          </label>
+        </div>
+
       </div>
     `;
 
@@ -690,6 +990,8 @@ const SettingsView = {
       container.querySelector('#st-serverprefs-status').classList.toggle('hidden', semServidor(e.target.value));
       container.querySelector('#st-pastadados-wrap')?.classList.toggle('hidden', semServidor(e.target.value));
       container.querySelector('#st-serverprefs-actions').classList.toggle('hidden', semServidor(e.target.value));
+      container.querySelector('#st-espelhar-indexeddb-field')?.classList.toggle('hidden', semServidor(e.target.value));
+      container.querySelector('#st-storage-wrap')?.classList.toggle('hidden', semServidor(e.target.value));
       const urlInput = container.querySelector('#st-webhook-url');
       const placeholders = {
         'pc-sem-servidor': 'não se aplica neste cenário',
@@ -707,25 +1009,69 @@ const SettingsView = {
     // variável) formava um CICLO com o botão "Fechar" do Unificar: entrar em
     // Unificar e sair de novo sobrescrevia _prevView com 'unificar', então
     // o "Fechar" daqui passava a voltar pra Unificar em vez de sair de vez.
-    container.querySelector('#st-close').onclick = () => App.back('tabela');
+    // [09/09/2026] CORRIGIDO — bug relatado pelo usuário: "o botão 'fechar'
+    // (id='st-close') nas configurações ainda não funciona." Causa raiz:
+    // desde a rodada anterior (09/09/2026, `App._openSettingsFullscreen`,
+    // ver app.js), SettingsView SÓ é montada dentro do overlay de tela
+    // cheia `#settings-fullscreen-overlay` — nunca mais como uma view
+    // normal dentro de `#view`/`App.navigate`. Este handler continuava
+    // chamando `App.back('tabela')` (o caminho ANTIGO, de quando as
+    // Configurações eram só mais uma view empilhável) — isso troca a view
+    // por baixo (`#view`) para 'tabela', mas NUNCA remove nem fecha o
+    // `<div id="settings-fullscreen-overlay">` (que fica sozinho, sem
+    // nenhum código dono dele além de `_openSettingsFullscreen`/seu botão
+    // próprio `#settings-fullscreen-close`) — o overlay (fixed, cobrindo a
+    // tela inteira, por cima de tudo) continuava visível e intacto, dando a
+    // impressão de que o clique em "✕ Fechar" simplesmente não fazia nada.
+    // Corrigido chamando o fechamento de VERDADE do overlay (o mesmo botão
+    // `#settings-fullscreen-close`, que já faz `SettingsView.unmount()` +
+    // `el.remove()` — ver `_openSettingsFullscreen` em app.js) quando ele
+    // existir; mantém `App.back('tabela')` como fallback pra qualquer
+    // contexto futuro em que SettingsView volte a ser montada fora do
+    // overlay (não existe mais hoje, mas evita deixar o botão sem NENHUMA
+    // ação nesse caso hipotético).
+    container.querySelector('#st-close').onclick = () => {
+      const fecharOverlay = document.getElementById('settings-fullscreen-close');
+      if (fecharOverlay) fecharOverlay.click();
+      else App.back('tabela');
+    };
     container.querySelector('#st-reset-padroes').onclick = () => this._resetarPadroesDoApp();
     container.querySelector('#st-baixar-tudo').onclick = () => this._downloadFullCatalog();
     const btnGuiaTexto = container.querySelector('#st-download-guia-texto');
     if (btnGuiaTexto) btnGuiaTexto.onclick = () => this._downloadServerGuideText();
     this._renderLastSync();
     container.querySelector('#st-restaurar-servidor').onclick = () => ServerPrefs.restaurarDoServidor(container);
-    // NOVO (03/09/2026) — botão "💾 Salvar pasta" (ver campo #st-pastadados-input
-    // acima) — envia a pasta escolhida pro servidor guardar a partir de
-    // agora, e já re-consulta o status pra refletir a mudança na hora.
-    const btnPastaDados = container.querySelector('#st-pastadados-salvar');
-    if (btnPastaDados) {
-      btnPastaDados.onclick = async () => {
-        const pasta = container.querySelector('#st-pastadados-input')?.value.trim() || '';
-        const resultado = await ServerPrefs.configurarPastaDados(pasta);
+    // MUDADO (07/09/2026), pedido verbatim: "E já deixe o nome do pasta
+    // padrão. e um botão lateral para editar assim como se faz com o nome
+    // dos mapas." — botão ✏️ (ver HTML acima) abre um `prompt()` JÁ
+    // PREENCHIDO com o caminho atual de verdade (consultado no servidor via
+    // `statusArmazenamento()`, nunca um valor "esquecido" de um campo em
+    // branco) — mesmo padrão de `.map-switch-rename` em mapview.js
+    // (`_openMapSwitcherModal`). Cancelar o prompt (Esc/Cancelar) não muda
+    // nada; confirmar em branco volta pro padrão (pasta "storage").
+    const btnPastaDadosEditar = container.querySelector('#st-pastadados-editar');
+    if (btnPastaDadosEditar) {
+      btnPastaDadosEditar.onclick = async () => {
+        const status = await ServerPrefs.statusArmazenamento();
+        if (!status) { Utils.toast('Não foi possível consultar o servidor agora (verifique se ele está rodando).', { type: 'warn' }); return; }
+        const novaPasta = prompt('Pasta onde o servidor deve guardar os arquivos:\n\n(deixe em branco para voltar ao padrão — uma pasta "storage" dentro da pasta do servidor)', status.pastaDadosAtual || '');
+        if (novaPasta === null) return; // cancelou — nada muda
+        const resultado = await ServerPrefs.configurarPastaDados(novaPasta.trim());
         if (resultado) this._renderServerPrefsStatus();
       };
     }
+    // MUDADO (07/09/2026), pedido verbatim: "Agora, além da a opção
+    // 'Guardar no IndexedDB', deve ter a opção de 'guardar no servidor'.
+    // Uma sempre deve ficar ativa ou as duas." — ANTES: um único checkbox
+    // '#st-espelhar-indexeddb' (chave 'servidorEspelharIndexedDB'). AGORA:
+    // dois checkboxes independentes com trava mútua (ver `_wireGuardarDestinos`
+    // abaixo) e o botão que abre a árvore de arquivos em modal (ver
+    // `_abrirModalEstruturaArquivos` abaixo).
+    this._wireGuardarDestinos(container);
+    const btnVerArvore = container.querySelector('#st-storage-ver-arvore');
+    if (btnVerArvore) btnVerArvore.onclick = () => this._abrirModalEstruturaArquivos();
     this._renderServerPrefsStatus();
+    this._renderStorageSection();
 
     container.querySelector('#perm-geo-btn').onclick = () => this._requestGeoPermission();
     container.querySelector('#perm-cam-btn').onclick = () => this._requestCameraPermission();
@@ -1140,8 +1486,39 @@ const SettingsView = {
       this._container.querySelector('#st-conf-nome')?.focus();
     };
 
+    // NOVO (09/09/2026) — ver js/classicmode.js. `ClassicMode.toggle()` já
+    // cuida de mostrar/esconder tudo E salvar `layoutMode` sozinho (mesmo
+    // método usado pelo botão 🔀 do cabeçalho) — este onchange só decide
+    // qual direção chamar, comparando o estado atual com o que a pessoa
+    // acabou de marcar/desmarcar (evita chamar enter() de novo se já
+    // estava ativo, ou vice-versa, o que `toggle()` sozinho não sabe
+    // distinguir de um clique duplo no checkbox).
+    container.querySelector('#st-layout-classico').onchange = async (e) => {
+      if (e.target.checked === !!ClassicMode?.isActive?.()) return;
+      await ClassicMode?.toggle?.();
+    };
     container.querySelector('#st-hud').onchange = async (e) => { await Perf.setEnabled(e.target.checked); };
     container.querySelector('#st-history-sempre').onchange = async (e) => { await History.setAlwaysShow(e.target.checked); };
+    // [10/09/2026] Pedido verbatim: toggle "Mostrar a Tela de Abertura ao
+    // iniciar o app" — ver comentário grande junto do checkbox HTML acima.
+    container.querySelector('#st-splash-sempre').onchange = async (e) => { await DB.setSetting('splashSempreAoAbrir', e.target.checked); };
+
+    // NOVO (08/09/2026), pedido verbatim: "Isso deve ser configuravel
+    // em alguma secao das 'configuracoes do app', se ao selecionar a
+    // tela que sera exibida, ira abrir em tela cheia ou nao. Para
+    // todas que aparecem no dropdown."
+    const wsFullscreenSave = async () => {
+      await DB.setSetting('workspaceFullscreenConfig', {
+        foto: container.querySelector('#st-ws-fullscreen-foto').checked,
+        organizar: container.querySelector('#st-ws-fullscreen-organizar').checked,
+        modelador: container.querySelector('#st-ws-fullscreen-modelador').checked,
+        acessarModelos: container.querySelector('#st-ws-fullscreen-acessarmodelos').checked,
+      });
+    };
+    container.querySelector('#st-ws-fullscreen-foto').onchange = wsFullscreenSave;
+    container.querySelector('#st-ws-fullscreen-organizar').onchange = wsFullscreenSave;
+    container.querySelector('#st-ws-fullscreen-modelador').onchange = wsFullscreenSave;
+    container.querySelector('#st-ws-fullscreen-acessarmodelos').onchange = wsFullscreenSave;
 
     // Pedido do usuário (25/08/2026): campo em SEGUNDOS na tela (mais
     // natural pra digitar), convertido pra ms na hora de salvar — DB já
@@ -1163,8 +1540,22 @@ const SettingsView = {
       Utils.toast('Configurações salvas ✓', { type: 'ok' });
     };
 
+    // MUDADO (07/09/2026), pedido verbatim: "além da opção 'Guardar no
+    // IndexedDB', deve ter a opção de 'guardar no servidor'. Uma sempre
+    // deve ficar ativa ou as duas." — este checkbox (#st-autosave-ativo,
+    // aqui em "Salvamento automático em arquivo") e o novo #st-guardar-
+    // servidor (card "Armazenamento no servidor", mais acima) controlam a
+    // MESMA chave 'autoSaveAtivo' — mudar um sincroniza o outro na hora
+    // (ver `_syncGuardarServidorUI` abaixo). Trava: não deixa desmarcar
+    // este se "Guardar no IndexedDB" também já estiver desmarcado.
     container.querySelector('#st-autosave-ativo').onchange = async (e) => {
+      if (!e.target.checked && !(container.querySelector('#st-guardar-indexeddb')?.checked ?? true)) {
+        e.target.checked = true; // reverte — não pode desmarcar as duas
+        Utils.toast('Pelo menos uma das duas ("Guardar no IndexedDB" ou "Guardar no servidor") precisa ficar marcada.', { type: 'warn', duration: 4500 });
+        return;
+      }
       await DB.setSetting('autoSaveAtivo', e.target.checked);
+      this._syncGuardarServidorUI(container, e.target.checked);
       if (e.target.checked && !(await DB.getSetting('servidorUrl', ''))) {
         Utils.toast('Configure também a URL do servidor local acima para o salvamento automático funcionar.', { type: 'warn', duration: 4500 });
       }
@@ -1331,6 +1722,228 @@ const SettingsView = {
       const status = await ServerPrefs.statusArmazenamento();
       atualEl.textContent = status ? `📁 Pasta atual: ${status.pastaDadosAtual}` : '⚠️ Não foi possível consultar o servidor agora (verifique se ele está rodando).';
     }
+  },
+
+  /** NOVO (07/09/2026), pedido verbatim: "Se há algo no indexedDB e o app
+   *  está rodando em servidor e for verificado que o que está no indexedDB
+   *  não está no servidor, uma opção para gravar tudo no servidor deve
+   *  ficar disponível [...]". Chamada 1x ao montar a tela (mesmo espírito de
+   *  `_renderServerPrefsStatus`): compara IndexedDB×servidor (ver
+   *  `ServerPrefs.itensFaltandoNoServidor`) e mostra "N item(ns) faltando" +
+   *  botão "📤 Gravar tudo no servidor" (só aparece se houver algo faltando);
+   *  "✅ tudo sincronizado" se não houver nada; aviso se não for possível
+   *  consultar (servidor offline etc.).
+   *
+   *  MUDADO (07/09/2026), pedido verbatim: "Coloque a 'Estrutura de arquivos
+   *  do servidor' em um botão que quando clicado abre uma janela e mostra a
+   *  estrutura." — a árvore de pastas/arquivos SAIU desta função (que antes
+   *  também desenhava em `#st-storage-tree` direto na tela) e foi para
+   *  `_abrirModalEstruturaArquivos` abaixo, consultada só quando a pessoa
+   *  clica no botão "📁 Ver estrutura de arquivos no servidor" (ver HTML). */
+  async _renderStorageSection() {
+    const elDiscrepancia = this._container?.querySelector('#st-storage-discrepancia');
+    if (!elDiscrepancia) return;
+
+    elDiscrepancia.textContent = 'Verificando itens no servidor…';
+
+    const faltando = await ServerPrefs.itensFaltandoNoServidor();
+
+    if (faltando === null) {
+      elDiscrepancia.innerHTML = '⚠️ Não foi possível verificar agora (o servidor local está rodando?)';
+    } else if (faltando.length === 0) {
+      elDiscrepancia.innerHTML = '✅ Tudo que está no IndexedDB deste aparelho já está no servidor.';
+    } else {
+      elDiscrepancia.innerHTML = '';
+      const aviso = document.createElement('span');
+      aviso.textContent = `⚠️ ${faltando.length} item(ns) estão no IndexedDB deste aparelho mas ainda não no servidor. `;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn secondary sm';
+      btn.textContent = '📤 Gravar tudo no servidor';
+      btn.title = 'Envia cada item faltando para o servidor local agora, e atualiza o backup completo em seguida';
+      // MUDADO (07/09/2026), pedido verbatim: "Também só vai guardar tudo na
+      // pasta 'storage' do servidor se for clicado no botão 'guardar tudo'.
+      // Se houver conflito de arquivos deve aparecer uma janela perguntando
+      // se deseja substituir os arquivos. A janela deve ser no mesmo modelo
+      // da janela de 'importar' do app." — antes de enviar, consulta a
+      // árvore de arquivos já existente no servidor; se houver QUALQUER
+      // arquivo lá (não vazio), pergunta com `Utils.showChoiceModal` (o
+      // mesmo modal genérico usado em "⬆️ Importar backup") antes de
+      // prosseguir. Servidor vazio → envia direto, sem perguntar nada.
+      btn.onclick = async () => {
+        const arquivosAtuais = await ServerPrefs.listarArquivos();
+        const servidorTemArquivos = !!(arquivosAtuais && (arquivosAtuais.arvore?.filhos || []).some((f) => (f.filhos && f.filhos.length) || f.tipo === 'arquivo'));
+        if (servidorTemArquivos) {
+          const escolha = await Utils.showChoiceModal({
+            title: '⚠️ Já existem arquivos no servidor',
+            message: 'A pasta de armazenamento do servidor já tem arquivos. Enviar agora pode SUBSTITUIR arquivos com o mesmo nome (mesmo patrimônio/foto/mapa). Deseja continuar e substituir?',
+            choices: [
+              { label: 'Substituir e continuar', value: 'substituir' },
+              { label: 'Cancelar', value: null },
+            ],
+          });
+          if (escolha !== 'substituir') return;
+        }
+        btn.disabled = true;
+        const textoOriginal = btn.textContent;
+        const resultado = await ServerPrefs.enviarTodosParaServidor(faltando, (atual, total) => {
+          btn.textContent = `Enviando (${atual}/${total})…`;
+        });
+        btn.textContent = textoOriginal;
+        btn.disabled = false;
+        Utils.toast(
+          resultado.falhas
+            ? `Enviado ${resultado.enviados}/${resultado.total} — ${resultado.falhas} falha(s) (servidor pode ter caído no meio; tente de novo).`
+            : `✅ ${resultado.enviados} item(ns) enviado(s) ao servidor.`,
+          { type: resultado.falhas ? 'warn' : 'ok' },
+        );
+        this._renderStorageSection();
+      };
+      elDiscrepancia.appendChild(aviso);
+      elDiscrepancia.appendChild(btn);
+    }
+  },
+
+  /** NOVO (07/09/2026), pedido verbatim: "Coloque a 'Estrutura de arquivos
+   *  do servidor' em um botão que quando clicado abre uma janela e mostra a
+   *  estrutura." Janela no mesmo padrão `modal-backdrop`/`modal-sheet` usado
+   *  em `_downloadFullCatalog` acima — abre, consulta `ServerPrefs.
+   *  listarArquivos()` na hora, desenha com `_renderArvoreStorage` (que já
+   *  trata pasta vazia sem setinha — ver comentário lá), com um botão
+   *  "🔄 Atualizar" pra reconsultar sem fechar/reabrir a janela. */
+  async _abrirModalEstruturaArquivos() {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal-sheet" style="text-align:left">
+        <div class="handle"></div>
+        <h3 style="margin-top:0">📁 Estrutura de arquivos no servidor</h3>
+        <div style="display:flex; gap:8px; margin-bottom:8px">
+          <button type="button" class="btn secondary sm" id="mea-atualizar" title="Consultar de novo a estrutura no servidor">🔄 Atualizar</button>
+        </div>
+        <div id="mea-arvore" style="max-height:min(60vh, 420px); overflow:auto; background:var(--bg-elev-2); border:1px solid var(--border); border-radius:10px; padding:8px">Consultando…</div>
+        <button class="btn secondary block" id="mea-close" style="margin-top:10px" title="Fechar esta janela">Fechar</button>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('mousedown', (e) => { if (e.target === modal) modal.remove(); });
+    modal.querySelector('#mea-close').onclick = () => modal.remove();
+
+    const elArvore = modal.querySelector('#mea-arvore');
+    const carregar = async () => {
+      elArvore.textContent = 'Consultando…';
+      const arquivos = await ServerPrefs.listarArquivos();
+      if (!arquivos) {
+        elArvore.textContent = '⚠️ Não foi possível consultar a estrutura de pastas agora (o servidor local está rodando?)';
+        return;
+      }
+      elArvore.innerHTML = '';
+      elArvore.appendChild(this._renderArvoreStorage(arquivos.arvore));
+    };
+    modal.querySelector('#mea-atualizar').onclick = () => carregar();
+    carregar();
+  },
+
+  /** NOVO (07/09/2026) — trava mútua entre "Guardar no IndexedDB"
+   *  (`#st-guardar-indexeddb`, chave nova `guardarIndexedDB`) e "Guardar no
+   *  servidor" (`#st-guardar-servidor`, MESMA chave `autoSaveAtivo` já usada
+   *  por `#st-autosave-ativo` em "💾 Salvamento automático em arquivo" —
+   *  ver comentário grande nesse handler abaixo). Pedido verbatim: "Uma
+   *  sempre deve ficar ativa ou as duas." */
+  _wireGuardarDestinos(container) {
+    const chkIndexedDB = container.querySelector('#st-guardar-indexeddb');
+    const chkServidor = container.querySelector('#st-guardar-servidor');
+    if (chkIndexedDB) {
+      chkIndexedDB.onchange = async (e) => {
+        if (!e.target.checked && !(chkServidor?.checked ?? false)) {
+          e.target.checked = true; // reverte — não pode desmarcar as duas
+          Utils.toast('Pelo menos uma das duas ("Guardar no IndexedDB" ou "Guardar no servidor") precisa ficar marcada.', { type: 'warn', duration: 4500 });
+          return;
+        }
+        await DB.setSetting('guardarIndexedDB', e.target.checked);
+      };
+    }
+    if (chkServidor) {
+      chkServidor.onchange = async (e) => {
+        if (!e.target.checked && !(chkIndexedDB?.checked ?? true)) {
+          e.target.checked = true; // reverte — não pode desmarcar as duas
+          Utils.toast('Pelo menos uma das duas ("Guardar no IndexedDB" ou "Guardar no servidor") precisa ficar marcada.', { type: 'warn', duration: 4500 });
+          return;
+        }
+        await DB.setSetting('autoSaveAtivo', e.target.checked);
+        // Sincroniza o outro checkbox que controla a MESMA chave, mais
+        // abaixo na tela (ver `#st-autosave-ativo`/`_syncGuardarServidorUI`).
+        const chkAutoSave = container.querySelector('#st-autosave-ativo');
+        if (chkAutoSave) chkAutoSave.checked = e.target.checked;
+        if (e.target.checked && !(await DB.getSetting('servidorUrl', ''))) {
+          Utils.toast('Configure também a URL do servidor local acima para o salvamento automático funcionar.', { type: 'warn', duration: 4500 });
+        }
+      };
+    }
+  },
+
+  /** NOVO (07/09/2026) — chamado pelo handler de `#st-autosave-ativo` (ver
+   *  comentário grande lá) para refletir a mudança no `#st-guardar-servidor`
+   *  correspondente (mesma chave `autoSaveAtivo`, mostrada em 2 lugares). */
+  _syncGuardarServidorUI(container, checked) {
+    const chk = container.querySelector('#st-guardar-servidor');
+    if (chk) chk.checked = checked;
+  },
+
+  /** Desenha 1 nó da árvore devolvida por "listar-arquivos" (ver comentário
+   *  grande em `_renderStorageSection` acima). Pasta COM filhos → `<details>`
+   *  com o nome como `<summary>` (clique abre/fecha os filhos); pasta VAZIA
+   *  → uma linha simples, SEM `<details>` (ver "BUG CORRIGIDO 07/09/2026"
+   *  abaixo — sem filhos pra abrir, a setinha não faz sentido); arquivo →
+   *  uma linha com tamanho formatado; nó "info" (lista truncada, ver
+   *  server/receive.js/php) → um aviso em itálico, sem ícone. Recursivo —
+   *  a profundidade já vem limitada pelo próprio servidor (ver
+   *  `listarArvore`/`limite` lá), então não precisa limitar de novo aqui. */
+  _renderArvoreStorage(no, profundidade = 0) {
+    if (no.tipo === 'arquivo') {
+      const div = document.createElement('div');
+      div.style.cssText = 'padding-left:20px; color:var(--text-dim)';
+      div.textContent = `📄 ${no.nome} (${this._formatBytes(no.tamanho)})`;
+      return div;
+    }
+    if (no.tipo === 'info') {
+      const div = document.createElement('div');
+      div.style.cssText = 'padding-left:20px; font-style:italic; color:var(--text-dim)';
+      div.textContent = no.nome;
+      return div;
+    }
+    const filhos = no.filhos || [];
+    // BUG CORRIGIDO (07/09/2026), pedido verbatim: "Quando as pastas
+    // estiverem vazias a setinha não deve aparecer." — CAUSA RAIZ: todo nó
+    // de pasta virava um `<details>` nativo do HTML, que SEMPRE desenha a
+    // setinha de expandir/recolher sozinho (é o navegador quem desenha,
+    // não o app), mesmo sem nenhum filho pra mostrar dentro. CORRIGIDO:
+    // pasta SEM filhos agora vira uma linha simples (`<div>`, igual a um
+    // arquivo), nunca um `<details>` — só pastas COM pelo menos 1 filho
+    // continuam usando `<details>` (onde a setinha faz sentido de verdade).
+    if (filhos.length === 0) {
+      const div = document.createElement('div');
+      div.style.cssText = `padding-left:${profundidade === 0 ? 0 : 20}px; margin-left:${profundidade === 0 ? 0 : 10}px; color:var(--text-dim)`;
+      div.textContent = `📁 ${no.nome} (vazia)`;
+      return div;
+    }
+    const det = document.createElement('details');
+    det.open = profundidade < 2; // raiz + as 5 pastas de topo (3d/images/text/raw/app) começam abertas; mais fundo que isso, fechado (clique expande — "interagível" do pedido)
+    const sum = document.createElement('summary');
+    sum.textContent = `📁 ${no.nome} (${filhos.length})`;
+    sum.style.cursor = 'pointer';
+    det.appendChild(sum);
+    filhos.forEach((filho) => det.appendChild(this._renderArvoreStorage(filho, profundidade + 1)));
+    det.style.marginLeft = '10px';
+    return det;
+  },
+
+  _formatBytes(n) {
+    if (!n) return '0 B';
+    const unidades = ['B', 'KB', 'MB', 'GB'];
+    let i = 0;
+    let v = n;
+    while (v >= 1024 && i < unidades.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(i ? 1 : 0)} ${unidades[i]}`;
   },
 
   unmount() {
@@ -2321,251 +2934,18 @@ pause</div></li>
   },
 
   _downloadServerBundle() {
-    const receivePhp = `<?php
-// receive.php — recebe os dados do app (POST JSON). Usos:
-//   1) "salvar-item": salvamento automático de UM item por vez (a cada item
-//      confirmado na captura, se ativado nas configurações) — grava em
-//      arquivo individual e/ou num único arquivo com o catálogo completo,
-//      conforme o "modoArquivo" enviado pelo app. Vários PCs/celulares podem
-//      chamar isso ao mesmo tempo com segurança: cada item tem um id
-//      globalmente único (gerado no navegador), então dois aparelhos nunca
-//      sobrescrevem o item um do outro — mesmo cadastrando o MESMO número de
-//      patrimônio ao mesmo tempo, os dois catálogos ficam salvos separados.
-//   2) "listar": usado pela sincronização entre aparelhos (sync.js) — devolve
-//      os itens do catálogo central (catalogo-unico.json), opcionalmente só
-//      os alterados a partir de um instante ("desde"), para cada aparelho
-//      puxar o que os outros enviaram.
-//   3) envio em lote (email/backup manual) — salva uma cópia e opcionalmente
-//      dispara email.
-// Cabeçalhos CORS/JSON vêm ANTES de tudo — se config.php estivesse faltando ou
-// desse erro e os headers viessem depois, o PHP pararia sem nunca enviar
-// "Access-Control-Allow-Origin", e o navegador reporta isso como erro de CORS
-// mesmo o problema real sendo outro. Com config.php ausente, o app continua
-// funcionando (só o email automático fica desativado).
-header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo json_encode(['erro' => 'Use POST']); exit; }
-
-$configPath = __DIR__ . '/config.php';
-if (file_exists($configPath)) {
-  require_once $configPath;
-} else {
-  if (!defined('DESTINO_EMAIL')) define('DESTINO_EMAIL', '');
-  if (!defined('EMAIL_REMETENTE')) define('EMAIL_REMETENTE', 'catalogo@localhost');
-}
-
-$raw = file_get_contents('php://input');
-$data = json_decode($raw, true);
-if (!$data) { http_response_code(400); echo json_encode(['erro' => 'JSON inválido']); exit; }
-
-function slugify($str) {
-  $s = preg_replace('/[^A-Za-z0-9_-]+/', '_', (string) $str);
-  return trim($s, '_') ?: 'sem_id';
-}
-
-// ---------- Formatos extras (derivados do catálogo, além do .json sempre mantido) ----------
-function txtSimplesFromItens($itens) {
-  $setores = [];
-  foreach ($itens as $it) { if (!empty($it['setor'])) $setores[$it['setor']] = true; }
-  $setorTxt = empty($setores) ? '(vários / não informado)' : implode(', ', array_keys($setores));
-  $linhas = [];
-  $linhas[] = 'Setor: ' . $setorTxt;
-  $linhas[] = 'Data: ' . date('d/m/Y H:i');
-  $linhas[] = 'Total de itens: ' . count($itens);
-  $linhas[] = '';
-  foreach ($itens as $it) {
-    $patrimonio = !empty($it['patrimonio']) ? $it['patrimonio'] : '(sem número)';
-    $tipo = !empty($it['tipo']) ? $it['tipo'] : ($it['descricao'] ?? '');
-    $linhas[] = trim($patrimonio . ($tipo ? ' ' . $tipo : ''));
-  }
-  return implode("\\r\\n", $linhas);
-}
-
-function csvCompletoFromItens($itens) {
-  // Pedido do usuário (27/08/2026): "Inserido em" (criadoEm) removido —
-  // "Criado originalmente em" (criadoOriginalmenteEm) já cumpre esse papel.
-  $cols = ['patrimonio', 'descricao', 'tipo', 'setor', 'geoLat', 'geoLng', 'origemSessaoLabel', 'criadoOriginalmenteEm', 'modificadoEm', 'ultimaConsultaEm'];
-  $headers = ['Patrimônio', 'Descrição', 'Tipo', 'Setor', 'Latitude', 'Longitude', 'Cadastrado por', 'Criado originalmente em', 'Modificado em', 'Última consulta'];
-  $esc = function ($v) { return '"' . str_replace('"', '""', (string) ($v ?? '')) . '"'; };
-  $linhas = [implode(';', array_map($esc, $headers))];
-  foreach ($itens as $it) {
-    $linhas[] = implode(';', array_map(function ($c) use ($it, $esc) { return $esc($it[$c] ?? ''); }, $cols));
-  }
-  return "\\xEF\\xBB\\xBF" . implode("\\r\\n", $linhas);
-}
-
-// ---------- 1) Salvamento automático de um item ----------
-if (($data['acao'] ?? '') === 'salvar-item') {
-  $item = $data['item'] ?? null;
-  $modo = $data['modoArquivo'] ?? 'unico'; // individual | unico | ambos
-  $formatoExtra = $data['formatoExtra'] ?? 'nenhum'; // nenhum | txt-simples | csv-completo | ambos-formatos
-  if (!$item || empty($item['id'])) { http_response_code(400); echo json_encode(['erro' => 'item ausente ou sem id']); exit; }
-
-  $resultado = ['ok' => true, 'acao' => 'salvar-item', 'modoArquivo' => $modo, 'caminhos' => []];
-
-  if ($modo === 'individual' || $modo === 'ambos') {
-    $itensDir = __DIR__ . '/itens';
-    if (!is_dir($itensDir)) mkdir($itensDir, 0777, true);
-    // O nome do arquivo usa o ID ÚNICO do item (não só o patrimônio!) — assim,
-    // se dois aparelhos catalogarem o MESMO número de patrimônio, cada catálogo
-    // vira um arquivo próprio, e nenhum some por cima do outro.
-    $baseSlug = slugify($item['patrimonio'] ?? '');
-    $nome = ($baseSlug !== 'sem_id' ? $baseSlug . '__' : '') . slugify($item['id']);
-    $path = $itensDir . '/' . $nome . '.json';
-    file_put_contents($path, json_encode($item, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    $resultado['arquivoIndividual'] = basename($path);
-    $resultado['caminhos'][] = realpath($path) ?: $path;
-  }
-
-  // catalogo-unico.json é SEMPRE mantido (independente do modo de arquivo
-  // escolhido no app) — é o índice central usado pela sincronização entre
-  // aparelhos ("listar" abaixo). O flock garante que vários PCs/celulares
-  // gravando ao mesmo tempo não corrompam o arquivo. A comparação é sempre
-  // pelo ID único do item — nunca pelo patrimônio — então dois catálogos do
-  // mesmo patrimônio nunca se fundem em um só; ambos permanecem na lista.
-  $catalogoPath = __DIR__ . '/catalogo-unico.json';
-  $fp = fopen($catalogoPath, 'c+');
-  if ($fp) {
-    flock($fp, LOCK_EX);
-    $existingRaw = stream_get_contents($fp);
-    $catalogo = $existingRaw ? json_decode($existingRaw, true) : null;
-    if (!is_array($catalogo) || !isset($catalogo['itens'])) $catalogo = ['itens' => []];
-    $found = false;
-    foreach ($catalogo['itens'] as &$it2) {
-      if (($it2['id'] ?? null) === $item['id']) { $it2 = $item; $found = true; break; }
-    }
-    unset($it2);
-    if (!$found) $catalogo['itens'][] = $item; // patrimônio repetido = catálogo próprio, mantém os dois
-    $catalogo['atualizadoEm'] = date('c');
-    ftruncate($fp, 0);
-    rewind($fp);
-    fwrite($fp, json_encode($catalogo, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    fflush($fp);
-    flock($fp, LOCK_UN);
-    fclose($fp);
-    $resultado['totalNoCatalogoUnico'] = count($catalogo['itens']);
-    $resultado['caminhos'][] = realpath($catalogoPath) ?: $catalogoPath;
-
-    if ($formatoExtra === 'txt-simples' || $formatoExtra === 'ambos-formatos') {
-      $txtPath = __DIR__ . '/catalogo-simples.txt';
-      file_put_contents($txtPath, txtSimplesFromItens($catalogo['itens']));
-      $resultado['caminhos'][] = realpath($txtPath) ?: $txtPath;
-    }
-    if ($formatoExtra === 'csv-completo' || $formatoExtra === 'ambos-formatos') {
-      $csvPath = __DIR__ . '/catalogo-completo.csv';
-      file_put_contents($csvPath, csvCompletoFromItens($catalogo['itens']));
-      $resultado['caminhos'][] = realpath($csvPath) ?: $csvPath;
-    }
-  }
-
-  echo json_encode($resultado);
-  exit;
-}
-
-// ---------- 2) Sincronização: listar itens para outros aparelhos puxarem ----------
-if (($data['acao'] ?? '') === 'listar') {
-  $catalogoPath = __DIR__ . '/catalogo-unico.json';
-  $itens = [];
-  if (file_exists($catalogoPath)) {
-    $fp = fopen($catalogoPath, 'r');
-    if ($fp) {
-      flock($fp, LOCK_SH);
-      $raw = stream_get_contents($fp);
-      flock($fp, LOCK_UN);
-      fclose($fp);
-      $catalogo = json_decode($raw, true);
-      if (is_array($catalogo) && isset($catalogo['itens'])) $itens = $catalogo['itens'];
-    }
-  }
-  $desde = $data['desde'] ?? null;
-  if ($desde) {
-    $itens = array_values(array_filter($itens, function ($it) use ($desde) {
-      return (($it['modificadoEm'] ?? '') >= $desde) || (($it['criadoEm'] ?? '') >= $desde);
-    }));
-  }
-  echo json_encode(['ok' => true, 'itens' => $itens, 'servidorEm' => date('c')]);
-  exit;
-}
-
-// ---------- 2b) Importar objetos 3D (.obj) — rodada 51 (pedido do
-// usuário: "Deve haver um diretório para os arquivos dos objetos [...]
-// Caso esteja rodando por servidor, uma requisição é feita ao servidor
-// para listar o diretório dos objetos e retorná-los") ----------
-// Basta criar a pasta "objetos" ao lado deste receive.php e colocar
-// arquivos .obj dentro — nenhuma configuração extra é necessária.
-if (($data['acao'] ?? '') === 'listarObjs') {
-  $dirObjs = __DIR__ . '/objetos';
-  $arquivos = [];
-  if (is_dir($dirObjs)) {
-    foreach (scandir($dirObjs) as $nome) {
-      if (substr($nome, -4) !== '.obj') continue;
-      $conteudo = @file_get_contents($dirObjs . '/' . $nome);
-      if ($conteudo !== false) $arquivos[] = ['nome' => $nome, 'conteudo' => $conteudo];
-    }
-  }
-  echo json_encode(['ok' => true, 'arquivos' => $arquivos]);
-  exit;
-}
-
-// ---------- 2c) NOVO (01/09/2026): preferências do usuário, em arquivo
-// SEPARADO (preferencias-usuario.json) — ver js/serverprefs.js. Mesma API
-// do server/receive.js real (já versionado no projeto). ----------
-if (($data['acao'] ?? '') === 'salvar-preferencias') {
-  $preferencias = $data['preferencias'] ?? null;
-  if (!is_array($preferencias)) { http_response_code(400); echo json_encode(['erro' => 'preferencias ausente ou inválida']); exit; }
-  $p = __DIR__ . '/preferencias-usuario.json';
-  file_put_contents($p, json_encode(['preferencias' => $preferencias, 'atualizadoEm' => date('c')], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-  echo json_encode(['ok' => true, 'acao' => 'salvar-preferencias', 'caminho' => realpath($p) ?: $p]);
-  exit;
-}
-if (($data['acao'] ?? '') === 'carregar-preferencias') {
-  $p = __DIR__ . '/preferencias-usuario.json';
-  if (!file_exists($p)) { echo json_encode(['ok' => true, 'preferencias' => null, 'atualizadoEm' => null]); exit; }
-  $dado = json_decode(@file_get_contents($p), true);
-  echo json_encode(['ok' => true, 'preferencias' => $dado['preferencias'] ?? null, 'atualizadoEm' => $dado['atualizadoEm'] ?? null]);
-  exit;
-}
-
-// ---------- 2d) NOVO (01/09/2026): backup completo recuperável
-// (backup-completo.json) — ver js/serverprefs.js. ----------
-if (($data['acao'] ?? '') === 'salvar-backup-completo') {
-  $backup = $data['backup'] ?? null;
-  if (!is_array($backup)) { http_response_code(400); echo json_encode(['erro' => 'backup ausente ou inválido']); exit; }
-  $p = __DIR__ . '/backup-completo.json';
-  file_put_contents($p, json_encode($backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-  echo json_encode(['ok' => true, 'acao' => 'salvar-backup-completo', 'caminho' => realpath($p) ?: $p]);
-  exit;
-}
-if (($data['acao'] ?? '') === 'carregar-backup-completo') {
-  $p = __DIR__ . '/backup-completo.json';
-  if (!file_exists($p)) { echo json_encode(['ok' => true, 'backup' => null]); exit; }
-  $backup = json_decode(@file_get_contents($p), true);
-  echo json_encode(['ok' => true, 'backup' => $backup]);
-  exit;
-}
-
-// ---------- 3) Envio em lote (backup/email manual) ----------
-$dir = __DIR__ . '/recebidos';
-if (!is_dir($dir)) mkdir($dir, 0777, true);
-$fname = $dir . '/catalogo-' . date('Y-m-d_H-i-s') . '.json';
-file_put_contents($fname, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-$enviado = false;
-if (defined('DESTINO_EMAIL') && DESTINO_EMAIL) {
-  $assunto = 'Catalogação de itens — ' . date('d/m/Y H:i');
-  $corpo = ($data['textoAcompanhante'] ?? '') . "\\n\\n";
-  foreach (($data['items'] ?? []) as $it) {
-    $corpo .= "- Patrimônio: " . ($it['patrimonio'] ?? '—') . " | " . ($it['descricao'] ?? '') . "\\n";
-  }
-  $headers = 'Content-Type: text/plain; charset=UTF-8' . "\\r\\n" . 'From: ' . (defined('EMAIL_REMETENTE') ? EMAIL_REMETENTE : 'catalogo@localhost');
-  $enviado = @mail(DESTINO_EMAIL, $assunto, $corpo, $headers);
-}
-
-echo json_encode(['ok' => true, 'salvo' => basename($fname), 'emailEnviado' => $enviado]);
-`;
+    // NOVO (07/09/2026), pedido verbatim do usuario: "retire as copias
+    // embutidas do js/settings.js e deixe em arquivos separados em .js
+    // (arquivo com apenas uma variavel com uma string de texto gigante)
+    // mesmo para funcionar em 'file:///'. E deixar mais organizado e
+    // estruturado." Conteudo agora mora em
+    // js/serverbundles/receive-php-bundle.js (carregado ANTES deste
+    // arquivo — ver index.html), gerado programaticamente a partir do
+    // server/receive.php REAL (nunca mais digitado a mao aqui — elimina
+    // o risco de esta copia ficar desatualizada de novo, como estava
+    // antes desta rodada). O fallback (string curta) só aparece se, por
+    // algum motivo, esse arquivo não tiver sido carregado.
+    const receivePhp = window.RECEIVE_PHP_BUNDLE || '<?php\n// RECEIVE_PHP_BUNDLE não carregado — verifique se js/serverbundles/receive-php-bundle.js existe e foi incluído em index.html antes de settings.js.';
     const configPhp = `<?php
 // config.php — configurações do modo servidor
 define('DESTINO_EMAIL', 'seuemail@exemplo.com'); // para onde enviar
@@ -2588,218 +2968,11 @@ define('EMAIL_REMETENTE', 'catalogo@localhost');
    * à parte) — quem precisar disso agora deve usar a versão PHP/XAMPP.
    */
   _downloadServerBundleNode() {
-    const receiveJs = `// receive.js — versão Node.js do servidor local opcional deste app
-// (equivalente ao receive.php da aba PHP/XAMPP). Não precisa instalar NADA
-// além do próprio Node.js — "node receive.js" já sobe o servidor.
-//
-// Mesma API que o app já fala com receive.php (E com o server/receive.js
-// real, já versionado no próprio projeto — este arquivo aqui é a versão
-// BAIXÁVEL, útil pra rodar em outra máquina/pasta):
-//   1) "salvar-item": salvamento automático de UM item por vez — grava em
-//      arquivo individual e/ou num único arquivo com o catálogo completo
-//      (catalogo-unico.json), conforme o "modoArquivo" enviado pelo app.
-//   2) "listar": usado pela sincronização entre aparelhos (sync.js) —
-//      devolve os itens do catálogo central, opcionalmente só os alterados
-//      a partir de um instante ("desde").
-//   3) "salvar-preferencias"/"carregar-preferencias" (NOVO): configurações e
-//      opções de menu, em arquivo SEPARADO (preferencias-usuario.json).
-//   4) "salvar-backup-completo"/"carregar-backup-completo" (NOVO): espelho
-//      completo do catálogo (backup-completo.json) — permite recuperar tudo
-//      se os dados do navegador forem apagados sem ter exportado antes.
-//   5) envio em lote (backup manual): só salva uma cópia em recebidos/ —
-//      esta versão NÃO envia email automaticamente (ver aviso acima).
-'use strict';
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-
-const PORTA = process.env.PORTA || 8000;
-const DIR = __dirname;
-
-function slugify(str) {
-  const s = String(str || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')
-    .replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
-  return s || 'sem_id';
-}
-
-function txtSimplesFromItens(itens) {
-  const setores = new Set();
-  itens.forEach((it) => { if (it.setor) setores.add(it.setor); });
-  const setorTxt = setores.size ? [...setores].join(', ') : '(vários / não informado)';
-  const linhas = [\`Setor: \${setorTxt}\`, \`Data: \${new Date().toLocaleString('pt-BR')}\`, \`Total de itens: \${itens.length}\`, ''];
-  itens.forEach((it) => {
-    const patrimonio = it.patrimonio || '(sem número)';
-    const tipo = it.tipo || it.descricao || '';
-    linhas.push(\`\${patrimonio}\${tipo ? ' ' + tipo : ''}\`.trim());
-  });
-  return linhas.join('\\r\\n');
-}
-
-function csvCompletoFromItens(itens) {
-  // Pedido do usuário (27/08/2026): "Inserido em" (criadoEm) removido —
-  // "Criado originalmente em" (criadoOriginalmenteEm) já cumpre esse papel.
-  const cols = ['patrimonio', 'descricao', 'tipo', 'setor', 'geoLat', 'geoLng', 'origemSessaoLabel', 'criadoOriginalmenteEm', 'modificadoEm', 'ultimaConsultaEm'];
-  const headers = ['Patrimônio', 'Descrição', 'Tipo', 'Setor', 'Latitude', 'Longitude', 'Cadastrado por', 'Criado originalmente em', 'Modificado em', 'Última consulta'];
-  const esc = (v) => \`"\${String(v ?? '').replace(/"/g, '""')}"\`;
-  const linhas = [headers.map(esc).join(';')];
-  itens.forEach((it) => { linhas.push(cols.map((c) => esc(it[c])).join(';')); });
-  return '\\uFEFF' + linhas.join('\\r\\n');
-}
-
-function lerCatalogo() {
-  const p = path.join(DIR, 'catalogo-unico.json');
-  if (!fs.existsSync(p)) return { itens: [] };
-  try {
-    const dado = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return (dado && Array.isArray(dado.itens)) ? dado : { itens: [] };
-  } catch (e) { return { itens: [] }; }
-}
-
-function salvarCatalogo(catalogo) {
-  catalogo.atualizadoEm = new Date().toISOString();
-  fs.writeFileSync(path.join(DIR, 'catalogo-unico.json'), JSON.stringify(catalogo, null, 2), 'utf8');
-}
-
-const server = http.createServer((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-  if (req.method !== 'POST') { res.writeHead(405); res.end(JSON.stringify({ erro: 'Use POST' })); return; }
-
-  let corpo = '';
-  req.on('data', (chunk) => { corpo += chunk; });
-  req.on('end', () => {
-    let data;
-    try { data = JSON.parse(corpo); } catch (e) { res.writeHead(400); res.end(JSON.stringify({ erro: 'JSON inválido' })); return; }
-
-    // ---------- 1) Salvamento automático de um item ----------
-    if (data.acao === 'salvar-item') {
-      const item = data.item;
-      const modo = data.modoArquivo || 'unico';
-      const formatoExtra = data.formatoExtra || 'nenhum';
-      if (!item || !item.id) { res.writeHead(400); res.end(JSON.stringify({ erro: 'item ausente ou sem id' })); return; }
-
-      const resultado = { ok: true, acao: 'salvar-item', modoArquivo: modo, caminhos: [] };
-
-      if (modo === 'individual' || modo === 'ambos') {
-        const itensDir = path.join(DIR, 'itens');
-        if (!fs.existsSync(itensDir)) fs.mkdirSync(itensDir, { recursive: true });
-        const baseSlug = slugify(item.patrimonio);
-        const nome = \`\${baseSlug !== 'sem_id' ? baseSlug + '__' : ''}\${slugify(item.id)}.json\`;
-        const p = path.join(itensDir, nome);
-        fs.writeFileSync(p, JSON.stringify(item, null, 2), 'utf8');
-        resultado.arquivoIndividual = nome;
-        resultado.caminhos.push(p);
-      }
-
-      const catalogo = lerCatalogo();
-      const idx = catalogo.itens.findIndex((it) => it.id === item.id);
-      if (idx >= 0) catalogo.itens[idx] = item; else catalogo.itens.push(item);
-      salvarCatalogo(catalogo);
-      resultado.totalNoCatalogoUnico = catalogo.itens.length;
-      resultado.caminhos.push(path.join(DIR, 'catalogo-unico.json'));
-
-      if (formatoExtra === 'txt-simples' || formatoExtra === 'ambos-formatos') {
-        const p = path.join(DIR, 'catalogo-simples.txt');
-        fs.writeFileSync(p, txtSimplesFromItens(catalogo.itens), 'utf8');
-        resultado.caminhos.push(p);
-      }
-      if (formatoExtra === 'csv-completo' || formatoExtra === 'ambos-formatos') {
-        const p = path.join(DIR, 'catalogo-completo.csv');
-        fs.writeFileSync(p, csvCompletoFromItens(catalogo.itens), 'utf8');
-        resultado.caminhos.push(p);
-      }
-
-      res.end(JSON.stringify(resultado));
-      return;
-    }
-
-    // ---------- 2) Sincronização: listar itens para outros aparelhos puxarem ----------
-    if (data.acao === 'listar') {
-      let itens = lerCatalogo().itens;
-      const desde = data.desde;
-      if (desde) itens = itens.filter((it) => (it.modificadoEm || '') >= desde || (it.criadoEm || '') >= desde);
-      res.end(JSON.stringify({ ok: true, itens, servidorEm: new Date().toISOString() }));
-      return;
-    }
-
-    // ---------- 2b) Importar objetos 3D (.obj) — rodada 51 (pedido do
-    // usuário: "Deve haver um diretório para os arquivos dos objetos [...]
-    // Caso esteja rodando por servidor, uma requisição é feita ao servidor
-    // para listar o diretório dos objetos e retorná-los"). Basta criar a
-    // pasta "objetos" ao lado deste receive.js e colocar arquivos .obj
-    // dentro — nenhuma configuração extra é necessária. ----------
-    if (data.acao === 'listarObjs') {
-      const dirObjs = path.join(DIR, 'objetos');
-      let arquivos = [];
-      if (fs.existsSync(dirObjs)) {
-        arquivos = fs.readdirSync(dirObjs)
-          .filter((nome) => nome.toLowerCase().endsWith('.obj'))
-          .map((nome) => ({ nome, conteudo: fs.readFileSync(path.join(dirObjs, nome), 'utf8') }));
-      }
-      res.end(JSON.stringify({ ok: true, arquivos }));
-      return;
-    }
-
-    // ---------- 2c) NOVO (01/09/2026): preferências do usuário, em arquivo
-    // SEPARADO (preferencias-usuario.json) — ver js/serverprefs.js.
-    // Mesma API do server/receive.js real (já versionado no projeto) ----------
-    if (data.acao === 'salvar-preferencias') {
-      const preferencias = data.preferencias;
-      if (!preferencias || typeof preferencias !== 'object') { res.writeHead(400); res.end(JSON.stringify({ erro: 'preferencias ausente ou inválida' })); return; }
-      const p = path.join(DIR, 'preferencias-usuario.json');
-      fs.writeFileSync(p, JSON.stringify({ preferencias, atualizadoEm: new Date().toISOString() }, null, 2), 'utf8');
-      res.end(JSON.stringify({ ok: true, acao: 'salvar-preferencias', caminho: p }));
-      return;
-    }
-    if (data.acao === 'carregar-preferencias') {
-      const p = path.join(DIR, 'preferencias-usuario.json');
-      if (!fs.existsSync(p)) { res.end(JSON.stringify({ ok: true, preferencias: null, atualizadoEm: null })); return; }
-      try {
-        const dado = JSON.parse(fs.readFileSync(p, 'utf8'));
-        res.end(JSON.stringify({ ok: true, preferencias: dado.preferencias || null, atualizadoEm: dado.atualizadoEm || null }));
-      } catch (e) { res.end(JSON.stringify({ ok: true, preferencias: null, atualizadoEm: null })); }
-      return;
-    }
-
-    // ---------- 2d) NOVO (01/09/2026): backup completo recuperável
-    // (backup-completo.json) — ver js/serverprefs.js. ----------
-    if (data.acao === 'salvar-backup-completo') {
-      const backup = data.backup;
-      if (!backup || typeof backup !== 'object') { res.writeHead(400); res.end(JSON.stringify({ erro: 'backup ausente ou inválido' })); return; }
-      const p = path.join(DIR, 'backup-completo.json');
-      fs.writeFileSync(p, JSON.stringify(backup, null, 2), 'utf8');
-      res.end(JSON.stringify({ ok: true, acao: 'salvar-backup-completo', caminho: p }));
-      return;
-    }
-    if (data.acao === 'carregar-backup-completo') {
-      const p = path.join(DIR, 'backup-completo.json');
-      if (!fs.existsSync(p)) { res.end(JSON.stringify({ ok: true, backup: null })); return; }
-      try {
-        const backup = JSON.parse(fs.readFileSync(p, 'utf8'));
-        res.end(JSON.stringify({ ok: true, backup }));
-      } catch (e) { res.end(JSON.stringify({ ok: true, backup: null })); }
-      return;
-    }
-
-    // ---------- 3) Envio em lote (backup manual) — email automático NÃO
-    // implementado nesta versão (ver aviso no topo do arquivo) ----------
-    const dir = path.join(DIR, 'recebidos');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const fname = path.join(dir, \`catalogo-\${stamp}.json\`);
-    fs.writeFileSync(fname, JSON.stringify(data, null, 2), 'utf8');
-    res.end(JSON.stringify({ ok: true, salvo: path.basename(fname), emailEnviado: false }));
-  });
-});
-
-server.listen(PORTA, () => {
-  console.log(\`Servidor do Catalogação de Itens rodando em http://localhost:\${PORTA}/\`);
-  console.log('Deixe esta janela aberta enquanto for usar o app. Ctrl+C para parar.');
-});
-`;
+    // NOVO (07/09/2026) — mesma explicação do bloco `receivePhp` acima
+    // (ver comentário grande lá). Conteúdo agora mora em
+    // js/serverbundles/receive-node-bundle.js, gerado a partir do
+    // server/receive.js REAL.
+    const receiveJs = window.RECEIVE_NODE_BUNDLE || '// receive.js\n// RECEIVE_NODE_BUNDLE não carregado — verifique se js/serverbundles/receive-node-bundle.js existe e foi incluído em index.html antes de settings.js.';
     Utils.downloadBlob(new Blob([receiveJs], { type: 'text/plain' }), 'receive.js');
     Utils.toast('receive.js baixado — rode "node receive.js" numa pasta com esse arquivo para subir o servidor.', { type: 'ok', duration: 5500 });
   },

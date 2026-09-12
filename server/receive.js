@@ -86,6 +86,33 @@ const DIR = __dirname;
 // `objetos/` (import de .obj) continua fora da pasta de dados de propósito —
 // é uma pasta de ENTRADA que a pessoa preenche manualmente, não um destino de
 // "guardar os arquivos" gerado pelo app.
+//
+// NOVO (07/09/2026), pedido verbatim: "outputs/ [...] └── storage/ #
+// Conteúdo persistido pelo usuário ├── 3d/ [...] ├── images/ [...] ├── text/
+// [...] ├── raw/ [...] └── app/ # guarda arquivos de configuração". Antes
+// desta rodada, a pasta de dados (padrão "dados/") guardava tudo solto,
+// organizado por FUNCIONALIDADE (itens/, catalogo-unico.json, etc). Agora a
+// pasta padrão passa a se chamar "storage/" e todo arquivo salvo é roteado
+// pra uma subpasta por TIPO — decidido com o usuário (ver AskUserQuestion
+// desta rodada, mesmas 3 respostas usadas no receive.php, ver comentário
+// grande equivalente lá):
+//   1) "storage/" SUBSTITUI "dados/" por completo — "Substitui por completo".
+//   2) Configuração do PRÓPRIO servidor continua em `config.json` (não
+//      "config.txt" — "para as configurações mantenha o config.json e
+//      descarte a ideia de 'config.txt'"). Esse `config.json` continua FORA
+//      de "storage/" (em `CONFIG_PATH`, ao lado deste arquivo): ele é quem
+//      diz onde "storage/" está (inclusive se for um caminho customizado
+//      fora da pasta do app), então não pode morar dentro da pasta que ele
+//      aponta (dependência circular). "storage/app/" guarda, em vez disso,
+//      as PREFERÊNCIAS do usuário salvas pelo app (preferencias-
+//      usuario.json) — "configuração" no sentido do pedido do usuário, mas
+//      não o bootstrap do próprio servidor.
+//   3) Rodando por "file:///" (sem servidor), nada muda — "Continua como
+//      hoje: fica no IndexedDB + download manual". Esta seção só afeta o
+//      modo servidor (PHP/Node).
+// Ver migrarParaStorageSeNecessario() abaixo: cuida de servidores JÁ
+// RODANDO com dados na antiga "dados/" pra ninguém perder arquivo nenhum
+// na hora de atualizar ("como não dar problema quanto a perder arquivos?").
 const CONFIG_PATH = path.join(DIR, 'config.json');
 
 function carregarConfig() {
@@ -97,15 +124,106 @@ function salvarConfig(cfg) {
   salvarArquivoAtomico(CONFIG_PATH, JSON.stringify(cfg, null, 2));
 }
 
+// As 5 subpastas por tipo dentro da pasta de dados — pedido verbatim do
+// usuário (estrutura enviada por ele). Hoje só "text/", "raw/" e "app/"
+// recebem arquivo de verdade (nenhuma ação deste servidor grava .obj/.gltf/
+// .png no disco ainda — fotos e modelos 3D continuam embutidos como
+// base64/vértices dentro dos JSONs) — "3d/" e "images/" ficam criadas e
+// vazias, prontas pra quando/se isso for implementado.
+function subpastasStorage() { return ['3d', 'images', 'text', 'raw', 'app']; }
+
+function temConteudo(pasta) {
+  if (!fs.existsSync(pasta)) return false;
+  try { return fs.readdirSync(pasta).length > 0; } catch (e) { return false; }
+}
+
+// NOVO (07/09/2026) — ver comentário grande acima. Roda em toda chamada
+// (rápido: só confere um arquivo-marcador) e, na PRIMEIRA vez depois desta
+// atualização, reorganiza dados de uma instalação antiga automaticamente,
+// sem exigir nenhuma ação manual da pessoa:
+//   Passo 1 (só quando a pasta usada é a PADRÃO, sem "pastaDados"
+//   customizado em config.json): se existir uma pasta antiga "dados/" com
+//   arquivos dentro, e a nova pasta "storage/" ainda não existir (ou
+//   estiver vazia), RENOMEIA "dados/" inteira pra "storage/" —
+//   fs.renameSync é atômico no mesmo disco, então não existe um instante em
+//   que os arquivos não estão em lugar nenhum.
+//   Passo 2 (sempre, padrão ou customizado): qualquer arquivo antigo ainda
+//   solto na RAIZ da pasta de dados (formato de antes desta rodada) é
+//   movido (renameSync, nunca copia+apaga separado) pra dentro da subpasta
+//   por tipo certa. Depois de rodar uma vez, grava um arquivo ".storage-
+//   migrado" dentro da pasta final, e nunca mais repete o processo.
+function migrarParaStorageSeNecessario(abs, usandoPadrao) {
+  const marcador = path.join(abs, '.storage-migrado');
+  if (fs.existsSync(marcador)) return;
+
+  // Passo 1: pasta antiga "dados/" (só no caminho padrão) -> nova "storage/"
+  if (usandoPadrao) {
+    const antigaDados = path.join(DIR, 'dados');
+    if (!temConteudo(abs) && temConteudo(antigaDados)) {
+      try {
+        if (fs.existsSync(abs)) fs.rmdirSync(abs); // pasta nova vazia criada antes desta checagem — libera o rename
+        fs.renameSync(antigaDados, abs);
+      } catch (e) { /* melhor esforço — se o rename falhar (ex: disco diferente), segue sem migrar; nada é apagado */ }
+    }
+  }
+
+  if (!fs.existsSync(abs)) return; // instalação nova, sem nada de nenhuma versão anterior pra migrar
+
+  subpastasStorage().forEach((sub) => {
+    const subAbs = path.join(abs, sub);
+    if (!fs.existsSync(subAbs)) fs.mkdirSync(subAbs, { recursive: true });
+  });
+
+  // Passo 2: arquivos/pastas soltos na raiz (formato de qualquer versão
+  // anterior a esta rodada) -> subpasta por tipo.
+  const mover = (de, para) => {
+    const origem = path.join(abs, de);
+    const destino = path.join(abs, para);
+    if (fs.existsSync(origem) && !fs.existsSync(destino)) {
+      try { fs.renameSync(origem, destino); } catch (e) { /* melhor esforço — não apaga nada em caso de falha */ }
+    }
+  };
+  mover('catalogo-unico.json', path.join('text', 'catalogo-unico.json'));
+  mover('catalogo-simples.txt', path.join('text', 'catalogo-simples.txt'));
+  mover('backup-completo.json', path.join('text', 'backup-completo.json'));
+  mover('preferencias-usuario.json', path.join('app', 'preferencias-usuario.json'));
+  mover('catalogo-completo.csv', path.join('raw', 'catalogo-completo.csv'));
+  mover('itens', path.join('text', 'itens'));
+  mover('recebidos', path.join('text', 'recebidos'));
+
+  try {
+    fs.writeFileSync(marcador, `Migrado automaticamente em ${new Date().toISOString()} — reorganizado nas subpastas por tipo (${subpastasStorage().join('/')}).`, 'utf8');
+  } catch (e) { /* não crítico — pior caso, tenta migrar de novo na próxima chamada (idempotente, não perde nada) */ }
+}
+
 // Resolve a pasta de dados ATUAL (relida a cada chamada — barata, é um JSON
 // pequeno — pra "configurar-pasta-dados" valer na hora, sem reiniciar o
-// servidor) e garante que ela existe no disco.
+// servidor) e garante que ela (e as subpastas por tipo) existem no disco.
 function pastaDadosAtual() {
   const cfg = carregarConfig();
-  const pasta = (cfg.pastaDados && String(cfg.pastaDados).trim()) || path.join(DIR, 'dados');
+  const pastaConfigurada = (cfg.pastaDados && String(cfg.pastaDados).trim()) || '';
+  const usandoPadrao = !pastaConfigurada;
+  const pasta = usandoPadrao ? path.join(DIR, 'storage') : pastaConfigurada;
   const abs = path.isAbsolute(pasta) ? pasta : path.join(DIR, pasta);
+
+  migrarParaStorageSeNecessario(abs, usandoPadrao);
+
   if (!fs.existsSync(abs)) fs.mkdirSync(abs, { recursive: true });
-  return abs;
+  subpastasStorage().forEach((sub) => {
+    const subAbs = path.join(abs, sub);
+    if (!fs.existsSync(subAbs)) fs.mkdirSync(subAbs, { recursive: true });
+  });
+  // BUG CORRIGIDO (07/09/2026), pedido verbatim: "No nome da pasta do
+  // servidor, as barras devem ficar todas para o mesmo lado" — mesma
+  // correção espelhada de receive.php (ver comentário grande lá): normaliza
+  // pra '/' só na hora de DEVOLVER o valor (usado pra MOSTRAR na tela de
+  // Configurações) — nunca antes, as operações de arquivo acima continuam
+  // com 'abs' original, sem risco de quebrar nada no Windows. No Node,
+  // 'path.join' já normaliza tudo pro separador do sistema operacional
+  // (nunca mistura estilos como o '__DIR__' do PHP fazia), mas esta troca
+  // deixa o VALOR MOSTRADO consistente entre receive.php e receive.js de
+  // qualquer forma (sempre '/', em qualquer sistema).
+  return abs.replace(/\\/g, '/');
 }
 
 function slugify(str) {
@@ -139,7 +257,7 @@ function csvCompletoFromItens(itens) {
 function lerCatalogo() {
   // NOVO (03/09/2026): `pastaDadosAtual()` no lugar de `DIR` direto — ver
   // comentário grande acima sobre a pasta de dados configurável.
-  const p = path.join(pastaDadosAtual(), 'catalogo-unico.json');
+  const p = path.join(pastaDadosAtual(), 'text', 'catalogo-unico.json'); // NOVO (07/09/2026): dentro de storage/text/
   if (!fs.existsSync(p)) return { itens: [] };
   try {
     const dado = JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -149,7 +267,7 @@ function lerCatalogo() {
 
 function salvarCatalogo(catalogo) {
   catalogo.atualizadoEm = new Date().toISOString();
-  fs.writeFileSync(path.join(pastaDadosAtual(), 'catalogo-unico.json'), JSON.stringify(catalogo, null, 2), 'utf8');
+  fs.writeFileSync(path.join(pastaDadosAtual(), 'text', 'catalogo-unico.json'), JSON.stringify(catalogo, null, 2), 'utf8'); // NOVO (07/09/2026)
 }
 
 // Grava em ARQUIVO TEMPORÁRIO + renomeia por cima do definitivo
@@ -192,7 +310,7 @@ const server = http.createServer((req, res) => {
 
       const pastaDados = pastaDadosAtual(); // NOVO (03/09/2026) — ver comentário grande acima
       if (modo === 'individual' || modo === 'ambos') {
-        const itensDir = path.join(pastaDados, 'itens');
+        const itensDir = path.join(pastaDados, 'text', 'itens'); // NOVO (07/09/2026): dentro de storage/text/
         if (!fs.existsSync(itensDir)) fs.mkdirSync(itensDir, { recursive: true });
         const baseSlug = slugify(item.patrimonio);
         const nome = `${baseSlug !== 'sem_id' ? baseSlug + '__' : ''}${slugify(item.id)}.json`;
@@ -207,15 +325,15 @@ const server = http.createServer((req, res) => {
       if (idx >= 0) catalogo.itens[idx] = item; else catalogo.itens.push(item);
       salvarCatalogo(catalogo);
       resultado.totalNoCatalogoUnico = catalogo.itens.length;
-      resultado.caminhos.push(path.join(pastaDados, 'catalogo-unico.json'));
+      resultado.caminhos.push(path.join(pastaDados, 'text', 'catalogo-unico.json')); // NOVO (07/09/2026)
 
       if (formatoExtra === 'txt-simples' || formatoExtra === 'ambos-formatos') {
-        const p = path.join(pastaDados, 'catalogo-simples.txt');
+        const p = path.join(pastaDados, 'text', 'catalogo-simples.txt'); // NOVO (07/09/2026): dentro de storage/text/
         fs.writeFileSync(p, txtSimplesFromItens(catalogo.itens), 'utf8');
         resultado.caminhos.push(p);
       }
       if (formatoExtra === 'csv-completo' || formatoExtra === 'ambos-formatos') {
-        const p = path.join(pastaDados, 'catalogo-completo.csv');
+        const p = path.join(pastaDados, 'raw', 'catalogo-completo.csv'); // NOVO (07/09/2026): dentro de storage/raw/
         fs.writeFileSync(p, csvCompletoFromItens(catalogo.itens), 'utf8');
         resultado.caminhos.push(p);
       }
@@ -259,13 +377,13 @@ const server = http.createServer((req, res) => {
     if (data.acao === 'salvar-preferencias') {
       const preferencias = data.preferencias;
       if (!preferencias || typeof preferencias !== 'object') { res.writeHead(400); res.end(JSON.stringify({ erro: 'preferencias ausente ou inválida' })); return; }
-      const p = path.join(pastaDadosAtual(), 'preferencias-usuario.json'); // NOVO (03/09/2026)
+      const p = path.join(pastaDadosAtual(), 'app', 'preferencias-usuario.json'); // NOVO (07/09/2026): dentro de storage/app/
       salvarArquivoAtomico(p, JSON.stringify({ preferencias, atualizadoEm: new Date().toISOString() }, null, 2));
       res.end(JSON.stringify({ ok: true, acao: 'salvar-preferencias', caminho: p }));
       return;
     }
     if (data.acao === 'carregar-preferencias') {
-      const p = path.join(pastaDadosAtual(), 'preferencias-usuario.json');
+      const p = path.join(pastaDadosAtual(), 'app', 'preferencias-usuario.json');
       if (!fs.existsSync(p)) { res.end(JSON.stringify({ ok: true, preferencias: null, atualizadoEm: null })); return; }
       try {
         const dado = JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -286,13 +404,13 @@ const server = http.createServer((req, res) => {
     if (data.acao === 'salvar-backup-completo') {
       const backup = data.backup;
       if (!backup || typeof backup !== 'object') { res.writeHead(400); res.end(JSON.stringify({ erro: 'backup ausente ou inválido' })); return; }
-      const p = path.join(pastaDadosAtual(), 'backup-completo.json'); // NOVO (03/09/2026)
+      const p = path.join(pastaDadosAtual(), 'text', 'backup-completo.json'); // NOVO (07/09/2026): dentro de storage/text/
       salvarArquivoAtomico(p, JSON.stringify(backup, null, 2));
       res.end(JSON.stringify({ ok: true, acao: 'salvar-backup-completo', caminho: p, totalItens: Array.isArray(backup.items) ? backup.items.length : undefined }));
       return;
     }
     if (data.acao === 'carregar-backup-completo') {
-      const p = path.join(pastaDadosAtual(), 'backup-completo.json');
+      const p = path.join(pastaDadosAtual(), 'text', 'backup-completo.json');
       if (!fs.existsSync(p)) { res.end(JSON.stringify({ ok: true, backup: null })); return; }
       try {
         const backup = JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -308,7 +426,41 @@ const server = http.createServer((req, res) => {
     // sozinho) pra o app mostrar na tela de Configurações (ver
     // js/serverprefs.js/settings.js). ----------
     if (data.acao === 'status-armazenamento') {
-      res.end(JSON.stringify({ ok: true, pastaDadosAtual: pastaDadosAtual(), pastaDadosPadrao: path.join(DIR, 'dados') }));
+      res.end(JSON.stringify({ ok: true, pastaDadosAtual: pastaDadosAtual(), pastaDadosPadrao: path.join(DIR, 'storage'), subpastas: subpastasStorage() }));
+      return;
+    }
+
+    // NOVO (07/09/2026), pedido verbatim: "a estrutura de pastas deve ser
+    // mostrada (com ícones de pastas e clicável e interagível)" — mesma
+    // lógica/mesmo limite (profundidade 4, 500 nós) do receive.php (ver
+    // comentário grande lá, listarArvore).
+    if (data.acao === 'listar-arquivos') {
+      const pastaDados = pastaDadosAtual();
+      const contador = { n: 0 };
+      const limite = 500;
+      const listarArvore = (pasta, profundidadeRestante) => {
+        const filhos = [];
+        if (profundidadeRestante <= 0 || !fs.existsSync(pasta)) return filhos;
+        let itens = [];
+        try { itens = fs.readdirSync(pasta); } catch (e) { return filhos; }
+        itens.sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+        for (const nome of itens) {
+          if (nome.startsWith('.')) continue; // esconde .storage-migrado etc.
+          if (contador.n >= limite) { filhos.push({ nome: `… (mais de ${limite} itens, lista cortada aqui)`, tipo: 'info' }); break; }
+          const caminho = path.join(pasta, nome);
+          contador.n++;
+          let stat;
+          try { stat = fs.statSync(caminho); } catch (e) { continue; }
+          if (stat.isDirectory()) {
+            filhos.push({ nome, tipo: 'pasta', filhos: listarArvore(caminho, profundidadeRestante - 1) });
+          } else {
+            filhos.push({ nome, tipo: 'arquivo', tamanho: stat.size });
+          }
+        }
+        return filhos;
+      };
+      const arvore = { nome: path.basename(pastaDados), tipo: 'pasta', filhos: listarArvore(pastaDados, 4) };
+      res.end(JSON.stringify({ ok: true, arvore, pastaDadosAtual: pastaDados }));
       return;
     }
     if (data.acao === 'configurar-pasta-dados') {
@@ -322,9 +474,43 @@ const server = http.createServer((req, res) => {
       return;
     }
 
+    // NOVO (07/09/2026), pedido verbatim: "poder carregar modelos 3D
+    // externos [...] Quando rodando em um servidor, deve ser guardado em
+    // 'storage/3d/'." — mesmo par de ações do receive.php (ver comentário
+    // grande lá): 'salvar-arquivo-3d' grava em disco de verdade;
+    // 'listarObjs' devolve tudo que já foi salvo, no formato que
+    // js/objimport.js `tryLoadFromServer` já esperava desde a rodada 51
+    // (ação nunca implementada em nenhum dos 2 servidores até agora).
+    const sanitizarNomeArquivo3D = (nome) => {
+      let base = path.basename(String(nome || ''));
+      base = base.replace(/[^A-Za-z0-9._-]/g, '_');
+      if (!base.toLowerCase().endsWith('.obj')) base += '.obj';
+      return base === '.obj' ? `modelo_${Date.now()}.obj` : base;
+    };
+    if (data.acao === 'salvar-arquivo-3d') {
+      const pasta3d = path.join(pastaDadosAtual(), '3d');
+      if (!fs.existsSync(pasta3d)) fs.mkdirSync(pasta3d, { recursive: true });
+      const nome = sanitizarNomeArquivo3D(data.nomeArquivo);
+      fs.writeFileSync(path.join(pasta3d, nome), String(data.conteudo || ''), 'utf8');
+      res.end(JSON.stringify({ ok: true, acao: 'salvar-arquivo-3d', nomeArquivo: nome }));
+      return;
+    }
+    if (data.acao === 'listarObjs') {
+      const pasta3d = path.join(pastaDadosAtual(), '3d');
+      const arquivos = [];
+      if (fs.existsSync(pasta3d)) {
+        for (const nome of fs.readdirSync(pasta3d)) {
+          if (!nome.toLowerCase().endsWith('.obj')) continue;
+          try { arquivos.push({ nome, conteudo: fs.readFileSync(path.join(pasta3d, nome), 'utf8') }); } catch (e) { /* pula arquivo ilegível */ }
+        }
+      }
+      res.end(JSON.stringify({ ok: true, arquivos }));
+      return;
+    }
+
     // ---------- 7) Envio em lote (backup manual) — email automático NÃO
     // implementado nesta versão (só na PHP, que tem mail() nativo) ----------
-    const dir = path.join(pastaDadosAtual(), 'recebidos'); // NOVO (03/09/2026): também dentro da pasta de dados
+    const dir = path.join(pastaDadosAtual(), 'text', 'recebidos'); // NOVO (07/09/2026): dentro de storage/text/
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const fname = path.join(dir, `catalogo-${stamp}.json`);
@@ -340,5 +526,5 @@ server.listen(PORTA, () => {
   // sendo gravados (pedido do usuário: "isto deve ficar claro visualmente" —
   // este log complementa o indicativo dentro do app, ver serverprefs.js/
   // settings.js).
-  console.log(`Pasta de dados: ${pastaDadosAtual()} (configurável em server/config.json, chave "pastaDados", ou pelo próprio app em Configurações → Servidor local)`);
+  console.log(`Pasta de dados: ${pastaDadosAtual()} (organizada por tipo: ${subpastasStorage().join('/')} — configurável em server/config.json, chave "pastaDados", ou pelo próprio app em Configurações → Servidor local)`);
 });

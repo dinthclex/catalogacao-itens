@@ -17,6 +17,81 @@
  * (quando em modo assistido) para referência/depuração.
  */
 
+/**
+ * [11/09/2026] ÍNDICE DE FUNÇÕES — cabeçalho adicionado pra evitar buscas
+ * exaustivas (pedido do usuário, mesmo padrão já aplicado em
+ * ambientephotos.js). Lista todo método top-level de `Mapping` (objeto,
+ * usado por js/mapview.js e js/view3d.js — o 2D e o "Ver em 3D" leem/
+ * mutam o `map` sempre através destas funções) e de `SensorTracker`
+ * (classe, modo "assistido" do rastreamento por sensores).
+ *
+ * Mapping (objeto):
+ * - newMap: cria um Map novo vazio (walls/points/objects/cameras/layers etc.).
+ * - defaultAmbienteName: nome padrão "Ambiente N" quando o usuário não digita um.
+ * - displayName: nome exibido de um mapa (aplica o padrão acima quando vazio).
+ * - ensureNewFields: migração preguiçosa — garante que campos adicionados em
+ *   versões recentes existem num `map` salvo antigo (chamado ao carregar).
+ * - ensureSafeLayer: garante que existe uma camada "segura" (não removível/
+ *   sempre visível) pra nunca sobrar elemento sem camada nenhuma.
+ * - resolveLayerId: resolve um `layerId` possivelmente inválido/ausente pra
+ *   um id de camada de verdade (camada ativa/segura) — usado por TODO ponto
+ *   que precisa "qual camada este elemento novo vai" (2D e 3D).
+ * - ensureAllElementsLayered: varre o mapa inteiro corrigindo elementos sem
+ *   `layerId` (chamado em migrações/aberturas de mapa).
+ * - getChildren/getDescendantIds: hierarquia de mapas-filhos (sub-ambientes).
+ * - wouldCreateCycle: valida que reatribuir o pai de um mapa não cria um ciclo.
+ * - isLayerVisible/filterByLayerVisibility: consulta/filtra elementos por
+ *   visibilidade de camada — usado pra esconder/mostrar no editor 2D e no 3D.
+ * - addLayer/removeLayer/renameLayer/setLayerVisible/setLayerLocked/
+ *   setLayerOpacity/reorderLayer/reorderLayerToIndex/countInLayer/
+ *   duplicateLayer/mergeLayerDown: CRUD completo da janela "Camadas" (2D).
+ * - recalcBounds: recalcula a caixa delimitadora do mapa a partir de todo
+ *   elemento (paredes/pontos/objetos) — usado ao editar/importar.
+ * - addText/removeText/updateText: elemento de texto solto no mapa 2D.
+ * - addWall/removeWall/splitWallAt: CRUD de paredes (splitWallAt divide uma
+ *   parede em duas ao inserir uma porta/janela/canto novo no meio dela).
+ * - addDoor/removeDoor/updateDoor, addWindow/removeWindow/updateWindow,
+ *   resolveDoorWindowPos: CRUD de portas/janelas (presas a uma parede).
+ * - addCamera/removeCamera/updateCamera/setCamera3DAtiva: CRUD do objeto
+ *   "Câmera" (câmera fixa de segurança OU "orb de câmera"/Camera Match, ver
+ *   campo opcional `fotoId`) e qual câmera está "ativa" no "Ver em 3D".
+ * - _capitalizeTipo/_labelForObjectType: rótulo amigável a partir do tipo
+ *   interno de um objeto do catálogo (mesa/armário/etc.).
+ * - _allSceneNames/_nextObjectName: geram um nome único ("Mesa 2") ao criar
+ *   objeto novo sem nome explícito.
+ * - addObject/removeObject/updateObject: CRUD de objetos do mapa (móveis,
+ *   formas desenhadas, etc. — o catálogo do painel "+" em view3d.js/mapview.js).
+ * - objectFootprintFor/objectTopHeight/objectTopHeightAt/
+ *   pointInObjectFootprint/_footprintBox/_boxesOverlap/_findTopObjectAt:
+ *   geometria de "pegada"/altura de objetos — empilhamento (colocar um item
+ *   EM CIMA de outro objeto) e colisão entre objetos.
+ * - defaultShapeForTipo/applyDefaultShapeToObject: forma/dimensões-padrão
+ *   por tipo de objeto ao criar um novo.
+ * - addItemToObject/removeItemFromObject/computeItemAssocIndex: associação
+ *   entre um objeto do mapa e patrimônio(s) catalogado(s) (`item.mapaX`).
+ * - addPoint/removePoint: pontos de referência soltos no mapa (modo manual).
+ * - lineIntersection: geometria auxiliar (interseção de 2 segmentos).
+ * - analyzeWalls: detecta cantos/interseções entre paredes (auto-junção).
+ * - latLngToLocalMeters: converte coordenada GPS pra metros locais do mapa
+ *   (origem = 1º ponto capturado) — usado no modo assistido/geo.js.
+ * - findPeripheralSlot: posição "livre" na borda do mapa pra um elemento
+ *   novo que ainda não tem lugar certo (ex. câmera nova sem clique no chão).
+ * - sampleAverageColor: amostra a cor média de uma paredes/imagem (usado ao
+ *   colorir automaticamente uma parede a partir da câmera).
+ * - linkObjects/unlinkObject/groupMembers: agrupamento de objetos (mover/
+ *   girar vários de uma vez como um grupo).
+ *
+ * SensorTracker (classe — modo "assistido", dead-reckoning por sensores):
+ * - constructor: estado inicial (heading, posição, buffer do acelerômetro).
+ * - isSupported (static): detecta se o navegador expõe DeviceOrientation/Motion.
+ * - requestPermission: pede permissão de sensores (obrigatório no iOS 13+).
+ * - start/stop: liga/desliga os listeners de orientação/movimento.
+ * - _handleOrientation: atualiza `heading` a partir da bússola do aparelho.
+ * - _handleMotion: detecta picos de aceleração (candidatos a "passo").
+ * - _registerStep: confirma um passo e avança `pos` na direção de `heading`.
+ * - reset: zera a posição estimada (início de uma nova sessão de captura).
+ */
+
 const Mapping = {
   newMap({ nome, modo = 'manual' } = {}) {
     const id = DB.uuid();
@@ -312,6 +387,13 @@ const Mapping = {
       cameras: filtra(map.cameras),
       textos: filtra(map.textos),
       itens: filtra(map.itens),
+      // [09/09/2026] Ajuste ligado ao conserto de "orb de foto não aparece
+      // no 3D" (ver view3d.js _buildFotosNoMapa): agora que `map.fotos` é
+      // sempre preenchido antes deste filtro rodar, aplica a MESMA regra de
+      // visibilidade de camada que já vale pra `itens` — um orb de foto
+      // numa camada oculta some do 3D junto com o resto dela, em vez de
+      // continuar aparecendo por engano.
+      fotos: filtra(map.fotos),
     };
   },
 
@@ -482,7 +564,12 @@ const Mapping = {
   // nem se associa a um item do catálogo. ----------
   addText(map, x, y, content = 'Texto', extra = {}) {
     if (!map.textos) map.textos = [];
-    const t = { id: Utils.uid('txt'), x, y, content, cor: '#ffffff', tamanho: 14, piso: 0, criadoEm: DB.nowISO(), ...extra };
+    // NOVO (07/09/2026), pedido verbatim: "...'Texto'... devem ter nomes...
+    // implemente algo semelhante [ao bpy.data.objects] no app." — `nome` é
+    // um campo NOVO, separado de `content` (que continua sendo o TEXTO
+    // exibido no mapa — o `nome` é só a identidade do objeto no "dicionário"
+    // de cena, ver js/sceneobjects.js).
+    const t = { id: Utils.uid('txt'), x, y, content, cor: '#ffffff', tamanho: 14, piso: 0, criadoEm: DB.nowISO(), nome: this._nextObjectName(map, 'Texto'), ...extra };
     map.textos.push(t);
     this.recalcBounds(map);
     return t;
@@ -516,7 +603,16 @@ const Mapping = {
     // sempre foi) — o campo existe pra alimentar o NOVO formato de texto
     // (js/maptxt.js) e o empilhamento em altura no 3D (engine3d.js, mesmo
     // mecanismo `piso*2.8` que objetos já usam), não pra mudar o 2D agora.
-    const wall = { id: Utils.uid('wall'), x1, y1, x2, y2, height: 2.6, espessura: 0.12, colorRGB: null, tipo: 'padrao', piso: 0, ...extra };
+    // NOVO (07/09/2026), pedido verbatim: "...'Parede'... 'Reta/Curva'...
+    // devem ter nomes... implemente algo semelhante [ao bpy.data.objects]
+    // no app." — decisão de escopo TRANSPARENTE: a ferramenta "Reta/Curva"
+    // (e também "Lápis", que desenha segmentos) não tem coleção própria no
+    // mapa — ambas produzem entradas em `map.walls` (mesmo array de
+    // "Parede"), então ganham o MESMO nome padrão "Parede.NNN" — não há como
+    // distinguir "uma parede normal" de "uma reta/curva desenhada com a
+    // ferramenta Lápis/Reta" sem mudar a arquitetura de dados (que não foi
+    // pedido aqui); reportado ao usuário no changelog do sw.js.
+    const wall = { id: Utils.uid('wall'), x1, y1, x2, y2, height: 2.6, espessura: 0.12, colorRGB: null, tipo: 'padrao', piso: 0, nome: this._nextObjectName(map, 'Parede'), ...extra };
     map.walls.push(wall);
     this.recalcBounds(map);
     return wall; // pedido implícito por quem já chamava assumindo isso (ver mapview.js _pasteImageOrClipboard/cola de seleção) — antes não retornava nada
@@ -645,6 +741,9 @@ const Mapping = {
       // parede" (pedido do usuário). No 2D não muda nada visualmente (vista
       // de cima não representa isso).
       aberta: false,
+      // NOVO (07/09/2026), pedido verbatim: "...'Porta'... devem ter
+      // nomes..."
+      nome: this._nextObjectName(map, 'Porta'),
       colorRGB: null, layerId: null, criadoEm: DB.nowISO(), ...extra,
     };
     map.portas.push(d);
@@ -674,6 +773,9 @@ const Mapping = {
       x, y, angulo: 0, alturaPeitoril: 1.0, largura: 1.2, altura: 1.2,
       tipo: 'padrao', grade: false, bandeira: false, // grade: grelha de proteção (só visual); bandeira: variante com bandeira/transom (só abre o topo)
       aberta: false, // só afeta o 3D — ver comentário em addDoor acima
+      // NOVO (07/09/2026), pedido verbatim: "...'Janela'... devem ter
+      // nomes..."
+      nome: this._nextObjectName(map, 'Janela'),
       colorRGB: null, layerId: null, criadoEm: DB.nowISO(), ...extra,
     };
     map.janelas.push(j);
@@ -715,7 +817,30 @@ const Mapping = {
   // (fotoId — de uma foto de qualquer ambiente, ver AmbientePhotos). ----------
   addCamera(map, x, y, extra = {}) {
     if (!map.cameras) map.cameras = [];
-    const cam = { id: Utils.uid('cam'), x, y, angulo: 0, fov: Math.PI / 3, piso: 0, fotoId: null, criadoEm: DB.nowISO(), ...extra };
+    // NOVO (07/09/2026), pedido verbatim: "...'Câmeras'... devem ter
+    // nomes... implemente algo semelhante [ao bpy.data.objects] no app."
+    // [10/09/2026] NOVO — Campos Blender (Lens/DOF/Clipping) adicionados —
+    // ver histórico completo em js/mapview.js `_camPropsFieldsetHtml`.
+    // [11/09/2026] REESCRITO — pedido verbatim: "No 'Ver em 3D', nas
+    // propriedades de uma câmera, apague todas as propriedades. Deixe
+    // apenas FOV. [...] uma seção de 'Resolução' [...] Ao carregar uma
+    // foto, a câmera deve assumir a resolução da foto." Todo o fieldset
+    // Blender (tipo de lente/distância focal/sensor/shift/DOF/clipping)
+    // SUMIU do painel — `fov` (radianos, direto, sem derivar de foco/
+    // sensor nenhum) e `resolutionX`/`resolutionY` (pixels — influenciam o
+    // tamanho do retângulo amarelo, ver `_activeCamFrameAspect`/
+    // `_activeCamPropsVFovRad` em view3d.js e o retângulo de verdade em
+    // engine3d.js `_fotoFrustumMeshesById`) são os ÚNICOS campos de câmera
+    // que sobraram, além do que já existia antes desta rodada (posição/
+    // ângulo/piso/foto associada). `extra.fov`/`extra.resolutionX/Y` (se
+    // vierem explícitos de quem chama) têm prioridade — `...extra`
+    // continua por último.
+    const cam = {
+      id: Utils.uid('cam'), x, y, angulo: 0, fov: Math.PI / 3, piso: 0, fotoId: null,
+      criadoEm: DB.nowISO(), nome: this._nextObjectName(map, 'Câmera'),
+      resolutionX: 1920, resolutionY: 1080,
+      ...extra,
+    };
     map.cameras.push(cam);
     this.recalcBounds(map);
     return cam;
@@ -753,9 +878,77 @@ const Mapping = {
   // catalogado (obj.itemIds — pode ser MAIS DE UM, ver addItemToObject
   // abaixo) — vira também o "marcador" desses itens no mapa/3D.
   // Cada um tem um correspondente simples em 3D (ver engine3d.js). ----------
+  // NOVO (07/09/2026), pedido verbatim: "Nomes padrão, por exemplo, para o
+  // cubo, 'Cube.001' (assim como no Blender). Podendo ser alterado ou
+  // acessado, depois. Todos os objetos, agora, devem ter um nome. Todo
+  // objeto que pode ser inserido na grade do mapa 2D ou no mapa 3D deve ter
+  // um nome." — mesmo espírito do Blender: "<Tipo capitalizado>.NNN",
+  // incrementando o sufixo por TIPO dentro do mesmo mapa (não globalmente),
+  // pra "Mesa.001"/"Mesa.002" não brigarem com "Coluna.001". `_nextObjectName`
+  // é usada tanto na criação (`addObject` abaixo) quanto para "preencher"
+  // objetos antigos sem nome, retroativamente, quando o painel de
+  // propriedades é aberto (ver mapview.js `_openObjectPanel`).
+  _capitalizeTipo(tipo) {
+    // BUG CORRIGIDO (07/09/2026), pedido verbatim: "...'Novo Cubo 3D'...
+    // devem ter nomes..." — todos os pontos de criação do botão "Novo Cubo
+    // 3D" (mapview.js e view3d.js) chamam `addObject(map,x,y,null,...)` com
+    // `tipo` null (o cubo nasce sem tipo de catálogo, só com customMesh) —
+    // antes disso caía no fallback genérico 'objeto' ("Objeto.001"), o que
+    // não identifica a origem. Como TODO chamador com tipo null/vazio no
+    // código atual é, de fato, o "Novo Cubo 3D", o fallback vira 'cubo'
+    // ("Cubo.001", igual ao Blender pro Cube.001 default).
+    const s = String(tipo || 'cubo');
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  },
+  // NOVO (07/09/2026) — objetos importados de .obj (js/objimport.js,
+  // tipo="objimport:N") não têm um nome "bonito" pra capitalizar (o tipo é
+  // só um contador interno) — usa o nome do ARQUIVO importado (ex.:
+  // "Cadeira.obj" -> "Cadeira") como base do nome padrão em vez disso,
+  // continuando com o mesmo sufixo ".001" incremental por tipo.
+  _labelForObjectType(tipo) {
+    if (window.ObjImport?.isCustomKey?.(tipo)) {
+      const item = (window.ObjImport.listImported?.() || []).find((i) => i.key === tipo);
+      if (item?.label) return this._capitalizeTipo(item.label);
+    }
+    return this._capitalizeTipo(tipo);
+  },
+  // NOVO (07/09/2026), pedido verbatim: "Todos os objetos devem ter nomes:
+  // 'Lápis', 'Parede', 'Porta', 'Janela', 'Texto', 'Reta/Curva', cada uma das
+  // formas da ferramenta 'Formas', 'Retículo métrico', 'Trena', 'Traço
+  // guia', 'Orb de foto', 'Câmeras', 'Adicionar orb', cada um dos objetos da
+  // ferramenta 'Objetos' e 'Novo Cubo 3D'. Assim como no Blender, há um
+  // dicionário para todos os objetos em cena (bpy.data.objects[...]),
+  // implemente algo semelhante no app." — o Blender usa um único namespace
+  // GLOBAL pra bpy.data.objects (não um por tipo), então agora o sufixo
+  // ".NNN" evita colisão contra TODAS as coleções nomeáveis do mapa (não só
+  // `map.objects` como antes), listadas em `_allSceneNames` abaixo — usada
+  // também pelo novo `js/sceneobjects.js` (window.SceneObjects), o
+  // "dicionário" central pedido pelo usuário.
+  _allSceneNames(map) {
+    const nomes = [];
+    const colecoes = [
+      map.objects, map.walls, map.portas, map.janelas, map.textos,
+      map.cameras, map.medidas2d, map.tracos2d,
+    ];
+    for (const col of colecoes) {
+      if (!col) continue;
+      for (const it of col) if (it && it.nome) nomes.push(it.nome);
+    }
+    return nomes;
+  },
+  _nextObjectName(map, tipoBase) {
+    const usados = new Set(this._allSceneNames(map));
+    let n = 1;
+    let nome;
+    do {
+      nome = `${tipoBase}.${String(n).padStart(3, '0')}`;
+      n++;
+    } while (usados.has(nome));
+    return nome;
+  },
   addObject(map, x, y, tipo, extra = {}) {
     if (!map.objects) map.objects = [];
-    const obj = { id: Utils.uid('obj'), x, y, tipo, piso: 0, angulo: 0, criadoEm: DB.nowISO(), ...extra };
+    const obj = { id: Utils.uid('obj'), x, y, tipo, piso: 0, angulo: 0, criadoEm: DB.nowISO(), nome: this._nextObjectName(map, this._labelForObjectType(tipo)), ...extra };
     // Luminária: fica no TETO por padrão (3m do chão) quando quem chamou não
     // já mandou uma elevação própria — a hotbar 3D já manda a elevação
     // calculada pela mira + 3m (ver view3d.js _placeWithBuildTool/
@@ -1230,6 +1423,65 @@ const Mapping = {
     let r = 0, g = 0, b = 0, n = 0;
     for (let i = 0; i < data.length; i += 4) { r += data[i]; g += data[i + 1]; b += data[i + 2]; n++; }
     return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
+  },
+
+  /** NOVO (07/09/2026), pedido verbatim: "ligar objetos separados como no
+   *  Blender. [...] deve ser possível agrupá-los para que, ao abrir o
+   *  Modelador para editá-los, seja possível modificar ambos." Grupo é
+   *  representado por `obj.grupoId` (string) COMPARTILHADO entre todos os
+   *  membros — sem lista separada em nenhum outro lugar do mapa, então
+   *  "quem está no grupo" é sempre `map.objects.filter(o=>o.grupoId===X)`
+   *  (ver `Mapping.groupMembers`). Centralizado aqui (não em mapview.js/
+   *  view3d.js) por ser lógica de dados pura, compartilhada por QUEM QUER
+   *  que precise ler/mudar grupos (painel 2D, Modelador 3D) — testável
+   *  isoladamente em Node, sem DOM.
+   *
+   *  `linkObjects(map, idA, idB)` — liga 2 objetos num grupo só:
+   *  - Nenhum dos 2 tinha grupo -> cria um grupoId novo pros 2.
+   *  - Só um tinha grupo -> o outro ENTRA nesse grupo.
+   *  - Os 2 já tinham grupos DIFERENTES -> FUNDE os 2 grupos num só (todo
+   *    membro do grupo de B passa a usar o grupoId de A) — "ligar" 2
+   *    conjuntos já existentes vira 1 conjunto maior, ninguém fica de fora.
+   *  - Já estavam no MESMO grupo -> não faz nada (idempotente).
+   *  Devolve o grupoId final, ou `null` se algum dos ids não existir. */
+  linkObjects(map, idA, idB) {
+    if (idA === idB) return null;
+    const objs = map?.objects || [];
+    const a = objs.find((o) => o.id === idA);
+    const b = objs.find((o) => o.id === idB);
+    if (!a || !b) return null;
+    if (a.grupoId && a.grupoId === b.grupoId) return a.grupoId; // já ligados
+    if (a.grupoId && b.grupoId) {
+      // Funde: todo mundo do grupo de B passa a usar o grupoId de A.
+      const grupoAntigoB = b.grupoId;
+      objs.forEach((o) => { if (o.grupoId === grupoAntigoB) o.grupoId = a.grupoId; });
+      return a.grupoId;
+    }
+    const grupoId = a.grupoId || b.grupoId || ('grp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7));
+    a.grupoId = grupoId;
+    b.grupoId = grupoId;
+    return grupoId;
+  },
+
+  /** Tira UM objeto do seu grupo atual (os outros membros continuam
+   *  ligados entre si). Se sobrar só 1 membro no grupo depois disso, esse
+   *  1 também é desligado (um "grupo" de 1 objeto só não faz sentido —
+   *  vira um objeto solto de novo, evita grupos fantasmas acumulando). */
+  unlinkObject(map, id) {
+    const objs = map?.objects || [];
+    const alvo = objs.find((o) => o.id === id);
+    if (!alvo || !alvo.grupoId) return;
+    const grupoId = alvo.grupoId;
+    alvo.grupoId = null;
+    const restantes = objs.filter((o) => o.grupoId === grupoId);
+    if (restantes.length === 1) restantes[0].grupoId = null;
+  },
+
+  /** Lista os OUTROS membros do grupo de `obj` (exclui o próprio `obj`) —
+   *  lista vazia se `obj` não tiver grupo. */
+  groupMembers(map, obj) {
+    if (!obj?.grupoId) return [];
+    return (map?.objects || []).filter((o) => o.grupoId === obj.grupoId && o.id !== obj.id);
   },
 };
 

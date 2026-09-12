@@ -228,10 +228,17 @@ const ModelerUI = {
       // fixo passado pelo chamador — o MESMO elemento serve os dois
       // contextos, nunca duplicado.
       + '<button type="button" class="m3d-btn m3d-exit" id="m3d-exit-btn">✕ Sair do Modelador</button>'
-      + '<div class="m3d-npanel" id="m3d-npanel">'
-      + '  <div class="m3d-npanel-head" id="m3d-npanel-head"><span>▸ Propriedades</span><span>▾</span></div>'
-      + '  <div class="m3d-npanel-body" id="m3d-npanel-body"></div>'
-      + '</div>'
+      // [15/09/2026] REMOVIDO -- pedido verbatim (Parte B): "o botão
+      // dropdown 'Propriedades' (que aparece no lado direito da tela),
+      // deve ficar dentro do botão '+' (o outro botão na lateral direita
+      // da tela)." O painel flutuante próprio #m3d-npanel/#m3d-npanel-head/
+      // #m3d-npanel-body (id/CSS antigos, ver .m3d-npanel em
+      // modeler3d.css) SUMIU daqui -- seu conteúdo (updateNPanel, logo
+      // abaixo) passa a ser escrito direto dentro da aba vertical
+      // "Propriedades" do painel "+" unificado da lateral direita
+      // (construído 1x por view3d.js, sobrevive a entrar/sair do
+      // Modelador -- ver #v3d-proppanel-transformacao-body/
+      // _renderPropriedadesPanel em view3d.js).
       + '<div class="m3d-hint">Tab: Modo Objeto/Edição · Botão direito seleciona · G/R/S mover/girar/escalar · X/Y/Z trava eixo · Enter/clique esquerdo confirma · Esc cancela · A seleciona/deseleciona tudo</div>';
     state.wrapEl.appendChild(root);
     state.rootEl = root;
@@ -262,7 +269,11 @@ const ModelerUI = {
     // cima) — os equivalentes agora são ligados dentro de
     // `_buildFerramentasPanel` (seção "Ferramentas de malha").
 
-    root.querySelector('#m3d-npanel-head').onclick = () => root.querySelector('#m3d-npanel').classList.toggle('collapsed');
+    // [15/09/2026] REMOVIDO -- ver comentário grande acima (HTML do
+    // #m3d-npanel removido de build()): o cabeçalho recolhível "▸
+    // Transformação" agora é o de view3d.js (#v3d-proppanel-
+    // transformacao-head), ligado 1x lá (mount()) -- nada a religar aqui
+    // a cada build().
 
     // REMOVIDO (03/09/2026) — o "+"/submenu lateral já existe (construído
     // por `view3d.js` na tela base, sobrevive a entrar/sair daqui) — nada a
@@ -276,9 +287,95 @@ const ModelerUI = {
 
     this.updateToolbarActive(state);
     this.updateNPanel(state);
+    this._renderCamLockedOverridesBar(state);
+  },
+
+  /** [14/09/2026] NOVO — pedido verbatim: "Quando for ativado o Modelador,
+   *  na bandeja de baixo, onde estão os botões do 'Ver através desta
+   *  foto', coloque botões de tudo que foi modificado no Modelador quando
+   *  ele trabalha no modo normal [...] Um botão para cada coisa que foi
+   *  desativada, por exemplo, orbitar em torno do objeto selecionado."
+   *  `state.camLocked`/`state._camLockedFixedPose` só existem quando o
+   *  Modelador foi aberto a partir de "Ver através desta câmera" (ver
+   *  `Modeler3D.enter`, `opts.enterOrbital:false` — chamado por
+   *  `view3d.js` quando `this._orbCamMode || this._fotoCamMode`) — fora
+   *  disso esta função não desenha nada.
+   *  [18/09/2026] REPOSICIONADO — pedido verbatim: "Tinha uma opção que,
+   *  mesmo estando no modo 'Ver através desta câmera', era possível
+   *  orbitar em torno do objeto selecionado para modelar com o Modelador.
+   *  Se existe ainda, então, logo acima do botão 'Modo Objeto'." O botão
+   *  CONTINUAVA existindo (`Modeler3D.toggleCamLockedOrbitOverride`, mesmo
+   *  onclick de sempre) mas tinha ficado no lugar ERRADO: a versão
+   *  original (14/09/2026, comentário acima) o anexava direto em
+   *  `#v3d-fotocam-overlay` esperando encontrar ali a antiga bandeja de
+   *  botões `.v3d-fotocam-overlay-controls` (pra ficar "junto com os
+   *  outros botões do 'Ver através desta foto'") — só que essa bandeja foi
+   *  REMOVIDA numa rodada seguinte, ainda no mesmo dia (15/09/2026, "Parte
+   *  B": todos aqueles botões — Enquadramento/Escurecer o entorno/
+   *  Escurecer imagem/Imagem/Propriedades/Informações — foram realocados
+   *  pra dentro da aba lateral direita "Propriedades", ver
+   *  `_renderPropriedadesPanel` em view3d.js). Como `#v3d-fotocam-overlay`
+   *  (o wrap INTEIRO, `position:absolute;inset:0`) continuou existindo,
+   *  este botão continuava sendo anexado ali com sucesso (nenhum erro),
+   *  só que sem NENHUM posicionamento próprio (`.btn.secondary.sm` não tem
+   *  `position` nenhuma) — caía no fluxo normal do documento, aparecendo
+   *  encolhido no canto superior esquerdo da tela, longe de qualquer botão
+   *  do Modelador — daí o pedido do usuário pra confirmar se ainda
+   *  existia. CORRIGIDO: o botão passa a ser inserido DENTRO do próprio
+   *  `.m3d-toolbar` do Modelador (`state.rootEl`), como uma NOVA primeira
+   *  linha (`insertBefore` no topo) — como `.m3d-toolbar` é
+   *  `flex-direction:column` ancorada por `bottom` (ver modeler3d.css), a
+   *  caixa cresce PRA CIMA ao ganhar uma linha nova no topo do DOM, então
+   *  esta nova linha aparece exatamente "logo acima do botão 'Modo
+   *  Objeto'" (a 1ª linha de sempre da toolbar), como pedido. Estilizado
+   *  com `.m3d-row`/`.m3d-btn` (visual do Modelador) em vez de
+   *  `.btn.secondary.sm` (visual da tela base "Ver em 3D"), pra combinar
+   *  com o resto da toolbar em que agora vive. Por estar dentro de
+   *  `state.rootEl`, `dispose()` (abaixo) já remove este botão de graça
+   *  junto com o resto da toolbar (`state.rootEl.remove()`) — não precisa
+   *  mais de nenhuma limpeza separada por referência. Só o botão "Orbitar
+   *  em torno do objeto selecionado" por enquanto — outras capacidades
+   *  desativadas por `camLocked` (WASD/setas, arrastar pra girar/pan com
+   *  botão do meio/direito, roda do mouse) ficam de fora desta 1ª rodada;
+   *  mesmo padrão (botão que liga/desliga um "override" temporário) serve
+   *  pra qualquer uma delas no futuro, se pedido. */
+  _renderCamLockedOverridesBar(state) {
+    if (state._camLockedOverrideRowEl) { state._camLockedOverrideRowEl.remove(); state._camLockedOverrideRowEl = null; state._camLockedOverrideBtnEl = null; }
+    if (!state._camLockedFixedPose) return;
+    const toolbar = state.rootEl?.querySelector('.m3d-toolbar');
+    if (!toolbar) return;
+    const row = document.createElement('div');
+    row.className = 'm3d-row';
+    row.id = 'm3d-camlocked-orbit-row';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'm3d-btn';
+    btn.id = 'm3d-camlocked-orbit-override';
+    btn.title = 'Enquanto travada em "Ver através desta câmera", o Modelador não deixa orbitar/mover a câmera. Este botão liga um orbitador TEMPORÁRIO em torno do objeto selecionado — desligue de novo pra voltar exatamente à perspectiva fixa da câmera.';
+    btn.onclick = () => window.Modeler3D.toggleCamLockedOrbitOverride(state);
+    row.appendChild(btn);
+    toolbar.insertBefore(row, toolbar.firstChild);
+    state._camLockedOverrideRowEl = row;
+    state._camLockedOverrideBtnEl = btn;
+    this.updateCamLockedOverrideButton(state);
+  },
+
+  updateCamLockedOverrideButton(state) {
+    const btn = state._camLockedOverrideBtnEl;
+    if (!btn) return;
+    const orbitando = !state.camLocked;
+    btn.textContent = orbitando ? '🔒 Voltar à perspectiva da câmera' : '🎯 Orbitar em torno do objeto';
+    btn.classList.toggle('active', orbitando);
   },
 
   dispose(state) {
+    // [18/09/2026] `state._camLockedOverrideRowEl`/`_camLockedOverrideBtnEl`
+    // (ver `_renderCamLockedOverridesBar`) agora vivem DENTRO de
+    // `state.rootEl` (viraram uma linha da própria `.m3d-toolbar`) — o
+    // `state.rootEl.remove()` logo abaixo já os remove junto; só zera as
+    // referências aqui, sem precisar de nenhum `.remove()` separado.
+    state._camLockedOverrideRowEl = null;
+    state._camLockedOverrideBtnEl = null;
     if (state.rootEl) { state.rootEl.remove(); state.rootEl = null; }
     document.querySelectorAll('.m3d-menu').forEach((m) => m.remove());
     // NOVO (01/09/2026) — o modal "Histórico do Desfazer" (ver
@@ -476,7 +573,14 @@ const ModelerUI = {
       b.type = 'button';
       b.className = 'm3d-sidebar-tab' + (ctx._sidebarTab === t.key ? ' active' : '');
       b.textContent = t.label;
-      b.onclick = () => { ctx._sidebarTab = t.key; this.renderSidebar(view3d); };
+      // [09/09/2026] Ajuste solicitado pelo usuário (efeito colateral do item
+      // "Definir origem" > "Personalizado" > escolher com o mouse): trocar de
+      // aba enquanto o modo de escolher a origem pelas arestas está ativo não
+      // fazia sentido deixar ligado escondido (o painel some, mas o
+      // mousemove continuaria escutando/desenhando o marcador 3D) — sai do
+      // modo (`exitOriginPickMode`) sempre que a aba muda pra longe de
+      // "Ferramentas".
+      b.onclick = () => { if (t.key !== 'ferramentas' && emEdicao) ModelerInput.exitOriginPickMode(ctx); ctx._sidebarTab = t.key; this.renderSidebar(view3d); };
       tabsEl.appendChild(b);
     });
     contentEl.innerHTML = '';
@@ -566,19 +670,39 @@ const ModelerUI = {
     // implementação — desloca a malha inteira pelo ponto escolhido e
     // compensa `state.group.position` pra o objeto não "pular" de lugar
     // visualmente ao trocar de origem.
+    // [09/09/2026] ATUALIZADO, pedido verbatim: "A opção 'Personalizado
+    // (x/y/z)' deve ter duas subopções. Uma que dá a possibilidade de
+    // definir qualquer lugar (independente do objeto) para definir como sua
+    // origem. A outra opção deve funcionar assim, deve ser possível definir
+    // o ponto de origem do objeto com o cursor do mouse sobre as suas
+    // arestas e vértices [...] Se estiver em 'Personalizado (x/y/z)', então,
+    // deve aparecer, logo em baixo do botão de 'definir origem', três campos
+    // para inserir as coordenadas [...] do mesmo jeito que é no botão
+    // lateral direito em 'Propriedades', em 'Transformação'." — "Personalizado
+    // (x/y/z)..." virou 2 itens (`_openOrigemCustomPanel(state,'livre'/
+    // 'picking')`), que abrem o painel `#m3d-origem-custom-wrap` (ver
+    // `_renderOrigemCustomPanel` abaixo) com 3 `_createNumField` (o MESMO
+    // widget de 3 botões usado em "Transformação" > "Posição", ver
+    // `_buildGroup`/`_buildObjectTransformPanel`) em vez dos 3 `prompt()` de
+    // antes (`_promptOrigemPersonalizada`, mantida só como fallback não
+    // usado por nenhum botão agora).
     const origBtn = document.createElement('button');
     origBtn.type = 'button'; origBtn.className = 'm3d-btn'; origBtn.style.cssText = 'width:100%; margin-top:4px;';
     origBtn.textContent = '⌖ Definir origem ▾';
     origBtn.onclick = (e) => {
       this.showFloatingMenuAt(state, e.currentTarget, [
-        { label: '🎯 Centro de massa', run: () => ModelerInput.setOrigin(state, 'centroMassa') },
-        { label: '⬇️ Centralizado (em baixo)', run: () => ModelerInput.setOrigin(state, 'centralizadoBaixo') },
-        { label: '⬆️ Centralizado (em cima)', run: () => ModelerInput.setOrigin(state, 'centralizadoCima') },
-        { label: '🔘 Vértice selecionado', run: () => ModelerInput.setOrigin(state, 'verticeSelecionado') },
-        { label: '✏️ Personalizado (x/y/z)...', run: () => this._promptOrigemPersonalizada(state) },
+        { label: '🎯 Centro de massa', run: () => { this._closeOrigemCustomPanel(state); ModelerInput.setOrigin(state, 'centroMassa'); } },
+        { label: '⬇️ Centralizado (em baixo)', run: () => { this._closeOrigemCustomPanel(state); ModelerInput.setOrigin(state, 'centralizadoBaixo'); } },
+        { label: '⬆️ Centralizado (em cima)', run: () => { this._closeOrigemCustomPanel(state); ModelerInput.setOrigin(state, 'centralizadoCima'); } },
+        { label: '🔘 Vértice selecionado', run: () => { this._closeOrigemCustomPanel(state); ModelerInput.setOrigin(state, 'verticeSelecionado'); } },
+        { label: '✏️ Personalizado — livre (x/y/z)', run: () => this._openOrigemCustomPanel(state, 'livre') },
+        { label: '📐 Personalizado — sobre arestas/vértices (mouse)', run: () => this._openOrigemCustomPanel(state, 'picking') },
       ]);
     };
-    editBody.appendChild(dupBtn); editBody.appendChild(delBtn); editBody.appendChild(uniBtn); editBody.appendChild(origBtn);
+    const origemCustomWrap = document.createElement('div');
+    origemCustomWrap.id = 'm3d-origem-custom-wrap';
+    editBody.appendChild(dupBtn); editBody.appendChild(delBtn); editBody.appendChild(uniBtn); editBody.appendChild(origBtn); editBody.appendChild(origemCustomWrap);
+    this._renderOrigemCustomPanel(state, origemCustomWrap);
     wrap.appendChild(editHead); wrap.appendChild(editBody);
 
     const histHead = document.createElement('div'); histHead.className = 'm3d-nf-collapsible-head';
@@ -602,6 +726,51 @@ const ModelerUI = {
     histBtn.onclick = () => this.showHistoryModal(state);
     histBody.appendChild(histRow); histBody.appendChild(histBtn);
     wrap.appendChild(histHead); wrap.appendChild(histBody);
+
+    // NOVO (07/09/2026), pedido verbatim: "ligar objetos separados como no
+    // Blender. [...] deve ser possível agrupá-los para que, ao abrir o
+    // Modelador para editá-los, seja possível modificar ambos." O
+    // Modelador (mesh/gizmo/render/input, todos os outros arquivos deste
+    // módulo) foi desenhado do início ao fim pra editar 1 malha de cada
+    // vez (`state.obj`, ver modeler-core.js `enter()`) — reescrever pra
+    // segurar VÁRIAS malhas simultâneas na mesma cena de edição seria uma
+    // mudança de arquitetura grande demais pra fazer com segurança sem
+    // navegador de teste real. Em vez disso, esta seção realiza "modificar
+    // ambos" de um jeito honesto e seguro: lista os OUTROS membros do
+    // grupo (Mapping.groupMembers, mesmo dado usado pelo painel 2D) com um
+    // botão "Editar este" que SALVA a malha atual (Modeler3D.enter já faz
+    // isso sozinho — reentrar chama `exit()` da sessão corrente primeiro,
+    // ver modeler-core.js linha ~127) e abre o Modelador NO outro objeto,
+    // sem sair da ferramenta — dá pra ir alternando entre os membros do
+    // grupo, editando cada um, sem nunca "sair" do fluxo de edição.
+    if (window.Mapping) {
+      const membrosGrupo = Mapping.groupMembers(state.view3d._map, state.obj);
+      if (state.obj.grupoId) {
+        const grpHead = document.createElement('div'); grpHead.className = 'm3d-nf-collapsible-head';
+        const grpArrow = document.createElement('span'); grpArrow.className = 'm3d-nf-collapsible-arrow';
+        const grpLbl = document.createElement('span'); grpLbl.textContent = `Grupo (${membrosGrupo.length + 1} objetos)`;
+        grpHead.appendChild(grpArrow); grpHead.appendChild(grpLbl);
+        const grpBody = document.createElement('div'); grpBody.className = 'm3d-nf-collapsible-body';
+        const setGrpCollapsed = (c) => { state._sidebarUI.grupoCollapsed = c; grpBody.classList.toggle('collapsed', c); grpArrow.textContent = c ? '▸' : '▾'; };
+        grpHead.onclick = () => setGrpCollapsed(!state._sidebarUI.grupoCollapsed);
+        setGrpCollapsed(!!state._sidebarUI.grupoCollapsed);
+        if (!membrosGrupo.length) {
+          const vazio = document.createElement('div'); vazio.style.cssText = 'font-size:11.5px; color:var(--m3d-text-dim,#9aa)'; vazio.textContent = 'Nenhum outro membro (grupo com 1 objeto só).';
+          grpBody.appendChild(vazio);
+        }
+        membrosGrupo.forEach((sib) => {
+          const row = document.createElement('div'); row.style.cssText = 'display:flex; align-items:center; gap:4px; margin-top:4px';
+          const nomeSpan = document.createElement('span'); nomeSpan.style.cssText = 'flex:1; font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap'; nomeSpan.textContent = `🔗 ${sib.nome || sib.tipo || '(objeto)'}`;
+          const editBtn = document.createElement('button'); editBtn.type = 'button'; editBtn.className = 'm3d-btn'; editBtn.style.cssText = 'flex:none; padding:2px 8px; font-size:11px';
+          editBtn.textContent = 'Editar este';
+          editBtn.title = 'Salva o objeto atual e passa a editar este outro membro do grupo, sem sair do Modelador.';
+          editBtn.onclick = () => window.Modeler3D.enter(state.view3d, sib);
+          row.appendChild(nomeSpan); row.appendChild(editBtn);
+          grpBody.appendChild(row);
+        });
+        wrap.appendChild(grpHead); wrap.appendChild(grpBody);
+      }
+    }
 
     // NOVO (03/09/2026), pedido verbatim: o botão "➕ Adicionar" (barra de
     // cima, modo Edição) e o "Remover:" (Excluir/Mesclar/Remover Duplicados)
@@ -666,12 +835,130 @@ const ModelerUI = {
     return wrap;
   },
 
-  /** "Definir origem" > "Personalizado" — pedido verbatim: "nessa é
-   *  possível mudar a posição pelas propriedades: x, y e z, para definir
-   *  qual será a origem do objeto." Usa 3 `prompt()` em sequência (mesmo
-   *  padrão simples já usado em `Modelos3DView._criarNovoModelo`/
-   *  `_renomearCustom`, js/modelos3d.js) em vez de um formulário novo —
-   *  ponto em espaço LOCAL do objeto (mesma referência dos vértices em
+  // [09/09/2026] NOVO — painel inline de "Personalizado (x/y/z)" (ver
+  // comentário grande em `_buildFerramentasPanel`, no botão "Definir
+  // origem"). `state._origemCustomUI = { active, mode:'livre'|'picking',
+  // accum:[x,y,z], fieldsApi }` guarda o estado (não no DOM — o sidebar
+  // inteiro é reconstruído do zero a cada `renderSidebar`, mesmo espírito de
+  // `state._npanelUI`/`state._sidebarUI` já usados aqui).
+  //
+  // `accum` é a peça chave pra fazer o ARRASTO ao vivo (clicar e arrastar o
+  // botão do meio de cada campo, "o número vai alterando", pedido verbatim)
+  // funcionar apesar de `ModelerInput.setOrigin` operar sempre em cima do
+  // espaço LOCAL ATUAL (que muda de referência a cada chamada — vira 0,0,0
+  // no ponto que acabou de virar a nova origem): `accum` lembra, na
+  // referência ORIGINAL (de quando o painel abriu), pra onde a origem já foi
+  // movida até agora — cada novo commit de um eixo manda pra `setOrigin` só
+  // o DELTA entre o alvo novo e `accum` (não o valor absoluto do campo), e
+  // depois atualiza `accum` pro alvo novo. Sem isso, arrastar o campo X
+  // depois de já ter mudado Y produziria um deslocamento errado (a
+  // referência de "local" already teria mudado pelo commit do Y).
+  _openOrigemCustomPanel(state, mode) {
+    state._origemCustomUI = { active: true, mode, accum: [0, 0, 0], fieldsApi: null };
+    if (mode === 'picking') ModelerInput.enterOriginPickMode(state);
+    else ModelerInput.exitOriginPickMode(state); // garante que uma sessão de picking anterior não fique "presa" ligada
+    this.renderSidebar(state.view3d);
+  },
+
+  _closeOrigemCustomPanel(state) {
+    if (state._origemCustomUI) state._origemCustomUI.active = false;
+    ModelerInput.exitOriginPickMode(state);
+  },
+
+  /** Preenche `wrap` (`#m3d-origem-custom-wrap`, filho fixo de `editBody`,
+   *  logo abaixo do botão "⌖ Definir origem ▾") com os 3 campos x/y/z — só
+   *  quando `state._origemCustomUI.active`; vazio (nada aparece) o resto do
+   *  tempo, exatamente o "logo em baixo do botão de 'definir origem', deve
+   *  aparecer, três campos" só quando "estiver em 'Personalizado (x/y/z)'"
+   *  (pedido verbatim). Reaproveita `_buildGroup`/`_createNumField` — o
+   *  MESMO widget de 3 botões (seta◄ clique decrementa / meio clica-edita
+   *  ou arrasta-varia / seta► clique incrementa) da seção "Transformação" >
+   *  "Posição" (ver `_buildObjectTransformPanel`), pedido verbatim: "cada
+   *  campo deve ser do mesmo jeito que é no botão lateral direito em
+   *  'Propriedades', em 'Transformação'". */
+  _renderOrigemCustomPanel(state, wrap) {
+    wrap.innerHTML = '';
+    const ui = state._origemCustomUI;
+    if (!ui || !ui.active) return;
+    wrap.style.cssText = 'margin-top:6px; padding:6px; border:1px dashed var(--m3d-border, #3a4a5c); border-radius:6px;';
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:11px; color:var(--m3d-text-dim,#9aa); margin-bottom:4px;';
+    hint.textContent = ui.mode === 'picking'
+      ? '📐 Passe o mouse sobre as arestas do objeto (segure Shift pra dar snap) e clique pra definir a origem ali — ou digite/arraste os campos abaixo.'
+      : '✏️ Digite ou clique-e-arraste os campos abaixo pra mover a origem livremente.';
+    wrap.appendChild(hint);
+
+    const acc = ui.accum;
+    const group = this._buildGroup('Origem:', [
+      { axis: 'x', value: acc[0], step: 0.01, minDecimals: 4, onCommit: (v) => this._commitOrigemCustomAxis(state, 0, v) },
+      { axis: 'y', value: acc[1], step: 0.01, minDecimals: 4, onCommit: (v) => this._commitOrigemCustomAxis(state, 1, v) },
+      { axis: 'z', value: acc[2], step: 0.01, minDecimals: 4, onCommit: (v) => this._commitOrigemCustomAxis(state, 2, v) },
+    ]);
+    wrap.appendChild(group.el);
+    ui.fieldsApi = group;
+
+    if (ui.mode === 'picking') {
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button'; cancelBtn.className = 'm3d-btn'; cancelBtn.style.cssText = 'width:100%; margin-top:4px;';
+      cancelBtn.textContent = '✕ Sair do modo "escolher com o mouse"';
+      cancelBtn.onclick = () => { ModelerInput.exitOriginPickMode(state); ui.mode = 'livre'; this.renderSidebar(state.view3d); };
+      wrap.appendChild(cancelBtn);
+    }
+  },
+
+  /** Confirma um NOVO valor (`v`, na referência ORIGINAL de quando o painel
+   *  abriu) pro eixo `axisIdx` (0=x/1=y/2=z) — ver comentário grande em
+   *  `_openOrigemCustomPanel` pro porquê do cálculo de delta via `accum`. */
+  // LIMITAÇÃO CONHECIDA (documentada, não testada num navegador de verdade):
+  // `ModelerInput.setOrigin` empurra 1 entrada de undo
+  // (`ModelerMesh.pushUndo`) a CADA chamada seguida (sem debounce) —
+  // arrastar (clicar-e-segurar) um destes 3 campos por muito tempo pode
+  // acumular várias entradas de "Definir origem" seguidas no histórico
+  // (Ctrl+Z desfaz em vários passos pequenos em vez de 1 só). Mesmo espírito
+  // dos outros campos de arrasto contínuo deste painel (nenhum deles faz
+  // debounce de undo hoje) — não é uma regressão introduzida aqui, só uma
+  // limitação que já existia no padrão de arrasto reaproveitado.
+  _commitOrigemCustomAxis(state, axisIdx, v) {
+    const ui = state._origemCustomUI;
+    if (!ui) return;
+    const alvo = ui.accum.slice();
+    alvo[axisIdx] = v;
+    const delta = [alvo[0] - ui.accum[0], alvo[1] - ui.accum[1], alvo[2] - ui.accum[2]];
+    // [09/09/2026] Bug relatado pelo usuário: "ao variar os valores da
+    // origem pelo clicar e arrastar nas entradas de valor que tem ali, uma
+    // enchurrada de notificações apareceram ('A origem já está neste
+    // ponto')." Causa raiz: este método é o `onCommit` chamado a CADA
+    // "tick" do arrasto contínuo (clicar-e-segurar sobre o campo, ver
+    // `_buildGroup`/o widget de arrasto reaproveitado por estes 3 campos),
+    // não só ao soltar — e `delta` aqui é a variação DESDE O ÚLTIMO tick,
+    // não a origem nova em si. Como o arrasto dispara MUITO mais ticks do
+    // que mudanças de valor visíveis (o campo arredonda pro passo/decimais
+    // configurados, `step:0.01`/`minDecimals:4` acima), boa parte dos
+    // ticks chega aqui com `delta` EXATAMENTE [0,0,0] (nenhuma mudança de
+    // verdade desde o tick anterior) — e `ModelerInput.setOrigin` trata
+    // QUALQUER `P` igual a [0,0,0] como "a origem já está nesse ponto"
+    // (guarda pensada pro caso de verdade: escolher um modo/confirmar um
+    // valor cujo alvo já é a origem atual — ver o guard lá, mantido
+    // intacto pros outros chamadores: os botões "Centro de massa"/
+    // "Centralizado"/"Vértice selecionado" e o prompt() de fallback,
+    // sempre com um ALVO absoluto, nunca um delta de arrasto). Aqui, um
+    // delta zero é só um tick "sem novidade" do arrasto — nunca deveria
+    // nem chegar a `setOrigin` (que faria `pushUndo`/mostraria o toast à
+    // toa), então corta ANTES, sem chamar nada — resolve a enchurrada de
+    // toasts de uma vez, sem tocar no guard genérico (que continua válido
+    // e necessário pros outros chamadores).
+    if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) { ui.accum = alvo; return; }
+    ModelerInput.setOrigin(state, 'personalizado', { x: delta[0], y: delta[1], z: delta[2] });
+    ui.accum = alvo;
+  },
+
+  /** NÃO USADA MAIS por nenhum botão (09/09/2026) — substituída pelo painel
+   *  inline `_renderOrigemCustomPanel` (3 campos estilo "Transformação", em
+   *  vez de 3 `prompt()` em sequência). Mantida aqui só como referência/
+   *  fallback, sem nada ligado a ela. "Definir origem" > "Personalizado" —
+   *  pedido verbatim original: "nessa é possível mudar a posição pelas
+   *  propriedades: x, y e z, para definir qual será a origem do objeto."
+   *  Ponto em espaço LOCAL do objeto (mesma referência dos vértices em
    *  `state.cm.vertices`), não em metros do mapa. Cancelar qualquer um dos
    *  3 campos cancela a operação inteira (nenhuma alteração parcial). */
   _promptOrigemPersonalizada(state) {
@@ -1068,7 +1355,21 @@ const ModelerUI = {
     // PRÓPRIO em cada `<div>` seta (`arrowL`/`arrowR`, abaixo) — decide
     // diminuir/aumentar direto pela identidade do elemento clicado, não
     // mais por aritmética de coordenada — ver `wireArrow`.
-    const PX_PER_STEP = 10; // sensibilidade do arraste
+    // [11/09/2026] NOVO — pedido verbatim: "A variação do FOV está lenta
+    // ainda. Deve ser imediata. É alguma coisa no Three.js, alguma
+    // função?" INVESTIGADO: não é o Three.js — `Engine3D.setFov` (chamado
+    // por `onCommit` deste campo, ver mapview.js `_wireCamPropsFieldset`)
+    // só atribui `camera3.fov` e chama `updateProjectionMatrix()`, sem
+    // NENHUMA interpolação/animação (conferido em todo `engine3d.js` — só
+    // existe essa ÚNICA atribuição a `camera3.fov`). A "lentidão" sempre
+    // esteve AQUI: este campo só muda o valor em `cfg.step` a cada
+    // `PX_PER_STEP` pixels ARRASTADOS — pra uma faixa de até 170° (FOV),
+    // isso sempre vai exigir muito mais pixels de arraste do que pra um
+    // campo de metros/graus fino (offset/rotação, onde este componente
+    // nasceu). Virou configurável por campo (`cfg.pxPerStep`, opcional,
+    // cai no `10` de sempre se omitido) — o campo FOV (mapview.js) passa
+    // um valor BEM menor, pra sentir a mudança "imediata" ao arrastar.
+    const PX_PER_STEP = cfg.pxPerStep || 10; // sensibilidade do arraste
 
     const el = document.createElement('div');
     el.className = 'm3d-numfield';
@@ -1186,7 +1487,30 @@ const ModelerUI = {
       let accumPx = 0;
       dragging = false;
       const startValue = curValue;
+      // [11/09/2026] NOVO — pedido verbatim: "Ao clicar e arrastar o offset
+      // X, o offset Y e a rotação para alterar os seus valores, acaba dando
+      // um salto, em vez de ser só a variação a partir do clique." CAUSA
+      // RAIZ: `el.requestPointerLock?.()` (2 linhas abaixo) é ASSÍNCRONO —
+      // o navegador só efetiva o lock alguns quadros depois do pedido. É
+      // quirk conhecido (mesma categoria de bug já contornado no arraste 3D
+      // do Modelador via `state._cursorRebaseTo`, ver modeler-input.js) que,
+      // no exato instante em que o lock finalmente engata, o PRÓXIMO evento
+      // `mousemove` chega com um `movementX/Y` "espúrio" — reflete o
+      // reposicionamento interno/invisível do cursor do SO feito pelo
+      // navegador ao travar (não um movimento real do mouse). Sem ignorar
+      // esse 1º evento pós-lock, ele entrava direto na soma de `accumPx`
+      // (linha logo abaixo) juntando-se ao arraste real — dava exatamente o
+      // "salto" relatado, bem na hora que o arraste "pega" o pointer lock.
+      // CORRIGIDO: `pointerlockchange` marca `ignoreNextMovement`, e o
+      // `onMove` seguinte descarta esse 1º movimento (sem somar a
+      // `accumPx`) antes de voltar a acumular normalmente.
+      let ignoreNextMovement = false;
+      const onPointerLockChange = () => {
+        if (document.pointerLockElement === el) ignoreNextMovement = true;
+      };
+      document.addEventListener('pointerlockchange', onPointerLockChange);
       const onMove = (mv) => {
+        if (ignoreNextMovement) { ignoreNextMovement = false; return; }
         accumPx += mv.movementX || 0;
         if (!dragging && Math.abs(accumPx) > 3) {
           dragging = true;
@@ -1212,6 +1536,7 @@ const ModelerUI = {
       const onUp = (up) => {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('pointerlockchange', onPointerLockChange); // [11/09/2026] limpa o listener novo (ver comentário acima)
         el.classList.remove('m3d-nf-pressed');
         if (dragging) {
           el.classList.remove('dragging');
@@ -1236,6 +1561,26 @@ const ModelerUI = {
     return {
       el,
       setValue(v) { curValue = v; if (!editing) renderDisplay(); },
+      // [11/09/2026] NOVO — pedido verbatim (painel "Propriedades da
+      // câmera" → FOV/Distância focal virando 1 campo só com um <select>
+      // de modo ao lado, ver mapview.js `_wireCamPropsFieldset`): o campo
+      // precisa trocar de rótulo ("FOV: " <-> "Distância Focal: ") E de
+      // sufixo ("°" <-> "mm") ao vivo, sem recriar o widget inteiro (isso
+      // perderia o estado de "pressed"/drag em andamento). `cfg.label`/
+      // `cfg.suffix` eram só lidos 1x na criação — `setLabel` muta o MESMO
+      // `cfg` fechado por `renderDisplay`/`_formatNumField` e redesenha.
+      setLabel(label, suffix, step) {
+        cfg.label = label;
+        if (suffix !== undefined) cfg.suffix = suffix;
+        // [11/09/2026] NOVO — o campo único FOV/Distância focal também
+        // precisa trocar o TAMANHO DO PASSO ao trocar de modo (2° no modo
+        // FOV, 5mm no modo Milímetros — faixas bem diferentes, mesmo
+        // "sentir bem" pedido pro FOV sozinho não serve pra mm). `cfg.step`
+        // é lido AO VIVO por `wireArrow`/pelo arraste (mesmo objeto `cfg`
+        // fechado na criação), então mutar aqui já basta.
+        if (step !== undefined) cfg.step = step;
+        if (!editing) renderDisplay();
+      },
     };
   },
 
@@ -1276,28 +1621,25 @@ const ModelerUI = {
    *  Dimensões são interdependentes (mudar uma recalcula a outra a partir
    *  da bounding box local) — atualizadas via `setValue` (sem reconstruir
    *  o DOM) pra não interromper um arraste em andamento no outro campo. */
+  /** [12/09/2026] REMOVIDO — pedido verbatim: "Em Propriedades, há dois
+   *  dropdowns de 'Transformação' aninhados. Remova o interno, porém
+   *  conserve o seu conteúdo. Para que fique do mesmo jeito que os outros 2
+   *  botões: 'Fundo' e 'Câmera'." CAUSA: esta função já era chamada DENTRO
+   *  da seção recolhível "Transformação" do painel unificado "+" da
+   *  lateral direita (`#v3d-proppanel-transformacao`, com seu próprio
+   *  cabeçalho/chevron — ver `view3d.js`), mas construía um SEGUNDO
+   *  cabeçalho recolhível idêntico ("Transformação" de novo, com seta
+   *  própria) por dentro — resquício de quando esta função ainda vivia num
+   *  painel flutuante PRÓPRIO, sem a seção externa (ver comentário grande
+   *  de `updateNPanel`, 15/09/2026). CORRIGIDO: `wrap` volta a ser só um
+   *  contêiner simples (`contentWrap`), sem cabeçalho/recolhimento
+   *  PRÓPRIO — igual a "Fundo"/"Câmera", cujo conteúdo vai direto no corpo
+   *  da seção externa, sem sub-dropdown. `state._npanelUI.transformCollapsed`
+   *  mantido no objeto de estado só por segurança (não lido em nenhum
+   *  outro lugar após esta correção), sem custo.
+   */
   _buildObjectTransformPanel(state) {
-    const wrap = document.createElement('div');
-
-    const head = document.createElement('div');
-    head.className = 'm3d-nf-collapsible-head';
-    const arrow = document.createElement('span'); arrow.className = 'm3d-nf-collapsible-arrow';
-    const label = document.createElement('span'); label.textContent = 'Transformação';
-    head.appendChild(arrow); head.appendChild(label);
-
     const contentWrap = document.createElement('div');
-    contentWrap.className = 'm3d-nf-collapsible-body';
-
-    const setCollapsed = (c) => {
-      state._npanelUI.transformCollapsed = c;
-      contentWrap.classList.toggle('collapsed', c);
-      arrow.textContent = c ? '▸' : '▾';
-    };
-    head.onclick = () => setCollapsed(!state._npanelUI.transformCollapsed);
-    setCollapsed(!!state._npanelUI.transformCollapsed);
-
-    wrap.appendChild(head);
-    wrap.appendChild(contentWrap);
 
     const p = state.group.position;
     const rot = { x: state.xform.rotX * 180 / Math.PI, y: state.xform.rotY * 180 / Math.PI, z: state.xform.rotZ * 180 / Math.PI };
@@ -1459,7 +1801,7 @@ const ModelerUI = {
     contentWrap.appendChild(scaleGroup.el);
     contentWrap.appendChild(dimGroup.el);
 
-    return wrap;
+    return contentWrap;
   },
 
   /** SIMPLIFICAÇÃO documentada (ver modeler-core.js cabeçalho): em Modo de
@@ -1484,8 +1826,19 @@ const ModelerUI = {
     return wrap;
   },
 
+  /** [15/09/2026] CORRIGIDO -- pedido verbatim (Parte B, ver comentário
+   *  grande em `build()` acima): o destino deste conteúdo deixou de ser
+   *  `#m3d-npanel-body` (painel flutuante PRÓPRIO deste arquivo,
+   *  recriado a cada `build()`/sessão) e passou a ser
+   *  `#v3d-proppanel-transformacao-body`, dentro da aba vertical
+   *  "Propriedades" do painel unificado "+" da lateral direita --
+   *  construído 1x por `view3d.js` (mount()), sobrevive a entrar/sair do
+   *  Modelador. Busca via `state.view3d._container` (MESMO padrão já
+   *  usado por `toggleSidebar`/`renderSidebar`/`_sidebarCtx` pro botão
+   *  "+" esquerdo -- ver comentário grande lá) em vez de `state.rootEl`
+   *  (que não tem mais este elemento). */
   updateNPanel(state) {
-    const body = state.rootEl?.querySelector('#m3d-npanel-body');
+    const body = state.view3d?._container?.querySelector('#v3d-proppanel-transformacao-body');
     if (!body) return;
     if (!state._npanelUI) state._npanelUI = { transformCollapsed: false };
     body.innerHTML = '';

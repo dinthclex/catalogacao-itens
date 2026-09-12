@@ -79,8 +79,28 @@ const SearchView = {
     });
 
     this._updateViewModeButtons();
-    container.querySelector('#srch-viewmode-2d').onclick = () => { this._viewMode = '2d'; this._updateViewModeButtons(); };
-    container.querySelector('#srch-viewmode-3d').onclick = () => { this._viewMode = '3d'; this._updateViewModeButtons(); };
+    // ATUALIZADO (07/09/2026), pedido verbatim: "No 'Buscar', a apresentação
+    // da busca deve ser feita ao clicar no botão 2D e 3D, não somente quando
+    // for clicado na sugestão de busca." -- antes, clicar em "2D"/"3D" só
+    // trocava a cor do botão (`_updateViewModeButtons`) e ficava esperando o
+    // usuário clicar de novo numa sugestão pra, só aí, mostrar o item na
+    // visualização escolhida -- ou seja, trocar de 2D pra 3D com um item JÁ
+    // selecionado não fazia NADA visível até re-clicar na lista. Agora, se
+    // já há um item selecionado (`_currentItem`), o próprio clique no botão
+    // 2D/3D já reapresenta ELE MESMO no modo recém-escolhido (mesmo funil de
+    // sempre, `_selectItem` -- reaproveita o `verNoMapa3D`/prévia 2D, sem
+    // duplicar lógica); sem item selecionado ainda, o clique só troca o modo
+    // mesmo (comportamento de sempre, nada pra apresentar ainda).
+    container.querySelector('#srch-viewmode-2d').onclick = () => {
+      this._viewMode = '2d';
+      this._updateViewModeButtons();
+      if (this._currentItem) this._selectItem(this._currentItem.id);
+    };
+    container.querySelector('#srch-viewmode-3d').onclick = () => {
+      this._viewMode = '3d';
+      this._updateViewModeButtons();
+      if (this._currentItem) this._selectItem(this._currentItem.id);
+    };
 
     // Restaura o estado da busca ao voltar para esta aba (query, resultados e
     // item selecionado) — sem isso, trocar de aba e voltar reiniciava a busca

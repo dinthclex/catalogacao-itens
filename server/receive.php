@@ -73,6 +73,37 @@ function slugify($str) {
 // não tinha as ações "salvar-preferencias"/"salvar-backup-completo" que
 // receive.js já tinha (de uma rodada anterior) — adicionadas agora, pra as
 // duas versões (Node/PHP) oferecerem exatamente a mesma API.
+//
+// NOVO (07/09/2026), pedido verbatim: "outputs/ [...] └── storage/ #
+// Conteúdo persistido pelo usuário ├── 3d/ [...] ├── images/ [...] ├── text/
+// [...] ├── raw/ [...] └── app/ # guarda arquivos de configuração". Antes
+// desta rodada, a pasta de dados (padrão "dados/") guardava tudo solto,
+// organizado por FUNCIONALIDADE (itens/, catalogo-unico.json, etc). Agora a
+// pasta padrão passa a se chamar "storage/" e todo arquivo salvo é roteado
+// pra uma subpasta por TIPO — decidido com o usuário (ver AskUserQuestion
+// desta rodada):
+//   1) "storage/" SUBSTITUI "dados/" por completo (não convive com ela) —
+//      resposta do usuário: "Substitui por completo".
+//   2) A configuração do PRÓPRIO servidor continua em `config.json` (não
+//      "config.txt" — resposta do usuário: "para as configurações mantenha
+//      o config.json e descarte a ideia de 'config.txt'"). Esse
+//      `config.json` (a chave "pastaDados") continua fora de "storage/",
+//      em `caminhoConfigJson()` (mesmo lugar de sempre, ao lado deste
+//      arquivo) — e não dentro de "storage/app/": ele é quem DIZ onde
+//      "storage/" está (inclusive se for um caminho totalmente customizado,
+//      fora da pasta do app), então não pode morar dentro da própria pasta
+//      que ele aponta (senão, pra achar a configuração seria preciso saber
+//      antes onde procurar — dependência circular). "storage/app/" guarda,
+//      em vez disso, as PREFERÊNCIAS do usuário salvas pelo app
+//      (preferencias-usuario.json) — que são "configurações" no sentido do
+//      pedido do usuário, só que não são o bootstrap do próprio servidor.
+//   3) O comportamento rodando por "file:///" (sem servidor) NÃO muda —
+//      resposta do usuário: "Continua como hoje: fica no IndexedDB +
+//      download manual". Esta seção só afeta o modo servidor (PHP/Node).
+// Ver migrarParaStorageSeNecessario() logo abaixo: cuida de servidores JÁ
+// RODANDO com dados na antiga "dados/" pra ninguém perder arquivo nenhum
+// na hora de atualizar (pedido verbatim: "como não dar problema quanto a
+// perder arquivos?").
 function caminhoConfigJson() { return __DIR__ . '/config.json'; }
 
 function carregarConfigJson() {
@@ -86,16 +117,112 @@ function salvarConfigJson($cfg) {
   file_put_contents(caminhoConfigJson(), json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 }
 
+// As 5 subpastas por tipo dentro da pasta de dados (padrão "storage/", ou a
+// pasta customizada em "pastaDados") — pedido verbatim do usuário (estrutura
+// enviada por ele). Hoje só "text/", "raw/" e "app/" recebem arquivo de
+// verdade (nenhuma função deste servidor grava .obj/.gltf/.png no disco
+// ainda — fotos e modelos 3D continuam embutidos como base64/vértices
+// dentro dos JSONs) — "3d/" e "images/" ficam criadas e vazias, prontas pra
+// quando/se isso for implementado.
+function subpastasStorage() { return ['3d', 'images', 'text', 'raw', 'app']; }
+
+// NOVO (07/09/2026) — ver comentário grande acima. Roda em toda chamada
+// (rápido: só verifica a existência de um arquivo-marcador) e, na PRIMEIRA
+// vez depois desta atualização, reorganiza dados de uma instalação antiga
+// automaticamente, sem exigir nenhuma ação manual da pessoa:
+//   Passo 1 (só quando a pasta usada é a PADRÃO, sem "pastaDados"
+//   customizado em config.json): se existir uma pasta antiga "dados/" com
+//   arquivos dentro, e a nova pasta "storage/" ainda não existir (ou
+//   estiver vazia), RENOMEIA "dados/" inteira pra "storage/" — rename() é
+//   uma operação atômica no mesmo disco, então não existe um instante em
+//   que os arquivos não estão em lugar nenhum.
+//   Passo 2 (sempre, padrão ou customizado): qualquer arquivo antigo ainda
+//   solto na RAIZ da pasta de dados (formato de antes desta rodada) é
+//   movido (rename, nunca copia+apaga separado) pra dentro da subpasta por
+//   tipo certa. Depois de rodar uma vez, grava um arquivo ".storage-
+//   migrado" dentro da pasta final, e nunca mais repete o processo (mesmo
+//   que a pessoa apague algum arquivo depois — isso não é reinterpretado
+//   como "precisa migrar de novo").
+function migrarParaStorageSeNecessario($abs, $usandoPadrao) {
+  $marcador = $abs . '/.storage-migrado';
+  if (file_exists($marcador)) return;
+
+  $temConteudo = function ($pasta) {
+    if (!is_dir($pasta)) return false;
+    $itens = @scandir($pasta);
+    return $itens && count(array_diff($itens, ['.', '..'])) > 0;
+  };
+
+  // Passo 1: pasta antiga "dados/" (só no caminho padrão) -> nova "storage/"
+  if ($usandoPadrao) {
+    $antigaDados = __DIR__ . '/dados';
+    if (!$temConteudo($abs) && $temConteudo($antigaDados)) {
+      if (is_dir($abs)) @rmdir($abs); // pasta nova vazia criada antes desta checagem — libera o rename
+      @rename($antigaDados, $abs);
+    }
+  }
+
+  if (!is_dir($abs)) return; // instalação nova, sem nada de nenhuma versão anterior pra migrar
+
+  foreach (subpastasStorage() as $sub) {
+    $subAbs = $abs . '/' . $sub;
+    if (!is_dir($subAbs)) @mkdir($subAbs, 0777, true);
+  }
+
+  // Passo 2: arquivos/pastas soltos na raiz (formato de qualquer versão
+  // anterior a esta rodada) -> subpasta por tipo. Cada linha só faz algo se
+  // o item de origem realmente existir (instalação já migrada ou nova não
+  // tem nada aqui pra mover).
+  $mover = function ($de, $para) use ($abs) {
+    $origem = $abs . '/' . $de;
+    $destino = $abs . '/' . $para;
+    if (file_exists($origem) && !file_exists($destino)) @rename($origem, $destino);
+  };
+  $mover('catalogo-unico.json', 'text/catalogo-unico.json');
+  $mover('catalogo-simples.txt', 'text/catalogo-simples.txt');
+  $mover('backup-completo.json', 'text/backup-completo.json');
+  $mover('preferencias-usuario.json', 'app/preferencias-usuario.json');
+  $mover('catalogo-completo.csv', 'raw/catalogo-completo.csv');
+  $mover('itens', 'text/itens');
+  $mover('recebidos', 'text/recebidos');
+
+  @file_put_contents($marcador, 'Migrado automaticamente em ' . date('c') . " — reorganizado nas subpastas por tipo (" . implode('/', subpastasStorage()) . ").");
+}
+
 // Relida a cada chamada (arquivo pequeno) pra "configurar-pasta-dados" valer
 // na hora, sem precisar reiniciar nada (PHP não tem processo persistente
 // mesmo, cada requisição já é nova).
 function pastaDadosAtual() {
   $cfg = carregarConfigJson();
-  $pasta = isset($cfg['pastaDados']) ? trim((string) $cfg['pastaDados']) : '';
-  if ($pasta === '') $pasta = __DIR__ . '/dados';
+  $pastaConfigurada = isset($cfg['pastaDados']) ? trim((string) $cfg['pastaDados']) : '';
+  $usandoPadrao = ($pastaConfigurada === '');
+  $pasta = $usandoPadrao ? (__DIR__ . '/storage') : $pastaConfigurada;
   $abs = (strpos($pasta, '/') === 0 || preg_match('/^[A-Za-z]:[\\\\\/]/', $pasta)) ? $pasta : (__DIR__ . '/' . $pasta);
+
+  migrarParaStorageSeNecessario($abs, $usandoPadrao);
+
   if (!is_dir($abs)) mkdir($abs, 0777, true);
-  return $abs;
+  foreach (subpastasStorage() as $sub) {
+    $subAbs = $abs . '/' . $sub;
+    if (!is_dir($subAbs)) mkdir($subAbs, 0777, true);
+  }
+  // BUG CORRIGIDO (07/09/2026), pedido verbatim: "No nome da pasta do
+  // servidor, as barras devem ficar todas para o mesmo lado, atualmente só
+  // a pasta do servidor que é indicada com a barra '/'
+  // ('C:\Users\PC\Desktop\projetos\catalogacao-itens\outputs\server/storage')."
+  // -- CAUSA RAIZ: '__DIR__' no Windows devolve o caminho com barras
+  // INVERTIDAS ('\', padrão do PHP nesse sistema), mas o '/storage'/'/'.
+  // $pastaConfigurada acima são sempre concatenados com barra NORMAL ('/',
+  // escrita explicitamente no código) -- misturando os dois estilos no
+  // mesmo caminho final. Os `mkdir`/`is_dir` acima aceitam os dois estilos
+  // igual no Windows (não muda nada tecnicamente), mas o VALOR TEXTO
+  // devolvido (usado em 'status-armazenamento'/'listar-arquivos' pra
+  // MOSTRAR pro usuário, e como valor pré-preenchido no botão "✏️ editar"
+  // de settings.js) ficava com uma mistura visualmente inconsistente.
+  // CORRIGIDO: normaliza TODAS as barras pra '/' só na hora de devolver
+  // (nunca antes -- as operações de arquivo acima continuam com o valor
+  // original de '$abs', sem risco de quebrar nada no Windows).
+  return str_replace('\\', '/', $abs);
 }
 
 // ---------- Formatos extras (derivados do catálogo, além do .json sempre mantido) ----------
@@ -193,7 +320,7 @@ if (($data['acao'] ?? '') === 'salvar-item') {
   $pastaDados = pastaDadosAtual(); // NOVO (03/09/2026)
 
   if ($modo === 'individual' || $modo === 'ambos') {
-    $itensDir = $pastaDados . '/itens';
+    $itensDir = $pastaDados . '/text/itens'; // NOVO (07/09/2026): dentro de storage/text/
     if (!is_dir($itensDir)) mkdir($itensDir, 0777, true);
     // O nome do arquivo usa o ID ÚNICO do item (não só o patrimônio!) — assim,
     // se dois aparelhos catalogarem o MESMO número de patrimônio (ao mesmo
@@ -215,7 +342,7 @@ if (($data['acao'] ?? '') === 'salvar-item') {
   // anterior liberar o arquivo. A comparação é sempre pelo ID único do item —
   // nunca pelo patrimônio — então dois catálogos do mesmo patrimônio nunca
   // se fundem em um só; ambos permanecem na lista.
-  $catalogoPath = $pastaDados . '/catalogo-unico.json';
+  $catalogoPath = $pastaDados . '/text/catalogo-unico.json'; // NOVO (07/09/2026): dentro de storage/text/
   $fp = fopen($catalogoPath, 'c+');
   if ($fp) {
     flock($fp, LOCK_EX);
@@ -242,12 +369,12 @@ if (($data['acao'] ?? '') === 'salvar-item') {
     // catálogo atualizado, então sempre refletem todos os itens já salvos
     // (não só o item desta chamada).
     if ($formatoExtra === 'txt-simples' || $formatoExtra === 'ambos-formatos') {
-      $txtPath = $pastaDados . '/catalogo-simples.txt';
+      $txtPath = $pastaDados . '/text/catalogo-simples.txt'; // NOVO (07/09/2026): dentro de storage/text/
       file_put_contents($txtPath, txtSimplesFromItens($catalogo['itens'], $txtCampos, $txtOrganizarPorSetor));
       $resultado['caminhos'][] = realpath($txtPath) ?: $txtPath;
     }
     if ($formatoExtra === 'csv-completo' || $formatoExtra === 'ambos-formatos') {
-      $csvPath = $pastaDados . '/catalogo-completo.csv';
+      $csvPath = $pastaDados . '/raw/catalogo-completo.csv'; // NOVO (07/09/2026): dentro de storage/raw/
       file_put_contents($csvPath, csvCompletoFromItens($catalogo['itens']));
       $resultado['caminhos'][] = realpath($csvPath) ?: $csvPath;
     }
@@ -259,7 +386,7 @@ if (($data['acao'] ?? '') === 'salvar-item') {
 
 // ---------- 2) Sincronização: listar itens para outros aparelhos puxarem ----------
 if (($data['acao'] ?? '') === 'listar') {
-  $catalogoPath = pastaDadosAtual() . '/catalogo-unico.json';
+  $catalogoPath = pastaDadosAtual() . '/text/catalogo-unico.json'; // NOVO (07/09/2026): dentro de storage/text/
   $itens = [];
   if (file_exists($catalogoPath)) {
     $fp = fopen($catalogoPath, 'r');
@@ -288,13 +415,13 @@ if (($data['acao'] ?? '') === 'listar') {
 if (($data['acao'] ?? '') === 'salvar-preferencias') {
   $preferencias = $data['preferencias'] ?? null;
   if (!is_array($preferencias)) { http_response_code(400); echo json_encode(['erro' => 'preferencias ausente ou inválida']); exit; }
-  $p = pastaDadosAtual() . '/preferencias-usuario.json';
+  $p = pastaDadosAtual() . '/app/preferencias-usuario.json'; // NOVO (07/09/2026): dentro de storage/app/
   file_put_contents($p, json_encode(['preferencias' => $preferencias, 'atualizadoEm' => date('c')], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
   echo json_encode(['ok' => true, 'acao' => 'salvar-preferencias', 'caminho' => realpath($p) ?: $p]);
   exit;
 }
 if (($data['acao'] ?? '') === 'carregar-preferencias') {
-  $p = pastaDadosAtual() . '/preferencias-usuario.json';
+  $p = pastaDadosAtual() . '/app/preferencias-usuario.json';
   if (!file_exists($p)) { echo json_encode(['ok' => true, 'preferencias' => null, 'atualizadoEm' => null]); exit; }
   $dado = json_decode(file_get_contents($p), true);
   echo json_encode(['ok' => true, 'preferencias' => $dado['preferencias'] ?? null, 'atualizadoEm' => $dado['atualizadoEm'] ?? null]);
@@ -306,13 +433,13 @@ if (($data['acao'] ?? '') === 'carregar-preferencias') {
 if (($data['acao'] ?? '') === 'salvar-backup-completo') {
   $backup = $data['backup'] ?? null;
   if (!is_array($backup)) { http_response_code(400); echo json_encode(['erro' => 'backup ausente ou inválido']); exit; }
-  $p = pastaDadosAtual() . '/backup-completo.json';
+  $p = pastaDadosAtual() . '/text/backup-completo.json'; // NOVO (07/09/2026): dentro de storage/text/
   file_put_contents($p, json_encode($backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
   echo json_encode(['ok' => true, 'acao' => 'salvar-backup-completo', 'caminho' => realpath($p) ?: $p, 'totalItens' => isset($backup['items']) && is_array($backup['items']) ? count($backup['items']) : null]);
   exit;
 }
 if (($data['acao'] ?? '') === 'carregar-backup-completo') {
-  $p = pastaDadosAtual() . '/backup-completo.json';
+  $p = pastaDadosAtual() . '/text/backup-completo.json';
   if (!file_exists($p)) { echo json_encode(['ok' => true, 'backup' => null]); exit; }
   $backup = json_decode(file_get_contents($p), true);
   echo json_encode(['ok' => true, 'backup' => $backup]);
@@ -323,7 +450,40 @@ if (($data['acao'] ?? '') === 'carregar-backup-completo') {
 // pedido verbatim: "deve ser possível configurar. Por padrão é em uma pasta
 // dentro do app [...] Isto deve ficar claro visualmente." ----------
 if (($data['acao'] ?? '') === 'status-armazenamento') {
-  echo json_encode(['ok' => true, 'pastaDadosAtual' => pastaDadosAtual(), 'pastaDadosPadrao' => __DIR__ . '/dados']);
+  echo json_encode(['ok' => true, 'pastaDadosAtual' => pastaDadosAtual(), 'pastaDadosPadrao' => __DIR__ . '/storage', 'subpastas' => subpastasStorage()]);
+  exit;
+}
+
+// NOVO (07/09/2026), pedido verbatim: "a estrutura de pastas deve ser
+// mostrada (com ícones de pastas e clicável e interagível)". Devolve uma
+// ÁRVORE (pastas com filhos, arquivos com tamanho) da pasta de dados atual
+// pra Configurações desenhar com ícones de pasta/arquivo, expansível. Corta
+// em profundidade 4 (storage/text/itens/arquivo.json já usa as 4) e num
+// total de 500 nós (arquivos+pastas somados) — evita payload gigante em
+// instalações com milhares de itens; o resto vira uma linha "…" avisando.
+function listarArvore($pasta, $profundidadeRestante, &$contador, $limite) {
+  $filhos = [];
+  if ($profundidadeRestante <= 0 || !is_dir($pasta)) return $filhos;
+  $itens = @scandir($pasta) ?: [];
+  natsort($itens);
+  foreach ($itens as $nome) {
+    if ($nome === '.' || $nome === '..' || substr($nome, 0, 1) === '.') continue; // esconde .storage-migrado etc.
+    if ($contador >= $limite) { $filhos[] = ['nome' => "… (mais de {$limite} itens, lista cortada aqui)", 'tipo' => 'info']; break; }
+    $caminho = $pasta . '/' . $nome;
+    $contador++;
+    if (is_dir($caminho)) {
+      $filhos[] = ['nome' => $nome, 'tipo' => 'pasta', 'filhos' => listarArvore($caminho, $profundidadeRestante - 1, $contador, $limite)];
+    } else {
+      $filhos[] = ['nome' => $nome, 'tipo' => 'arquivo', 'tamanho' => @filesize($caminho) ?: 0];
+    }
+  }
+  return $filhos;
+}
+if (($data['acao'] ?? '') === 'listar-arquivos') {
+  $pastaDados = pastaDadosAtual();
+  $contador = 0;
+  $arvore = ['nome' => basename($pastaDados), 'tipo' => 'pasta', 'filhos' => listarArvore($pastaDados, 4, $contador, 500)];
+  echo json_encode(['ok' => true, 'arvore' => $arvore, 'pastaDadosAtual' => $pastaDados]);
   exit;
 }
 if (($data['acao'] ?? '') === 'configurar-pasta-dados') {
@@ -335,8 +495,45 @@ if (($data['acao'] ?? '') === 'configurar-pasta-dados') {
   exit;
 }
 
+// NOVO (07/09/2026), pedido verbatim: "poder carregar modelos 3D externos
+// [...] Quando rodando em um servidor, deve ser guardado em 'storage/3d/'."
+// — usado por js/objimport.js (import de .obj): 'salvar-arquivo-3d' grava o
+// arquivo de VERDADE em disco (além da cópia em memória RAM, que some se a
+// página recarregar — comportamento antigo, mantido); 'listarObjs' lê tudo
+// que já foi salvo ali, no MESMO formato `{nome, conteudo}` que
+// `ObjImport.tryLoadFromServer` já esperava desde a rodada 51 (a ação em si
+// nunca tinha sido implementada no servidor até agora). Nome sanitizado
+// (sem barra/".."), sempre dentro de `storage/3d/` — nunca escreve fora dali.
+function sanitizarNomeArquivo3D($nome) {
+  $base = basename((string) $nome);
+  $base = preg_replace('/[^A-Za-z0-9._-]/', '_', $base);
+  if (substr($base, -4) !== '.obj') $base .= '.obj';
+  return ($base === '.obj') ? ('modelo_' . time() . '.obj') : $base;
+}
+if (($data['acao'] ?? '') === 'salvar-arquivo-3d') {
+  $pasta3d = pastaDadosAtual() . '/3d';
+  if (!is_dir($pasta3d)) mkdir($pasta3d, 0777, true);
+  $nome = sanitizarNomeArquivo3D($data['nomeArquivo'] ?? '');
+  file_put_contents($pasta3d . '/' . $nome, (string) ($data['conteudo'] ?? ''));
+  echo json_encode(['ok' => true, 'acao' => 'salvar-arquivo-3d', 'nomeArquivo' => $nome]);
+  exit;
+}
+if (($data['acao'] ?? '') === 'listarObjs') {
+  $pasta3d = pastaDadosAtual() . '/3d';
+  $arquivos = [];
+  if (is_dir($pasta3d)) {
+    foreach ((@scandir($pasta3d) ?: []) as $nome) {
+      if (strtolower(substr($nome, -4)) !== '.obj') continue;
+      $conteudo = @file_get_contents($pasta3d . '/' . $nome);
+      if ($conteudo !== false) $arquivos[] = ['nome' => $nome, 'conteudo' => $conteudo];
+    }
+  }
+  echo json_encode(['ok' => true, 'arquivos' => $arquivos]);
+  exit;
+}
+
 // ---------- 6) Envio em lote (backup/email manual) ----------
-$dir = pastaDadosAtual() . '/recebidos'; // NOVO (03/09/2026): também dentro da pasta de dados
+$dir = pastaDadosAtual() . '/text/recebidos'; // NOVO (07/09/2026): dentro de storage/text/
 if (!is_dir($dir)) mkdir($dir, 0777, true);
 $fname = $dir . '/catalogo-' . date('Y-m-d_H-i-s') . '.json';
 file_put_contents($fname, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));

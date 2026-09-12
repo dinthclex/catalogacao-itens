@@ -349,6 +349,59 @@ const ModelerRender = {
     return verts;
   },
 
+  // [09/09/2026] NOVO — pedido verbatim (ver comentário grande em
+  // `ModelerInput.enterOriginPickMode`, modeler-input.js): marcador 3D (uma
+  // esfera pequena) que segue o preview do ponto em cima da aresta sob o
+  // cursor, mais uma 2ª esfera (maior, cor diferente) pro "destaque para o
+  // centro do vértice" quando o ponto em preview está perto/encaixado numa
+  // ponta da aresta. `depthTest:false` — sempre visível por cima da malha,
+  // igual a um "gizmo" (mesmo espírito do outlineMesh/outros marcadores
+  // deste arquivo, que também não deixam a malha escondê-los). Os 2
+  // marcadores são criados 1x (guardados em `state._originPickMarker`/
+  // `state._originPickVertexMarker`) e reaproveitados a cada `mousemove` —
+  // só reposicionados/escondidos, nunca recriados. `local` nulo (saiu de
+  // cima de qualquer aresta, ou saiu do modo) esconde os 2.
+  updateOriginPickMarker(state, local, vertexHighlightIdx) {
+    if (!state.group) return;
+    const THREE = state.THREE;
+    if (!state._originPickMarker) {
+      const geo = new THREE.SphereGeometry(0.035, 12, 8);
+      const mat = new THREE.MeshBasicMaterial({ color: 0xffcc33, depthTest: false, transparent: true, opacity: 0.95 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 999;
+      state._originPickMarker = mesh;
+    }
+    if (!state._originPickVertexMarker) {
+      const geo2 = new THREE.SphereGeometry(0.065, 12, 8);
+      const mat2 = new THREE.MeshBasicMaterial({ color: 0x33ffb0, depthTest: false, transparent: true, opacity: 0.85 });
+      const vm = new THREE.Mesh(geo2, mat2);
+      vm.renderOrder = 1000;
+      vm.visible = false;
+      state._originPickVertexMarker = vm;
+    }
+    const marker = state._originPickMarker;
+    const vmarker = state._originPickVertexMarker;
+    if (!local) {
+      if (marker.parent) marker.parent.remove(marker);
+      if (vmarker.parent) vmarker.parent.remove(vmarker);
+      return;
+    }
+    if (marker.parent !== state.group) state.group.add(marker);
+    marker.position.set(local[0], local[1], local[2]);
+    // Perto de uma ponta: some o marcador amarelo "genérico" e mostra só o
+    // verde (maior) EM CIMA do vértice — "destaque para o centro do
+    // vértice", não os dois sobrepostos.
+    marker.visible = vertexHighlightIdx == null;
+    if (vertexHighlightIdx != null && state.cm.vertices[vertexHighlightIdx]) {
+      const vp = state.cm.vertices[vertexHighlightIdx];
+      if (vmarker.parent !== state.group) state.group.add(vmarker);
+      vmarker.position.set(vp[0], vp[1], vp[2]);
+      vmarker.visible = true;
+    } else {
+      vmarker.visible = false;
+    }
+  },
+
   faceCentroidScreen(state, fi, cssW, cssH) {
     const f = state.cm.faces[fi];
     if (!f || !f.length) return null;
@@ -698,6 +751,12 @@ const ModelerRender = {
   _drawOrbitTargetDot(state, ctx, w, h) {
     if (state.camPosMode !== 'orbit') return;
     const cfg = state.view3d?._paredeConfig || (typeof MapConfig !== 'undefined' ? MapConfig._cache : null) || {};
+    // [12/09/2026] NOVO — pedido verbatim: "Em 'configurações 3D', na seção
+    // 'Debug', coloque um botão para ativar o debug. Ativando o debug,
+    // todas as suas opções entram em execução." Agora também exige o
+    // interruptor mestre `debugModoAtivo` (ver mapconfig.js DEFAULTS e
+    // `_isDebugAtivo()` em view3d.js), além da opção individual abaixo.
+    if (cfg.debugModoAtivo !== true) return;
     if (cfg.modeladorMostrarAlvoOrbital === false) return;
     const t = state.orbit?.target;
     if (!t) return;

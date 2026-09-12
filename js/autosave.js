@@ -17,12 +17,29 @@
  */
 
 const AutoSave = {
+  // NOVO (07/09/2026), pedido verbatim: "Os salvamentos automáticos, quando
+  // estiver em um servidor e estiver marcada a opção de 'guardar em
+  // servidor', devem ser feitos para as coisas que estão em uso no
+  // momento." — 'autoSaveAtivo' é agora EXATAMENTE a chave por trás do
+  // checkbox "Guardar no servidor" (ver settings.js `#st-guardar-servidor`/
+  // `_wireGuardarDestinos`), então este método (chamado a cada item
+  // confirmado, via `pushItem` abaixo, chamado direto de app.js) já
+  // satisfaz o pedido sem nenhuma mudança de lógica aqui — só o item que
+  // acabou de ser usado/confirmado é enviado, nunca o catálogo inteiro
+  // (isso é o botão "📤 Gravar tudo no servidor"/"⬇️ Exportar backup").
   async isEnabled() {
     return !!(await DB.getSetting('autoSaveAtivo', false));
   },
 
-  async pushItem(item, { isUpdate = false } = {}) {
-    const ativo = await this.isEnabled();
+  // NOVO (07/09/2026), pedido verbatim: "uma opção para gravar tudo no
+  // servidor deve ficar disponível" — o botão "📤 Gravar tudo no servidor"
+  // (ver serverprefs.js/settings.js) precisa poder enviar um item MESMO com
+  // o "salvamento automático" (autoSaveAtivo) desligado — é justamente pra
+  // quem cadastrou itens ANTES de configurar o servidor, ou com o autosave
+  // desligado. `force: true` pula a checagem de `isEnabled()` abaixo; todo
+  // o resto do envio continua idêntico.
+  async pushItem(item, { isUpdate = false, force = false, silent = false } = {}) {
+    const ativo = force || (await this.isEnabled());
     if (!ativo) return { enviado: false, motivo: 'desativado' };
 
     const url = await DB.getSetting('servidorUrl', '');
@@ -57,14 +74,18 @@ const AutoSave = {
       // Mostra onde exatamente ficou salvo no servidor — o caminho vem do
       // próprio servidor (ele sabe onde está no disco; o navegador nunca sabe
       // isso por conta própria, por segurança).
-      if (resultado?.caminhos?.length) {
+      // `silent` — NOVO (07/09/2026): usado pelo envio em LOTE de "📤 Gravar
+      // tudo no servidor" (ver ServerPrefs.enviarTodosParaServidor) — sem
+      // isto, enviar centenas de itens de uma vez dispararia centenas de
+      // toasts empilhados, um por item.
+      if (resultado?.caminhos?.length && !silent) {
         Utils.toast(`Salvo no servidor em: ${resultado.caminhos.join(' · ')}`, { type: 'ok', duration: 4500 });
       }
       window.EventLog?.log?.(`Envio automático ao servidor local: ok (${item.patrimonio || item.descricao || item.id}).`, { tipo: 'ok' });
       return { enviado: true, resultado };
     } catch (e) {
       console.warn('Salvamento automático falhou (item continua salvo localmente):', e);
-      Utils.toast('Item salvo localmente, mas o servidor de auto-salvamento não respondeu.', { type: 'warn' });
+      if (!silent) Utils.toast('Item salvo localmente, mas o servidor de auto-salvamento não respondeu.', { type: 'warn' });
       window.EventLog?.log?.(`Envio automático ao servidor local falhou (${item.patrimonio || item.descricao || item.id}): ${e.message}`, { tipo: 'erro' });
       return { enviado: false, motivo: e.message };
     }

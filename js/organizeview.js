@@ -1079,7 +1079,14 @@ const OrganizeView = {
     this._onCloseCb = opts.onClose || null;
     if (!this._selectedMapIds) this._selectedMapIds = new Set();
     if (!this._selectedFotoIds) this._selectedFotoIds = new Set();
-    this._buildOverlay();
+    // ATUALIZADO (08/09/2026), pedido verbatim: "Isso deve ser configurável
+    // [...] por padrão, todas devem ocupar apenas o espaço da divisão, não
+    // a tela cheia (como o que está acontecendo com o 'Organizar' e o
+    // 'Foto')." `opts.container`, quando informado (ver js/bsplayout.js,
+    // EDITOR_TYPES.organizar), confina o overlay dentro dele — mesmo
+    // truque CSS de `.bsp-leaf-body { transform: translateZ(0) }` usado
+    // por AmbientePhotos.open, ver comentário lá.
+    this._buildOverlay(opts.container);
     if (this._dirty || !this._maps.length) await this.reload();
     else { this._renderList(); this._startThumbnailQueue(); }
   },
@@ -1114,6 +1121,7 @@ const OrganizeView = {
     window.Perf?.mountIn(null);
     this._overlayEl.remove();
     this._overlayEl = null;
+    this._confinedContainer = null;
     this._listEl = null;
     const cb = this._onCloseCb;
     this._onCloseCb = null;
@@ -1156,7 +1164,7 @@ const OrganizeView = {
     };
   },
 
-  _buildOverlay() {
+  _buildOverlay(container) {
     const el = document.createElement('div');
     el.className = 'organize-overlay';
     el.innerHTML = `
@@ -1274,7 +1282,8 @@ const OrganizeView = {
         <ul class="organize-pending-list" id="organize-pending-list"></ul>
       </div>
     `;
-    document.body.appendChild(el);
+    this._confinedContainer = container || null;
+    (container || document.body).appendChild(el);
     this._overlayEl = el;
     this._listEl = el.querySelector('#organize-list');
     // ITEM B (retomado 31/08/2026) — ver comentário grande em `Perf.mountIn`
@@ -5881,7 +5890,7 @@ const OrganizeView = {
     try {
       const prev = App.views?.[App.currentView];
       if (prev?.unmount) { try { prev.unmount(); } catch (err) { console.warn(`unmount("${App.currentView}") falhou:`, err); } }
-      document.querySelectorAll('.bottomnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === 'mapa'));
+      document.querySelectorAll('.bsp-botoes-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === 'mapa'));
       const titleEl = document.getElementById('view-title');
       if (titleEl) titleEl.textContent = App.titles?.mapa || 'Mapa do ambiente';
       document.body.classList.add('view-mapa');
@@ -5980,7 +5989,7 @@ const OrganizeView = {
     if (typeof MapView !== 'undefined' && container) {
       try {
         document.body.classList.add('view-mapa');
-        document.querySelectorAll('.bottomnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === 'mapa'));
+        document.querySelectorAll('.bsp-botoes-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === 'mapa'));
         App.currentView = 'mapa';
         App.views.mapa = MapView;
         await MapView.mount(container);
