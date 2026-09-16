@@ -73,6 +73,17 @@
  * - _setupCullMeshes()/_setupWallOcclusionMeshes()/
  *   _updateDistanceCulling(camera) — culling por distância/oclusão de
  *   paredes (desempenho).
+ * - [13/09/2026 UTC] NOVO — _buildOcclusionSectors(mapData)/_sectorIdAt(piso,x,z)/
+ *   _updateSectorOcclusionCulling(camera) — oclusão por setores (paredes
+ *   particionam cada andar em regiões conectadas via flood-fill; objeto
+ *   num setor não visível a partir do setor da câmera nem entra no draw
+ *   call), pedido do usuário pra milhares de objetos atrás de uma parede
+ *   grande não custarem FPS — ver comentário grande de
+ *   _buildOcclusionSectors, mais abaixo, pro sistema completo.
+ * - [13/09/2026 UTC] NOVO — _updateFrameBudgetCulling(camera) — orçamento de
+ *   objetos desenhados por QUADRO (mapconfig.js "Desempenho 3D", padrão
+ *   1200), prioriza quem está mais perto da câmera — ver comentário grande
+ *   dela pro sistema completo.
  * - _addWireframeOcclusion() — malhas de wireframe usadas só pra ocluir
  *   (sem desenhar), no modo "sólido+wireframe".
  * - _setupHybridMeshes()/updateHybridQuality(camera,fpsAtual,fpsAlvo) —
@@ -245,8 +256,10 @@ function cameraRightFlat(cam) { return rotY({ x: -1, y: 0, z: 0 }, cam.yaw); }
 // de "Ver através desta câmera" (`view3d.js _computeFotoCamPose`, que
 // precisa devolver um `yaw` de CÂMERA DE VISÃO equivalente a este mesmo
 // vetor, ver comentário grande lá pra a álgebra que prova a equivalência).
+// [15/09/2026 UTC] Sinal de dirAngulo invertido: pedido do usuario para que o giro do cone
+// (objeto Camera/Orb no 3D) seja no sentido horario visto de cima, ao aumentar os graus.
 function objectPointerForward(dirAngulo, pitch) {
-  const d = cameraForward({ yaw: dirAngulo || 0, pitch: pitch || 0 });
+  const d = cameraForward({ yaw: -(dirAngulo || 0), pitch: pitch || 0 });
   return { x: d.x, y: d.y, z: -d.z };
 }
 
@@ -658,6 +671,22 @@ class Engine3D {
   constructor(canvas, initialConfig, opts) {
     this.canvas = canvas;
     this._eye = !!(opts && opts.eye);
+    // [13/09/2026] NOVO — resolução de renderização CUSTOMIZADA (ver
+    // mapconfig.js DEFAULTS.resolucaoCustom3D/view3d.js
+    // _applyResolucaoCustom3D). `null` (padrão) = "Automática": `_resize()`
+    // continua usando `clientWidth`/`clientHeight` × dpr, EXATAMENTE como
+    // sempre — só quando `{w,h,fit}` é passado aqui (ou via
+    // `setCustomRes3D`, chamada ao vivo pra reagir a uma mudança de config
+    // sem precisar reabrir o "Ver em 3D") o render target passa a usar
+    // `w`×`h` fixos em vez do tamanho do canvas — `fit` não é usado AQUI
+    // dentro (é só repassado pra quem consulta `this._customRes.fit`, ver
+    // view3d.js, que decide o CSS `object-fit` do canvas visível a partir
+    // dele — motor 3D não mexe com CSS/DOM por conta própria). SÓ tem
+    // efeito em modo "eye" (`this._eye`) — é o pipeline WebGLRenderTarget
+    // dele (ver "MODO EYE" mais abaixo) que sabe desenhar numa resolução
+    // diferente da do canvas; o modo não-eye (nenhuma tela usa mais, mas
+    // mantido por segurança) ignora isto silenciosamente.
+    this._customRes = (opts && opts.customRes && opts.customRes.w > 0 && opts.customRes.h > 0) ? { ...opts.customRes } : null;
     // [11/09/2026] NOVO — estado do gizmo "enquadramento" (retângulo
     // amarelo, ver setCameraFrustumsVisible/_fotoFrustumMeshesById).
     // [15/09/2026] o padrão tinha virado `true` (temporário, "pelo
@@ -1132,7 +1161,19 @@ class Engine3D {
     // far da câmera com folga acima da neblina (mesma proporção do valor
     // original fixo, 100/42 ≈ 2.4×) — evita o plano de corte da câmera
     // "estourar" bem em cima de onde a neblina já devia ter escondido tudo.
-    this.camera3 = new THREE.PerspectiveCamera(72, 1, 0.1, Math.max(rd * 2.4, 60));
+    // [13/09/2026] NOVO — pedido verbatim: "controles de plano de corte
+    // próximo/distante (z_near/z_far)... em 'Desempenho 3D'". `this._config`
+    // já tem o `initialConfig` do construtor mesclado a esta altura (ver
+    // `this._config = { ...DEFAULT_CONFIG, ...initialConfig }` acima em
+    // `_initThree`/constructor), então uma janela "Ver em 3D" recém-aberta
+    // já nasce com o near/far persistidos, sem esperar o 1º `setConfig()`
+    // (ver mapconfig.js DEFAULTS.cameraZNear/cameraZFar). `cameraZNear`
+    // ausente/inválido cai no 0.1 de sempre; `cameraZFar` ausente/null (o
+    // padrão — "automático") cai no MESMO cálculo dinâmico de sempre —
+    // nenhuma mudança de comportamento pra quem nunca mexeu nesses campos.
+    const nearInicial = (Number.isFinite(this._config.cameraZNear) && this._config.cameraZNear > 0) ? this._config.cameraZNear : 0.1;
+    const farInicial = (Number.isFinite(this._config.cameraZFar) && this._config.cameraZFar > 0) ? this._config.cameraZFar : Math.max(rd * 2.4, 60);
+    this.camera3 = new THREE.PerspectiveCamera(72, 1, nearInicial, farInicial);
     this.camera3.up.set(0, 1, 0);
 
     this._hemiLight = new THREE.HemisphereLight(0x1a2436, 0x05060a, 0.35);
@@ -1172,6 +1213,51 @@ class Engine3D {
     // nos cantos/bordas de formas não-esféricas).
     this._raycaster = new THREE.Raycaster();
     this._pickMeshes = [];
+    // [26/09/2026] NOVO — refatoração InstancedMesh (pedido do usuário: "então,
+    // refatore a engine3D", perf/organização mesmo sem milhares de objetos
+    // ainda no mapa). Pool de THREE.InstancedMesh por `tipo` de objeto
+    // GENÉRICO de catálogo (o ramo comum de `_buildOneObjectMesh`, não
+    // mesa/luminária/poste/escada/molde/imagem/.obj/retângulo/polígono, que
+    // continuam 100% como sempre foram, uma malha por objeto) — montado do
+    // zero em `_rebuildInstancedPools` (chamado no fim de `setScene`).
+    // DESENHO ACEITO, documentado aqui pra quem mexer depois: `this.pickables`
+    // e `this._pickMeshes` continuam EXATAMENTE como sempre — uma entrada por
+    // objeto, byte-idêntico a antes — o pick/raycast nunca soube nem precisa
+    // saber que existe instancing (o raycaster deste projeto já é confirmado,
+    // por teste ao vivo, a acertar malhas com `.visible=false`). O que muda é
+    // só a malha VISÍVEL de cada objeto elegível: ela vira invisível
+    // (`mesh.visible=false`) e um InstancedMesh irmão
+    // (`this._instancedPools[poolKey]` — poolKey = "tipo::piso", ver
+    // comentário grande de frustum culling em `_rebuildInstancedPools`,
+    // 13/09/2026: o pool é por tipo+ANDAR, não só por tipo, senão a bounding
+    // sphere automática do InstancedMesh cobriria o prédio inteiro e nunca
+    // seria cortada pelo frustum) passa a desenhá-la, com a MESMA posição/
+    // rotação (`mesh.userData._inst.matrix`,
+    // cópia da matriz calculada do jeito de sempre) e a MESMA cor por
+    // instância (`InstancedMesh.setColorAt`, testado disponível nesta versão
+    // do three.js). Objetos incrementais (`addObjectIncremental`) NÃO entram
+    // num pool (crescer um InstancedMesh já criado exigiria descartar e
+    // recriar ele inteiro — mais risco que ganho pra um objeto só) — ficam
+    // desenhados INDIVIDUALMENTE, do jeito de sempre, até o próximo `setScene`
+    // completo (troca de andar, reabrir o mapa) reagrupar tudo nos pools —
+    // igual ao próprio `_tintForLight`/luminárias incrementais logo abaixo,
+    // mesmo espírito de "pequena defasagem aceita, nunca incorreção
+    // permanente". `setXRayTarget`/`setGlobalXRay`/`_updateDistanceCulling`
+    // foram adaptados (ver `_instancePromote`/`_instanceDemote`/
+    // `_syncInstanceVisibility` abaixo) pra manter a malha individual e a
+    // instância dela SEMPRE em sincronia, nunca desenhando as duas ao mesmo
+    // tempo (dobraria o objeto na tela) nem nenhuma das duas (sumiria).
+    this._instancedPools = {};
+    // [13/09/2026] NOVO — cache das texturas procedurais de piso "Lajota" e
+    // "Teto modular" (ver `_getCanvasTextureCached` abaixo). Chave = string
+    // composta (tipo + dimensões reais em metros, já que o `texture.repeat`
+    // depende do tamanho do objeto) — evita recriar um `<canvas>` +
+    // `THREE.CanvasTexture` a cada `_buildOneObjectMesh` (chamado pra TODO
+    // objeto do mapa, inclusive numa reconstrução de cena inteira com
+    // centenas de objetos) quando várias instâncias do mesmo tipo/tamanho já
+    // compartilhariam a mesma textura pronta. Vive na instância do motor (não
+    // em `window`) pra ser descartada junto com ele (`dispose`, ver abaixo).
+    this._texturaProceduralCache = {};
 
     this._ready = true;
     if (this._pendingScene) {
@@ -1407,6 +1493,11 @@ class Engine3D {
    *  pernas) — a peça de verdade (com a malha certa) só nasce ao clicar. */
   _initBuildGhosts(THREE, scene) {
     const ghostMat = () => new THREE.MeshBasicMaterial({ color: 0x7fe0ff, transparent: true, opacity: 0.35, depthWrite: false });
+    // Compartilhado por `showGhostObject` pro ramo da mesa (`_ghostMesa`,
+    // abaixo) — as 5 partes (tampo+pernas) trocam de geometria a cada
+    // chamada, mas podem todas usar o MESMO material (mesma cor/opacidade
+    // azulada de todo ghost), sem precisar de um `ghostMat()` novo por parte.
+    this._ghostMatShared = ghostMat();
     this._ghostWall = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), ghostMat());
     this._ghostWall.rotation.x = -Math.PI / 2;
     this._ghostWall.visible = false;
@@ -1473,6 +1564,27 @@ class Engine3D {
     }
     this._ghostEscada.visible = false;
     scene.add(this._ghostEscada);
+
+    // [13/09/2026] NOVO — pedido verbatim: "O ghost da mesa está aparecendo
+    // como uma caixa, deve ser o modelo da própria mesa azulado." Mesmo
+    // padrão do `_ghostEscada` acima (grupo próprio, reaproveitando a
+    // geometria REAL do objeto em vez da caixa delimitadora genérica) — ver
+    // comentário grande em `_makeMesaMeshes` pra causa raiz completa e por
+    // que luminária/poste NÃO foram cobertos junto. Criado sem malhas: as 5
+    // partes da mesa (tampo + 4 pernas) são criadas por `_makeMesaMeshes` e
+    // ANEXADAS aqui a cada chamada de `showGhostObject('mesa', ...)`, porque
+    // o número/tamanho delas pode mudar com `perfil` (mesa é redimensionável
+    // no 2D) — ao contrário da escada, que sempre tem o mesmo nº de degraus
+    // (this._GHOST_ESCADA_DEGRAUS fixo), não dá pra pré-alocar um pool fixo
+    // de partes da mesa sem reimplementar a lógica de `_makeMesaMeshes` de
+    // novo aqui só pra saber quantas caixas alocar — então este grupo troca
+    // de filhos (remove os antigos, adiciona os novos) a cada chamada. Isso
+    // é MUITO mais barato do que parece: só acontece enquanto a pessoa está
+    // efetivamente arrastando o ghost de uma mesa (poucos frames por vez, não
+    // o tempo todo), e nunca mais que ~5 meshes pequenas por troca.
+    this._ghostMesa = new THREE.Group();
+    this._ghostMesa.visible = false;
+    scene.add(this._ghostMesa);
 
     this._ghostItem = new THREE.Mesh(new THREE.ConeGeometry(0.26 * Math.SQRT2, 0.6, 4), ghostMat());
     this._ghostItem.visible = false;
@@ -1616,7 +1728,7 @@ class Engine3D {
     // [22/09/2026] `_ghostEscada` (ver comentário grande no construtor) incluído
     // nesta lista — senão ficaria "preso" visível trocando de ferramenta com um
     // 'escada' mirado antes.
-    [this._ghostWall, this._ghostWallSeg, this._ghostWallSection, this._ghostObject, this._ghostEscada, this._ghostItem, this._ghostDoorWindow, this._ghostTijolo, this._ghostTijoloCunha, this._ghostSpringDot, this._ghostSnapSphere, this._protractorRing, this._footprintOutline, ...(this._guideLines || []), ...(this._footprintDrops || [])].forEach((m) => { if (m) m.visible = false; });
+    [this._ghostWall, this._ghostWallSeg, this._ghostWallSection, this._ghostObject, this._ghostEscada, this._ghostMesa, this._ghostItem, this._ghostDoorWindow, this._ghostTijolo, this._ghostTijoloCunha, this._ghostSpringDot, this._ghostSnapSphere, this._protractorRing, this._footprintOutline, ...(this._guideLines || []), ...(this._footprintDrops || [])].forEach((m) => { if (m) m.visible = false; });
   }
 
   /** "Ghost de seccionamento" (pedido do usuário) — mostrado por
@@ -1780,7 +1892,16 @@ class Engine3D {
       if (!this._ghostEscada) return;
       this._ghostObject.visible = false;
       const { w: largura, d: profundidadeTotal } = this.objectFootprint(tipoKey);
-      const alturaTotal = 2.0; // fixa — mesmo valor/motivo de _buildEscadaMesh
+      // [13/09/2026] Mesma correção de `_buildEscadaMesh`/`Mapping.objectTopHeightAt`
+      // — a altura do PREVIEW (ghost) também precisa refletir a altura real
+      // de andar (`mapData.alturaPiso`), não mais um valor fixo de 2m
+      // desconectado — senão o ghost mostraria uma escada mais curta do que
+      // a que vai realmente ser criada ao clicar (confuso pro usuário
+      // posicionar). O ghost usa sempre o pool fixo de `_GHOST_ESCADA_DEGRAUS`
+      // caixas (preview não precisa bater o nº exato de degraus do objeto
+      // final, que só existe depois de clicar — ver comentário no
+      // construtor) — só a altura TOTAL empilhada precisa estar certa.
+      const alturaTotal = this.mapData?.alturaPiso || 2.8;
       const nDegraus = this._GHOST_ESCADA_DEGRAUS;
       const stepDepth = profundidadeTotal / nDegraus;
       const stepHeight = alturaTotal / nDegraus;
@@ -1799,6 +1920,25 @@ class Engine3D {
       return;
     }
     if (this._ghostEscada) this._ghostEscada.visible = false;
+    // [13/09/2026] NOVO — ver comentário grande em `_makeMesaMeshes`/
+    // `_initBuildGhosts` pra causa raiz completa: a mesa agora ganha o mesmo
+    // tratamento bespoke que a escada já tinha (silhueta real — tampo + 4
+    // pernas — em vez da caixa delimitadora genérica).
+    if (tipoKey === 'mesa') {
+      this._ghostObject.visible = false;
+      if (!this._ghostMesa) return;
+      const perfil = this.objectFootprint(tipoKey); // { w, d, h } — MESMA fonte usada pelo objeto real (OBJECT3D_PROFILES/mesa)
+      // `_makeMesaMeshes` espera um `obj` com x/y/angulo (coordenadas do
+      // MUNDO) — o ghost ainda não é um objeto salvo no mapa, então montamos
+      // um `obj` temporário mínimo só com os campos que a função lê.
+      const objTemp = { x, y: z, angulo };
+      while (this._ghostMesa.children.length) this._ghostMesa.remove(this._ghostMesa.children[0]);
+      const { meshes } = this._makeMesaMeshes(objTemp, perfil, elevacao, this._ghostMatShared);
+      meshes.forEach((m) => this._ghostMesa.add(m));
+      this._ghostMesa.visible = true;
+      return;
+    }
+    if (this._ghostMesa) this._ghostMesa.visible = false;
     if (!this._ghostObject) return;
     const { w, d, h } = this.objectFootprint(tipoKey);
     this._ghostObject.scale.set(w, h, d);
@@ -1978,6 +2118,11 @@ class Engine3D {
         delete m.userData._xrayRemovedFromHybrid;
         if (this._hybridMeshes && !this._hybridMeshes.includes(m)) this._hybridMeshes.push(m);
       }
+      // [26/09/2026] NOVO — ver `_instanceDemote`/comentário grande em
+      // `this._instancedPools` (constructor): objeto instanciado (pool de
+      // InstancedMesh por tipo) fica INVISÍVEL por padrão — devolve ele pro
+      // estado invisível de sempre e restaura a instância que o desenhava.
+      this._instanceDemote(m);
     });
     this._xrayObjId = objId ?? null;
     this._xrayMeshes = objId ? (this._pickMeshes || []).filter((m) => m.userData?.pick?.type === 'object' && m.userData.pick.id === objId) : [];
@@ -1995,6 +2140,11 @@ class Engine3D {
         const idx = this._hybridMeshes.indexOf(m);
         if (idx !== -1) { this._hybridMeshes.splice(idx, 1); m.userData._xrayRemovedFromHybrid = true; }
       }
+      // [26/09/2026] NOVO — "promove" a malha individual (agora invisível por
+      // causa do pool de InstancedMesh, ver acima) de volta a visível — com o
+      // material de Raio X já trocado na linha de cima — e zera a instância
+      // dela no pool, pra nunca desenhar o objeto duas vezes ao mesmo tempo.
+      this._instancePromote(m);
     });
   }
 
@@ -2036,6 +2186,9 @@ class Engine3D {
         delete m.userData._xrayGlobalRemovedFromHybrid;
         if (this._hybridMeshes && !this._hybridMeshes.includes(m)) this._hybridMeshes.push(m);
       }
+      // [26/09/2026] NOVO — mesmo par promote/demote de setXRayTarget acima,
+      // ver comentário grande lá e em `this._instancedPools` (constructor).
+      this._instanceDemote(m);
     });
     this._xrayGlobalMeshes = [];
     this._xrayGlobalActive = types.length > 0;
@@ -2052,6 +2205,7 @@ class Engine3D {
         const idx = this._hybridMeshes.indexOf(m);
         if (idx !== -1) { this._hybridMeshes.splice(idx, 1); m.userData._xrayGlobalRemovedFromHybrid = true; }
       }
+      this._instancePromote(m);
     });
   }
 
@@ -2465,6 +2619,19 @@ class Engine3D {
 
   setMode(mode) { this.mode = mode; }
 
+  /** [13/09/2026] NOVO — troca (ou desliga, passando `null`) a resolução de
+   *  renderização customizada com o "Ver em 3D" JÁ ABERTO (ver comentário
+   *  grande sobre `this._customRes` no construtor/`_resize`) — usada por
+   *  view3d.js quando a config muda ao vivo (`_onMapConfigChange`), sem
+   *  precisar fechar/reabrir a tela. Só marca o novo valor e força
+   *  `_resize()` a recalcular tudo no próximo quadro (zera `_lastW` pra
+   *  passar pelo cache-guard mesmo se `custom.w/h` coincidir por acaso com
+   *  o último tamanho já aplicado). */
+  setCustomRes3D(customRes) {
+    this._customRes = (customRes && customRes.w > 0 && customRes.h > 0) ? { ...customRes } : null;
+    this._lastW = -1; this._lastH = -1;
+  }
+
   _pixelRatioCap() {
     const teto = Engine3D.RESOLUCAO_DPR[this._config.resolucao3D] || Engine3D.RESOLUCAO_DPR.alta;
     return Math.min(window.devicePixelRatio || 1, teto);
@@ -2549,6 +2716,36 @@ class Engine3D {
    *  horário real do aparelho. */
   _horaAtualConfigurada() {
     const manual = this._config?.horaDoDiaManual;
+    // [13/09/2026 UTC] Pedido: "Seguir relógio do mundo" — botão novo,
+    // acima de "Seguir relógio do aparelho", mutuamente exclusivo com ele.
+    // Correção explícita do usuário: "Não é para ser 'relógio do mundo'
+    // é para ser 'relógio do mundo' (ou seja, todo o cenário 3D, não só o
+    // prédio)". Reaproveita `RelogioMundo.getHoraAtual()` (mecanismo já
+    // genérico — relógio simulado de velocidade configurável, tempo real
+    // por padrão) como fonte de hora pra ISSO — céu/Sol/Lua da cena
+    // inteira — sem duplicar um segundo relógio do zero. O rótulo visível
+    // ao usuário (HUD) foi atualizado separadamente pra "Relógio do
+    // mundo"; o nome interno do módulo/global (`RelogioMundo`) e sua
+    // lógica de expediente/almoço continuam intactos (scripts de NPC já
+    // dependem deles e aquilo é legitimamente sobre o prédio).
+    if (manual === 'mundo') {
+      // [13/09/2026 UTC] CORRIGIDO — bug relatado pelo usuário (globo
+      // "preto, parado e não interativo" quando 'Seguir relógio do
+      // mundo' está ativo): `RelogioMundo.getHoraAtual()` NÃO devolve um
+      // número decimal — devolve um OBJETO `{horas, minutos, segundos,
+      // diaDaSemana}` (ver relogio-mundo.js). O código anterior fazia
+      // `typeof h === 'number'`, que é SEMPRE falso pra esse objeto, então
+      // caía sempre no fallback do relógio do aparelho, SEM avisar de
+      // erro nenhum — o "mundo" nunca funcionava de verdade, silenciosamente.
+      const h = window.RelogioMundo?.getHoraAtual?.();
+      if (h && typeof h === 'object' && !isNaN(Number(h.horas))) {
+        return Number(h.horas) + Number(h.minutos || 0) / 60 + Number(h.segundos || 0) / 3600;
+      }
+      // RelogioMundo indisponível por algum motivo: cai pro relógio do
+      // aparelho em vez de travar a cena sem luz definida.
+      const now = new Date();
+      return now.getHours() + now.getMinutes() / 60;
+    }
     if (manual != null && !isNaN(Number(manual))) return Number(manual);
     const now = new Date();
     return now.getHours() + now.getMinutes() / 60;
@@ -2741,8 +2938,25 @@ class Engine3D {
       // lá) enquanto um override de recorte estiver ativo (câmera/orb
       // calibrada "Camera Match"), em vez de sobrescrever `far` sempre a
       // partir da distância de renderização/neblina.
-      this.camera3.far = (this._clipFarOverride != null) ? this._clipFarOverride : Math.max(rd * 2.4, 60);
-      if (this._clipNearOverride != null) this.camera3.near = this._clipNearOverride;
+      // [13/09/2026] NOVO — pedido verbatim: "controles de plano de corte
+      // próximo/distante (z_near/z_far)... em 'Desempenho 3D'... deve ser
+      // atualizado em tempo real". `cfg.cameraZNear`/`cameraZFar` (ver
+      // mapconfig.js DEFAULTS) são o 2º nível de prioridade, ABAIXO do
+      // override de câmera/orb calibrada (`_clipFarOverride`/
+      // `_clipNearOverride`, que continua vencendo enquanto "vendo através"
+      // de uma câmera — este painel novo não deve brigar com aquele recurso
+      // já existente) — só entram quando não há override de câmera ativo.
+      // `cameraZFar` ausente/null (padrão — "automático") cai no MESMO
+      // cálculo de sempre (`rd*2.4`); `cameraZNear` ausente/inválido cai no
+      // 0.1 de sempre — nenhuma mudança de comportamento pra quem nunca
+      // mexeu nesses campos novos. Esta função já é chamada ao vivo por
+      // `MapConfig.onChange` (ver view3d.js `_onMapConfigChange`), então
+      // arrastar o "botão triplo" já reflete na câmera aberta sem reabrir a
+      // tela — satisfaz "tempo real" sem nenhuma chamada direta adicional.
+      const cfgFarUser = (Number.isFinite(this._config.cameraZFar) && this._config.cameraZFar > 0) ? this._config.cameraZFar : null;
+      const cfgNearUser = (Number.isFinite(this._config.cameraZNear) && this._config.cameraZNear > 0) ? this._config.cameraZNear : null;
+      this.camera3.far = (this._clipFarOverride != null) ? this._clipFarOverride : (cfgFarUser ?? Math.max(rd * 2.4, 60));
+      this.camera3.near = (this._clipNearOverride != null) ? this._clipNearOverride : (cfgNearUser ?? 0.1);
       this.camera3.updateProjectionMatrix();
       // NOVO (01/09/2026), item "Sol e Lua": a posição dos dois depende do
       // `far` da câmera (ver _updateSky, R = far*0.85) — sem isto, mudar a
@@ -2785,6 +2999,28 @@ class Engine3D {
     // _disposeGroupContents logo abaixo) se o modo mudar depois.
     this._hybridMeshes = [];
     this._hybridRadius = null; // null = sem raio nenhum restringindo ainda (ver updateHybridQuality)
+    // [correção 13/09/2026] `_doorRuntime`: Map (chave = `el.id` da porta)
+    // guardando as referências/estado de animação de cada porta —
+    // `leafMesh`/`manetaMesh` (THREE.Mesh/Group) e `pivotInfo`/
+    // `anguloAtualAnim`/`manetaAnimDur`/`manetaAnimT`/`manetaLastTargetDeg`
+    // (números/objeto simples). ANTES essas referências eram guardadas
+    // direto na entidade persistida (`el._doorLeafMesh` etc.) — como `el` é
+    // o MESMO objeto que vive em `mapData.portas` (só filtrado/copiado
+    // rasamente por Mapping.filterByLayerVisibility/filterByPiso, nunca
+    // clonado fundo), isso anexava um `THREE.Mesh`/`THREE.Group` de verdade
+    // (com referências circulares e contexto WebGL) na entidade real do
+    // mapa — na hora de salvar o mapa no IndexedDB (`DB.saveMap`, ex.: ao
+    // excluir qualquer item, que dispara um save), o `structuredClone`
+    // usado por baixo dos panos pelo IndexedDB falhava
+    // (`DataCloneError`/"Falha ao salvar"), porque objetos do three.js não
+    // são clonáveis dessa forma. Mesmo padrão já usado em outro lugar deste
+    // arquivo pra malhas ligadas a uma entidade sem contaminar os dados
+    // persistidos (ver `_dynamicLights`, indexado por
+    // `luz.userData.ownerObjId` em vez de guardado na entidade) — aqui
+    // usamos um Map em vez de array porque o acesso é sempre por id
+    // específico (uma porta de cada vez), não uma varredura completa.
+    // Recriado do zero a cada setScene, igual aos outros caches acima.
+    this._doorRuntime = new Map();
     // [11/09/2026] NOVO — item 1 do pedido "parte do cone aparece na frente
     // da câmera" em "Ver através desta câmera": índice camId -> [malhas
     // caixa+cone] daquela câmera, repovoado do zero a cada setScene (mesmo
@@ -2798,6 +3034,33 @@ class Engine3D {
     // acaba entre o near plane e o resto da cena, aparecendo como uma forma
     // indevida "na frente" de tudo.
     this._cameraMeshesById = {};
+    // [13/09/2026] NOVO — índice camId -> refs de malhas/luz do modelo "PS1"
+    // de câmera (ver bloco "câmeras" logo abaixo e `_updateCamerasLive`,
+    // chamado por view3d.js `_updateScriptLifecycle` a cada quadro). Só
+    // câmeras com `cam.modeloVisual==='ps1'` entram aqui — o modelo PADRÃO
+    // (caixa+cone, sem mudança nenhuma nesta rodada) não usa este índice.
+    // Repovoado do zero a cada setScene, mesmo padrão de `_cameraMeshesById`.
+    this._camPs1RefsById = {};
+    // [correção 13/09/2026] índice objId -> `THREE.Group` do carro (ver
+    // `_buildCarroMesh` mais abaixo) — MESMO problema/MESMA correção da
+    // porta (ver comentário grande logo acima, sobre `_doorRuntime`): antes
+    // esse Group vivia direto em `obj._carroGroup3D` (a entidade real do
+    // mapa), e travava o salvamento no IndexedDB com `DataCloneError`
+    // assim que o carro era construído em cena (achado pelo usuário: erro
+    // "onRotationChange... could not be cloned", causado pelo Euler de
+    // rotação do próprio Group anexado à entidade). Repovoado do zero a
+    // cada setScene, mesmo padrão de `_camPs1RefsById`.
+    this._carroRefsById = {};
+    // [15/09/2026] NOVO — lista de relógios de parede/mesa montados nesta
+    // cena (ver `_buildRelogioMesh` mais abaixo e `_updateRelogiosParede`,
+    // chamado por view3d.js a cada quadro, MESMO padrão de
+    // `_camPs1RefsById`/`_updateCamerasLive` acima): cada entrada guarda os
+    // 3 meshes-filho dos ponteiros (hora/minuto/segundo) pra girar a
+    // `rotation.z` deles conforme `window.RelogioMundo.getHoraAtual()`,
+    // sem precisar varrer `_group.children` procurando por tipo a cada
+    // quadro. Repovoada do zero a cada `setScene`, mesmo motivo de sempre
+    // (trocar de andar/reconstruir a cena descarta as malhas antigas).
+    this._relogiosParede = [];
     // [14/09/2026] NOVO — `this._forcedHiddenMeshes` (ver
     // `setCameraMeshVisible`/`setFotoMeshVisible`/`_updateDistanceCulling`)
     // guarda REFERÊNCIAS às malhas antigas — sem limpar aqui, um `setScene`
@@ -2877,7 +3140,7 @@ class Engine3D {
     if (this._config.modoLuminarias3D === 'leve') {
       (mapData.objects || []).forEach((o) => {
         if (o.tipo !== 'luminaria') return;
-        this._luzesLeves.push({ x: o.x, y: (o.piso || 0) * 2.8 + (o.elevacao || 0), z: o.y });
+        this._luzesLeves.push({ x: o.x, y: (o.piso || 0) * (mapData.alturaPiso || 2.8) + (o.elevacao || 0), z: o.y });
       });
     }
 
@@ -3193,7 +3456,7 @@ class Engine3D {
       // parede empilha na altura do seu próprio piso (mesmo `piso*2.8` que
       // objetos/câmeras já usavam, ver `baseY` em `_buildOneObjectMesh`)
       // — ver comentário grande em Mapping.addWall (js/mapping.js).
-      const pisoY = (w.piso || 0) * 2.8;
+      const pisoY = (w.piso || 0) * (mapData.alturaPiso || 2.8);
       mesh.position.set(cx, pisoY + y0 + segH / 2, cz);
       mesh.rotation.y = wRotY;
       this._group.add(mesh);
@@ -3463,7 +3726,7 @@ class Engine3D {
       // depois). SOLTA (parentWallId null): usa o próprio `el.piso`, igual a
       // qualquer objeto solto no mapa.
       const parentWallPD = el.parentWallId ? (mapData.walls || []).find((w) => w.id === el.parentWallId) : null;
-      const pisoY = ((parentWallPD ? parentWallPD.piso : el.piso) || 0) * 2.8;
+      const pisoY = ((parentWallPD ? parentWallPD.piso : el.piso) || 0) * (mapData.alturaPiso || 2.8);
       const baseY = (kind === 'porta' ? 0 : (el.alturaPeitoril || 0)) + pisoY;
       const tipos = kind === 'porta' ? DOOR_TYPES3D : WINDOW_TYPES3D;
       const corHex = el.colorRGB
@@ -3539,28 +3802,43 @@ class Engine3D {
       // Corrigindo a rotação de base, os dois somem juntos.
       const rotY = objAnguloToRotY(pos.angulo || 0);
       let meshX = pos.x, meshZ = pos.y, meshRotY = rotY;
-      if (kind === 'porta' && el.aberta) {
-        // Porta ABERTA: a folha gira 90° a partir da DOBRADIÇA, igual ao
+      // [14/09/2026] NOVO — `el.anguloAbertura` (0..90°, campo NOVO,
+      // independente do booleano `el.aberta`): quando definido, tem
+      // PRIORIDADE sobre `el.aberta` pra decidir o ângulo de abertura da
+      // folha — permite um Script (js/components.js) animar a porta em
+      // qualquer ângulo intermediário, não só aberta/fechada. `el.aberta`
+      // sozinho (sem `anguloAbertura`) continua se comportando exatamente
+      // como antes (0° fechada / 90° aberta) — ZERO mudança de
+      // comportamento padrão pra porta sem Script.
+      if (kind === 'porta') {
+        const openDeg = (el.anguloAbertura !== undefined && el.anguloAbertura !== null)
+          ? Math.max(0, Math.min(90, el.anguloAbertura))
+          : (el.aberta ? 90 : 0);
+        const phi = openDeg * Math.PI / 180;
+        // Porta ABERTA (phi>0): a folha gira a partir da DOBRADIÇA, igual ao
         // símbolo arquitetônico do 2D (_drawDoorShape — hinge num CANTO do
-        // vão + arco de 90°, `el.abertura`: 'esquerda'|'direita' escolhe
-        // qual ponta é fixa). Antes, a folha só ficava mais FINA quando
-        // aberta, mas continuava centrada e paralela ao vão — bug relatado
-        // pelo usuário: "está sendo renderizada no meio... no 2D as
-        // dobradiças ficam no canto, não no meio". Agora: pivota no canto
-        // certo (mesmo `abertura`) e gira 90°, ficando encostada na parede
-        // (perpendicular ao vão) — sem colidir/tampar a passagem, coerente
-        // com o buraco de verdade já cortado na parede (ver `openings`
-        // acima) e com o pedido "se a porta estiver aberta, deve ser
-        // possível entrar" (colisão em view3d.js também já respeita isso).
+        // vão + arco de até 90°, `el.abertura`: 'esquerda'|'direita' escolhe
+        // qual ponta é fixa). Fórmula generalizada (era só phi=90° fixo,
+        // antes de `anguloAbertura` existir): o centro da folha percorre um
+        // arco de raio `largura/2` em torno da dobradiça — `v0` é o vetor
+        // dobradiça->centro quando FECHADA (ao longo do vão) e `v1` o mesmo
+        // vetor quando TOTALMENTE ABERTA (perpendicular ao vão); como os
+        // dois são perpendiculares entre si e de mesmo módulo, interpolar
+        // com cos(phi)/sin(phi) (em vez de lerp linear de x/z) traça o arco
+        // certo pra qualquer phi intermediário — em phi=0 dá exatamente
+        // `pos.x/pos.y` (fechada, sem essa conta) e em phi=90° dá
+        // exatamente a fórmula antiga (aberta).
         const ang = pos.angulo || 0;
         const alongX = Math.cos(ang), alongY = Math.sin(ang); // ao longo da parede/vão
         const perpX = -Math.sin(ang), perpY = Math.cos(ang); // perpendicular — direção do giro ao abrir
         const hingeSign = el.abertura === 'esquerda' ? -1 : 1;
         const hingeX = pos.x + alongX * hingeSign * (largura / 2);
         const hingeZ = pos.y + alongY * hingeSign * (largura / 2);
-        meshX = hingeX + perpX * (largura / 2);
-        meshZ = hingeZ + perpY * (largura / 2);
-        meshRotY = rotY + Math.PI / 2;
+        const v0x = -hingeSign * alongX * (largura / 2), v0z = -hingeSign * alongY * (largura / 2);
+        const v1x = perpX * (largura / 2), v1z = perpY * (largura / 2);
+        meshX = hingeX + Math.cos(phi) * v0x + Math.sin(phi) * v1x;
+        meshZ = hingeZ + Math.cos(phi) * v0z + Math.sin(phi) * v1z;
+        meshRotY = rotY + phi;
       }
       // `partsLocal` — UMA peça (porta) ou VÁRIAS (moldura+vidro da janela,
       // ver acima): cada uma em coordenadas LOCAIS (lx/lz giram junto com
@@ -3597,13 +3875,116 @@ class Engine3D {
       // funcionam mirando em QUALQUER pedaço, e o modo 'pixelperfect'
       // (_hoverPickPixelPerfect) também acerta a malha de verdade certinho.
       meshesAdded.forEach((m) => { m.userData.pick = pick; this._pickMeshes.push(m); });
+      // [14/09/2026] NOVO — guarda a malha da folha + os dados pra
+      // recalcular o arco de abertura (mesmo `pos`/`largura`/`altura`/
+      // `baseY`/`rotY` usados acima) em `el._doorLeafMesh`/
+      // `el._doorPivotInfo` — só pra porta (1 peça única, `meshesAdded[0]`).
+      // Usado por `_updateDoorAnimations` (chamado a cada quadro por
+      // `view3d.js` `_updateScriptLifecycle`) pra animar `el.anguloAbertura`
+      // suavemente SEM precisar reconstruir a cena inteira a cada mudança —
+      // ver `Components`/exemplo de Script "Porta Automática".
+      if (kind === 'porta') {
+        // [correção 13/09/2026] guardado em `this._doorRuntime` (Map por
+        // id), NÃO em `el` — ver comentário grande em `setScene` sobre por
+        // que anexar um THREE.Mesh direto na entidade persistida quebrava
+        // o salvamento no IndexedDB.
+        const rt = { leafMesh: meshesAdded[0] || null, pivotInfo: { pos, largura, altura, baseY, rotY }, manetaMesh: null };
+        this._doorRuntime.set(el.id, rt);
+        // [13/09/2026] NOVO — variante "porta com maçaneta" (pedido do
+        // usuário: "faça uma porta com maçaneta e deve ter um script para
+        // fazer a animação de movimento da maçaneta quando se dá dois
+        // cliques..."). `el.comManeneta:true` é um campo NOVO e opcional —
+        // sem ele, a porta continua exatamente como sempre (placa lisa sem
+        // maçaneta), ZERO mudança de comportamento padrão.
+        //
+        // Construída como um GRUPO (cilindro fino "espelho"/rosca + alavanca
+        // em L) e adicionada como FILHO de `el._doorLeafMesh` (`mesh.add`,
+        // não `this._group.add`) — assim ela HERDA automaticamente toda
+        // posição/rotação que `_updateDoorAnimations` já aplica na folha a
+        // cada quadro (abrir/fechar), sem precisar recalcular nada aqui: o
+        // grupo da maçaneta só faz sua PRÓPRIA rotação extra (eixo local Z,
+        // perpendicular à face da porta) em cima disso, cuidado por
+        // `_updateDoorAnimations` (ver mais abaixo, junto da animação da
+        // folha) quando `anguloAbertura` muda de alvo.
+        //
+        // Posição local (relativa ao CENTRO da folha, já que a geometria da
+        // porta é uma BoxGeometry centrada em 0,0,0): lado OPOSTO à
+        // dobradiça (`hingeSign` já calculado acima pro arco de abertura),
+        // altura ~1m absoluto (convertido pra offset local subtraindo
+        // `altura/2`, já que o eixo Y local da folha tem origem no centro
+        // dela), levemente à frente da face (metade da espessura da folha +
+        // uma folga pequena) — posição típica de maçaneta real.
+        const doorMesh = meshesAdded[0];
+        if (el.comManeneta && doorMesh) {
+          // [correção 13/09/2026] `hingeSign` foi calculado num bloco
+          // `if (kind === 'porta')` ANTERIOR (linha ~3730), com escopo de
+          // `const` só daquele bloco — reusá-lo aqui (bloco `if` separado)
+          // dava `ReferenceError: hingeSign is not defined` e quebrava o
+          // motor 3D inteiro. Mesma fórmula de lá, recalculada aqui.
+          const hingeSign = el.abertura === 'esquerda' ? -1 : 1;
+          const corManeta = el.colorManeta
+            ? colorFromHex(el.colorManeta, 0xc9c9c9)
+            : 0xc9c9c9; // metálico padrão (dourado: passar `el.colorManeta = 0xd4af37`)
+          const matManeta = wireframe
+            ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+            : new THREE.MeshLambertMaterial({ color: corManeta });
+          // [15/09/2026 UTC] ALTERADO — pedido verbatim: "O modelo 3D da
+          // porta deve ter a maçaneta voltada para o lado certo." Antes só
+          // havia UM grupo de maçaneta, montado inteiro no lado +Z local da
+          // folha — uma porta de verdade tem maçaneta/puxador nas DUAS
+          // faces (cada lado do ambiente que a porta separa precisa abrir
+          // pelo seu próprio lado); com só uma face montada, olhando a
+          // porta do lado sem maçaneta ela aparecia "sem nada"/errada — o
+          // sintoma batido de "voltada pro lado errado". CORRIGIDO: a
+          // montagem da maçaneta virou uma função local (`montarManeta`),
+          // chamada 2x — uma pro lado +Z, outra pro lado -Z (espelhada em Z
+          // e também em X, já que uma maçaneta vista pelo lado de trás é a
+          // imagem espelhada da vista pela frente) — cada face agora tem seu
+          // próprio grupo, sempre do lado OPOSTO à dobradiça (`hingeSign`,
+          // mesma lógica de antes, inalterada) em X. `rt.manetaMesh` vira um
+          // array com os 2 grupos (`_updateDoorAnimations`, mais abaixo, só
+          // precisa girar TODOS eles do mesmo jeito ao animar).
+          const montarManeta = (ladoZ) => {
+            const manetaGrupo = new THREE.Group();
+            // Rosca/espelho: cilindro curto, eixo alinhado ao Z local
+            // (protunde pra fora da face da porta) — `CylinderGeometry`
+            // nasce com eixo Y, por isso o `rotation.x = π/2` (deita o
+            // cilindro pro eixo Z).
+            const rosca = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.04, 12), matManeta);
+            rosca.rotation.x = Math.PI / 2;
+            rosca.position.set(0, 0, ladoZ * (espMesh / 2 + 0.02));
+            manetaGrupo.add(rosca);
+            // Alavanca em L: barra fina saindo da rosca — estende no sentido
+            // da dobradiça (`-hingeSign` em X), formato "L" simples (2
+            // caixas: a haste que sai da rosca + a ponta que dobra, ambas
+            // filhas do MESMO grupo, então giram juntas na animação de
+            // "girar a maçaneta"). `ladoZ` espelha a profundidade (Z) pra
+            // cada face olhar pro lado certo.
+            const haste = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.02, 0.02), matManeta);
+            haste.position.set(-hingeSign * 0.05, 0, ladoZ * (espMesh / 2 + 0.045));
+            manetaGrupo.add(haste);
+            const ponta = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.03), matManeta);
+            ponta.position.set(-hingeSign * 0.095, 0, ladoZ * (espMesh / 2 + 0.06));
+            manetaGrupo.add(ponta);
+            // Posição do GRUPO inteiro: lado oposto à dobradiça, ~1m de
+            // altura absoluta (offset local = altura alvo - metade da
+            // altura da folha, já que a folha é centrada em seu próprio
+            // meio) — mesma fórmula de X/Y de antes, só Z passa a depender
+            // de `ladoZ`.
+            manetaGrupo.position.set(-hingeSign * (largura / 2 - 0.06), 1.0 - altura / 2, 0);
+            doorMesh.add(manetaGrupo);
+            return manetaGrupo;
+          };
+          rt.manetaMesh = [montarManeta(1), montarManeta(-1)];
+        }
+      }
     };
     (mapData.portas || []).forEach((d) => buildDoorOrWindowMesh(d, 'porta'));
     (mapData.janelas || []).forEach((j) => buildDoorOrWindowMesh(j, 'janela'));
 
     // --- marcadores dos itens (pirâmides — cone de 4 lados = base quadrada) ---
     (mapData.itens || []).forEach((it) => {
-      const baseY = (it.piso || 0) * 2.8;
+      const baseY = (it.piso || 0) * (mapData.alturaPiso || 2.8);
       const r = 0.26, h = 0.6;
       const geo = new THREE.ConeGeometry(r * Math.SQRT2, h, 4);
       let mat;
@@ -3650,7 +4031,7 @@ class Engine3D {
     // vez de depender de um pai com transformação local. ---
     const ALTURA_CAMERA = 1.6;
     (mapData.cameras || []).forEach((cam) => {
-      const baseY = (cam.piso || 0) * 2.8;
+      const baseY = (cam.piso || 0) * (mapData.alturaPiso || 2.8);
       // [11/09/2026] CORRIGIDO — pedido verbatim, com repro exato: "crie um
       // câmera, então o desenho 2D dela tem uma seta que aponta para
       // norte. Depois, vou para o 'Ver em 3D' e a câmera (modelo 3D) e
@@ -3665,6 +4046,93 @@ class Engine3D {
       // "assistir"/"ver através") precisam apontar pro MESMO lado.
       const dirX = -Math.cos(cam.angulo || 0), dirZ = -Math.sin(cam.angulo || 0);
       const rotY = Math.atan2(dirX, dirZ); // mesma convenção das paredes (atan2(dx,dz))
+
+      // [13/09/2026] NOVO — modelo "PS1" de câmera de vigilância (pedido
+      // verbatim: "novo modelo de câmera, assim como no jogo '007 the world
+      // is not enough' para Play Station 1 [...] uma cúpula/base fixa +
+      // uma cabeça/lente que gira horizontalmente num arco limitado, com uma
+      // lucezinha vermelha piscando quando ativa"). Ativado por câmera via
+      // `cam.modeloVisual==='ps1'` (campo NOVO, opcional — ausente/qualquer
+      // outro valor mantém o modelo PADRÃO caixa+cone abaixo, ZERO mudança
+      // pras câmeras já existentes de mapas antigos). HONESTIDADE DE ESCOPO:
+      // isto é uma VARIANTE VISUAL do mesmo tipo "câmera" já existente
+      // (`map.cameras`, dispatch fixo pela chave 'camera' em
+      // js/objectassets.js) — não um tipo de catálogo novo/separado. O
+      // dispatch de clique de TODA câmera é uma chave fixa hoje
+      // (`dispatchClick3D('camera', ...)`), então criar um 2º TIPO de
+      // catálogo de verdade exigiria mudar esse dispatch pra ler um campo
+      // por-câmera em vários lugares do motor — risco maior de regressão
+      // sem poder testar ao vivo nesta rodada. Um campo de dado
+      // (`modeloVisual`) só trocando a GEOMETRIA é a via mais segura pro
+      // pedido ("novo modelo" = nova aparência) sem tocar no sistema de
+      // clique/card 3D já testado em produção (continua sendo o MESMO
+      // `_showCameraCard3D`, agora com botões novos — ver view3d.js).
+      //
+      // GEOMETRIA (3-4 formas THREE básicas, nenhuma customizada):
+      // - "base": CylinderGeometry curta, fixa (não gira) — o suporte de
+      //   parede/teto.
+      // - "cúpula": esfera achatada (scale.y reduzido) sobre a base, cor
+      //   escura semi-opaca — a "bolha" translúcida clássica dessas câmeras.
+      // - "cabeça/lente" (`lensHead`, um Group): cilindro fino saliente, que
+      //   é o que GIRA (yaw) no vai-e-volta — ver `cam.anguloLente` abaixo e
+      //   `Engine3D._updateCamerasLive`, chamado todo quadro por view3d.js.
+      // - LED vermelho: esferinha pequena na cúpula + PointLight de
+      //   intensidade baixíssima, ambos piscando (também em
+      //   `_updateCamerasLive`) enquanto a câmera está "ativa".
+      //
+      // ÂNGULOS — dois campos DISTINTOS de propósito (evita reaproveitar
+      // `cam.angulo` pra duas coisas ao mesmo tempo, o que quebraria o
+      // modelo PADRÃO que já usa `cam.angulo` como o apontamento inteiro da
+      // câmera): `cam.angulo` continua sendo a orientação FIXA de MONTAGEM
+      // (pra onde a base/cúpula ficam viradas, escolhida ao criar a câmera,
+      // igual sempre foi) — `cam.anguloLente` (NOVO, radianos, padrão 0) é o
+      // desvio ADICIONAL da cabeça/lente em relação a essa orientação de
+      // montagem, tipicamente escrito por um Script (ver assets/modelos/
+      // _exemplo-script-camera-vigilancia.txt) fazendo o vai-e-volta entre
+      // um mínimo e um máximo configuráveis.
+      if (cam.modeloVisual === 'ps1') {
+        const matCorpo = wireframe
+          ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+          : new THREE.MeshLambertMaterial({ color: 0x50565f }); // cinza-metálico — "equipamento", não "objeto de cena"
+        const matCupula = wireframe
+          ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+          : new THREE.MeshPhongMaterial({ color: 0x1c2430, transparent: true, opacity: 0.55, shininess: 90 }); // cúpula escura semi-translúcida
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.05, 12), matCorpo);
+        base.position.set(cam.x, baseY + ALTURA_CAMERA + 0.05, cam.y);
+        base.rotation.y = rotY; // só estética (cilindro é simétrico no eixo Y) — mantém consistência com a direção de montagem
+        this._group.add(base);
+        const dome = new THREE.Mesh(new THREE.SphereGeometry(0.085, 14, 10), matCupula);
+        dome.scale.set(1, 0.62, 1); // "achatada" — cúpula, não bola inteira
+        dome.position.set(cam.x, baseY + ALTURA_CAMERA - 0.02, cam.y);
+        this._group.add(dome);
+        // Cabeça/lente: Group próprio pra girar (yaw) sem mexer em base/cúpula.
+        const lensHead = new THREE.Group();
+        lensHead.position.set(cam.x, baseY + ALTURA_CAMERA - 0.015, cam.y);
+        lensHead.rotation.y = rotY; // ponto de partida = mesma orientação de montagem (offset 0)
+        const lensMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.14, 12), matCorpo);
+        lensMesh.rotation.x = Math.PI / 2; // cilindro nasce "de pé" (eixo Y) — deitado (eixo Z local) pra apontar pra frente
+        lensMesh.position.set(0, 0, 0.07); // saliente à frente do centro da cúpula
+        lensHead.add(lensMesh);
+        // LED vermelho — esferinha emissiva + luz pontual bem fraca (não
+        // deve iluminar o cômodo, só "ler" como uma lucezinha de status).
+        const ledMat = new THREE.MeshBasicMaterial({ color: 0xff2020 });
+        const ledMesh = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), ledMat);
+        ledMesh.position.set(0.05, 0.03, 0.1);
+        lensHead.add(ledMesh);
+        const ledLight = new THREE.PointLight(0xff2222, 0, 0.6); // intensidade 0 = começa apagada; `_updateCamerasLive` pisca
+        ledLight.position.copy(ledMesh.position);
+        lensHead.add(ledLight);
+        this._group.add(lensHead);
+        const camPosPs1 = { x: cam.x, y: baseY + ALTURA_CAMERA, z: cam.y };
+        const camPickPs1 = { id: cam.id, type: 'camera', pos: camPosPs1, center: camPosPs1, radius: 0.3, ref: cam, obb: { half: { x: 0.11, y: 0.1, z: 0.11 }, rotY, shape: 'box' } };
+        this.pickables.push(camPickPs1);
+        base.userData.pick = camPickPs1; dome.userData.pick = camPickPs1; lensMesh.userData.pick = camPickPs1;
+        this._pickMeshes.push(base, dome, lensMesh);
+        this._cameraMeshesById[cam.id] = [base, dome, lensHead]; // visibilidade (setCameraMeshVisible) cobre o grupo inteiro
+        this._camPs1RefsById[cam.id] = { lensHead, ledMesh, ledMat, ledLight, montagemRotY: rotY };
+        return; // NÃO monta o modelo padrão (caixa+cone) pra esta câmera
+      }
+
       const matCam = wireframe
         ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
         : new THREE.MeshLambertMaterial({ color: 0x4fd1ff });
@@ -3757,7 +4225,7 @@ class Engine3D {
     // `cameraForward` (em vez de reescrever a mesma conta) garante que os
     // dois lugares do código nunca divirjam na convenção de ângulo.
     (mapData.fotos || []).forEach((foto) => {
-      const baseY = (foto.piso || 0) * 2.8 + (foto.altura || 0);
+      const baseY = (foto.piso || 0) * (mapData.alturaPiso || 2.8) + (foto.altura || 0);
       // [22/09/2026] CORRIGIDO — era `cameraForward({yaw:foto.dirAngulo,...})`
       // direto, uma inversão de 180° no eixo Z relativo ao mapa 2D (ver
       // comentário grande de `objectPointerForward`, topo do arquivo).
@@ -4043,8 +4511,511 @@ class Engine3D {
     // fica desatualizado se um novo tipo de malha for adicionado depois.
     if (wireframe) this._addWireframeOcclusion();
     if (this.mode === 'hibrido') this._setupHybridMeshes();
+    // Ver comentário grande em `this._instancedPools` (constructor) — 1x por
+    // cena inteira, depois que TODAS as malhas (`_pickMeshes`) já existem.
+    this._rebuildInstancedPools();
     this._setupCullMeshes();
     this._setupWallOcclusionMeshes();
+    // [13/09/2026 UTC] NOVO — ver comentário grande de _buildOcclusionSectors
+    // (mais abaixo neste arquivo) pro pedido/motivo completo. Precisa rodar
+    // DEPOIS de `this._floorInfo` já montado (usado como área da grade) —
+    // ponto já garantido aqui, `_floorInfo` é montado bem antes deste bloco
+    // de pós-passos, dentro do mesmo setScene.
+    this._buildOcclusionSectors(mapData);
+  }
+
+  /** Monta (ou remonta do zero — chamado a cada `setScene`) os
+   *  `THREE.InstancedMesh` de objetos genéricos de catálogo, um por `tipo`
+   *  com pelo menos `LIMIAR` objetos marcados `userData._instancerEligible`
+   *  (ver `_buildOneObjectMesh`) — abaixo do limiar o custo de criar/manter
+   *  um InstancedMesh não compensa (poucos objetos daquele tipo continuam
+   *  desenhados INDIVIDUALMENTE, do jeito de sempre, com `visible=true`
+   *  normal — nada muda pra eles). As malhas antigas (do `setScene` anterior)
+   *  já foram descartadas por `_disposeGroupContents` no início deste método
+   *  — um InstancedMesh é só mais um filho de `this._group` (tem
+   *  `.geometry`/`.material` como qualquer `THREE.Mesh` comum), então aquele
+   *  descarte genérico já cobre ele de graça, sem precisar de nenhum código
+   *  extra de limpeza aqui. */
+  _rebuildInstancedPools() {
+    const THREE = this.THREE;
+    this._instancedPools = {};
+    if (!this._zeroInstMatrix) this._zeroInstMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+    // [13/09/2026 — RODADA "frustum culling"] MUDADO — pedido verbatim:
+    // "mesmo o prédio estando com uma única face do lado de fora, o fps caiu
+    // bastante, não deveria ser assim [...] implemente [frustum culling]."
+    // CAUSA RAIZ CONFIRMADA (lendo `lib/three.global.js`, não só suposição):
+    // o comentário antigo deste método (removido agora) dizia que a
+    // bounding sphere automática de um `InstancedMesh` era calculada "só a
+    // partir da geometria de UMA instância, na origem" — isso está ERRADO
+    // pra esta versão do three.js: `InstancedMesh.computeBoundingSphere()`
+    // (ver classe `InstancedMesh`, `lib/three.global.js`) de fato percorre
+    // TODAS as `count` instâncias e faz a UNIÃO das esferas de cada uma
+    // (`this.boundingSphere.union(...)` num laço `for i < count`) — o
+    // cálculo em si é correto. O bug de verdade é outro: antes desta
+    // mudança, havia 1 ÚNICO `InstancedMesh` por TIPO pro mapa INTEIRO (ex:
+    // um só pool de "cadeira" pras 2000 cadeiras dos 40 andares do prédio)
+    // — a união de todas as instâncias desse pool cobre o PRÉDIO INTEIRO, e
+    // `Frustum.intersectsObject` (ver `lib/three.global.js`, classe
+    // `Frustum`) só descarta o `InstancedMesh` quando a câmera não vê NADA
+    // daquela esfera gigante — ou seja, o pool inteiro (milhares de
+    // instâncias, TODAS as cadeiras do prédio) só é cortado quando a câmera
+    // não vê o prédio inteiro; com a câmera dentro/perto do prédio olhando
+    // só pra 1 andar, a esfera do pool ainda intersecta o frustum (o prédio
+    // continua "no campo de visão" de longe/pelas laterais) e o three.js
+    // manda desenhar as instâncias TODAS mesmo — daí o "1 face do lado de
+    // fora derruba o FPS", exatamente como relatado. CORRIGIDO: os pools
+    // agora são segmentados por TIPO + PISO (`obj.piso`, o mesmo campo já
+    // usado pra calcular a altura Y do objeto — ver `baseY` em
+    // `_buildOneObjectMesh`) — um pool de "cadeira" por ANDAR, não um só pro
+    // prédio inteiro. Cada pool passa a ter uma bounding sphere do TAMANHO
+    // DE UM ANDAR (bem menor que o prédio todo), então `frustumCulled` pode
+    // voltar a `true` (ligado, o padrão do three.js) com segurança: quando a
+    // câmera olha só pra 1 andar, o three.js agora consegue de fato pular o
+    // draw call inteiro dos pools dos OUTROS 39 andares. Prédios sem
+    // `obj.piso` (mapas de andar único, valor `undefined`/0 pra todo mundo)
+    // caem todos no mesmo pool de sempre — nenhuma regressão nesse caso,
+    // já que aí só existe "1 andar" mesmo.
+    const grupos = new Map(); // poolKey ("tipo::piso") -> [mesh,...]
+    this._pickMeshes.forEach((m) => {
+      if (!m.userData._instancerEligible) return;
+      const tipo = m.userData.pick?.ref?.tipo;
+      if (!tipo) return;
+      const piso = m.userData.pick?.ref?.piso || 0;
+      const poolKey = tipo + '::' + piso;
+      if (!grupos.has(poolKey)) grupos.set(poolKey, { tipo, piso, meshes: [] });
+      grupos.get(poolKey).meshes.push(m);
+    });
+    const LIMIAR = 4;
+    grupos.forEach(({ tipo, piso, meshes }, poolKey) => {
+      if (meshes.length < LIMIAR) return; // continuam individuais — ver comentário do método
+      const geo = meshes[0].geometry; // mesma forma/dimensões pra todo objeto deste tipo (ver checagem em _buildOneObjectMesh)
+      // Material base BRANCO neutro — a cor de verdade (incluindo o matiz de
+      // `_tintForLight`, já aplicado ao material de CADA malha individual
+      // antes de chegar aqui) vem por instância via `setColorAt` abaixo
+      // (multiplica a cor da instância pela cor do material base; branco =
+      // não altera nada, deixa a cor da instância passar intacta).
+      const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+      const inst = new THREE.InstancedMesh(geo, mat, meshes.length);
+      meshes.forEach((m, i) => {
+        m.updateMatrix();
+        inst.setMatrixAt(i, m.matrix);
+        inst.setColorAt(i, m.material.color || new THREE.Color(0xffffff));
+        // `.matrix` guardado AQUI (não reaproveitado de `m.matrix` ao vivo
+        // depois) porque `_instanceDemote`/`_syncInstanceVisibility` precisam
+        // restaurar a transformação de verdade da instância mesmo depois de
+        // ela ter sido zerada (Raio X/culling) — `m.matrix` nunca muda depois
+        // de construído (o objeto individual não se move sozinho), então uma
+        // cópia congelada aqui é exatamente o mesmo valor pra sempre.
+        m.userData._inst = { tipo, piso, poolKey, index: i, matrix: m.matrix.clone() };
+        m.visible = false; // a instância é quem desenha agora — ver comentário grande no construtor
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      // Bounding sphere calculada AQUI, com as matrizes REAIS (nenhuma ainda
+      // zerada por Raio X/culling de distância) — reflete a extensão
+      // espacial de verdade deste pool (1 andar, não o prédio inteiro, ver
+      // comentário grande acima) e nunca precisa ser recalculada depois: um
+      // objeto individual nunca se move sozinho, então a região que este
+      // pool ocupa é fixa pra sempre a partir daqui. `frustumCulled = true`
+      // (padrão do three.js, deixado explícito aqui só pra documentar a
+      // decisão) — agora seguro porque o pool é pequeno o bastante pra o
+      // corte por frustum ser útil de verdade.
+      inst.computeBoundingSphere();
+      inst.frustumCulled = true;
+      this._group.add(inst);
+      this._instancedPools[poolKey] = { mesh: inst, count: meshes.length, tipo, piso };
+    });
+  }
+
+  /** Mantém a instância (`mesh.userData._inst`) de UMA malha individual em
+   *  sincronia com `mesh.visible` — chamado sempre que algo de FORA da
+   *  construção da cena muda essa visibilidade "ao vivo" depois de pronta
+   *  (hoje só `_updateDistanceCulling`, todo quadro). Malhas sem instância
+   *  (`_inst` ausente — não elegíveis, ou elegíveis mas abaixo do `LIMIAR`)
+   *  não fazem nada aqui, exatamente como antes desta refatoração. Ignorado
+   *  de propósito enquanto a malha está "promovida" pro Raio X pontual
+   *  (`_xrayPromoted`, ver `_instancePromote`) — nesse momento é
+   *  `setXRayTarget` quem manda na instância dela (zerada), não o culling. */
+  _syncInstanceVisibility(mesh) {
+    const inst = mesh.userData._inst;
+    if (!inst || mesh.userData._xrayPromoted) return;
+    const pool = this._instancedPools[inst.poolKey];
+    if (!pool) return;
+    pool.mesh.setMatrixAt(inst.index, mesh.visible ? inst.matrix : this._zeroInstMatrix);
+    pool.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /** "Promove" uma malha individual instanciada pro Raio X (pontual ou
+   *  global): torna ela visível de verdade (quem chama já troca o material
+   *  dela pro material transparente/wireframe de Raio X, ANTES ou DEPOIS de
+   *  chamar isto, tanto faz) e zera a instância dela no pool, pra nunca
+   *  desenhar o objeto DUAS vezes (a malha individual sob Raio X + a
+   *  instância sólida normal, sobrepostas). Sem `_inst` (objeto não
+   *  instanciado) não faz nada — o resto de `setXRayTarget`/`setGlobalXRay`
+   *  já funciona sozinho nesse caso, exatamente como antes desta
+   *  refatoração. */
+  _instancePromote(mesh) {
+    const inst = mesh.userData._inst;
+    if (!inst) return;
+    mesh.userData._xrayPromoted = true;
+    mesh.visible = true;
+    const pool = this._instancedPools[inst.poolKey];
+    if (pool) { pool.mesh.setMatrixAt(inst.index, this._zeroInstMatrix); pool.mesh.instanceMatrix.needsUpdate = true; }
+  }
+
+  /** Desfaz `_instancePromote` — devolve a malha individual pro estado
+   *  invisível de sempre e restaura a instância dela (transformação
+   *  ORIGINAL, congelada em `_inst.matrix`) — não espera pelo próximo
+   *  `_updateDistanceCulling` pra isso (evitaria o objeto "sumir" por um
+   *  quadro se ele já estivesse fora do alcance de renderização; o próximo
+   *  culling corrige de novo se for o caso, sem nenhum efeito visível
+   *  perceptível — mesmo espírito de pequenas defasagens já aceitas em
+   *  outros pontos deste arquivo, ver `_tintForLight`). */
+  _instanceDemote(mesh) {
+    const inst = mesh.userData._inst;
+    if (!inst) return;
+    delete mesh.userData._xrayPromoted;
+    mesh.visible = false;
+    const pool = this._instancedPools[inst.poolKey];
+    if (pool) { pool.mesh.setMatrixAt(inst.index, inst.matrix); pool.mesh.instanceMatrix.needsUpdate = true; }
+  }
+
+  /** [13/09/2026] NOVO — pedido do usuário: "chão lajotado, teto modular
+   *  (escritórios), teto de gesso com rodelas de acesso". Gera (ou devolve
+   *  do cache, ver `this._texturaProceduralCache` no construtor) uma
+   *  `THREE.CanvasTexture` PROCEDURAL desenhada num `<canvas>` 2D pequeno —
+   *  nenhuma imagem/arquivo externo é carregado, só formas geométricas
+   *  simples (retângulos de fundo + linhas de "rejunte"), técnica idêntica
+   *  em espírito à do disco do relógio/mostrador do robô (outros usos de
+   *  canvas 2D neste arquivo).
+   *  `kind`: 'lajota' (chão lajotado — quadrados com rejunte escuro bem
+   *  visível, tom cinza-claro/bege) ou 'modular' (teto modular de
+   *  escritório — quadrados maiores, tom branco-gelo, linhas MAIS SUTIS que
+   *  a lajota, imitando o forro de placas). `larguraM`/`profundidadeM`: o
+   *  tamanho REAL do objeto (metros) — usado só pra calcular
+   *  `texture.repeat` (quantas vezes o padrão de 256×256px se repete ao
+   *  longo do objeto), de forma que o tamanho VISUAL de cada quadrado da
+   *  textura fique em ESCALA REAL (lajota de 0.6m, placa de forro de 0.6m),
+   *  não esticado/comprimido conforme o objeto é redimensionado.
+   *  Cache por chave `kind+larguraM+profundidadeM` (arredondados) — o
+   *  `<canvas>` em si é sempre o MESMO padrão 256×256 pra um dado `kind`
+   *  (só o `repeat` muda com o tamanho), então na prática gera 1 canvas por
+   *  `kind` e reaproveita entre todos os objetos do mesmo tipo/acabamento,
+   *  só clonando a textura (`texture.clone()`) quando o repeat muda — clonar
+   *  é bem mais barato que redesenhar o canvas do zero. */
+  _getProceduralFloorTexture(kind, larguraM, profundidadeM) {
+    const THREE = this.THREE;
+    const TAMANHO_LAJOTA_M = kind === 'lajota' ? 0.6 : 0.6; // 60cm — mesma escala pedida pro chão lajotado e pro forro modular
+    const cacheKeyCanvas = 'canvas::' + kind;
+    let base = this._texturaProceduralCache[cacheKeyCanvas];
+    if (!base) {
+      const CANVAS_PX = 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = CANVAS_PX; canvas.height = CANVAS_PX;
+      const ctx = canvas.getContext('2d');
+      if (kind === 'lajota') {
+        // Chão lajotado: fundo bege/cinza-claro, linhas de rejunte
+        // cinza-escuro bem marcadas (contraste alto — pedido: "linhas de
+        // rejunte cinza-escuro"), um único quadrado de lajota preenchendo
+        // todo o canvas (o "grid" de verdade vem do `repeat`, repetindo
+        // este quadrado várias vezes pela superfície do objeto).
+        ctx.fillStyle = '#d8d2c4';
+        ctx.fillRect(0, 0, CANVAS_PX, CANVAS_PX);
+        // Leve variação de tom (2 tons de bege alternados, tipo lajotas
+        // "batidas" de fábricas diferentes) — puramente estético, opcional.
+        ctx.fillStyle = '#dcd6c8';
+        ctx.fillRect(0, 0, CANVAS_PX / 2, CANVAS_PX / 2);
+        ctx.fillRect(CANVAS_PX / 2, CANVAS_PX / 2, CANVAS_PX / 2, CANVAS_PX / 2);
+        ctx.strokeStyle = '#5a5448';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(3, 3, CANVAS_PX - 6, CANVAS_PX - 6);
+      } else {
+        // Teto modular: fundo branco-gelo, linhas MAIS SUTIS (cinza claro,
+        // traço fino) que a lajota — imita as juntas discretas de um forro
+        // de placas de escritório, sem "gritar" tanto quanto o rejunte do
+        // chão.
+        ctx.fillStyle = '#f4f5f7';
+        ctx.fillRect(0, 0, CANVAS_PX, CANVAS_PX);
+        ctx.strokeStyle = '#d3d6db';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(1.5, 1.5, CANVAS_PX - 3, CANVAS_PX - 3);
+      }
+      base = new THREE.CanvasTexture(canvas);
+      base.wrapS = base.wrapT = THREE.RepeatWrapping;
+      this._texturaProceduralCache[cacheKeyCanvas] = base;
+    }
+    // `repeat` depende do tamanho REAL do objeto (largura/profundidade,
+    // metros) — cacheado À PARTE por essa combinação, clonando a textura
+    // base (mesmo canvas, `image` é compartilhada — clone() do Three.js não
+    // duplica os pixels, só o objeto-textura com seus próprios wrap/repeat/
+    // needsUpdate) pra não escrever um `repeat` por cima do de outro objeto
+    // de tamanho diferente que já esteja usando a mesma textura-base.
+    const rw = Math.max(0.1, larguraM || 10), rd = Math.max(0.1, profundidadeM || 10);
+    const cacheKeyRepeat = kind + '::' + rw.toFixed(2) + 'x' + rd.toFixed(2);
+    let tex = this._texturaProceduralCache[cacheKeyRepeat];
+    if (!tex) {
+      tex = base.clone();
+      tex.needsUpdate = true;
+      tex.repeat.set(rw / TAMANHO_LAJOTA_M, rd / TAMANHO_LAJOTA_M);
+      this._texturaProceduralCache[cacheKeyRepeat] = tex;
+    }
+    return tex;
+  }
+
+  /** [15/09/2026] NOVO — textura procedural do MOSTRADOR do relógio
+   *  (marcações de hora), pedido do usuário: "Também deve ter marcações
+   *  das horas, além dos ponteiros, se for menos custoso em processamento,
+   *  faça uma textura para as horas e imprima os ponteiros por cima."
+   *  MESMO padrão de cache de `_getProceduralFloorTexture` acima (canvas 2D
+   *  desenhado UMA vez, cacheado por chave, nunca redesenhado por objeto/
+   *  quadro) — aqui mais simples ainda: como o disco do mostrador é sempre
+   *  aplicado como UMA textura direta cobrindo o disco inteiro (sem
+   *  `repeat`/mosaico como no piso — um relógio não "ladrilha" o próprio
+   *  mostrador), não existe a etapa de clonar-por-tamanho; a chave de cache
+   *  é só a cor de fundo (`perfil.color`, permite reaproveitar entre
+   *  relógios de skins diferentes sem redesenhar o canvas de novo pra cada
+   *  um).
+   *
+   *  DESENHO — canvas 256×256: fundo pintado com a cor do mostrador
+   *  (mesma `perfil.color` do disco — ver comentário em `_buildRelogioMesh`
+   *  sobre por que o material usa `color: 0xffffff` com essa textura como
+   *  `map`), um círculo fino de moldura, e 12 tracinhos radiais nas
+   *  posições de hora (a cada 30°) — mais GROSSOS/LONGOS nas posições
+   *  12/3/6/9 (múltiplos de 90°) pra dar aquele destaque de "marcador
+   *  cardinal" que a maioria dos relógios de parede tem. Os PONTEIROS
+   *  continuam sendo geometria (caixas finas, `fazPonteiro` acima) — a
+   *  textura cobre só o mostrador de baixo, os ponteiros ficam por CIMA
+   *  dela (meshes-filho separados, ver `_buildRelogioMesh`), exatamente
+   *  como pedido ("imprima os ponteiros por cima"). */
+  _getProceduralMostradorTexture(corFundo) {
+    const THREE = this.THREE;
+    this._texturaProceduralCache = this._texturaProceduralCache || {};
+    const cor = (corFundo === undefined || corFundo === null) ? 0xf2ede0 : corFundo;
+    const cacheKey = 'mostrador::' + cor.toString(16);
+    let tex = this._texturaProceduralCache[cacheKey];
+    if (tex) return tex;
+    const CANVAS_PX = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = CANVAS_PX; canvas.height = CANVAS_PX;
+    const ctx = canvas.getContext('2d');
+    // [16/09/2026 UTC] ALTERADO — pedido verbatim: "faça um arquivo
+    // específico do projeto [...] para gerar a textura 2D do relógio
+    // (colocando a sequência de comandos de canvas para gerá-lo) e carregue
+    // para gerar a mesma imagem." Os comandos de canvas (fundo/moldura/12
+    // marcações de hora) que antes moravam INLINE aqui foram extraídos pra
+    // `assets/js/mostrador-canvas.js` (`window.MostradorCanvas.desenhar`,
+    // carregado via `<script>` no index.html ANTES deste arquivo) — usado
+    // tanto por esta função (textura ao vivo, `<canvas>` de navegador de
+    // verdade) quanto pela ferramenta de geração de `.glb` do relógio
+    // (`ferramentas/gerar_malhas.js`, textura ASSADA em PNG, rodando em
+    // Node) — MESMO código-fonte, garantindo a MESMA imagem nos dois casos.
+    const corHex = '#' + ('000000' + (cor >>> 0).toString(16)).slice(-6);
+    window.MostradorCanvas.desenhar(ctx, CANVAS_PX, corHex);
+    tex = new THREE.CanvasTexture(canvas);
+    // Sem `repeat`/wrap especial — a textura cobre o disco inteiro de uma
+    // vez só (UV padrão do `CylinderGeometry` já mapeia a face circular do
+    // topo/base 1:1 num círculo centralizado no quadrado da textura, que é
+    // exatamente como este canvas foi desenhado).
+    this._texturaProceduralCache[cacheKey] = tex;
+    return tex;
+  }
+
+  /** [13/09/2026] NOVO — "Teto de gesso com rodelas de acesso" (pedido do
+   *  usuário: "teto de gesso com rodelas de acesso (gabinete/chefia)").
+   *  Placa lisa branca (perfil-base, igual ao "Piso"/"Teto modular") +
+   *  vários discos cinza-claro finos (cilindros achatados, 15cm de
+   *  diâmetro × 1cm de espessura) colados na FACE DE BAIXO da placa,
+   *  distribuídos num grid regular espaçado a cada 2 metros — simula as
+   *  tampas circulares de acesso a fiação/dutos comuns nesse tipo de forro
+   *  em salas de gabinete/chefia. Geometria simples (sem textura nenhuma,
+   *  cumpre visualmente já só com a forma) — mesmo padrão dos outros
+   *  builders dedicados deste arquivo (mesa/luminária/poste/escada): recebe
+   *  `perfil` já resolvido (box, w/d/h da placa) e `baseY`, monta a placa +
+   *  os discos como filhos de UM `THREE.Group`, registra esse grupo (não a
+   *  placa sozinha) no pick/`_group`/`_pickMeshes` igual a qualquer objeto
+   *  comum, pra continuar selecionável/arrastável do jeito de sempre. */
+  _buildTetoGessoMesh(obj, perfil, baseY, wireframe, colWireframe) {
+    const THREE = this.THREE;
+    const group = new THREE.Group();
+    const matPlaca = wireframe
+      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+      : new THREE.MeshLambertMaterial({ color: perfil.color });
+    const placaGeo = new THREE.BoxGeometry(perfil.w, perfil.h, perfil.d);
+    const placa = new THREE.Mesh(placaGeo, matPlaca);
+    group.add(placa);
+    // Rodelas de acesso: grid espaçado a cada 2m, começando perto de uma
+    // borda (não centralizado exatamente na borda, pra não cortar metade da
+    // rodela pra fora da placa) — mesma ideia do grid do retículo métrico
+    // (`obj.reticuloMetrico`) logo abaixo neste arquivo, só que fixo em 2m
+    // e sem opção de configurar (pedido não pediu controle nenhum pro
+    // usuário aqui, só o efeito visual).
+    if (!wireframe) {
+      const ESPACAMENTO = 2; // metros
+      const RAIO_RODELA = 0.075; // 15cm de diâmetro
+      const ESPESSURA_RODELA = 0.01; // 1cm
+      const matRodela = new THREE.MeshLambertMaterial({ color: 0xc7cbd1 });
+      const rodelaGeo = new THREE.CylinderGeometry(RAIO_RODELA, RAIO_RODELA, ESPESSURA_RODELA, 16);
+      const hw = perfil.w / 2, hd = perfil.d / 2;
+      const margem = Math.min(ESPACAMENTO / 2, hw, hd);
+      for (let x = -hw + margem; x <= hw - margem + 1e-6; x += ESPACAMENTO) {
+        for (let z = -hd + margem; z <= hd - margem + 1e-6; z += ESPACAMENTO) {
+          const rodela = new THREE.Mesh(rodelaGeo, matRodela);
+          // Face de BAIXO da placa: -perfil.h/2 (centro da placa é y=0 no
+          // espaço local do grupo) menos metade da espessura da rodela,
+          // menos uma folga mínima só pra evitar z-fighting.
+          rodela.position.set(x, -perfil.h / 2 - ESPESSURA_RODELA / 2 - 0.0005, z);
+          group.add(rodela);
+        }
+      }
+    }
+    const centerY = baseY + perfil.y0 + perfil.h / 2;
+    group.position.set(obj.x, centerY, obj.y);
+    group.rotation.y = objAnguloToRotY(obj.angulo);
+    this._group.add(group);
+    const raioPick = Math.max(perfil.w || 0.5, perfil.d || 0.5) * 0.6;
+    const objPos = { x: obj.x, y: centerY, z: obj.y };
+    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: raioPick, ref: obj, obb: { half: { x: perfil.w / 2, y: perfil.h / 2, z: perfil.d / 2 }, rotY: group.rotation.y, shape: 'box', segments: 14 } };
+    this.pickables.push(objPick);
+    group.userData.pick = objPick;
+    this._pickMeshes.push(group);
+    if (Array.isArray(obj.components) && obj.components.some((c) => c.type === 'Script' && c.enabled !== false)) this._tagScriptBase(group, obj, baseY);
+  }
+
+  /** [13/09/2026] NOVO — "carro dirigível" (pedido verbatim: "Faça um
+   *  carro, que é possível entrar nele e sair andando [...] Deve ter
+   *  rodas, vidros e um formato de carro de verdade"). Geometria composta
+   *  com THREE puro, mesmo padrão dos outros builders bespoke deste
+   *  arquivo (mesa/luminária/poste/escada/teto-gesso — TODAS malhas filhas
+   *  de um único `THREE.Group`, registrado inteiro em `pickables`/
+   *  `_pickMeshes` como se fosse UMA peça só, igual `_buildTetoGessoMesh`
+   *  logo acima):
+   *    - Carroceria: 1 caixa larga (base, `perfil.w x perfil.h x perfil.d`
+   *      — perfil vem de `OBJECT3D_PROFILES.carro`, engine3d-profiles.js:
+   *      1.75 x 1.4 x 4.3m por padrão) + 1 caixa mais estreita/baixa por
+   *      cima simulando a cabine/teto (proporção fixa: 70% da largura, 45%
+   *      do comprimento, 45% da altura da base — não configurável por
+   *      instância nesta rodada, mesmo espírito "1 forma plausível, não um
+   *      modelo fiel por tipo" documentado no topo de engine3d-profiles.js).
+   *    - 4 rodas: cilindros pretos nos 4 cantos inferiores da carroceria,
+   *      raio 0.32m / largura(altura do cilindro) 0.22m, EIXO alinhado ao
+   *      comprimento do carro (CylinderGeometry nasce com o eixo em Y —
+   *      girado 90° em Z pra "deitar", ficando com o eixo ao longo de X
+   *      local do carro, que é a LARGURA — mesma convenção w=eixo local X/
+   *      d=eixo local Z de todo objeto 'retangulo' deste arquivo, ver
+   *      `objAnguloToRotY`).
+   *    - "Vidros": planos finos (BoxGeometry bem fina, não PlaneGeometry —
+   *      evita o problema de um Plane ficar invisível vista de trás/de
+   *      lado por causa de backface culling, já que o jogador pode olhar o
+   *      carro de qualquer ângulo) nas 2 laterais + frente + trás da
+   *      cabine, material `MeshLambertMaterial({color:0x88bbdd,
+   *      transparent:true, opacity:0.4})` — pedido verbatim de cor/opacidade.
+   *  Cor da carroceria/cabine: `obj.cor` (mesmo campo hex de sempre,
+   *  retângulo/polígono) se definido, senão `perfil.color` (vermelho
+   *  default do profile, já passado por `_tintForLight` pelo chamador).
+   *  Registrado no pick/`_pickMeshes` (clicável — `carro.model.js` usa
+   *  `onModelClick` pra entrar no carro, ver `view3d.js
+   *  _entrarNoCarro`). LIMITAÇÃO — ver comentário grande em
+   *  `_updateCarrosControlados` (view3d.js) pra tudo que este carro NÃO
+   *  faz ainda (colisão contra paredes, suspensão/inclinação em curva). */
+  _buildCarroMesh(obj, perfil, baseY, wireframe, colWireframe) {
+    const THREE = this.THREE;
+    const group = new THREE.Group();
+    const corCarroceria = obj.cor ? _hexToThreeColor(obj.cor) : perfil.color;
+    const matCarroceria = wireframe
+      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+      : new THREE.MeshLambertMaterial({ color: corCarroceria });
+
+    // Carroceria (base) — apoiada no chão (y local 0 = topo das rodas,
+    // ver `alturaRoda` abaixo definir onde a base do carro fica).
+    const raioRoda = 0.32, larguraRoda = 0.22;
+    const alturaCarroceria = perfil.h; // 1.4m default
+    const yCarroceriaBase = raioRoda * 0.75; // carroceria fica um pouco acima do centro da roda, "encaixada" nela
+    const carroceriaGeo = new THREE.BoxGeometry(perfil.w, alturaCarroceria, perfil.d);
+    const carroceria = new THREE.Mesh(carroceriaGeo, matCarroceria);
+    carroceria.position.set(0, yCarroceriaBase + alturaCarroceria / 2, 0);
+    group.add(carroceria);
+
+    // Cabine/teto — caixa mais estreita/baixa, centralizada e puxada um
+    // pouco pra trás do centro (proporção fixa documentada no comentário
+    // grande acima do método).
+    const cabineW = perfil.w * 0.7, cabineD = perfil.d * 0.45, cabineH = alturaCarroceria * 0.45;
+    const cabineGeo = new THREE.BoxGeometry(cabineW, cabineH, cabineD);
+    const cabine = new THREE.Mesh(cabineGeo, matCarroceria);
+    const yCabineBase = yCarroceriaBase + alturaCarroceria; // apoiada no topo da carroceria
+    cabine.position.set(0, yCabineBase + cabineH / 2, -perfil.d * 0.05); // leve deslocamento pra trás
+    group.add(cabine);
+
+    // 4 rodas — cantos inferiores da carroceria, giradas 90° em Z (eixo do
+    // cilindro passa a apontar ao longo de X local, "deitando" a roda).
+    if (!wireframe) {
+      const matRoda = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+      const rodaGeo = new THREE.CylinderGeometry(raioRoda, raioRoda, larguraRoda, 16);
+      const offsetX = perfil.w / 2 - larguraRoda * 0.15; // roda quase na borda externa da carroceria
+      const offsetZ = perfil.d / 2 - raioRoda * 1.1; // um pouco pra dentro das extremidades dianteira/traseira
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const roda = new THREE.Mesh(rodaGeo, matRoda);
+          roda.rotation.z = Math.PI / 2;
+          roda.position.set(sx * offsetX, raioRoda, sz * offsetZ);
+          group.add(roda);
+        }
+      }
+    }
+
+    // "Vidros" — 4 placas finas (BoxGeometry, não Plane — ver comentário
+    // grande acima do método) nas laterais/frente/trás da cabine.
+    if (!wireframe) {
+      const matVidro = new THREE.MeshLambertMaterial({ color: 0x88bbdd, transparent: true, opacity: 0.4 });
+      const ESPESSURA = 0.02;
+      const yVidro = yCabineBase + cabineH / 2;
+      // Laterais (esquerda/direita) — placa fina ao longo de Z (comprimento
+      // da cabine), quase da largura total da cabine.
+      const vidroLatGeo = new THREE.BoxGeometry(ESPESSURA, cabineH * 0.65, cabineD * 0.9);
+      for (const sx of [-1, 1]) {
+        const vidro = new THREE.Mesh(vidroLatGeo, matVidro);
+        vidro.position.set(sx * (cabineW / 2 - ESPESSURA / 2), yVidro, cabine.position.z);
+        group.add(vidro);
+      }
+      // Frente/trás — placa fina ao longo de X (largura da cabine).
+      const vidroFrenteGeo = new THREE.BoxGeometry(cabineW * 0.85, cabineH * 0.6, ESPESSURA);
+      for (const sz of [-1, 1]) {
+        const vidro = new THREE.Mesh(vidroFrenteGeo, matVidro);
+        vidro.position.set(0, yVidro, cabine.position.z + sz * (cabineD / 2 - ESPESSURA / 2));
+        group.add(vidro);
+      }
+    }
+
+    const centerY = baseY + perfil.y0; // grupo já tem a geometria toda posicionada relativa ao chão (y local 0 = chão)
+    group.position.set(obj.x, centerY, obj.y);
+    group.rotation.y = objAnguloToRotY(obj.angulo);
+    this._group.add(group);
+    const alturaTotal = yCabineBase + cabineH;
+    const raioPick = Math.max(perfil.w, perfil.d) * 0.6;
+    const objPos = { x: obj.x, y: centerY + alturaTotal / 2, z: obj.y };
+    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: raioPick, ref: obj, obb: { half: { x: perfil.w / 2, y: alturaTotal / 2, z: perfil.d / 2 }, rotY: group.rotation.y, shape: 'box', segments: 14 } };
+    this.pickables.push(objPick);
+    group.userData.pick = objPick;
+    this._pickMeshes.push(group);
+    // Guarda a referência do Group real desta instância pra
+    // `view3d._updateCarroCamera`/física poderem reposicionar o carro TODO
+    // quadro enquanto controlado (ver `entity._velocidade` em
+    // `_updateCarrosControlados`, view3d.js) sem precisar reconstruir a
+    // cena a cada frame — mesmo espírito de `_camPs1RefsById`/refs vivas já
+    // usadas por câmera/relógio neste arquivo. [correção 13/09/2026] Guarda
+    // em `this._carroRefsById` (por id), NÃO em `obj` — ver comentário
+    // grande em `setScene` sobre `_doorRuntime`/por que anexar um
+    // THREE.Group direto na entidade persistida quebrava o IndexedDB.
+    this._carroRefsById[obj.id] = group;
+    // [13/09/2026] SEMPRE marcado (diferente do `if (temScriptAtivo)`
+    // condicional usado pelos outros builders acima) — um carro não
+    // precisa de nenhum `ScriptComponent` pra se mover: a física de
+    // inércia (`view3d.js _updateCarrosControlados`) muda `obj.x`/`obj.y`/
+    // `obj.angulo` diretamente enquanto o jogador dirige, e reaproveitar
+    // `_syncScriptedObjectTransforms` (chamado TODO quadro por
+    // `_updateScriptLifecycle`, ver lá) já resolve "refletir esses valores
+    // na malha de verdade" de graça, sem precisar duplicar a lógica de
+    // reposicionamento aqui.
+    this._tagScriptBase(group, obj, baseY);
   }
 
   /** Constrói a malha de UM objeto e a registra em `this._group`/
@@ -4053,7 +5024,99 @@ class Engine3D {
    *  usuário, 25/08/2026 — ver `addObjectIncremental` logo abaixo) pra
    *  poder ser chamado tanto dali (montagem da cena INTEIRA) quanto na
    *  colocação incremental de UM objeto novo, sem duplicar a lógica. */
+  /** [15/09/2026 UTC] NOVO — pedido verbatim: "Ainda falta poder girar no z
+   *  e no x. Atualmente só aparece para girar no y. A escala (x, y e z)
+   *  não está aparecendo também. E deve ser aplicado em tempo real." CAUSA
+   *  RAIZ: `obj.customMeshXform` (rotX/rotZ/scaleX/Y/Z) só era lido/
+   *  aplicado dentro de `_buildCustomMeshObject` — ou seja, só pra objetos
+   *  com malha editada vértice-a-vértice no Modelador (`obj.customMesh`).
+   *  Um objeto comum do catálogo (Mesa/Cadeira/Armário/etc., a ESMAGADORA
+   *  MAIORIA) nunca tinha rotX/rotZ/escala aplicados de jeito NENHUM, não
+   *  importa o que fosse salvo em `customMeshXform` — por isso a UI
+   *  (`ModelerUI.buildStandaloneObjectTransformPanel`) nem mostrava esses
+   *  campos pra eles (`temMalha` = `!!obj.customMesh`).
+   *
+   *  CORREÇÃO: este método virou um WRAPPER fino em volta do antigo corpo
+   *  (renomeado pra `_buildOneObjectMeshCore`, INTOCADO — todo o resto do
+   *  dispatch continua 100% igual) — mesmo padrão JÁ usado neste arquivo
+   *  por `_applyObjMaterialOverride` (ver logo abaixo, chamado do MESMO
+   *  jeito no laço de `setScene`): mede quantos filhos `this._group` tinha
+   *  ANTES de construir a malha deste objeto, constrói normalmente, e
+   *  DEPOIS aplica rotX/rotZ/escala (se houver) em CIMA de TODOS os nós de
+   *  topo que a construção acabou de acrescentar — funciona pra QUALQUER
+   *  builder (perfil genérico com 1 malha, Mesa/Cadeira/Pilar com várias
+   *  malhas soltas, `.glb`/`.obj` importado com um `THREE.Group` inteiro),
+   *  sem precisar adaptar cada um deles individualmente. `obj.customMesh`
+   *  é excluído aqui de propósito (`_applyObjectExtraTransform` já checa
+   *  isso) — aquele caminho já aplica `customMeshXform` do jeito certo
+   *  (baked direto nos vértices, `_buildCustomMeshObject`), aplicar de novo
+   *  aqui por cima duplicaria a transformação. */
   _buildOneObjectMesh(obj, wireframe, colWireframe) {
+    const childrenBefore = this._group.children.length;
+    const baseYExtra = (obj.piso || 0) * (this.mapData?.alturaPiso || 2.8) + (obj.elevacao || 0);
+    this._buildOneObjectMeshCore(obj, wireframe, colWireframe);
+    this._applyObjectExtraTransform(obj, baseYExtra, childrenBefore);
+  }
+
+  /** Aplica `obj.customMeshXform.{rotX,rotZ,scaleX,scaleY,scaleZ}` (rotY
+   *  já é tratado à parte via `obj.angulo`, de sempre) em cima de TODOS os
+   *  nós de topo que `_buildOneObjectMeshCore` acabou de acrescentar em
+   *  `this._group` — ver comentário grande no wrapper `_buildOneObjectMesh`
+   *  acima pro motivo completo. Gira/escala em torno do PIVÔ do objeto
+   *  (`obj.x`, `baseY`, `obj.y` — o "pé" dele, não o centro geométrico da
+   *  malha, que este método não conhece de forma genérica pra todo tipo de
+   *  builder) — aproximação aceitável (tombar um objeto pela base é o
+   *  comportamento mais previsível pra maioria dos casos, ex. "quero essa
+   *  luminária inclinada"), documentada aqui em vez de escondida. LIMITAÇÃO
+   *  CONHECIDA: os `obb`/`radius` já registrados em `pickables` (área de
+   *  clique) NÃO são recalculados pra refletir a escala/rotação extra — a
+   *  detecção de clique pode ficar um pouco desalinhada da malha visual
+   *  depois de uma escala grande; sem navegador pra testar/calibrar isso ao
+   *  vivo nesta sessão, preferi não arriscar uma fórmula nova de bounding
+   *  box errada silenciosamente. */
+  _applyObjectExtraTransform(obj, baseY, childrenBefore) {
+    if (!obj || !this._group || obj.customMesh) return;
+    const xf = obj.customMeshXform;
+    if (!xf) return;
+    const rotX = xf.rotX || 0, rotZ = xf.rotZ || 0;
+    const scaleX = xf.scaleX ?? 1, scaleY = xf.scaleY ?? 1, scaleZ = xf.scaleZ ?? 1;
+    if (!rotX && !rotZ && scaleX === 1 && scaleY === 1 && scaleZ === 1) return; // caso comum (sem transformação extra) — zero custo, zero mudança
+    const THREE = this.THREE;
+    const pivot = new THREE.Vector3(obj.x, baseY, obj.y);
+    const scaleVec = new THREE.Vector3(scaleX, scaleY, scaleZ);
+    const extraQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(rotX, 0, rotZ, 'XYZ'));
+    const novos = this._group.children.slice(childrenBefore);
+    novos.forEach((node) => {
+      if (!node) return;
+      const offset = node.position.clone().sub(pivot);
+      offset.multiply(scaleVec);
+      offset.applyQuaternion(extraQuat);
+      node.position.copy(pivot).add(offset);
+      node.scale.multiply(scaleVec);
+      node.quaternion.premultiply(extraQuat);
+    });
+  }
+
+  /** [16/09/2026 UTC] NOVO — ver comentário grande em `_buildOneObjectMeshCore`
+   *  logo abaixo (bloco "escada deve continuar sendo gerada por código").
+   *  Mesma lógica de `Modeler3D._escadaFoiModificada` (js/modeler/
+   *  modeler-core.js) — mantida duplicada de propósito, ver ali. */
+  _escadaFoiModificada(obj) {
+    const perfil = (typeof OBJECT3D_PROFILES !== 'undefined' && OBJECT3D_PROFILES.escada) || {};
+    const larguraPadrao = perfil.w ?? 1.3;
+    const profundidadePadrao = perfil.d ?? 3.0;
+    if (obj.largura && Math.abs(obj.largura - larguraPadrao) > 1e-6) return true;
+    if (obj.profundidade && Math.abs(obj.profundidade - profundidadePadrao) > 1e-6) return true;
+    if (obj.escadaDegraus != null && obj.escadaDegraus !== '') {
+      const alturaTotal = obj.alturaEscada || this.mapData?.alturaPiso || perfil.h || 2.8;
+      const degrausPadrao = Math.round(alturaTotal / 0.18) || 11;
+      if (Math.round(obj.escadaDegraus) !== degrausPadrao) return true;
+    }
+    if (obj.alturaEscada && perfil.h && Math.abs(obj.alturaEscada - perfil.h) > 1e-6) return true;
+    return false;
+  }
+
+  _buildOneObjectMeshCore(obj, wireframe, colWireframe) {
     const THREE = this.THREE;
     // `obj.elevacao` (metros ACIMA do chão do piso, distinto de `obj.piso`
     // que é o NÚMERO do piso/andar) — pedido do usuário: "ao mirar em cima
@@ -4061,7 +5124,7 @@ class Engine3D {
     // manda a altura de onde bateu, ver view3d.js raycastSurface) e
     // "a luminária... por padrão, ela fica a 3 metros do chão" (ver
     // Mapping.addObject). 0 por padrão = comportamento de sempre (chão).
-    const baseY = (obj.piso || 0) * 2.8 + (obj.elevacao || 0);
+    const baseY = (obj.piso || 0) * (this.mapData?.alturaPiso || 2.8) + (obj.elevacao || 0);
     // Malha CUSTOMIZADA (pedido do usuário, 28/08/2026 — "Modelador 3D", ver
     // js/modeler/*.js): objeto modelado vértice-a-vértice pelo usuário (ao
     // invés de uma das formas fixas de OBJECT3D_PROFILES/retangulo/poligono
@@ -4097,6 +5160,99 @@ class Engine3D {
     if (this._objectModelsByTipo[obj.tipo] && (this._objectModelsByTipo[obj.tipo].detalhado || this._objectModelsByTipo[obj.tipo].lowpoly)) {
       this._buildTypeMoldeMesh(obj, baseY, wireframe, colWireframe);
       return;
+    }
+    // [13/09/2026] NOVO — pedido verbatim: "Implemente um pipeline de
+    // carregamento de modelo (ex. GLTFLoader do three.js) e um novo campo
+    // no perfil tipo modeloArquivo: 'monitor.glb', com fallback pra
+    // geometria procedural atual quando o arquivo não existir." Ver
+    // comentário grande no topo de `js/model3dloader.js` (`window.
+    // Model3DLoader`, novo) pra formato/limitações do arquivo importado.
+    // `obj.modeloArquivo` (por OBJETO, prioridade máxima, mesmo espírito de
+    // `obj.customMesh`) OU `OBJECT3D_PROFILES[obj.tipo]?.modeloArquivo`
+    // (por TIPO — o pedido original, "campo no perfil") — checado DEPOIS
+    // do molde customizado do Modelador embutido acima (`_objectModelsByTipo`)
+    // de propósito: um molde já desenhado/editado dentro do próprio app
+    // continua tendo prioridade sobre um arquivo externo pro MESMO tipo,
+    // evitando o susto de "editei o molde no Modelador e não mudou nada" se
+    // alguém também tiver um `modeloArquivo` configurado. `hasModel` só
+    // devolve `true` se `Model3DLoader.preloadAll()` (chamado por
+    // `view3d.js` _rebuildScene ANTES deste `setScene`) já tiver parseado
+    // esse arquivo com sucesso — arquivo nunca importado, removido, OU que
+    // falhou ao parsear caem, SEM avisar/travar nada, na geometria
+    // procedural de sempre logo abaixo (exatamente o "fallback" pedido).
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Sobre o objeto escada, ele
+    // deve continuar sendo gerado por código [...] Se a escada não for
+    // modificada, então ela carrega o modelo que veio do arquivo." Sem esta
+    // checagem, os 3 blocos de malha ESTÁTICA logo abaixo (.glb/.obj) já
+    // dariam `return` pra QUALQUER escada assim que `escada.malha.js`/
+    // `escada.glb.js` existisse — nunca chegando no `_buildEscadaMesh`
+    // procedural mais abaixo, mesmo quando a escada tem largura/
+    // profundidade/nº de degraus alterados do padrão do catálogo (o que a
+    // malha estática, fixa, não consegue refletir). `_escadaFoiModificada`
+    // espelha a MESMA lógica usada em `js/modeler/modeler-core.js`
+    // (`Modeler3D._escadaFoiModificada`) — mantidas separadas (arquivos/
+    // módulos diferentes) de propósito, sem introduzir uma dependência
+    // cruzada nova entre engine3d.js e o Modelador.
+    const _escadaModificadaAgora = obj.tipo === 'escada' && this._escadaFoiModificada(obj);
+    if (!_escadaModificadaAgora) {
+    const modeloArquivoNome = obj.modeloArquivo || OBJECT3D_PROFILES[obj.tipo]?.modeloArquivo;
+    if (modeloArquivoNome && window.Model3DLoader?.hasModel?.(modeloArquivoNome)) {
+      this._buildModeloArquivoMesh(obj, baseY, wireframe, colWireframe, modeloArquivoNome, window.Model3DLoader);
+      return;
+    }
+    }
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Implemente o ObjMeshSource
+    // para .glb como você mencionou." MESMO bloco do Model3DLoader acima,
+    // só que pra `.glb` ESTÁTICO/EMBUTIDO no próprio projeto (ver
+    // js/glbmeshsource.js) em vez de importado pelo usuário em tempo de
+    // execução — checado DEPOIS do Model3DLoader (um `.glb` importado pelo
+    // usuário pelo cartão do objeto continua tendo prioridade máxima sobre
+    // o `.glb` padrão do tipo, mesma lógica de "o que já foi customizado
+    // manualmente vence") e ANTES da malha `.obj` estática (um `.glb`, com
+    // material PBR/emissivo/textura embutida de verdade, é estritamente
+    // "melhor" que `.obj`+`.mtl` quando os dois existem pro mesmo tipo —
+    // ver tabela de limitações em assets/obj/conversor-obj-js.html). MESMO
+    // tratamento de `y0` (objeto "flutuante" tipo monitor/interruptor) do
+    // bloco de malha `.obj` logo abaixo, mesmo motivo.
+    if (!_escadaModificadaAgora) {
+      const nomeGlb = obj.modeloGlbEstatico || OBJECT3D_PROFILES[obj.tipo]?.modeloGlbEstatico || obj.tipo;
+      if (nomeGlb && window.GlbMeshSource?.hasModel?.(nomeGlb)) {
+        const y0Perfil = OBJECT3D_PROFILES[obj.tipo]?.y0 || 0;
+        this._buildModeloArquivoMesh(obj, baseY + y0Perfil, wireframe, colWireframe, nomeGlb, window.GlbMeshSource);
+        return;
+      }
+    }
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "A malha do objeto (o '.obj'
+    // dele) deve ficar em um arquivo separado e ser endereçado em
+    // '<nome-do-modelo>.model.js' [...]". MESMO bloco acima, só que pra
+    // malha `.obj` ESTÁTICA (ver js/objmeshsource.js) em vez de `.glb`
+    // importado pelo usuário em tempo de execução — daí reaproveitar o
+    // MESMO `_buildModeloArquivoMesh` de baixo (agora recebe o "loader"
+    // como parâmetro, em vez de sempre `window.Model3DLoader` fixo, pra
+    // não duplicar toda a lógica de posicionar/pickable/wireframe/escala
+    // só porque a ORIGEM da malha é outra). `ObjMeshSource.hasModel` só
+    // devolve `true` depois de `ensureMeshesReadyForMap` (chamado por
+    // view3d.js `_rebuildScene` ANTES deste `setScene`, mesmo espírito de
+    // `Model3DLoader.preloadAll` acima) — arquivo `.malha.js` ausente cai,
+    // sem avisar/travar nada, na geometria procedural de sempre abaixo.
+    if (!_escadaModificadaAgora) {
+      const nomeMalha = obj.modeloMalhaEstatica || OBJECT3D_PROFILES[obj.tipo]?.modeloMalhaEstatica || obj.tipo;
+      if (nomeMalha && window.ObjMeshSource?.hasModel?.(nomeMalha)) {
+        // [15/09/2026 UTC] NOVO — pedido verbatim (rodada "malha estática
+        // sem perdas nem limitações"): objetos de parede/elevados
+        // (OBJECT3D_PROFILES[tipo].y0 > 0, ex. monitor/interruptor/quadro)
+        // ficavam grudados no CHÃO quando convertidos pra malha estática —
+        // `_buildModeloArquivoMesh` sempre reencosta o Y mínimo da malha em
+        // `baseY`, sem saber que aquele tipo "flutua" a `y0` metros do chão
+        // (o ramo genérico de caixa/cilindro/cone, mais abaixo, sempre soma
+        // `perfil.y0` em `centerY` — a malha estática não tinha o mesmo
+        // tratamento). Soma o `y0` do PERFIL do tipo (mesma fonte que o ramo
+        // genérico usa) no `baseY` só pra este posicionamento — não afeta
+        // nenhum outro tipo/ramo, nem objetos com y0:0 (a maioria).
+        const y0Perfil = OBJECT3D_PROFILES[obj.tipo]?.y0 || 0;
+        this._buildModeloArquivoMesh(obj, baseY + y0Perfil, wireframe, colWireframe, nomeMalha, window.ObjMeshSource);
+        return;
+      }
     }
     // "Imagem" (colar/carregar, ver mapview.js) — malha BEM diferente das
     // outras (uma folha deitada com a imagem de verdade, não uma caixa) —
@@ -4170,6 +5326,13 @@ class Engine3D {
     // antes do `perfil` existir) — combinação rara o bastante (foto de
     // catálogo associada a OUTRO item) pra não valer a complexidade extra.
     this._addItemAssociadoDestaque(obj, perfil, baseY);
+    // [13/09/2026] NOVO — pedido verbatim: "Coloque este mesmo detalhe no
+    // objeto [...] algo que fique em cima do objeto [...] indicando que foi
+    // colocado algo no seu histórico [...] Tem que ser algo bem simples."
+    // Ver _addHistoricoDestaque abaixo (mesmo padrão de sprite-selo de
+    // _addItemAssociadoDestaque acima, só que mais simples: um pontinho só,
+    // sem contorno/flags).
+    this._addHistoricoDestaque(obj, perfil, baseY);
     // Mesa: 4 pernas + tampo fino, não um bloco sólido — pedido do
     // usuário ("faça o 3D da mesa com 4 pernas de mesa e um tampo de
     // mesa, para que pareça uma e não um cubo"). Colocar uma mesa pelo
@@ -4178,6 +5341,37 @@ class Engine3D {
     // sempre 'box' aqui pra ela — a checagem é só defensiva.
     if (obj.tipo === 'mesa' && perfil.shape === 'box') {
       this._buildMesaMesh(obj, perfil, baseY, wireframe, colWireframe);
+      return;
+    }
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "faça dois novos objetos:
+    // 'Mesa' e 'Pilar' [...] O objeto 'Pilar' deve ter a altura que define
+    // a distância entre um andar e outro." Builder DEDICADO (em vez de
+    // cair no ramo genérico logo abaixo, que usaria `perfil.h` — um valor
+    // FIXO de fábrica) só pra poder ler `this.mapData?.alturaPiso` (a
+    // distância de VERDADE entre andares deste mapa, configurável) na hora
+    // de montar a malha — mesmo motivo/mesma técnica de `_buildEscadaMesh`
+    // (`alturaTotal = obj.alturaEscada || this.mapData?.alturaPiso || 2.8`).
+    if (obj.tipo === 'pilar' && perfil.shape === 'box') {
+      this._buildPilarMesh(obj, perfil, baseY, wireframe, colWireframe);
+      return;
+    }
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "Faça um modelo 3D
+    // diferente para a cadeira (substituindo-o), faça uma 'cadeira de
+    // verdade' com pernas e encosto. Não uma caixa genérica como é
+    // atualmente." Builder DEDICADO (mesmo padrão de mesa/pilar acima —
+    // várias `Mesh` soltas, sem `THREE.Group`), ver `_buildCadeiraMesh`.
+    // Checagem defensiva de shape:'box' igual às outras dedicadas.
+    if (obj.tipo === 'cadeira' && perfil.shape === 'box') {
+      this._buildCadeiraMesh(obj, perfil, baseY, wireframe, colWireframe);
+      return;
+    }
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "Faça o mesmo para o
+    // vaso." Builder DEDICADO (vaso de terracota + folhagem em cima, em
+    // vez do cone verde solto saindo do chão), ver `_buildPlantaMesh`.
+    // Checagem defensiva de shape:'cone' (perfil.planta), mesmo padrão das
+    // outras dedicadas acima.
+    if (obj.tipo === 'planta' && perfil.shape === 'cone') {
+      this._buildPlantaMesh(obj, perfil, baseY, wireframe, colWireframe);
       return;
     }
     // Luminária: 2 tubos fluorescentes + folha metálica + caixas nas
@@ -4203,13 +5397,65 @@ class Engine3D {
       this._buildEscadaMesh(obj, perfil, baseY, wireframe, colWireframe);
       return;
     }
+    // Relógio (CORRIGIDO 15/09/2026 — bug confirmado pelo usuário: "Os
+    // relógios... ficam deitados... é só girar o relógio para que fique na
+    // parede"). Antes deste `if`, o relógio caía no ramo genérico logo
+    // abaixo, que monta um CylinderGeometry cru só com `mesh.rotation.y =
+    // objAnguloToRotY(obj.angulo)` — como o eixo do CylinderGeometry é Y por
+    // padrão, isso deixa o disco DEITADO (mostrador virado pro teto/chão,
+    // igual uma moeda em cima de uma mesa), nunca DE PÉ contra a parede,
+    // não importa o ângulo. Mesma checagem defensiva de shape:'cylinder' já
+    // usada por poste/robô acima. Ver `_buildRelogioMesh` pra rotação
+    // corrigida + ponteiros animados (tempo real do prédio).
+    if (obj.tipo === 'relogio' && perfil.shape === 'cylinder') {
+      this._buildRelogioMesh(obj, perfil, baseY, wireframe, colWireframe);
+      return;
+    }
+    // Porta-retrato de mesa (NOVO, 15/09/2026) — único tipo do catálogo com
+    // uma inclinação FIXA (~12°) simulando o objeto "em pé" apoiado numa
+    // superfície, tipo um porta-retrato de verdade encostado pra trás.
+    // Mesma checagem defensiva de shape:'box' de mesa/luminária/escada
+    // acima.
+    if (obj.tipo === 'quadro-mesa' && perfil.shape === 'box') {
+      this._buildQuadroMesaMesh(obj, perfil, baseY, wireframe, colWireframe);
+      return;
+    }
+    // Teto de gesso com rodelas de acesso (NOVO, 13/09/2026 — pedido do
+    // usuário). Mesma checagem defensiva de shape:'box' das outras
+    // dedicadas acima.
+    if (obj.tipo === 'teto-gesso' && perfil.shape === 'box') {
+      this._buildTetoGessoMesh(obj, perfil, baseY, wireframe, colWireframe);
+      return;
+    }
+    // Carro dirigível (NOVO, 13/09/2026 — pedido verbatim: "Faça um carro
+    // [...] Deve ter rodas, vidros e um formato de carro de verdade").
+    // Mesma checagem defensiva de shape:'box' das outras bespoke acima.
+    if (obj.tipo === 'carro' && perfil.shape === 'box') {
+      this._buildCarroMesh(obj, perfil, baseY, wireframe, colWireframe);
+      return;
+    }
     let geo;
     if (perfil.shape === 'cylinder') geo = new THREE.CylinderGeometry(perfil.r, perfil.r, perfil.h, perfil.segments || 14);
     else if (perfil.shape === 'cone') geo = new THREE.ConeGeometry(perfil.r, perfil.h, 14);
     else geo = new THREE.BoxGeometry(perfil.w, perfil.h, perfil.d);
+    // [13/09/2026] NOVO — "Chão lajotado" e "Teto modular" (pedido do
+    // usuário). "Piso" com `obj.acabamento === 'lajota'` (novo campo
+    // opcional, padrão ausente = 'liso', o comportamento de sempre — cor
+    // sólida, ZERO mudança) e QUALQUER objeto do tipo `teto-modular` usam
+    // uma textura procedural (ver `_getProceduralFloorTexture` acima) em vez
+    // da cor sólida de `perfil.color`. `teto-gesso` fica de fora de
+    // propósito (liso, sem grid — já tratado à parte, com `return`
+    // antecipado, no builder dedicado `_buildTetoGessoMesh` acima).
+    let mapaProcedural = null;
+    if (!wireframe) {
+      if (obj.tipo === 'piso' && obj.acabamento === 'lajota') mapaProcedural = this._getProceduralFloorTexture('lajota', perfil.w, perfil.d);
+      else if (obj.tipo === 'teto-modular') mapaProcedural = this._getProceduralFloorTexture('modular', perfil.w, perfil.d);
+    }
     const mat = wireframe
       ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: perfil.color });
+      : mapaProcedural
+        ? new THREE.MeshLambertMaterial({ map: mapaProcedural, color: 0xffffff })
+        : new THREE.MeshLambertMaterial({ color: perfil.color });
     const mesh = new THREE.Mesh(geo, mat);
     const centerY = baseY + perfil.y0 + perfil.h / 2;
     mesh.position.set(obj.x, centerY, obj.y);
@@ -4274,6 +5520,363 @@ class Engine3D {
     this.pickables.push(objPick);
     mesh.userData.pick = objPick;
     this._pickMeshes.push(mesh);
+    // Elegível pro pool de InstancedMesh (ver comentário grande no
+    // construtor, `this._instancedPools`) — só o ramo COMUM/genérico chega
+    // até aqui (mesa/luminária/poste/escada/molde/imagem/.obj já deram
+    // `return` mais acima), e só quando `perfil` é o mesmo objeto
+    // COMPARTILHADO de `OBJECT3D_PROFILES[obj.tipo]` (retângulo/polígono
+    // guardam dimensões PRÓPRIAS por objeto — `obj.largura`/`obj.raio` etc. —
+    // então dois objetos do "mesmo tipo" podem ter geometria DIFERENTE; batê-los
+    // no mesmo InstancedMesh, que só tem UMA geometria pra todas as
+    // instâncias, desenharia errado). Modo wireframe/híbrido ficam de fora de
+    // propósito: o 1º já é atendido por `_addWireframeOcclusion` (que varre
+    // `_group.children` esperando UMA malha wireframe por objeto, não um
+    // pool batido); o 2º (`updateHybridQuality`) troca `mesh.material` AO
+    // VIVO por objeto pra economizar GPU — instanciar destruiria esse
+    // controle fino sem necessidade (o pool já é rápido o bastante sozinho,
+    // não precisa das duas otimizações competindo pelo mesmo objeto).
+    // A montagem de verdade (agrupar por tipo, criar o InstancedMesh) só
+    // acontece depois, 1x por cena inteira, em `_rebuildInstancedPools`.
+    // [13/09/2026] NOVO — pedido verbatim (via Task 3, prédio de 40 andares
+    // com relógios/mesas/cadeiras animados por Script): um objeto com um
+    // `ScriptComponent` ATIVO em `obj.components` precisa que SUA PRÓPRIA
+    // malha se mova/gire independente das outras a cada quadro (ver
+    // `_syncScriptedObjectTransforms` logo abaixo) — um `InstancedMesh`
+    // batido por tipo (o pool acima) só tem UMA matriz por índice, sem
+    // nenhum sinal de "esta instância específica mudou" — animar uma única
+    // instância ainda seria possível (`setMatrixAt` por índice), mas exigiria
+    // achar o índice certo a cada quadro por objeto, e um relógio/mesa/
+    // cadeira ANIMADO tende a ser RARO entre centenas do mesmo tipo (a
+    // maioria fica parada) — mais simples e mais barato excluir só os
+    // animados do pool (continuam desenhados INDIVIDUALMENTE, do jeito de
+    // sempre) do que complicar o pool inteiro por causa de poucas exceções.
+    const temScriptAtivo = Array.isArray(obj.components) && obj.components.some((c) => c.type === 'Script' && c.enabled !== false);
+    if (!wireframe && this.mode !== 'hibrido' && obj.forma !== 'retangulo' && obj.forma !== 'poligono' && !temScriptAtivo) {
+      mesh.userData._instancerEligible = true;
+    }
+    // [13/09/2026] NOVO — guarda o deslocamento LOCAL desta malha em relação
+    // à base "de mundo" do objeto (x/y do mapa + baseY = piso*2.8+elevacao)
+    // no instante da montagem — usado por `_syncScriptedObjectTransforms`
+    // pra recalcular a posição/rotação a cada quadro SEM precisar saber a
+    // geometria específica de cada `perfil` (funciona igual pra caixa/
+    // cilindro/cone, já que só depende da posição que ESTE MESMO builder já
+    // calculou em `mesh.position`, não de uma fórmula própria repetida).
+    if (temScriptAtivo) this._tagScriptBase(mesh, obj, baseY);
+  }
+
+  /** [13/09/2026] NOVO — marca `mesh` com o deslocamento LOCAL dela em
+   *  relação à base "de mundo" do objeto (`obj.x`/`baseY`/`obj.y`) — ver
+   *  comentário grande em `_syncScriptedObjectTransforms`. Extraído do
+   *  corpo de `_buildOneObjectMesh` pra também ser chamado por builders
+   *  bespoke de múltiplas malhas (`_buildMesaMesh` — mesa é feita de 4
+   *  pernas + tampo, cada `Mesh` solta, todas precisam do MESMO tratamento
+   *  pra "mesas animadas" (pedido do usuário) se mover inteiras, juntas). */
+  _tagScriptBase(mesh, obj, baseY) {
+    mesh.userData._scriptBase = {
+      offX: mesh.position.x - obj.x, offY: mesh.position.y - baseY, offZ: mesh.position.z - obj.y,
+      objId: obj.id,
+    };
+  }
+
+  /** [13/09/2026] NOVO — "edição/animação ao vivo" de Script (Tarefa 3 do
+   *  pedido, reaproveitada por qualquer objeto com Script, não só os do
+   *  prédio gerado): objetos comuns só ganham sua malha/posição UMA VEZ, na
+   *  montagem da cena (`_buildOneObjectMesh` acima) — um `ScriptComponent`
+   *  rodando `Update()` e mudando `obj.x`/`obj.y`/`obj.elevacao`/`obj.angulo`
+   *  (ex.: os exemplos de "pular"/"ir e voltar" do prédio de 40 andares)
+   *  precisa que a malha de VERDADE acompanhe esses valores a cada quadro —
+   *  senão o script rodaria "no vazio" (o dado muda, a malha na tela não).
+   *  Chamado por `view3d.js` `_updateScriptLifecycle`, logo depois de
+   *  `Components.tickEntity` ter rodado o `Update()` de todo mundo (ordem
+   *  importa: primeiro os scripts mudam os dados, depois isto reflete os
+   *  dados na malha). Só objetos com Script ATIVO têm `userData._scriptBase`
+   *  (ver acima) — os milhares de objetos parados do prédio nem entram no
+   *  `.filter` abaixo (guard barato, mesmo espírito de `Components.
+   *  tickEntity`). */
+  _syncScriptedObjectTransforms(mapData) {
+    if (!this._pickMeshes || !this._pickMeshes.length) return;
+    const objIndex = new Map((mapData?.objects || []).map((o) => [o.id, o]));
+    for (const mesh of this._pickMeshes) {
+      const base = mesh.userData._scriptBase;
+      if (!base) continue;
+      const obj = objIndex.get(base.objId);
+      if (!obj) continue;
+      const baseY = (obj.piso || 0) * (this.mapData?.alturaPiso || 2.8) + (obj.elevacao || 0);
+      mesh.position.set(obj.x + base.offX, baseY + base.offY, obj.y + base.offZ);
+      mesh.rotation.y = objAnguloToRotY(obj.angulo);
+      // [13/09/2026] NOVO — pedido esclarecido do usuário sobre o robô
+      // recepcionista: "'trocar de uniforme' é só o momento em que ela vai
+      // desligar o holograma e ligá-lo [...] depois de alguma coisa feita
+      // na sala dos robôs." Reaproveita `obj.cor` (campo JÁ existente e já
+      // suportado por objetos "genéricos" — ver `_hexToThreeColor(obj.cor)`
+      // usado na CONSTRUÇÃO da malha, `_buildOneObjectMesh`) aplicando-o
+      // TAMBÉM AO VIVO, todo quadro, pra QUALQUER objeto com Script que
+      // mude `obj.cor` em tempo real (não é exclusividade do robô
+      // recepcionista — infraestrutura pequena e genérica, reaproveitável
+      // por qualquer script futuro que precise "piscar"/mudar a cor de um
+      // objeto, autorizado pelo próprio usuário: "se precisar de algo que o
+      // projeto não dê suporte, implemente"). Guard barato (`if (obj.cor)`)
+      // — objetos sem Script mudando a cor nunca setam isto, então o custo
+      // extra por quadro é 1 comparação de string pra cada objeto
+      // ANIMADO (já um subconjunto pequeno, ver comentário grande no topo
+      // deste método).
+      if (obj.cor && mesh.material && mesh.material.color) {
+        const corHex = _hexToThreeColor(obj.cor);
+        if (corHex !== undefined && corHex !== null) mesh.material.color.setHex(corHex);
+      }
+      // [13/09/2026] NOVO — efeito visual SIMPLIFICADO de "holograma" do
+      // robô recepcionista (ver comentário grande de esclarecimento em
+      // assets/modelos/robo-recepcionista.model.js e o script de exemplo
+      // atualizado): enquanto `obj.hologramaLigado!==false` (padrão
+      // ligado), o material fica azul translúcido com um leve emissive
+      // (leitura visual de "holograma"); quando o script desliga (na sala
+      // dos robôs), o material vira cinza metálico OPACO, sem emissive
+      // (leitura de "robô real", sem o holograma). HONESTIDADE: isto é
+      // troca de COR/opacidade/emissive do MESMO cilindro simples que já
+      // existia — não é um modelo humanoide nem um shader de holograma
+      // volumétrico de verdade; documentado como suficiente pelo próprio
+      // esclarecimento do usuário sobre o que "trocar de uniforme"
+      // significa de verdade.
+      if (obj.tipo === 'robo-recepcionista' && mesh.material) {
+        const hologramaLigado = obj.hologramaLigado !== false;
+        if (mesh.material.color) mesh.material.color.setHex(hologramaLigado ? 0x3a6ea5 : 0x5a5f6b);
+        if ('transparent' in mesh.material) mesh.material.transparent = hologramaLigado;
+        if ('opacity' in mesh.material) mesh.material.opacity = hologramaLigado ? 0.55 : 1;
+        if (mesh.material.emissive) mesh.material.emissive.setHex(hologramaLigado ? 0x2050ff : 0x000000);
+        if ('emissiveIntensity' in mesh.material) mesh.material.emissiveIntensity = hologramaLigado ? 0.55 : 0;
+      }
+    }
+  }
+
+  /** [14/09/2026] NOVO — animação suave da folha de porta quando
+   *  `el.anguloAbertura` é controlado por um Script (ver js/components.js e
+   *  o exemplo "Porta Automática" em assets/exemplos/_exemplo-script-porta-
+   *  automatica.txt). Chamado a cada quadro por `view3d.js`
+   *  `_updateScriptLifecycle` (mesmo lugar que já chama
+   *  `_syncScriptedObjectTransforms`). Guard barato: só faz trabalho pra
+   *  portas que passaram por `buildDoorOrWindowMesh` com
+   *  `_doorLeafMesh`/`_doorPivotInfo` guardados (ver lá) — as demais (a
+   *  imensa maioria, sem Script nenhum) nem entram no `for`.
+   *  `el._anguloAtualAnim` é o ângulo ATUAL da animação (graus, 0..90,
+   *  nunca serializado — só um número solto na entidade em memória,
+   *  mesmo espírito de `_scriptBase`/`_startedScripts`) — persegue
+   *  `el.anguloAbertura` (se definido) ou o equivalente de `el.aberta`
+   *  (0/90°) a uma velocidade fixa que cobre o curso inteiro (0→90°) em
+   *  ~500ms, pedido do usuário ("anime suavemente"). */
+  _updateDoorAnimations(dt) {
+    const portas = this.mapData?.portas;
+    if (!portas || !portas.length) return;
+    const DEG_PER_SEC = 90 / 0.5; // curso inteiro (0..90°) em ~500ms
+    for (const el of portas) {
+      // [correção 13/09/2026] estado/malhas agora vêm de `this._doorRuntime`
+      // (Map por `el.id`), não de propriedades em `el` — ver comentário
+      // grande em `setScene`.
+      const rt = this._doorRuntime?.get(el.id);
+      const mesh = rt?.leafMesh;
+      const info = rt?.pivotInfo;
+      if (!rt || !mesh || !info) continue;
+      const targetDeg = (el.anguloAbertura !== undefined && el.anguloAbertura !== null)
+        ? Math.max(0, Math.min(90, el.anguloAbertura))
+        : (el.aberta ? 90 : 0);
+      // [13/09/2026] NOVO — animação da MAÇANETA (variante `el.comManeneta`,
+      // ver `buildDoorOrWindowMesh` acima). Só entra pra portas que TÊM a
+      // peça (`el._doorManetaMesh`, um THREE.Group filho da folha — herda
+      // posição/rotação da folha automaticamente, só giramos o eixo Z LOCAL
+      // dele aqui). Detecta o "momento do clique" comparando o `targetDeg`
+      // desta rodada com o da rodada anterior (`el._manetaLastTargetDeg`):
+      // toda vez que o ALVO muda (aoClicarDuasVezes do Script alterou
+      // `anguloAbertura`, ou qualquer outra fonte), dispara um giro rápido
+      // (~250ms) da maçaneta — ANTES/JUNTO do início do movimento da folha
+      // (o giro da maçaneta é instantâneo no disparo; a folha ainda tem os
+      // ~500ms de curso inteiro de sempre) — simulando "girar a maçaneta pra
+      // destrancar" — e volta sozinha à posição neutra ao final dos 250ms,
+      // função seno (0 -> pico -> 0) pra não ter solavanco nas pontas.
+      // [15/09/2026 UTC] ALTERADO — `rt.manetaMesh` virou um ARRAY de 2
+      // grupos (maçaneta da face +Z e da face -Z, ver comentário grande em
+      // `montarManeta`, mais acima) em vez de um `THREE.Group` único — as 2
+      // giram sempre JUNTAS (mesmo `rotation.z`, mesma animação), só o
+      // ALVO (`rt.manetaMesh.rotation.z = ...`) virou um `forEach`.
+      if (el.comManeneta && rt.manetaMesh && rt.manetaMesh.length) {
+        if (rt.manetaLastTargetDeg === undefined) rt.manetaLastTargetDeg = targetDeg;
+        if (targetDeg !== rt.manetaLastTargetDeg) {
+          rt.manetaLastTargetDeg = targetDeg;
+          rt.manetaAnimDur = 0.25; // ~250ms, independente dos ~500ms da folha
+          rt.manetaAnimT = rt.manetaAnimDur;
+        }
+        if (rt.manetaAnimT > 0) {
+          rt.manetaAnimT = Math.max(0, rt.manetaAnimT - Math.max(0, dt || 0));
+          const p = 1 - rt.manetaAnimT / rt.manetaAnimDur;
+          const MAX_MANETA_RAD = 35 * Math.PI / 180; // ~35° de giro no cabo
+          const rotZ = Math.sin(Math.min(1, p) * Math.PI) * MAX_MANETA_RAD;
+          rt.manetaMesh.forEach((m) => { m.rotation.z = rotZ; });
+        } else {
+          rt.manetaMesh.forEach((m) => { if (m.rotation.z !== 0) m.rotation.z = 0; }); // garante neutro exato ao fim da animação
+        }
+      }
+      if (rt.anguloAtualAnim === undefined || rt.anguloAtualAnim === null) rt.anguloAtualAnim = targetDeg;
+      const diff = targetDeg - rt.anguloAtualAnim;
+      if (Math.abs(diff) < 0.05) {
+        if (rt.anguloAtualAnim === targetDeg) continue; // já parado no alvo — nada a recalcular
+        rt.anguloAtualAnim = targetDeg;
+      } else {
+        const step = DEG_PER_SEC * Math.max(0, dt || 0);
+        rt.anguloAtualAnim += Math.sign(diff) * Math.min(Math.abs(diff), step);
+      }
+      const phi = rt.anguloAtualAnim * Math.PI / 180;
+      const { pos, largura, altura, baseY, rotY } = info;
+      const ang = pos.angulo || 0;
+      const alongX = Math.cos(ang), alongY = Math.sin(ang);
+      const perpX = -Math.sin(ang), perpY = Math.cos(ang);
+      const hingeSign = el.abertura === 'esquerda' ? -1 : 1;
+      const hingeX = pos.x + alongX * hingeSign * (largura / 2);
+      const hingeZ = pos.y + alongY * hingeSign * (largura / 2);
+      const v0x = -hingeSign * alongX * (largura / 2), v0z = -hingeSign * alongY * (largura / 2);
+      const v1x = perpX * (largura / 2), v1z = perpY * (largura / 2);
+      const meshX = hingeX + Math.cos(phi) * v0x + Math.sin(phi) * v1x;
+      const meshZ = hingeZ + Math.cos(phi) * v0z + Math.sin(phi) * v1z;
+      mesh.position.set(meshX, baseY + altura / 2, meshZ);
+      mesh.rotation.y = rotY + phi;
+    }
+  }
+
+  /** [15/09/2026] NOVO — gira os ponteiros de TODOS os relógios (de parede
+   *  ou de mesa/estante, tanto faz — a montagem em `_buildRelogioMesh` é a
+   *  mesma) conforme a hora ATUAL do mundo (`window.RelogioMundo`, ver
+   *  js/relogio-mundo.js — NÃO a hora do aparelho do usuário: mesma
+   *  decisão de design já usada pelos robôs de copa/limpeza/recepcionista,
+   *  que também consultam o relógio do MUNDO, não `new Date()`, pra saber
+   *  se é hora do almoço etc.). Chamado TODO QUADRO por view3d.js
+   *  `_updateScriptLifecycle`, mesmo lugar/padrão de `_updateCamerasLive`/
+   *  `_updateDoorAnimations` logo abaixo/acima.
+   *
+   *  Guard barato: sem relógio nenhum na cena (`_relogiosParede` vazio,
+   *  populado só em `_buildRelogioMesh`) ou sem `RelogioMundo` carregado
+   *  (defensivo — o script já é parte do APP_SHELL, mas nada custa
+   *  proteger contra ordem de carregamento futura), sai sem fazer nada.
+   *
+   *  FÓRMULAS — convenção padrão de relógio analógico (minuto/segundo
+   *  "vazam" fração pro ponteiro de cima: às 3:30 o ponteiro de hora fica
+   *  NA METADE entre o 3 e o 4, não parado em cima do 3):
+   *    hora   = ((horas%12)/12 + minutos/720) * 2π
+   *    minuto = (minutos/60 + segundos/3600) * 2π
+   *    segundo= (segundos/60) * 2π
+   *
+   *  EIXO/SINAL — [15/09/2026, CORRIGIDO — o usuário reportou "o relógio...
+   *  está girando para o lado errado"] A versão anterior girava os
+   *  ponteiros em `rotation.z` (eixo LOCAL do `mesh`, antes da correção de
+   *  postura em X+Y — ver `_buildRelogioMesh`). Conferido numericamente com
+   *  o próprio Three.js (aplicando o quaternion resultante de
+   *  `mesh.rotation.set(Math.PI/2, rotY, 0)`): o eixo Z local do `mesh` cai
+   *  no mundo em **-Y (vertical)**, não na normal do mostrador — girar em
+   *  `rotation.z` faz o ponteiro varrer o plano HORIZONTAL (mundo XZ), como
+   *  um catavento deitado, nunca subindo/descendo no rosto do relógio (por
+   *  isso "para o lado errado": nem é o sentido que estava trocado, é o
+   *  EIXO de giro que estava errado). O eixo certo pra girar é o Y local do
+   *  `mesh` — esse sim cai no mundo em +Z, exatamente a normal que sai do
+   *  mostrador pra fora da parede — então agora o ponteiro nasce apontando
+   *  pro eixo -Z LOCAL (ver `fazPonteiro`/translate em `_buildRelogioMesh`)
+   *  e gira em `rotation.y`. Com essa troca, testado de novo com o Three.js
+   *  real: `rotation.y = -ang` com `ang` calculado pelas fórmulas acima
+   *  bate exatamente com a convenção de relógio de verdade — às 3:00
+   *  (ang=π/2) o ponteiro cai em +X mundo (direita de quem olha o
+   *  mostrador de frente, já que a normal do mostrador é +Z e a câmera
+   *  típica olha em -Z com "up"=+Y, right=+X — convenção padrão do
+   *  Three.js) e às 6:00 (ang=π) cai em -Y (pra baixo) — exatamente o
+   *  sentido horário 12→3→6→9→12 visto de frente. Por isso o `-` na frente
+   *  de cada fórmula abaixo permanece (o SINAL já estava certo; o que
+   *  mudou foi o EIXO, de `rotation.z` pra `rotation.y`). */
+  _updateRelogiosParede(dt) {
+    const relogios = this._relogiosParede;
+    if (!relogios || !relogios.length) return;
+    const RP = window.RelogioMundo;
+    const h = (RP && typeof RP.getHoraAtual === 'function') ? RP.getHoraAtual() : null;
+    const horasPredio = h?.horas || 0, minutosPredio = h?.minutos || 0, segundosPredio = h?.segundos || 0;
+    // [14/09/2026 UTC] NOVO — pedido verbatim (backlog, adiado desde a RODADA
+    // 20): "Os ponteiros do relogio e seu funcionamento deve funcionar
+    // por meio de scripts... seja possivel fazer um relogio do zero."
+    // CAUSA RAIZ do que faltava: as 3 horas usadas pra girar os ponteiros
+    // vinham SEMPRE, sem excecao, de RelogioMundo - nenhum Script
+    // conseguia influenciar o relogio de jeito nenhum (nem parar,
+    // adiantar, atrasar, ou mostrar outro fuso). Corrigido com o MESMO
+    // padrao ja usado por cam.anguloLente (camera PS1, escrita por
+    // _exemplo-script-camera-vigilancia.txt) e por entity.anguloAbertura/
+    // obj.elevacao (porta/elevador): 3 campos SIMPLES e OPCIONAIS no
+    // objeto - horaPonteiro/minutoPonteiro/segundoPonteiro (numeros
+    // comuns, 0-23/0-59/0-59, NAO radianos - nenhum Script precisa saber
+    // de eixo/sinal de rotacao) - que, se um Script os escrever a cada
+    // Update(dt), SUBSTITUEM a leitura de RelogioMundo pra aquele
+    // ponteiro especificamente (ver exemplo completo em
+    // assets/exemplos/_exemplo-script-relogio.txt: um "relogio do zero",
+    // sem precisar do perfil embutido de relogio, plantando um objeto
+    // qualquer e controlando os 3 campos direto). Cada campo e
+    // independente - um Script pode sobrescrever so segundoPonteiro
+    // (ex.: um "tique" que pula de segundo em segundo em vez de deslizar)
+    // e deixar hora/minuto automaticos, por exemplo. SEM nenhum Script
+    // anexado (o caso de sempre, relogio "de fabrica"), os 3 campos ficam
+    // undefined e o comportamento e 100% o mesmo de antes - tempo real
+    // do predio, sem nenhuma mudanca visivel.
+    for (const r of relogios) {
+      const obj = r.obj;
+      const horas = Number.isFinite(obj?.horaPonteiro) ? obj.horaPonteiro : horasPredio;
+      const minutos = Number.isFinite(obj?.minutoPonteiro) ? obj.minutoPonteiro : minutosPredio;
+      const segundos = Number.isFinite(obj?.segundoPonteiro) ? obj.segundoPonteiro : segundosPredio;
+      const angHora = ((horas % 12) / 12 + minutos / 720) * Math.PI * 2;
+      const angMinuto = (minutos / 60 + segundos / 3600) * Math.PI * 2;
+      const angSegundo = (segundos / 60) * Math.PI * 2;
+      if (r.ponteiroHora) r.ponteiroHora.rotation.y = -angHora;
+      if (r.ponteiroMinuto) r.ponteiroMinuto.rotation.y = -angMinuto;
+      if (r.ponteiroSegundo) r.ponteiroSegundo.rotation.y = -angSegundo;
+    }
+  }
+
+  /** [13/09/2026] NOVO — parte "viva" do modelo de câmera "PS1" (ver bloco
+   *  "câmeras" em `setScene`, `cam.modeloVisual==='ps1'`): gira a
+   *  cabeça/lente conforme `cam.anguloLente` (tipicamente escrito por um
+   *  Script, ex.: assets/exemplos/_exemplo-script-camera-vigilancia.txt) e
+   *  faz a lucezinha vermelha de status piscar. Chamado TODO QUADRO por
+   *  view3d.js `_updateScriptLifecycle`, logo depois de `Components.
+   *  tickEntity` já ter rodado o `Update()` de cada Script (mesma ordem de
+   *  `_syncScriptedObjectTransforms`/`_updateDoorAnimations` acima — dado
+   *  muda no Script, malha reflete aqui em seguida). Guard barato: só
+   *  câmeras com entrada em `_camPs1RefsById` (só as PS1 — a imensa maioria
+   *  das câmeras comuns nem entra no `for`) fazem qualquer trabalho.
+   *
+   *  PISCAR — mesmo espírito de "tempo real do navegador" já usado nos
+   *  scripts de robô (`Date.now()`, ver _exemplo-script-robo-copa.txt): sem
+   *  depender de nenhum "relógio simulado do prédio" que este motor não
+   *  expõe, um ciclo de 500ms ligado / 500ms apagado, calculado direto de
+   *  `Date.now()` (nunca dessincroniza entre câmeras, todas piscam juntas —
+   *  aceitável pro efeito pedido, "lucezinha piscando"). Só pisca enquanto
+   *  `cam.varreduraAtiva !== false` (mesmo campo que liga/desliga o
+   *  vai-e-volta — ver botão "🔄" em view3d.js `_showCameraCard3D`); com a
+   *  varredura desligada, a luz fica ACESA FIXA em baixa intensidade (lida
+   *  como "câmera ligada, mas parada"), não apagada de propósito (uma
+   *  câmera de segurança "morta" seria uma informação enganosa). */
+  _updateCamerasLive(dt) {
+    const refsById = this._camPs1RefsById;
+    if (!refsById) return;
+    const ids = Object.keys(refsById);
+    if (!ids.length) return;
+    const camIndex = new Map((this.mapData?.cameras || []).map((c) => [String(c.id), c]));
+    const piscaLigada = Math.floor(Date.now() / 500) % 2 === 0;
+    for (const id of ids) {
+      const refs = refsById[id];
+      const cam = camIndex.get(String(id));
+      if (!refs || !cam) continue;
+      // Cabeça/lente: orientação de montagem + desvio do Script.
+      refs.lensHead.rotation.y = refs.montagemRotY + (cam.anguloLente || 0);
+      // LED — intensidade da PointLight e cor do material da esferinha
+      // (a esferinha em si não "brilha" sozinha sem luz de cena incidindo
+      // nela com um material Basic — por isso a PointLight junto faz o
+      // trabalho de "acender" de verdade; o MeshBasicMaterial já é vermelho
+      // sempre, então alternar entre vermelho vivo/vermelho escuro no
+      // material dá o contraste aceso/apagado mesmo pra quem olhar de perto
+      // sem a luz "vazar" muito no ambiente).
+      const varreduraAtiva = cam.varreduraAtiva !== false;
+      const aceso = !varreduraAtiva || piscaLigada;
+      refs.ledLight.intensity = aceso ? 0.15 : 0;
+      refs.ledMat.color.setHex(aceso ? 0xff2020 : 0x4a0808);
+    }
   }
 
   /** Textura do "selo" de item associado (obj.itemId) — pedido do usuário
@@ -4374,6 +5977,63 @@ class Engine3D {
     tex.userData = { w: 64, h: 64 };
     this._ordinalBadgeTexCache.set(n, tex);
     return tex;
+  }
+
+  /** [13/09/2026] NOVO — textura do pontinho "tem histórico" (cor cacheada
+   *  por valor de cor — só 2 valores na prática, ver
+   *  `ObjectStandard.corIndicadorHistorico`). MESMO espírito de
+   *  `_buildItemBadgeTexture` acima, mas propositalmente mais simples (um
+   *  círculo só, sem ícone dentro) — pedido verbatim: "Tem que ser algo bem
+   *  simples." */
+  _buildHistoricoBadgeTexture(cor) {
+    this._histBadgeTexCache = this._histBadgeTexCache || new Map();
+    if (this._histBadgeTexCache.has(cor)) return this._histBadgeTexCache.get(cor);
+    const THREE = this.THREE;
+    const c = document.createElement('canvas');
+    c.width = 48; c.height = 48;
+    const ctx = c.getContext('2d');
+    ctx.beginPath();
+    ctx.arc(24, 24, 18, 0, Math.PI * 2);
+    ctx.fillStyle = cor;
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(10,13,17,0.6)';
+    ctx.stroke();
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this._histBadgeTexCache.set(cor, tex);
+    return tex;
+  }
+
+  /** [13/09/2026] NOVO — pedido verbatim: "Coloque este mesmo detalhe no
+   *  objeto [...] algo que fique em cima do objeto [...] indicando que foi
+   *  colocado algo no seu histórico. Implemente uma variação de cor de
+   *  acordo com a data de inserção [...] Tem que ser algo bem simples."
+   *  Igual a `_addItemAssociadoDestaque` acima (mesmo `THREE.Sprite` sempre
+   *  de frente pra câmera, `depthTest:false` pra nunca ficar escondido
+   *  "dentro" do próprio objeto), só que BEM mais simples de propósito: um
+   *  pontinho colorido só (sem ícone/contorno/flags), plantado logo ACIMA
+   *  do topo real do objeto ("em cima do objeto", pedido literal) — cor
+   *  vem de `ObjectStandard.corIndicadorHistorico` (verde = hoje/esta
+   *  semana, cinza = mais antigo), MESMA lógica do pontinho do botão
+   *  "Histórico deste objeto" (2D e 3D), pra nunca haver dois critérios de
+   *  cor diferentes pro mesmo dado. NO-OP se o objeto não tiver nenhuma
+   *  entrada de histórico ainda (o indicador só existe quando algo foi
+   *  colocado ali) ou se `ObjectStandard` não estiver carregado. */
+  _addHistoricoDestaque(obj, perfil, baseY) {
+    if (!window.ObjectStandard) return;
+    const cor = window.ObjectStandard.corIndicadorHistorico(obj);
+    if (!cor) return;
+    const THREE = this.THREE;
+    const h = Math.max(perfil.h || 0.5, 0.05);
+    const y0 = perfil.y0 || 0;
+    const topoY = baseY + y0 + h;
+    const tex = this._buildHistoricoBadgeTexture(cor);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+    sprite.scale.set(0.16, 0.16, 1);
+    sprite.position.set(obj.x, topoY + 0.14, obj.y);
+    sprite.renderOrder = 5;
+    this._group.add(sprite);
   }
 
   /** Destaque visual de "item associado" (obj.itemId) — pedido do usuário
@@ -4667,6 +6327,66 @@ class Engine3D {
     return true;
   }
 
+  /** [15/09/2026 UTC] NOVO — pedido verbatim: "[No painel de Transformação
+   *  do 'Ver em 3D'] deve ser aplicado em tempo real. Atualmente não está
+   *  sendo aplicado as alterações em tempo real (no 3D), tendo que sair do
+   *  3D e entrar de novo para ver as aplicações." A versão anterior
+   *  (`view3d.js` `_refreshObjectLiveTransform`) tentava "remendar"
+   *  position/rotation direto nas malhas já desenhadas — só achava UMA
+   *  malha por objeto (`_pickMeshes.find`, não `.filter`), então objetos
+   *  com várias malhas soltas (Mesa/Cadeira/Pilar/etc. — ver comentário
+   *  grande no topo do arquivo sobre os builders dedicados) só tinham UMA
+   *  parte atualizada e o resto ficava pra trás; e NUNCA tocava em
+   *  `mesh.scale` — por isso a escala nunca aparecia em tempo real, e
+   *  agora (depois de rotX/rotZ passarem a existir de verdade pra objetos
+   *  comuns, ver `_applyObjectExtraTransform` acima) rotX/rotZ também
+   *  ficariam pela metade do mesmo jeito.
+   *
+   *  CORREÇÃO — mesmo espírito de `addObjectIncremental` acima, só que pra
+   *  um objeto que JÁ EXISTE na cena: remove TODAS as malhas antigas dele
+   *  (achadas pelos NÓS DE TOPO de `this._group` — cobre tanto "várias
+   *  malhas soltas direto em `_group`" quanto "um `THREE.Group` só,
+   *  descendentes marcados por dentro" — caso de `.glb`/`.obj` importado,
+   *  ver `_buildModeloArquivoMesh`; remover só o descendente, como a 1ª
+   *  versão fazia, deixaria o Group pai órfão na cena, vazando memória) —
+   *  dispose de geometria/material de cada uma — e RECONSTRÓI do zero com
+   *  `_buildOneObjectMesh` (o MESMO dispatch de sempre, já com
+   *  `_applyObjectExtraTransform` embutido) usando os valores JÁ SALVOS em
+   *  `obj` (quem chama grava primeiro, refaz depois — ver
+   *  `ModelerUI.buildStandaloneObjectTransformPanel` `persist()`). Garante
+   *  o resultado CORRETO pra qualquer tipo de builder, sem duplicar
+   *  fórmulas de posicionamento à mão. */
+  rebuildObjectIncremental(obj) {
+    if (!this._ready || !this._group || !this.mapData || !obj) return false;
+    const eDeste = (n) => n?.userData?.pick?.ref === obj;
+    const topoParaRemover = this._group.children.filter((node) => {
+      if (eDeste(node)) return true;
+      let achou = false;
+      node?.traverse?.((n) => { if (eDeste(n)) achou = true; });
+      return achou;
+    });
+    topoParaRemover.forEach((node) => {
+      this._group.remove(node);
+      node.traverse?.((n) => {
+        if (!n.isMesh) return;
+        n.geometry?.dispose?.();
+        if (Array.isArray(n.material)) n.material.forEach((mt) => mt?.dispose?.());
+        else n.material?.dispose?.();
+      });
+    });
+    this._pickMeshes = this._pickMeshes.filter((m) => !eDeste(m));
+    this.pickables = this.pickables.filter((p) => p?.ref !== obj);
+    const wireframe = this.mode === 'wireframe';
+    const colWireframe = 0x78c8ff; // MESMA constante de `setScene`/`addObjectIncremental`, ver lá
+    const childrenBefore = this._group.children.length;
+    this._buildOneObjectMesh(obj, wireframe, colWireframe);
+    this._applyObjMaterialOverride(obj, childrenBefore);
+    if (wireframe) this._addWireframeOcclusion();
+    if (this.mode === 'hibrido') this._setupHybridMeshes();
+    this._setupCullMeshes();
+    return true;
+  }
+
   /** Registra, após a cena inteira construída, as malhas de OBJETO/ITEM/
    *  CÂMERA elegíveis pro corte por distância de renderização (pedido do
    *  usuário: "crie uma opção para mudar o jeito com que os blocos de
@@ -4688,7 +6408,12 @@ class Engine3D {
       const tipo = m.userData?.pick?.type;
       if (tipo !== 'object' && tipo !== 'item' && tipo !== 'camera') return;
       const p = m.userData.pick.pos;
-      this._cullMeshes.push({ mesh: m, x: p.x, z: p.z });
+      // [13/09/2026 UTC] NOVO — `piso` guardado junto (mesmo campo de
+      // sempre, `ref.piso`, já usado pra empilhar andares — ver `baseY` em
+      // `_buildOneObjectMesh`) pra `_updateSectorOcclusionCulling` (mais
+      // abaixo) achar o setor de cada objeto sem precisar reconsultar
+      // `userData.pick.ref` todo quadro.
+      this._cullMeshes.push({ mesh: m, x: p.x, z: p.z, piso: m.userData.pick.ref?.piso || 0 });
     });
   }
 
@@ -4711,6 +6436,257 @@ class Engine3D {
     this._wallOcclusionMeshes = this._pickMeshes.filter((m) => {
       const t = m.userData?.pick?.type;
       return t === 'wall' || t === 'porta' || t === 'janela';
+    });
+  }
+
+  /** [13/09/2026 UTC] NOVO — pedido verbatim do usuário: "No 'Ver em 3D',
+   *  não há otimização o suficiente para quando for milhares de objetos.
+   *  Fiz um teste, coloquei uma parede gigante de 160m de altura e 50m de
+   *  largura de modo que cobrisse o que estava atrás. Coloquei 2744 objetos
+   *  atrás da parede e o fps ficava baixo enquanto o personagem estava do
+   *  outro lado desta parede (onde não tinha os objetos) e estava apontando
+   *  para esta parede. Não deveria ser assim. Deveria ser considerado,
+   *  nesta situação, apenas o objeto parede, não o que estava atrás dela.
+   *  Implemente o sistema completo de oclusão por paredes/setores
+   *  (BSP/PVS). Já deve ter algo implementado no projeto. Parta de onde
+   *  parou (se for o caso)."
+   *
+   *  ONDE O PROJETO JÁ ESTAVA (levantado antes de escrever qualquer coisa
+   *  nova, exatamente o pedido de "partir de onde parou"): nenhuma
+   *  otimização existente resolvia este caso.
+   *   - O frustum culling por piso (`_rebuildInstancedPools`, rodada
+   *     "frustum culling" já concluída — ver comentário grande lá) só corta
+   *     ANDARES INTEIROS fora do campo de visão; dentro do MESMO andar, o
+   *     three.js só descarta um `InstancedMesh`/malha por frustum quando
+   *     ela está fora do ÂNGULO de visão — um objeto atrás de uma parede
+   *     mas DENTRO do ângulo (o jogador "apontando pra parede", exatamente
+   *     o teste do pedido) nunca é cortado por frustum: o three.js não tem
+   *     noção nenhuma de "existe uma parede opaca no meio do caminho" (o
+   *     z-buffer da GPU evita o CUSTO de pintar o pixel errado, mas o
+   *     vértice/draw call do objeto escondido continua acontecendo do
+   *     mesmo jeito).
+   *   - `_updateDistanceCulling` (logo abaixo) só olha DISTÂNCIA — sem
+   *     nenhuma noção de "tem parede no meio", não ajuda aqui (os 2744
+   *     objetos do teste podem estar bem dentro da distância de
+   *     renderização).
+   *   - `_updateItemBadgeOcclusion` (mais abaixo) já faz um raycast contra
+   *     `_wallOcclusionMeshes` — mas só pras PLAQUINHAS/selos (poucas
+   *     visíveis por vez); um raycast por OBJETO, milhares de vezes por
+   *     quadro, seria caro demais — não dava pra só reaproveitar aquilo
+   *     aqui.
+   *  Ou seja: não havia nenhuma oclusão por parede pra objeto comum — este
+   *  sistema é NOVO do zero, não uma continuação de código já existente.
+   *
+   *  SOLUÇÃO — "setores" por andar, particionados pelas paredes (a versão
+   *  do "BSP/PVS" pedido adaptada ao formato de mapa deste projeto: paredes
+   *  retas numa planta baixa 2D por piso, não uma malha 3D arbitrária —
+   *  um BSP tradicional particiona geometria 3D genérica; aqui a planta
+   *  baixa já É a partição natural, então o "BSP" vira uma grade 2D e o
+   *  "PVS" vira "mesmo setor conectado = visível, setor diferente = não"):
+   *
+   *  1. Esta função (`_buildOcclusionSectors`, chamada 1x por `setScene`,
+   *     NUNCA por quadro — é aqui que mora o custo "caro" deste sistema,
+   *     pago só ao abrir o 3D/editar paredes, nunca durante o passeio)
+   *     desenha uma grade 2D (`OCC_CELL_SIZE` metros por célula) POR ANDAR,
+   *     marcando como "bloqueada" toda célula coberta por um trecho MACIÇO
+   *     de parede — reaproveita o MESMO cálculo de vãos de porta/janela de
+   *     `addWallBox` (acima, dentro de `setScene`): um vão sem folha nunca
+   *     bloqueia; uma porta FECHADA bloqueia igual parede maciça ali; uma
+   *     JANELA NUNCA bloqueia (é vidro — dá pra ver através dela mesmo
+   *     "fechada", ver `setGlobalXRay` acima: "não existe uma noção de
+   *     aberta/fechada pra janela"). Em seguida, um flood-fill (pilha
+   *     explícita, célula a célula) rotula cada REGIÃO CONECTADA de
+   *     células livres com um `sectorId` próprio — duas salas ligadas por
+   *     um vão aberto (porta sem folha, buraco na parede, ou uma janela)
+   *     caem no MESMO setor (visão livre entre as duas, de propósito — ver
+   *     limitação abaixo); a sala de TESTE do pedido (parede maciça de
+   *     360°, sem vão nenhum) sempre cai num setor DIFERENTE de tudo que
+   *     está do lado de fora.
+   *  2. `_sectorIdAt(piso, x, z)` — 1 acesso de array (O(1), SEM raycast)
+   *     que devolve o `sectorId` de qualquer ponto do mundo.
+   *  3. `_updateSectorOcclusionCulling(camera)` (chamado todo quadro, ver
+   *     `render()` mais abaixo — logo DEPOIS de `_updateDistanceCulling`,
+   *     cuja decisão por distância continua valendo pra objetos do MESMO
+   *     setor da câmera): acha o setor DA CÂMERA (1 lookup) e, pra cada
+   *     objeto/item/câmera de `_cullMeshes` (a MESMA lista de
+   *     `_updateDistanceCulling` — nenhuma lista nova percorrida todo
+   *     quadro), se o setor dele for DIFERENTE do da câmera, força
+   *     `mesh.visible = false` (e sincroniza a instância do pool, ver
+   *     `_syncInstanceVisibility`) — SEM raycast nenhum, custo O(nº de
+   *     objetos) de comparações de inteiro por quadro, desprezível mesmo
+   *     com milhares de objetos. Reproduzindo o teste do pedido: os 2744
+   *     objetos atrás da parede caem num `sectorId` diferente do lado onde
+   *     o personagem está — passam a ser TODOS pulados (nem entram no
+   *     draw call) enquanto o personagem estiver do outro lado, exatamente
+   *     "deveria ser considerado apenas o objeto parede".
+   *
+   *  LIMITAÇÕES HONESTAS (documentadas de propósito — escopo/risco, sem
+   *  poder testar ao vivo nesta sessão, ver "REGRA ATUAL DE VERIFICAÇÃO" no
+   *  progresso da sessão):
+   *  - Dois setores ligados por um vão (porta aberta/sem folha, buraco,
+   *    janela) viram UM SÓ setor — sem NENHUMA oclusão entre os dois, por
+   *    mais longe que a câmera esteja do vão. Isto NÃO é um portal-PVS de
+   *    verdade (que só mostraria, através do vão, o que o "cone" dele
+   *    enquadra de dentro da sala vizinha) — é um modelo mais simples e
+   *    mais SEGURO (nunca esconde algo que deveria aparecer), só menos
+   *    agressivo perto de vãos largos/muitos cômodos conectados em cadeia.
+   *  - Grade 2D (planta baixa) — não distingue altura DENTRO do mesmo
+   *    `piso`: um mezanino/varanda aberta acima de uma sala fechada no
+   *    MESMO andar cairia no mesmo cálculo 2D; cenário raro no formato de
+   *    mapa deste projeto (andares empilhados por `obj.piso`), não tratado.
+   *  - Andar com grade grande demais (> `OCC_MAX_CELLS_POR_ANDAR` células):
+   *    fica de FORA do sistema (nenhuma entrada em `_occ.byFloor` pra ele)
+   *    — comportamento IDÊNTICO a antes desta rodada só pra esse andar
+   *    (nunca esconde nada errado, só deixa de otimizar ali), nunca trava o
+   *    navegador tentando montar uma grade absurda.
+   *  - Câmera/objeto sem `sectorId` (fora da grade, andar sem grade
+   *    montada, ou em cima de uma célula bloqueada — raro, câmera "dentro"
+   *    da espessura de uma parede): tratado como "sem informação", NUNCA
+   *    usado pra esconder nada — só deixa de otimizar nesse caso, mesmo
+   *    princípio de segurança do item acima. */
+  _buildOcclusionSectors(mapData) {
+    const OCC_CELL_SIZE = 0.5; // metros por célula da grade de setores
+    const OCC_MAX_CELLS_POR_ANDAR = 260000; // trava de segurança, ver limitação acima
+    this._occ = null;
+    const walls = mapData.walls || [];
+    if (!walls.length) return; // nenhuma parede no mapa — nada a particionar, todo objeto continua sempre visível (comportamento de sempre)
+    const fi = this._floorInfo;
+    if (!fi) return; // defensivo — nunca deveria acontecer (setScene sempre monta _floorInfo bem antes deste ponto)
+    const PAD = 2; // margem em metros além da área mapeada (mesma área usada pelo hoverPick do chão, ver _floorInfo acima)
+    const minX = fi.minX - PAD, minZ = fi.minZ - PAD;
+    const cols = Math.max(1, Math.ceil((fi.maxX + PAD - minX) / OCC_CELL_SIZE));
+    const rows = Math.max(1, Math.ceil((fi.maxZ + PAD - minZ) / OCC_CELL_SIZE));
+    const portas = mapData.portas || [];
+    const janelas = mapData.janelas || [];
+    const byFloor = new Map();
+    const pisos = new Set(walls.map((w) => w.piso || 0));
+    pisos.forEach((piso) => {
+      if (cols * rows > OCC_MAX_CELLS_POR_ANDAR) return; // ver limitação "andar com grade grande demais" acima — andar fica de fora, sem entrada no Map
+      const blocked = new Uint8Array(cols * rows);
+      const markCell = (x, z) => {
+        const cx = Math.floor((x - minX) / OCC_CELL_SIZE);
+        const cz = Math.floor((z - minZ) / OCC_CELL_SIZE);
+        if (cx < 0 || cz < 0 || cx >= cols || cz >= rows) return;
+        blocked[cz * cols + cx] = 1;
+      };
+      const rasterizeSegment = (x1, z1, x2, z2) => {
+        const dx = x2 - x1, dz = z2 - z1;
+        const len = Math.hypot(dx, dz);
+        if (len < 1e-4) { markCell(x1, z1); return; }
+        const ux = dx / len, uz = dz / len;
+        const nx = -uz, nz = ux; // normal unitária — "engorda" a linha pela espessura da parede
+        const half = (WALL_THICKNESS_3D / 2) + OCC_CELL_SIZE * 0.5; // margem extra de meia célula: garante que a parede NUNCA "vaza" um buraco de 1 célula por arredondamento da grade
+        const step = OCC_CELL_SIZE / 3; // passo bem menor que 1 célula — nenhum trecho da parede fica sem amostra
+        for (let t = 0; t <= len + 1e-6; t += step) {
+          const px = x1 + ux * t, pz = z1 + uz * t;
+          markCell(px + nx * half, pz + nz * half);
+          markCell(px - nx * half, pz - nz * half);
+          markCell(px, pz);
+        }
+      };
+      walls.filter((w) => (w.piso || 0) === piso).forEach((w) => {
+        const dx = w.x2 - w.x1, dz = w.y2 - w.y1;
+        const len = Math.hypot(dx, dz);
+        if (len < 1e-4) return;
+        const ux = dx / len, uz = dz / len;
+        // MESMO cálculo de vãos de `addWallBox` (dentro de `setScene`,
+        // acima) — vãos sempre existem geometricamente (aberta ou fechada,
+        // ver comentário grande de `addWallBox`); aqui só decidimos, PRA
+        // CADA vão, se ele deve ficar BLOQUEADO pra visão (porta fechada)
+        // ou LIVRE (porta aberta/sem folha, ou janela — nunca bloqueia).
+        const openings = [
+          ...portas.filter((d) => d.parentWallId === w.id).map((d) => ({
+            t0: Utils.clamp((d.posAoLongoDaParede || 0) - (d.largura || 0.8) / 2, 0, len),
+            t1: Utils.clamp((d.posAoLongoDaParede || 0) + (d.largura || 0.8) / 2, 0, len),
+            bloqueiaComoParede: !d.aberta,
+          })),
+          ...janelas.filter((j) => j.parentWallId === w.id).map((j) => ({
+            t0: Utils.clamp((j.posAoLongoDaParede || 0) - (j.largura || 1.2) / 2, 0, len),
+            t1: Utils.clamp((j.posAoLongoDaParede || 0) + (j.largura || 1.2) / 2, 0, len),
+            bloqueiaComoParede: false, // janela: vidro, nunca bloqueia — ver comentário grande acima
+          })),
+        ].filter((o) => o.t1 - o.t0 > 1e-3).sort((a, b) => a.t0 - b.t0);
+        if (!openings.length) {
+          rasterizeSegment(w.x1, w.y1, w.x2, w.y2); // sem vão nenhum — parede maciça do início ao fim, igual addWallBox
+          return;
+        }
+        let cursor = 0;
+        openings.forEach((o) => {
+          if (o.t0 > cursor) rasterizeSegment(w.x1 + ux * cursor, w.y1 + uz * cursor, w.x1 + ux * o.t0, w.y1 + uz * o.t0);
+          if (o.bloqueiaComoParede) rasterizeSegment(w.x1 + ux * o.t0, w.y1 + uz * o.t0, w.x1 + ux * o.t1, w.y1 + uz * o.t1);
+          cursor = Math.max(cursor, o.t1);
+        });
+        if (cursor < len) rasterizeSegment(w.x1 + ux * cursor, w.y1 + uz * cursor, w.x2, w.y2);
+      });
+      // Flood-fill iterativo (pilha explícita — NUNCA recursão, uma grade
+      // grande estouraria a pilha de chamadas do JS) — rotula cada região
+      // CONECTADA de células livres com um sectorId próprio.
+      const sectorId = new Int32Array(cols * rows).fill(-1);
+      let nextSector = 0;
+      const stack = [];
+      for (let i = 0; i < blocked.length; i++) {
+        if (blocked[i] || sectorId[i] !== -1) continue;
+        const id = nextSector++;
+        sectorId[i] = id;
+        stack.push(i);
+        while (stack.length) {
+          const cur = stack.pop();
+          const cx = cur % cols, cz = (cur / cols) | 0;
+          if (cx > 0) { const n = cur - 1; if (!blocked[n] && sectorId[n] === -1) { sectorId[n] = id; stack.push(n); } }
+          if (cx < cols - 1) { const n = cur + 1; if (!blocked[n] && sectorId[n] === -1) { sectorId[n] = id; stack.push(n); } }
+          if (cz > 0) { const n = cur - cols; if (!blocked[n] && sectorId[n] === -1) { sectorId[n] = id; stack.push(n); } }
+          if (cz < rows - 1) { const n = cur + cols; if (!blocked[n] && sectorId[n] === -1) { sectorId[n] = id; stack.push(n); } }
+        }
+      }
+      byFloor.set(piso, { sectorId, nextSector });
+    });
+    if (!byFloor.size) return; // todos os andares excederam a trava de segurança — sem oclusão por setor nenhuma, comportamento de sempre
+    this._occ = { cellSize: OCC_CELL_SIZE, minX, minZ, cols, rows, byFloor };
+  }
+
+  /** [13/09/2026 UTC] NOVO — setor de um ponto do mundo (`x,z`, no andar
+   *  `piso`), ver comentário grande de `_buildOcclusionSectors` acima pro
+   *  sistema completo. O(1), 1 acesso de array, SEM raycast. `null` = "sem
+   *  informação" (fora da grade, andar sem grade montada, ou em cima de uma
+   *  célula bloqueada) — nunca usado pra esconder nada, só pra decidir "não
+   *  otimiza aqui", ver `_updateSectorOcclusionCulling` logo abaixo. */
+  _sectorIdAt(piso, x, z) {
+    const occ = this._occ;
+    if (!occ) return null;
+    const floor = occ.byFloor.get(piso || 0);
+    if (!floor) return null;
+    const cx = Math.floor((x - occ.minX) / occ.cellSize);
+    const cz = Math.floor((z - occ.minZ) / occ.cellSize);
+    if (cx < 0 || cz < 0 || cx >= occ.cols || cz >= occ.rows) return null;
+    const id = floor.sectorId[cz * occ.cols + cx];
+    return id === -1 ? null : id;
+  }
+
+  /** [13/09/2026 UTC] NOVO — chamado todo quadro por `render()`, logo DEPOIS
+   *  de `_updateDistanceCulling` (ver comentário grande de
+   *  `_buildOcclusionSectors`, acima, pro sistema completo/pedido/motivo).
+   *  Reaproveita `this._cullMeshes` (mesma lista da distância) — nenhum
+   *  raycast, só comparação de `sectorId` (inteiro). Só ESCONDE (nunca
+   *  reexibe: quem decide "visível por distância" continua sendo
+   *  `_updateDistanceCulling`, chamado logo antes) — um objeto no MESMO
+   *  setor da câmera não é tocado aqui, mantém o que a distância já
+   *  decidiu. */
+  _updateSectorOcclusionCulling(camera) {
+    const occ = this._occ;
+    const lista = this._cullMeshes;
+    if (!occ || !lista?.length) return;
+    const alturaPiso = this.mapData?.alturaPiso || 2.8;
+    const pisoCamera = Math.floor((camera.y || 0) / alturaPiso);
+    const setorCamera = this._sectorIdAt(pisoCamera, camera.x, camera.z);
+    if (setorCamera === null) return; // câmera sem informação de setor — não otimiza este quadro, ver limitações
+    const forcado = this._forcedHiddenMeshes;
+    lista.forEach((c) => {
+      if (forcado && forcado.has(c.mesh)) return; // `_updateDistanceCulling` já tratou — prioridade absoluta continua lá
+      if (!c.mesh.visible) return; // já escondido (por distância) — nada a fazer aqui
+      const setorObjeto = this._sectorIdAt(c.piso, c.x, c.z);
+      if (setorObjeto === null || setorObjeto === setorCamera) return; // sem informação, ou mesmo setor — mantém como estava
+      c.mesh.visible = false;
+      this._syncInstanceVisibility(c.mesh);
     });
   }
 
@@ -4738,7 +6714,28 @@ class Engine3D {
   _updateDistanceCulling(camera) {
     const lista = this._cullMeshes;
     if (!lista?.length) return;
-    const rd = this._renderDistance();
+    // [13/09/2026] NOVO — pedido verbatim (revisão de performance): "objetos
+    // além do plano de corte distante (z_far) nunca precisam ser
+    // processados, pois o Three.js já os cortaria visualmente de qualquer
+    // jeito — mas sem isso o CPU/GPU ainda gasta trabalho com eles." Antes
+    // desta mudança, este método só comparava contra `rd` (a "Distância de
+    // renderização"/neblina, ver `_renderDistance()`) — em TODOS os casos
+    // de sempre isso já bastava, porque `camera3.far` sempre foi calculado
+    // a partir do PRÓPRIO `rd` (`Math.max(rd*2.4, 60)`, ver
+    // `_initThree`/`setConfig` — sempre ≥ `rd`, nunca menor). Agora que
+    // existe um "Fim" (z_far) configurável independente em "Desempenho 3D"
+    // (ver mapconfig.js DEFAULTS.cameraZFar/_wireDesempenho3DCamPlanes),
+    // esse invariante deixou de valer: um usuário pode setar `cameraZFar`
+    // BEM menor que `rd` — nesse caso o Three.js já clipa visualmente tudo
+    // além de `camera3.far`, mas SEM este `Math.min` este método continuaria
+    // marcando `mesh.visible = true` (e sincronizando a instância) pra
+    // objetos entre `camera3.far` e `rd`, desperdiçando processamento de
+    // vértice/matriz de instância pra algo que nunca aparece na tela.
+    // `Math.min` é seguro em QUALQUER cenário (inclusive o de sempre, onde
+    // `camera3.far` já é ≥ `rd` — o `Math.min` então vira `rd` de novo,
+    // ZERO mudança de comportamento) — nunca esconde algo que deveria estar
+    // visível, só evita processar cedo demais o que já seria cortado.
+    const rd = Math.min(this._renderDistance(), this.camera3?.far ?? Infinity);
     const modo = this._config.objetoRenderModo || 'objeto';
     // [14/09/2026] CORRIGIDO — pedido verbatim: "ao clicar em uma câmera e
     // selecionar 'Ver através desta câmera' [...] o cone da câmera
@@ -4778,13 +6775,91 @@ class Engine3D {
         const nx = Utils.clamp(camera.x, chunk.minX, chunk.maxX);
         const nz = Utils.clamp(camera.z, chunk.minZ, chunk.maxZ);
         const visivel = Math.hypot(camera.x - nx, camera.z - nz) <= rd;
-        chunk.items.forEach((m) => { m.visible = (forcado && forcado.has(m)) ? false : visivel; });
+        chunk.items.forEach((m) => {
+          m.visible = (forcado && forcado.has(m)) ? false : visivel;
+          // [26/09/2026] NOVO — ver `_syncInstanceVisibility`/comentário
+          // grande em `this._instancedPools` (constructor): mantém a
+          // instância (se houver) desta malha em sincronia com `m.visible`
+          // acabado de calcular.
+          this._syncInstanceVisibility(m);
+        });
       });
     } else {
       lista.forEach((c) => {
         const visivel = Math.hypot(c.x - camera.x, c.z - camera.z) <= rd;
         c.mesh.visible = (forcado && forcado.has(c.mesh)) ? false : visivel;
+        this._syncInstanceVisibility(c.mesh);
       });
+    }
+  }
+
+  /** [13/09/2026 UTC] NOVO — pedido verbatim do usuário: "No 'Ver em 3D',
+   *  nas 'configurações 3D', na seção 'Desempenho 3D', coloque uma
+   *  subseção para definir um limite de objetos a serem renderizados por
+   *  frame. Quando o contador atingir este limite, nenhum outro objeto é
+   *  mais desenhado, pulando, então, para o próximo frame. Por exemplo,
+   *  tendo um limite de 1500 objetos, mesmo tendo 2700 objetos para serem
+   *  desenhados dentro da cena por aquela perspectiva, então, o último
+   *  objeto a ser desenhado é quando o contador for incrementado para
+   *  1500, depois disso, vai para o próximo quadro (ou seja, nenhum objeto
+   *  é mais renderizado naquela cena). Se já não houver e não for custoso
+   *  para o processamento, o que está mais próximo do personagem é que
+   *  deve ter maior prioridade. Para a situação em que se atinja o limite
+   *  e algo que está perto não seja desenhado, mas algo que está distante
+   *  e nem precisaria ser desenhado, acaba por ser desenhado e
+   *  contabilizando no contador. Por padrão o valor deve ser 1200 objetos.
+   *  Apesar dos objetos acabarem ficando de fora da renderização da cena,
+   *  as lógicas devem continuar a serem feita. Por exemplo, scripts de
+   *  animação e rotinas de NPCs."
+   *
+   *  Diferente de `_updateDistanceCulling`/`_updateSectorOcclusionCulling`
+   *  (acima) — que escondem de vez quem está fora da distância/setor,
+   *  pouco importando quantos sobram — este é um ORÇAMENTO por quadro:
+   *  roda por ÚLTIMO (ver `render()`), só sobre quem JÁ sobreviveu aos
+   *  outros dois cortes, e ORDENA por distância até a câmera antes de
+   *  aplicar o limite — exatamente "o que está mais próximo... maior
+   *  prioridade", evitando o cenário descrito de um objeto perto ficar de
+   *  fora enquanto um distante (que já devia ter sido cortado por
+   *  distância/setor, mas por algum motivo não foi) consome vaga do
+   *  contador. `this._config.objetoLimitePorFrameAtivo === false` desliga
+   *  o sistema inteiro (nenhum custo extra por quadro além do check).
+   *
+   *  "As lógicas devem continuar a serem feita" — este método SÓ mexe em
+   *  `mesh.visible` (e a instância correspondente, via
+   *  `_syncInstanceVisibility`), exatamente como os outros dois cortes
+   *  acima — nunca em `this.mapData`/nos dados do objeto, nem pausa
+   *  `_updateScriptLifecycle`/`_updateCamerasLive` (chamados à parte, ver
+   *  `render()`, e sempre percorrem os dados de script/câmera do mapa
+   *  inteiro, não a lista de malhas visíveis) — um NPC/câmera fora do
+   *  orçamento deste quadro continua avançando o roteiro dele normalmente,
+   *  só a malha não é desenhada.
+   *
+   *  Custo: um `sort` (O(n log n)) só quando há MAIS candidatos que o
+   *  limite (a saída antecipada de baixo evita o sort inteiro no caso
+   *  comum de mapas pequenos) — aceitável mesmo com milhares de objetos
+   *  (é exatamente o cenário que motivou o pedido, "2700 objetos"). */
+  _updateFrameBudgetCulling(camera) {
+    const lista = this._cullMeshes;
+    if (!lista?.length) return;
+    if (this._config?.objetoLimitePorFrameAtivo === false) return;
+    const limite = Math.max(1, Math.round(Number(this._config?.objetoLimitePorFrame) || 1200));
+    const forcado = this._forcedHiddenMeshes;
+    // Só entram no orçamento quem SOBREVIVEU aos cortes de distância/setor
+    // (chamados logo antes, ver render()) — um objeto já escondido por eles
+    // não "gasta vaga" nem precisa ser reavaliado aqui.
+    const candidatos = [];
+    for (let i = 0; i < lista.length; i++) {
+      const c = lista[i];
+      if (!c.mesh.visible) continue;
+      if (forcado && forcado.has(c.mesh)) continue;
+      candidatos.push(c);
+    }
+    if (candidatos.length <= limite) return; // dentro do orçamento — nada a esconder
+    candidatos.forEach((c) => { c._d2 = (c.x - camera.x) ** 2 + (c.z - camera.z) ** 2; });
+    candidatos.sort((a, b) => a._d2 - b._d2); // mais perto primeiro — "maior prioridade"
+    for (let i = limite; i < candidatos.length; i++) {
+      candidatos[i].mesh.visible = false;
+      this._syncInstanceVisibility(candidatos[i].mesh);
     }
   }
 
@@ -5665,20 +7740,153 @@ class Engine3D {
     else this._pickMeshes.push(raiz);
   }
 
-  _buildMesaMesh(obj, perfil, baseY, wireframe, colWireframe) {
+  /** [13/09/2026] NOVO — malha de um objeto usando um modelo `.glb`/`.gltf`
+   *  IMPORTADO (`window.Model3DLoader`, ver comentário grande em
+   *  `js/model3dloader.js`) em vez de geometria procedural. Chamado por
+   *  `_buildOneObjectMesh` quando `obj.modeloArquivo`/
+   *  `OBJECT3D_PROFILES[obj.tipo].modeloArquivo` aponta pra um arquivo já
+   *  carregado com sucesso (`Model3DLoader.hasModel(nome)` — ver
+   *  comentário grande no ponto de chamada sobre o fallback quando não
+   *  está). Segue o MESMO padrão de posicionamento/pickable de
+   *  `_buildTypeMoldeMesh` acima (origem na base via bounding box, não um
+   *  "minY de vértice" — um `.glb` não tem `vertices`/`obj.customMesh`
+   *  pra calcular isso do jeito antigo), pra funcionar com o resto do app
+   *  (destaque de hover, seleção, "🔗 item associado", etc.) sem precisar
+   *  de nenhum código novo nesses outros sistemas — eles só olham
+   *  `pickables`/`_pickMeshes`/`userData.pick`, não COMO a malha foi
+   *  construída.
+   *
+   *  [15/09/2026 UTC] `loader` (NOVO parâmetro, opcional — default
+   *  `window.Model3DLoader`, pra não quebrar nenhuma chamada existente):
+   *  qualquer objeto com a MESMA API mínima (`getClone(nome)` devolvendo
+   *  um `THREE.Group` clonado, ou `null`) serve — `window.ObjMeshSource`
+   *  (malha `.obj` estática, ver js/objmeshsource.js) implementa essa
+   *  MESMA API de propósito, então este builder inteiro (posicionar/
+   *  escalar/pickable/wireframe) é 100% reaproveitado pras duas origens de
+   *  malha externa, sem duplicar nada aqui. */
+  _buildModeloArquivoMesh(obj, baseY, wireframe, colWireframe, nome, loader) {
     const THREE = this.THREE;
-    const w = perfil.w || 1.2, d = perfil.d || 0.6, h = perfil.h || 0.72;
+    const raiz = (loader || window.Model3DLoader).getClone(nome);
+    if (!raiz) return; // defensivo — não deveria acontecer (ponto de chamada já checou hasModel), mas nunca lançar aqui
+    // Modo "estrutura" (wireframe geral do app, ver `setMode('estrutura')`)
+    // — troca todo material carregado do arquivo por um wireframe simples,
+    // mesmo espírito de `_buildMoldeMesh`/outros builders bespoke (senão o
+    // modelo importado ficaria "sólido" mesmo com o modo de estrutura
+    // ligado, quebrando a consistência visual do app).
+    if (wireframe) {
+      raiz.traverse((child) => {
+        if (child.isMesh) {
+          child.material = new THREE.MeshBasicMaterial({ color: colWireframe || 0x66ccff, wireframe: true });
+        }
+      });
+    }
+    // Sem "minY de vértice" aqui (o `.glb` não usa `obj.customMesh` —
+    // calcula a base direto pela bounding box mundial, DEPOIS de escalar/
+    // posicionar/girar, igual ao resto deste método faz com `box3` logo
+    // abaixo) — por isso a ORDEM importa: primeiro posiciona em
+    // `baseY` "provisório" (y=0 relativo), mede a caixa, e só then ajusta Y
+    // pra encostar a base real no chão.
+    raiz.position.set(obj.x, baseY, obj.y);
+    raiz.rotation.y = objAnguloToRotY(obj.angulo);
+    // Escala opcional (`obj.modeloArquivoEscala`, ex. usuário achou o
+    // monitor grande demais depois de importar) — 1 (sem escala) por
+    // padrão, mesmo espírito de `obj.customMesh` nunca forçar escala
+    // sozinho.
+    const escala = (typeof obj.modeloArquivoEscala === 'number' && obj.modeloArquivoEscala > 0) ? obj.modeloArquivoEscala : 1;
+    raiz.scale.setScalar(escala);
+    this._group.add(raiz);
+    raiz.updateMatrixWorld(true);
+    const box3 = new THREE.Box3().setFromObject(raiz);
+    // Reencosta a base real (mínimo Y da bounding box já escalada/girada)
+    // no chão em `baseY` — sem isto, um arquivo cuja origem não fica na
+    // base (comum em programas de modelagem, que costumam centralizar no
+    // meio do objeto) apareceria "flutuando" ou "enterrada" no chão.
+    const ajusteY = baseY - box3.min.y;
+    raiz.position.y += ajusteY;
+    raiz.updateMatrixWorld(true);
+    const box3Final = new THREE.Box3().setFromObject(raiz);
+    const centerW = box3Final.getCenter(new THREE.Vector3());
+    const sizeW = box3Final.getSize(new THREE.Vector3());
+    const objPos = { x: centerW.x, y: centerW.y, z: centerW.z };
+    const halfX = Math.max(0.05, sizeW.x / 2), halfY = Math.max(0.05, sizeW.y / 2), halfZ = Math.max(0.05, sizeW.z / 2);
+    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(halfX, halfZ) * 1.2, ref: obj, obb: { half: { x: halfX, y: halfY, z: halfZ }, rotY: 0, shape: 'box', segments: 14 } };
+    this.pickables.push(objPick);
+    raiz.userData.pick = objPick;
+    // Registra CADA malha filha em `_pickMeshes` (não só a raiz) — o
+    // raycaster 'pixelperfect' (ver hoverPick) testa objeto por objeto
+    // desta lista; um `.glb` normalmente tem várias `THREE.Mesh` filhas
+    // (uma por material/primitiva), não uma raiz única testável.
+    raiz.traverse((child) => { if (child.isMesh) { child.userData.pick = objPick; this._pickMeshes.push(child); } });
+  }
+
+  /** [13/09/2026] NOVO — geometria PURA da mesa (4 pernas + tampo), extraída
+   *  de `_buildMesaMesh` pra ser reutilizável pelo GHOST de posicionamento
+   *  (ver `showGhostObject`/`_refreshGhostMesaBespoke` mais abaixo) sem
+   *  duplicar a matemática das pernas/tampo em dois lugares.
+   *
+   *  Causa raiz do bug relatado ("O ghost da mesa está aparecendo como uma
+   *  caixa"): o ghost de posicionamento (`showGhostObject`) só conhecia UM
+   *  ramo especial de verdade — o da escada (`_ghostEscada`, ver comentário
+   *  grande em `_initBuildGhosts`) — e para TODO o resto, incluindo mesa,
+   *  luminária e poste, sempre caiu na caixa delimitadora genérica
+   *  (`this._ghostObject`). Ou seja: NÃO é um bug exclusivo da mesa — os
+   *  outros dois builders bespoke (`_buildLuminariaMesh`/`_buildPosteMesh`)
+   *  têm o MESMO sintoma. Eles não foram corrigidos nesta rodada porque, ao
+   *  contrário da mesa, criam luz de verdade (`THREE.PointLight`, ver
+   *  comentário em `_initBuildGhosts` sobre "iluminar 3 vezes o que a
+   *  luminária ilumina") — reaproveitar o builder deles pro ghost exigiria
+   *  cuidado extra pra NÃO instanciar uma PointLight nova a cada frame de
+   *  arraste, o que ficou fora do escopo deste pedido (que citou
+   *  especificamente a mesa). Fica documentado aqui como problema conhecido
+   *  para uma futura rodada.
+   *
+   *  Só monta e devolve as `Mesh` (SEM adicionar a nenhuma cena/grupo, SEM
+   *  registrar em `pickables`/`_pickMeshes`) — quem chama decide o destino:
+   *  `_buildMesaMesh` (objeto real, abaixo) as põe em `this._group` e cria o
+   *  pickable; o ghost as põe num grupo próprio (`_ghostMesa`) e nunca vira
+   *  pickable, exatamente como os outros ghosts da caixa genérica. */
+  /** [13/09/2026, CORRIGIDO de verdade] Causa raiz EXATA do bug "os pés da
+   *  mesa ficam encolhidos" (reportado desde a v1 do prédio de 40 andares e
+   *  NUNCA corrigido antes apesar de comentários dizendo o contrário): esta
+   *  função sempre tratou `perfil.h` como a ALTURA TOTAL da mesa (chão até o
+   *  topo do tampo) e ignorava `perfil.y0` por completo. Isso é verdade
+   *  quando `perfil` vem do ramo `obj.forma === 'retangulo'` (linha ~4954,
+   *  `{ h: obj.altura || 0.5, y0: 0 }` — mesa colocada pela ferramenta normal,
+   *  `_MESA_FORMA_DEF` no mapview.js, `altura: 0.74`). MAS quando um objeto
+   *  tipo 'mesa' é criado SEM `obj.forma:'retangulo'` (ex.: gerado
+   *  programaticamente pelo script do prédio de 40 andares, ou colocado via
+   *  catálogo puro sem essa forma), o código cai no ramo `else` (linha
+   *  ~4980: `perfil = OBJECT3D_PROFILES[obj.tipo]`), e a entrada da tabela
+   *  pra 'mesa' é `{ h: 0.05, y0: 0.72 }` — aqui `h` é só a ESPESSURA do
+   *  tampo (5cm) e `y0` é a elevação do tampo (72cm), CONVENÇÃO DIFERENTE
+   *  (a mesma usada pelo builder de caixa genérico, ver `centerY = baseY +
+   *  perfil.y0 + perfil.h/2` na função principal). Como esta função nunca
+   *  leu `perfil.y0`, ela calculava `pernaAltura = h - tampoEsp ≈ 0.05 -
+   *  0.03 = 0.02m` — pernas de 2cm, mesa inteira encolhida a ~5cm de altura
+   *  junto do chão. Esse é o EXATO sintoma "pés encolhidos" relatado.
+   *  CORREÇÃO: normalizar a altura total ANTES de tudo, somando `y0` (se
+   *  existir) à espessura/altura declarada — cobre as DUAS convenções sem
+   *  quebrar nenhuma delas (`retangulo`: y0=0, soma dá o próprio `obj.altura`;
+   *  tabela antiga: y0=0.72 + h=0.05 = 0.77m, valor plausível de mesa real).
+   *  A partir daqui, `h` DENTRO desta função É, garantidamente, a altura
+   *  total do CHÃO até o topo do tampo — condição que o resto da função (e
+   *  o comentário matemático abaixo) assume. */
+  _makeMesaMeshes(obj, perfil, baseY, material) {
+    const THREE = this.THREE;
+    const w = perfil.w || 1.2, d = perfil.d || 0.6;
+    // Altura TOTAL (chão -> topo do tampo) = y0 (elevação do tampo, quando a
+    // convenção antiga da tabela OBJECT3D_PROFILES for usada) + h (que ali é
+    // só a espessura do tampo, mas no ramo 'retangulo' já É a altura total
+    // com y0=0 — a soma funciona pras duas convenções, ver comentário acima).
+    const h = (perfil.y0 || 0) + (perfil.h != null ? perfil.h : 0.72);
     const tampoEsp = Math.max(0.03, Math.min(0.06, h * 0.08));
     const pernaEsp = Math.max(0.03, Math.min(0.06, Math.min(w, d) * 0.07));
     const margem = pernaEsp * 1.2; // perna encostada pra DENTRO da quina, não bem na borda (evita "vazar" pro lado de fora do tampo)
     const pernaAltura = Math.max(0.05, h - tampoEsp);
-    const mat = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: perfil.color });
     const rotY = objAnguloToRotY(obj.angulo); // ver objAnguloToRotY — bate com a rotação do 2D
     const cos = Math.cos(rotY), sin = Math.sin(rotY);
     const meshes = [];
-    const tampo = new THREE.Mesh(new THREE.BoxGeometry(w, tampoEsp, d), mat);
+    const tampo = new THREE.Mesh(new THREE.BoxGeometry(w, tampoEsp, d), material);
     tampo.position.set(obj.x, baseY + h - tampoEsp / 2, obj.y);
     tampo.rotation.y = rotY;
     meshes.push(tampo);
@@ -5693,16 +7901,188 @@ class Engine3D {
     cornersLocal.forEach(([lx, lz]) => {
       const wx = obj.x + lx * cos + lz * sin;
       const wz = obj.y - lx * sin + lz * cos;
+      const perna = new THREE.Mesh(pernaGeo, material);
+      perna.position.set(wx, baseY + pernaAltura / 2, wz);
+      perna.rotation.y = rotY;
+      meshes.push(perna);
+    });
+    return { meshes, w, d, h };
+  }
+
+  _buildMesaMesh(obj, perfil, baseY, wireframe, colWireframe) {
+    const THREE = this.THREE;
+    const mat = wireframe
+      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+      : new THREE.MeshLambertMaterial({ color: perfil.color });
+    const rotY = objAnguloToRotY(obj.angulo);
+    const { meshes, w, d, h } = this._makeMesaMeshes(obj, perfil, baseY, mat);
+    meshes.forEach((m) => this._group.add(m));
+    const objPos = { x: obj.x, y: baseY + h / 2, z: obj.y };
+    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.6, ref: obj, obb: { half: { x: w / 2, y: h / 2, z: d / 2 }, rotY, shape: 'box', segments: 14 } };
+    this.pickables.push(objPick);
+    // [13/09/2026] NOVO — mesa animada por Script (pedido do usuário, Task 3
+    // do prédio de 40 andares: "algumas mesas... também devem ter scripts de
+    // animação") — ver `_tagScriptBase`/`_syncScriptedObjectTransforms`.
+    const temScriptAtivo = Array.isArray(obj.components) && obj.components.some((c) => c.type === 'Script' && c.enabled !== false);
+    meshes.forEach((m) => {
+      m.userData.pick = objPick;
+      this._pickMeshes.push(m);
+      if (temScriptAtivo) this._tagScriptBase(m, obj, baseY);
+    });
+  }
+
+  /** [15/09/2026 UTC] NOVO — "Pilar", objeto comum de catálogo (pedido
+   *  verbatim: "faça dois novos objetos: 'Mesa' e 'Pilar' [...] O objeto
+   *  'Pilar' deve ter a altura que define a distância entre um andar e
+   *  outro e dimensões de 120cmx60cm [...] é só um objeto comum" — sem
+   *  gizmo/forma especial, um `THREE.BoxGeometry` só, do chão até o teto
+   *  do andar onde foi colocado. `w`/`d` vêm de `perfil` (1.2×0.6m, ver
+   *  `OBJECT3D_PROFILES.pilar`); `h` NUNCA vem de `perfil.h` (que é só um
+   *  valor de fábrica pro ghost/footprint) — sempre `this.mapData?.
+   *  alturaPiso` (a distância real entre andares deste mapa), igual
+   *  `_buildEscadaMesh` já faz pra escada. */
+  _buildPilarMesh(obj, perfil, baseY, wireframe, colWireframe) {
+    const THREE = this.THREE;
+    const w = perfil.w || 1.2, d = perfil.d || 0.6;
+    const h = this.mapData?.alturaPiso || 2.8;
+    const mat = wireframe
+      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+      : new THREE.MeshLambertMaterial({ color: perfil.color });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    const centerY = baseY + h / 2;
+    mesh.position.set(obj.x, centerY, obj.y);
+    mesh.rotation.y = objAnguloToRotY(obj.angulo);
+    this._group.add(mesh);
+    const objPos = { x: obj.x, y: centerY, z: obj.y };
+    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.6, ref: obj, obb: { half: { x: w / 2, y: h / 2, z: d / 2 }, rotY: mesh.rotation.y, shape: 'box', segments: 14 } };
+    this.pickables.push(objPick);
+    mesh.userData.pick = objPick;
+    this._pickMeshes.push(mesh);
+  }
+
+  /** [15/09/2026 UTC] NOVO — "Cadeira de verdade" (pedido verbatim: "Faça
+   *  um modelo 3D diferente para a cadeira (substituindo-o), faça uma
+   *  'cadeira de verdade' com pernas e encosto. Não uma caixa genérica como
+   *  é atualmente."). Mesmo padrão de `_makeMesaMeshes`/`_buildMesaMesh`
+   *  (várias `Mesh` soltas — assento + 4 pernas + encosto — compartilhando
+   *  1 pickable/obb aproximado pela caixa delimitadora total): assento fino
+   *  na altura real de uma cadeira (~metade da altura total), 4 pernas
+   *  finas recuadas pra DENTRO do assento (não nas quinas — mesmo cuidado
+   *  já pedido pra mesa), e um encosto — painel vertical fino — na borda de
+   *  TRÁS do assento (local Z negativo, antes de girar por `obj.angulo`).
+   */
+  _buildCadeiraMesh(obj, perfil, baseY, wireframe, colWireframe) {
+    const THREE = this.THREE;
+    const w = perfil.w || 0.45, d = perfil.d || 0.45;
+    const h = (perfil.y0 || 0) + (perfil.h != null ? perfil.h : 0.9); // altura total chão -> topo do encosto
+    const mat = wireframe
+      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+      : new THREE.MeshLambertMaterial({ color: perfil.color });
+    const rotY = objAnguloToRotY(obj.angulo);
+    const cos = Math.cos(rotY), sin = Math.sin(rotY);
+    const assentoEsp = 0.04;
+    const assentoAltura = Math.min(0.46, h * 0.5); // altura real de assento de cadeira (~45cm do chão)
+    const pernaEsp = Math.max(0.025, Math.min(0.04, Math.min(w, d) * 0.08));
+    const margem = pernaEsp * 1.3; // perna recuada pra DENTRO do assento, não na quina (mesmo pedido já feito pra mesa)
+    const pernaAltura = Math.max(0.05, assentoAltura - assentoEsp / 2);
+    const encostoEsp = 0.035;
+    const encostoAltura = Math.max(0.1, h - assentoAltura);
+    const meshes = [];
+
+    const assento = new THREE.Mesh(new THREE.BoxGeometry(w, assentoEsp, d), mat);
+    assento.position.set(obj.x, baseY + assentoAltura - assentoEsp / 2, obj.y);
+    assento.rotation.y = rotY;
+    meshes.push(assento);
+
+    // 4 cantos em coordenadas LOCAIS (antes de girar) — mesma técnica
+    // local->mundo de `_makeMesaMeshes` (cos/sin de `objAnguloToRotY`).
+    const cornersLocal = [
+      [w / 2 - margem, d / 2 - margem], [-(w / 2 - margem), d / 2 - margem],
+      [w / 2 - margem, -(d / 2 - margem)], [-(w / 2 - margem), -(d / 2 - margem)],
+    ];
+    const pernaGeo = new THREE.BoxGeometry(pernaEsp, pernaAltura, pernaEsp);
+    cornersLocal.forEach(([lx, lz]) => {
+      const wx = obj.x + lx * cos + lz * sin;
+      const wz = obj.y - lx * sin + lz * cos;
       const perna = new THREE.Mesh(pernaGeo, mat);
       perna.position.set(wx, baseY + pernaAltura / 2, wz);
       perna.rotation.y = rotY;
       meshes.push(perna);
     });
+
+    // Encosto: painel fino vertical na borda TRASEIRA do assento (local
+    // Z negativo — "trás" da cadeira, oposto de onde alguém senta de frente).
+    const encostoLocalZ = -(d / 2 - margem);
+    const ex = obj.x + encostoLocalZ * sin;
+    const ez = obj.y + encostoLocalZ * cos;
+    const encosto = new THREE.Mesh(new THREE.BoxGeometry(w - margem * 2, encostoAltura, encostoEsp), mat);
+    encosto.position.set(ex, baseY + assentoAltura + encostoAltura / 2, ez);
+    encosto.rotation.y = rotY;
+    meshes.push(encosto);
+
     meshes.forEach((m) => this._group.add(m));
     const objPos = { x: obj.x, y: baseY + h / 2, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.6, ref: obj, obb: { half: { x: w / 2, y: h / 2, z: d / 2 }, rotY, shape: 'box', segments: 14 } };
+    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.65, ref: obj, obb: { half: { x: w / 2, y: h / 2, z: d / 2 }, rotY, shape: 'box', segments: 14 } };
     this.pickables.push(objPick);
-    meshes.forEach((m) => { m.userData.pick = objPick; this._pickMeshes.push(m); });
+    const temScriptAtivo = Array.isArray(obj.components) && obj.components.some((c) => c.type === 'Script' && c.enabled !== false);
+    meshes.forEach((m) => {
+      m.userData.pick = objPick;
+      this._pickMeshes.push(m);
+      if (temScriptAtivo) this._tagScriptBase(m, obj, baseY);
+    });
+  }
+
+  /** [15/09/2026 UTC] NOVO — "Vaso de verdade" (pedido verbatim: "Faça o
+   *  mesmo para o vaso" — mesmo tratamento dado à cadeira acima). Antes, o
+   *  tipo 'planta' caía no ramo GENÉRICO de cone (`perfil.shape==='cone'`)
+   *  e desenhava só a folhagem verde, flutuando/encostada direto no chão,
+   *  sem vaso nenhum. Agora: um vaso de verdade (tronco de cone — raio do
+   *  topo maior que o da base, terracota) apoiado no chão, com a folhagem
+   *  (o mesmo cone verde de antes, só reposicionado) sentada em CIMA da
+   *  boca do vaso, não saindo do chão.
+   */
+  _buildPlantaMesh(obj, perfil, baseY, wireframe, colWireframe) {
+    const THREE = this.THREE;
+    const r = perfil.r || 0.3;
+    const hTotal = perfil.h || 0.7;
+    const rotY = objAnguloToRotY(obj.angulo);
+    const potR = r * 0.6, potRTopo = potR * 1.15;
+    const potH = Math.min(0.3, hTotal * 0.35);
+    const folhaR = r;
+    const folhaH = Math.max(0.1, hTotal - potH);
+    const matVaso = wireframe
+      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+      : new THREE.MeshLambertMaterial({ color: 0xb5651d }); // terracota
+    const matFolha = wireframe
+      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+      : new THREE.MeshLambertMaterial({ color: perfil.color });
+    const meshes = [];
+
+    // Vaso: tronco de cone (CylinderGeometry aceita raioTopo != raioBase —
+    // topo mais largo que a base, formato clássico de vaso de planta).
+    const vaso = new THREE.Mesh(new THREE.CylinderGeometry(potRTopo, potR, potH, 12), matVaso);
+    vaso.position.set(obj.x, baseY + potH / 2, obj.y);
+    vaso.rotation.y = rotY;
+    meshes.push(vaso);
+
+    // Folhagem: cone verde (mesma forma de antes), agora sentada em cima
+    // da boca do vaso em vez de flutuar desde o chão.
+    const folha = new THREE.Mesh(new THREE.ConeGeometry(folhaR, folhaH, 12), matFolha);
+    folha.position.set(obj.x, baseY + potH + folhaH / 2, obj.y);
+    folha.rotation.y = rotY;
+    meshes.push(folha);
+
+    meshes.forEach((m) => this._group.add(m));
+    const hFull = potH + folhaH;
+    const objPos = { x: obj.x, y: baseY + hFull / 2, z: obj.y };
+    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(potRTopo, folhaR) * 1.1, ref: obj, obb: { half: { x: folhaR, y: hFull / 2, z: folhaR }, rotY, shape: 'cylinder', segments: 12 } };
+    this.pickables.push(objPick);
+    const temScriptAtivo = Array.isArray(obj.components) && obj.components.some((c) => c.type === 'Script' && c.enabled !== false);
+    meshes.forEach((m) => {
+      m.userData.pick = objPick;
+      this._pickMeshes.push(m);
+      if (temScriptAtivo) this._tagScriptBase(m, obj, baseY);
+    });
   }
 
   /** Escada 3D paramétrica — NOVO (01/09/2026), pedido verbatim do usuário
@@ -5728,12 +8108,39 @@ class Engine3D {
    *  lance) continuam vindo do redimensionamento normal no mapa 2D.
    *  `obj.escadaDegraus` é um campo NOVO, só existe/aparece no painel pra
    *  objetos tipo 'escada' (ver mapview.js `_openObjectPanel`, `formaFields`). */
+  /** [13/09/2026, CORRIGIDO de verdade] Causa raiz do bug "a escada não
+   *  alcança o andar de cima" / "não dá pra transitar fluidamente entre os
+   *  andares": `alturaTotal` era FIXA em 2.0m (pedido antigo, "altura de 2
+   *  metros, percebido, apenas no 3D"), um valor TOTALMENTE desconectado de
+   *  `map.alturaPiso` (a distância real de piso a piso — 4m na v3 do
+   *  prédio de 40 andares). Uma escada de 2m entre dois andares de 4m deixa
+   *  o topo do último degrau a meio caminho, flutuando no vão livre — o
+   *  jogador sobe a escada inteira e ainda não alcança o piso de cima.
+   *  CORRIGIDO: `alturaTotal` agora acompanha `map.alturaPiso` (recebido via
+   *  `this.mapData`, MESMA fonte que todo resto do motor usa pra empilhar
+   *  andares — ver `baseY = (obj.piso||0) * (this.mapData?.alturaPiso||2.8)`
+   *  logo antes de chamar esta função) por padrão, então o topo do último
+   *  degrau bate EXATAMENTE no piso de cima não importa a altura de andar
+   *  configurada. `obj.alturaEscada` (campo NOVO, opcional) permite ao
+   *  usuário fixar uma altura diferente de propósito (ex.: um lance curto
+   *  decorativo que não vai o andar inteiro) — quando ausente, o padrão é
+   *  sempre a altura do andar. */
   _buildEscadaMesh(obj, perfil, baseY, wireframe, colWireframe) {
     const THREE = this.THREE;
     const largura = Math.max(0.05, obj.largura || perfil.w || 1.3);
     const profundidadeTotal = Math.max(0.05, obj.profundidade || perfil.d || 3.0);
-    const alturaTotal = 2.0; // fixa — pedido explícito do usuário, ignora obj.altura de propósito
-    const degraus = Math.max(1, Math.round(obj.escadaDegraus) || 11);
+    const alturaTotal = obj.alturaEscada || this.mapData?.alturaPiso || 2.8;
+    // Degraus: se `obj.escadaDegraus` não foi configurado pelo usuário, o
+    // padrão agora ESCALA com `alturaTotal` visando ~18cm por degrau (medida
+    // realista de escada de verdade — ~17-19cm é o padrão de construção).
+    // Pra um andar de 4m isso dá `4/0.18 ≈ 22` degraus, bem mais realista
+    // que o antigo padrão fixo de 11 (que, aplicado a 4m em vez dos 2m
+    // originais, resultaria em degraus de ~36cm de altura — quase o dobro do
+    // realista, e beirando o limite de STEP_MAX=0.6m em view3d.js que
+    // permite ao jogador "subir andando" sem pular; degraus muito mais altos
+    // que isso travariam a subida). Um valor CUSTOMIZADO pelo usuário
+    // (`obj.escadaDegraus`) sempre tem prioridade — nunca sobrescrito aqui.
+    const degraus = Math.max(1, Math.round(obj.escadaDegraus) || Math.round(alturaTotal / 0.18) || 11);
     const stepDepth = profundidadeTotal / degraus;
     const stepHeight = alturaTotal / degraus;
     const mat = wireframe
@@ -5960,6 +8367,14 @@ class Engine3D {
     if (this._config.modoLuminarias3D !== 'leve' && (this._dynamicLights?.length || 0) < this._maxLuzesReais()) {
       const luz = new THREE.PointLight(0xeaf2ff, Engine3D.LUZ_LUMINARIA_INTENSITY, Engine3D.LUZ_LUMINARIA_DISTANCE, 2);
       luz.position.set(obj.x, baseY, obj.y);
+      // [14/09/2026] NOVO — marca de quem é essa luz + a intensidade
+      // ORIGINAL (antes de qualquer interruptor apagar/acender) — usado por
+      // assets/modelos/interruptor.model.js pra achar as `PointLight`
+      // reais das luminárias dentro do raio de controle e alternar entre
+      // intensidade 0 (apagada) e este valor guardado (sem precisar
+      // "adivinhar" `Engine3D.LUZ_LUMINARIA_INTENSITY` de novo, caso mude).
+      luz.userData.ownerObjId = obj.id;
+      luz.userData._intensidadeOriginal = Engine3D.LUZ_LUMINARIA_INTENSITY;
       this.scene.add(luz);
       this._dynamicLights = this._dynamicLights || [];
       this._dynamicLights.push(luz);
@@ -6058,10 +8473,212 @@ class Engine3D {
     if ((this._dynamicLights?.length || 0) < this._maxLuzesReais()) {
       const luz = new THREE.PointLight(0xffcf8c, Engine3D.LUZ_POSTE_INTENSITY, Engine3D.LUZ_POSTE_DISTANCE, 2);
       luz.position.set(wx, lampY, wz);
+      // [13/09/2026] NOVO — `ownerObjId` (mesmo campo já usado pela luz da
+      // luminária, ver `_buildLuminariaMesh`/linha com
+      // `luz.userData.ownerObjId = obj.id`, ~10 linhas acima na função
+      // irmã): faltava aqui, o que impedia qualquer código (ex.: um
+      // interruptor) de achar "a luz de verdade DESTE poste" por id —
+      // necessário pro `interruptor-remoto.model.js` novo (TAREFA 5 do
+      // backlog: painel de controle remoto que liga/desliga uma LISTA
+      // de postes por id, de longe, sem raio físico).
+      luz.userData.ownerObjId = obj.id;
       this.scene.add(luz);
       this._dynamicLights = this._dynamicLights || [];
       this._dynamicLights.push(luz);
     }
+  }
+
+  /** [15/09/2026] NOVO — corrige a orientação do relógio (bug confirmado
+   *  pelo usuário: "os relógios... ficam deitados... é só girar o relógio
+   *  para que fique na parede. Cuide para que fique na superfície da
+   *  parede, não dentro da parede") e acrescenta ponteiros de verdade,
+   *  animados a partir de `window.RelogioMundo.getHoraAtual()` (ver
+   *  `_updateRelogiosParede`, chamado todo quadro por view3d.js).
+   *
+   *  ORIENTAÇÃO — o `CylinderGeometry` usado pelo perfil (`OBJECT3D_
+   *  PROFILES.relogio`, engine3d-profiles.js) tem o eixo Y por padrão: com
+   *  só `mesh.rotation.y = objAnguloToRotY(obj.angulo)` (o que o ramo
+   *  genérico fazia antes desta correção) o disco fica DEITADO — os dois
+   *  círculos (mostrador) ficam virados pro TETO e pro CHÃO, nunca de
+   *  frente pra quem olha, não importa `obj.angulo`. A correção é rodar o
+   *  cilindro 90° num eixo HORIZONTAL primeiro (`rotation.x = Math.PI/2`,
+   *  escolhido — e não `rotation.z` — porque com Euler na ordem padrão
+   *  'XYZ' do Three.js a rotação X é aplicada ANTES da Y: o disco primeiro
+   *  "levanta" ficando de pé com a normal do mostrador apontando pro eixo
+   *  Z local, e SÓ DEPOIS a rotação Y de sempre gira esse "de pé" em torno
+   *  do eixo vertical pra apontar o mostrador pra fora da parede, exatamente
+   *  na direção de `obj.angulo` — se fosse `rotation.z` a ordem colocaria a
+   *  normal no eixo X local e a rotação Y subsequente a giraria errado,
+   *  perpendicular à direção esperada). `mesh.rotation.set(x, y, z)` abaixo
+   *  fixa os DOIS ao mesmo tempo (mesma chamada usada por outras peças
+   *  compostas deste arquivo, ex. `_buildLuminariaMesh`), sem depender da
+   *  ordem de duas atribuições separadas.
+   *
+   *  POSIÇÃO/ENCOSTO NA PAREDE — igual a `quadro`/`interruptor`/
+   *  `disjuntor` (todos objetos de parede que passam pelo MESMO ramo
+   *  genérico, ver comentário da tabela em engine3d-profiles.js): este
+   *  motor NÃO aplica nenhum deslocamento perpendicular automático além da
+   *  própria posição `obj.x`/`obj.y` do objeto — quem "encosta" o objeto na
+   *  superfície da parede (sem cravar pra dentro nem flutuar longe) é o
+   *  próprio usuário, ao posicionar no editor 2D (mapview.js já ajuda a
+   *  encaixar objetos de parede rente à linha da parede, mesmo mecanismo
+   *  usado por quadro/interruptor/disjuntor há várias rodadas). A correção
+   *  de posição do relógio, portanto, é a MESMA receita desses objetos —
+   *  nenhum offset extra dedicado é necessário nem desejável (inventar um
+   *  deslocamento só pro relógio o desalinharia dos demais objetos de
+   *  parede, que o usuário já sabe posicionar). O que fica genuinamente
+   *  ERRADO sem esta função é só a ROTAÇÃO (acima) — que é o que o usuário
+   *  de fato reportou ("ficam deitados").
+   *
+   *  PONTEIROS — 3 meshes-filho FINOS (caixas achatadas, mais simples que
+   *  cilindros pra um ponteiro) nascem AQUI (montagem única) com pivô na
+   *  base (posição deslocada pra que a ORIGEM do mesh — em torno da qual o
+   *  ponteiro gira — fique no "eixo" do relógio, não no meio do ponteiro) e
+   *  são registrados em `this._relogiosParede` para `_updateRelogiosParede`
+   *  girar a cada quadro — ver ali pro EIXO/fórmula corretos (`rotation.y`,
+   *  não `rotation.z` — comentário grande de `_updateRelogiosParede`
+   *  explica com conta feita no Three.js real por que `rotation.z` girava
+   *  os ponteiros no plano ERRADO/deitado, o "lado errado" reportado pelo
+   *  usuário). Por isso o ponteiro nasce aqui apontando pro eixo **-Z
+   *  LOCAL** do `mesh` (não mais +Y): -Z local é quem, depois da postura
+   *  X+Y do `mesh`, cai em cima no mundo (+Y, "12 horas") — condição pra
+   *  girar em `rotation.y` (que no mundo corresponde à normal do
+   *  mostrador, +Z) e varrer certinho o plano vertical do rosto do relógio.
+   *
+   *  ESPESSURA — [15/09/2026, CORRIGIDO — pedido do usuário: "deve ter
+   *  ponteiros finos"] antes os ponteiros eram proporcionais ao raio `r` do
+   *  mostrador (`r*0.22`/`r*0.14`/`r*0.05` de largura — ficavam grossos
+   *  demais, mais parecidos com réguas que com ponteiros). Agora largura e
+   *  espessura são valores ABSOLUTOS em metros (não escalam com `r` — um
+   *  ponteiro de relógio de parede de verdade tem a mesma largura em cm
+   *  independente do relógio ser um pouco maior ou menor), na escala de um
+   *  ponteiro real: hora ~1,2cm de largura × 0,3cm de espessura, minuto mais
+   *  fino ~0,8cm × 0,25cm, segundo bem fino ~0,3cm × 0,2cm — só o
+   *  COMPRIMENTO continua proporcional a `r` (hora mais curto, minuto mais
+   *  longo, segundo o mais longo, convenção universal já usada no desenho
+   *  2D do relógio, ver mapview.js `_drawFormaShape`/drawHand). */
+  _buildRelogioMesh(obj, perfil, baseY, wireframe, colWireframe) {
+    const THREE = this.THREE;
+    const r = perfil.r || 0.15;
+    const h = perfil.h || 0.04;
+    const rotY = objAnguloToRotY(obj.angulo);
+    const geo = new THREE.CylinderGeometry(r, r, h, perfil.segments || 14);
+    // Marcações de hora — textura procedural (canvas 2D, gerada/cacheada
+    // UMA vez, ver `_getProceduralMostradorTexture` acima) aplicada como
+    // `map` do disco do mostrador. `color: 0xffffff` é OBRIGATÓRIO junto
+    // com `map`: `MeshLambertMaterial.color` MULTIPLICA a textura — deixar
+    // a cor do perfil (creme) aqui escureceria/tingiria os traços desenhados
+    // no canvas; a cor de fundo do mostrador já está pintada DENTRO do
+    // próprio canvas (mesma cor do perfil, ver função), então o resultado
+    // final bate com o visual de sempre, só que com os tracinhos por cima.
+    // Wireframe não ganha textura (não faz sentido/não aparece mesmo).
+    const mat = wireframe
+      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+      : new THREE.MeshLambertMaterial({ color: 0xffffff, map: this._getProceduralMostradorTexture(perfil.color) });
+    const mesh = new THREE.Mesh(geo, mat);
+    const centerY = baseY + perfil.y0 + r; // r, não h/2: de pé, a "altura" ocupada é o DIÂMETRO do mostrador, não a espessura do disco
+    mesh.position.set(obj.x, centerY, obj.y);
+    // Ver comentário grande acima pro porquê de X-antes-de-Y (Euler 'XYZ' padrão).
+    mesh.rotation.set(Math.PI / 2, rotY, 0);
+    this._group.add(mesh);
+
+    // Ponteiros — caixas finas e curtas, cor escura (contraste com o
+    // mostrador claro do perfil). São FILHOS de `mesh`: herdam
+    // automaticamente a posição/rotação de "de pé + virado pro ângulo
+    // certo" dele, então só precisam girar em `rotation.y` (ver comentário
+    // grande acima e o de `_updateRelogiosParede`) pra apontar a hora —
+    // nenhuma conta de mundo precisa ser refeita a cada quadro.
+    const matPonteiro = wireframe
+      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+      : new THREE.MeshLambertMaterial({ color: 0x2c313a });
+    const fazPonteiro = (comprimento, largura, espessura) => {
+      // Geometria com o PIVÔ na base (não no centro): X=largura (visível de
+      // frente), Y=espessura (fininho, no sentido que sai da parede),
+      // Z=comprimento (eixo em que o ponteiro se estende) — desloca a
+      // geometria em -comprimento/2 no eixo Z LOCAL, então a ORIGEM do mesh
+      // (em torno de onde `rotation.y` gira, ver comentário grande da
+      // função) fica no "eixo" do relógio, e o ponteiro nasce apontando
+      // pro -Z local, que cai em "12 horas" (+Y mundo, pra cima) antes de
+      // qualquer rotação de hora — exatamente como um ponteiro parado no
+      // 12 antes do relógio começar a andar.
+      const g = new THREE.BoxGeometry(largura, espessura, comprimento);
+      g.translate(0, 0, -comprimento / 2);
+      const m = new THREE.Mesh(g, matPonteiro);
+      // Levemente à frente do mostrador (eixo Y LOCAL do `mesh` — depois da
+      // rotação X acima, é ele quem cai na normal que sai da parede, +Z
+      // mundo — ver comentário grande da função) — evita z-fighting/
+      // "ponteiro sumindo dentro do disco".
+      m.position.y = h / 2 + 0.002;
+      mesh.add(m);
+      return m;
+    };
+    const ponteiroHora = fazPonteiro(r * 0.5, 0.012, 0.003);
+    const ponteiroMinuto = fazPonteiro(r * 0.72, 0.008, 0.0025);
+    const ponteiroSegundo = fazPonteiro(r * 0.8, 0.003, 0.002);
+
+    const raioPick = r * 1.3;
+    const objPos = { x: obj.x, y: centerY, z: obj.y };
+    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: raioPick, ref: obj, obb: { half: { x: r, y: r, z: h }, rotY, shape: 'box', segments: perfil.segments || 14 } };
+    this.pickables.push(objPick);
+    mesh.userData.pick = objPick;
+    this._pickMeshes.push(mesh);
+
+    // Registra pra `_updateRelogiosParede` (chamado todo quadro por
+    // view3d.js) girar os ponteiros conforme a hora do MUNDO
+    // (`window.RelogioMundo`, ver js/relogio-mundo.js) — não a hora do
+    // aparelho do usuário (`new Date()`), decisão consistente com o resto
+    // da infraestrutura do prédio (robôs de copa/limpeza/recepcionista já
+    // usam `RelogioMundo` pra saber se é hora do almoço etc.).
+    // [15/09/2026 UTC] BUG CORRIGIDO — pedido verbatim do usuário: "Acrescentei
+    // um script [fixando horaPonteiro/minutoPonteiro/segundoPonteiro], porém
+    // o relógio seguiu funcionando normalmente [ignorando o script]." CAUSA
+    // RAIZ: este `push` nunca guardava `obj` (só os 3 meshes de ponteiro) —
+    // `_updateRelogiosParede` já lia `r.obj?.horaPonteiro` etc. (ver
+    // comentário grande lá, RODADA anterior), mas `r.obj` era SEMPRE
+    // `undefined` porque a referência nunca tinha sido incluída aqui, então
+    // o `Number.isFinite(obj?.horaPonteiro)` sempre falhava e o relógio
+    // caía no fallback (hora do `RelogioMundo`) mesmo com um Script válido
+    // escrevendo os 3 campos todo quadro. Corrigido incluindo `obj` no
+    // objeto registrado.
+    this._relogiosParede.push({ obj, ponteiroHora, ponteiroMinuto, ponteiroSegundo });
+  }
+
+  /** [15/09/2026] NOVO — "quadro-mesa" (porta-retrato pequeno de mesa/
+   *  estante, ver `OBJECT3D_PROFILES['quadro-mesa']` em engine3d-
+   *  profiles.js). Único motivo de existir como builder DEDICADO em vez de
+   *  cair no ramo genérico (que os outros objetos de superfície simples
+   *  como cafeteira/pia usam): a inclinação FIXA (~12°) pedida, simulando
+   *  um porta-retrato "em pé", apoiado pra trás numa superfície — o ramo
+   *  genérico só aplica `rotation.y` (`objAnguloToRotY`), sem nenhum campo
+   *  pra inclinação extra em X/Z por tipo. Mesma ideia de `_buildRelogioMesh`
+   *  (rotação composta X+Y), só que aqui a inclinação em X é FIXA (não
+   *  depende de nenhuma hora/estado ao vivo) — nasce inclinado e nunca mais
+   *  muda, sem precisar de nenhum tick/`_update*` novo. */
+  _buildQuadroMesaMesh(obj, perfil, baseY, wireframe, colWireframe) {
+    const THREE = this.THREE;
+    const INCLINACAO = 12 * Math.PI / 180; // ~12°, pedido do usuário
+    const geo = new THREE.BoxGeometry(perfil.w, perfil.h, perfil.d);
+    const mat = wireframe
+      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+      : new THREE.MeshLambertMaterial({ color: perfil.color });
+    const mesh = new THREE.Mesh(geo, mat);
+    // Pivô na base (não no centro) — inclinar em torno do CENTRO faria o
+    // porta-retrato "afundar" na mesa de um lado; deslocando a geometria
+    // em +h/2 antes de qualquer rotação, a origem do mesh fica na BASE, e
+    // a inclinação em X gira o porta-retrato em torno dela mesma (igual um
+    // porta-retrato de verdade balançando sobre o pé de apoio).
+    geo.translate(0, perfil.h / 2, 0);
+    const centerY = baseY + perfil.y0;
+    mesh.position.set(obj.x, centerY, obj.y);
+    const rotY = objAnguloToRotY(obj.angulo);
+    mesh.rotation.set(INCLINACAO, rotY, 0);
+    this._group.add(mesh);
+    const raioPick = Math.max(perfil.w, perfil.d) * 0.6;
+    const objPos = { x: obj.x, y: centerY + perfil.h / 2, z: obj.y };
+    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: raioPick, ref: obj, obb: { half: { x: perfil.w / 2, y: perfil.h / 2, z: perfil.d / 2 }, rotY, shape: 'box', segments: 14 } };
+    this.pickables.push(objPick);
+    mesh.userData.pick = objPick;
+    this._pickMeshes.push(mesh);
   }
 
   /** Remove e descarta (geometria/material — NÃO a textura do chão nem a do
@@ -6134,10 +8751,36 @@ class Engine3D {
     // instância` — cada "olho" cresce/encolhe seu próprio buffer sem afetar
     // nenhum outro "olho" ativo ao mesmo tempo.
     if (this._eye) {
-      const w = this.canvas.clientWidth || 1, h = this.canvas.clientHeight || 1;
-      if (w === this._lastW && h === this._lastH && dpr === this._lastDpr) return;
-      this._lastW = w; this._lastH = h; this._lastDpr = dpr;
-      const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr));
+      // [13/09/2026] NOVO — resolução customizada (ver comentário grande no
+      // construtor sobre `this._customRes`): quando presente, o TAMANHO DE
+      // RENDERIZAÇÃO (render target + buffers + câmera) vem dela — fixo,
+      // em pixels reais, SEM multiplicar por `dpr` (o campo já pede
+      // "pixels" diretamente nas Configurações 3D, não "pontos CSS") — em
+      // vez do tamanho CSS do canvas × dpr, que é o que continua valendo
+      // quando `_customRes` é `null` ("Automática", ramo de sempre, 100%
+      // inalterado). O TAMANHO CSS do canvas (`cw`/`ch`, layout normal da
+      // tela) NÃO muda — o "encaixe" de uma resolução de renderização
+      // `pw`×`ph` diferente do tamanho CSS do canvas é resolvido de graça
+      // pelo próprio navegador: `this.canvas.width/height` (mais abaixo)
+      // viram `pw`/`ph` (não `cw`×dpr/`ch`×dpr como no ramo "Automática"),
+      // e todo `<canvas>` já estica seu buffer de pixels pra caber na caixa
+      // CSS sozinho — é exatamente o "Esticar" pedido, sem nenhum desenho
+      // extra. "Caber" (preservar proporção, barras pretas) é só CSS
+      // `object-fit:contain` + fundo preto por cima disso — ver
+      // view3d.js `_applyResolucaoCustom3D`, que aplica esse `object-fit`
+      // no elemento `<canvas>` conforme `this._customRes.fit`.
+      // `_presentToCanvas()` (mais abaixo) continua desenhando 1:1 dentro
+      // do buffer `pw`×`ph` do PRÓPRIO canvas, sem saber de "esticar"/
+      // "caber" — é só o CSS por fora que decide como esse buffer aparece
+      // na tela.
+      const cw = this.canvas.clientWidth || 1, ch = this.canvas.clientHeight || 1;
+      const custom = this._customRes;
+      const w = custom ? custom.w : cw, h = custom ? custom.h : ch;
+      const effDpr = custom ? 1 : dpr;
+      if (w === this._lastW && h === this._lastH && effDpr === this._lastDpr && cw === this._lastCw && ch === this._lastCh) return;
+      this._lastW = w; this._lastH = h; this._lastDpr = effDpr;
+      this._lastCw = cw; this._lastCh = ch;
+      const pw = Math.max(1, Math.round(w * effDpr)), ph = Math.max(1, Math.round(h * effDpr));
       this.renderTarget.setSize(pw, ph);
       this._rtPixelW = pw; this._rtPixelH = ph;
       this._rtPixelBuffer = new Uint8Array(pw * ph * 4);
@@ -6170,7 +8813,61 @@ class Engine3D {
       this._rtOffscreen.width = pw; this._rtOffscreen.height = ph;
       this.camera3.aspect = w / h;
       this.camera3.updateProjectionMatrix();
-      if (this._outlineCanvas) { this._outlineCanvas.width = w; this._outlineCanvas.height = h; }
+      if (this._outlineCanvas) {
+        this._outlineCanvas.width = w; this._outlineCanvas.height = h;
+        // [correção 13/09/2026] BUG RELATADO PELO USUÁRIO (persistia mesmo
+        // depois da 1ª tentativa de correção, que só mexeu em
+        // `_pickAtClientPoint`/view3d.js — aquela correção resolve o RAIO do
+        // clique/mira do mouse real nos modos "Ver através desta
+        // câmera"/"órbita", mas o destaque em si (o contorno pontilhado
+        // desenhado ao redor do objeto mirado) é pintado num <canvas> 2D
+        // SEPARADO — `this._outlineCanvas`, ver construtor — que é
+        // posicionado por CSS com `position:absolute; inset:0` (ver
+        // `.v3d-hover-outline-canvas` em css/style.css): isso faz ele
+        // SEMPRE esticar por cima da caixa CSS INTEIRA do canvas WebGL
+        // irmão, não importa o que `object-fit` daquele canvas esteja
+        // fazendo. Com "Caber" (`object-fit:contain`), o WebGL desenha seu
+        // conteúdo ENCOLHIDO/centralizado dentro da caixa (barras pretas
+        // nas laterais ou em cima/baixo) — mas o canvas do contorno
+        // continuava desenhando (com coordenadas internas corretas, já que
+        // `width`/`height` acima já são `w`/`h` certos) esticado pra caixa
+        // INTEIRA, então o contorno aparecia deslocado/fora de escala em
+        // relação à imagem 3D real — exatamente "como se estivesse em
+        // Esticar", só que agora É POR CIMA da imagem certa (o raio já foi
+        // corrigido), não no raio em si. Corrigido posicionando este canvas
+        // (via `style.left/top/width/height` inline, sobrepondo o
+        // `inset:0` do CSS) no MESMO sub-retângulo "letterboxed" que o
+        // navegador desenha o conteúdo do canvas WebGL — mesma matemática
+        // de `object-fit:contain` já usada em `view3d.js`
+        // `_computeContainRect` (duplicada aqui em vez de chamada de lá
+        // porque `Engine3D` não deve depender de `View3D` — sentido
+        // contrário de dependência do resto do arquivo). `cw`/`ch` (a caixa
+        // CSS cheia, calculados logo acima) e `w`/`h` (o conteúdo,
+        // `custom.w`/`custom.h`) já estão em escopo aqui.
+        if (custom && custom.fit === 'caber' && cw && ch) {
+          const boxRatio = cw / ch, contentRatio = w / h;
+          let left = 0, top = 0, dispW = cw, dispH = ch;
+          if (boxRatio > contentRatio) {
+            dispW = ch * contentRatio;
+            left = (cw - dispW) / 2;
+          } else {
+            dispH = cw / contentRatio;
+            top = (ch - dispH) / 2;
+          }
+          this._outlineCanvas.style.left = `${left}px`;
+          this._outlineCanvas.style.top = `${top}px`;
+          this._outlineCanvas.style.width = `${dispW}px`;
+          this._outlineCanvas.style.height = `${dispH}px`;
+        } else {
+          // "Automática"/"Esticar": limpa qualquer override anterior — volta
+          // a valer o `inset:0` do CSS (cobre a caixa inteira), 100%
+          // comportamento de sempre.
+          this._outlineCanvas.style.left = '';
+          this._outlineCanvas.style.top = '';
+          this._outlineCanvas.style.width = '';
+          this._outlineCanvas.style.height = '';
+        }
+      }
       return;
     }
     const w = this.canvas.clientWidth || 1, h = this.canvas.clientHeight || 1;
@@ -6895,7 +9592,22 @@ class Engine3D {
     // Modelador, "travado" destacando o objeto de antes. Corrigido: pula o
     // destaque de mira inteiro enquanto o Modelador está ativo (ele tem o
     // seu PRÓPRIO sistema de destaque de seleção, ver modeler-render.js).
-    if (!window.Modeler3D?.isActive?.()) this._updateHoverHighlight(camera);
+    // [16/09/2026 UTC] NOVO — pedido verbatim do usuário (Trena 3D, seção
+    // nova de ⚙️ Configurações 3D): "deixar de fazer o destaque feito pelo
+    // raycaster (onde ele bate) enquanto está ativa a linha perpendicular
+    // (consequência de ter segurado o ctrl antes). Por padrão ativa."
+    // `this._suppressHoverHighlight` é setado por `view3d.js` (ver
+    // `setHoverHighlightSuppressed` logo abaixo) sempre que a âncora da
+    // Trena 3D estiver ativa (Ctrl segurado ou já commitada) E a opção
+    // `trena3DSuprimirDestaqueDuranteAncora` estiver ligada (padrão) — o
+    // destaque normal (contorno pontilhado no chão/parede/objeto sob a
+    // mira) não faz muito sentido nesse momento, já que a mira está sendo
+    // usada pra escolher uma ALTURA na reta vertical, não pra selecionar
+    // algo de verdade. `clearHoverHighlight()` garante que nenhum destaque
+    // "congelado" do quadro anterior fique preso na tela (mesmo motivo já
+    // documentado acima pro Modelador 3D).
+    if (!window.Modeler3D?.isActive?.() && !this._suppressHoverHighlight) this._updateHoverHighlight(camera);
+    else if (this._suppressHoverHighlight) this.clearHoverHighlight();
     // NOVO (01/09/2026), item GRANDE #5, decisão do usuário (AskUserQuestion):
     // "Automático por distância" — precisa ser chamado todo quadro (API do
     // próprio THREE.LOD: `.update(camera)` decide qual nível fica visível
@@ -6905,6 +9617,17 @@ class Engine3D {
     // (nenhum tipo customizado nos dois níveis ainda) — custo zero nesse caso.
     (this._lodObjects || []).forEach((lod) => lod.update(this.camera3));
     this._updateDistanceCulling(camera);
+    // [13/09/2026 UTC] NOVO — ver comentário grande de _buildOcclusionSectors
+    // (mais acima) pro sistema completo. Roda DEPOIS de
+    // _updateDistanceCulling de propósito: só ESCONDE em cima do que a
+    // distância já decidiu, nunca reexibe nada.
+    this._updateSectorOcclusionCulling(camera);
+    // [13/09/2026 UTC] NOVO — ver comentário grande de
+    // _updateFrameBudgetCulling (mais abaixo) pro sistema completo/pedido.
+    // Roda por ÚLTIMO dos 3 cortes de propósito: só decide entre quem já
+    // sobreviveu à distância E ao setor — nunca reexibe ninguém que os
+    // cortes anteriores já esconderam.
+    this._updateFrameBudgetCulling(camera);
     this._updateItemBadgeOcclusion(camera);
     this._updateEffects();
     // REESCRITO (07/09/2026), arquitetura WebGLRenderTarget — ver "MODO EYE"
@@ -6929,6 +9652,39 @@ class Engine3D {
     // redimensionar" no Modelador (ver comentário grande em
     // `_presentFrame`, acima).
     this._presentFrame();
+  }
+
+  /** [13/09/2026] NOVO — pedido verbatim: "Entre eles [posição X/Y/Z e FPS
+   *  do rodapé de 'Ver em 3D'], coloque a quantidade de objetos que está
+   *  sendo renderizada naquele frame." Lido pelo HUD (view3d.js) LOGO DEPOIS
+   *  de `render()`/`_presentFrame()` terem chamado `renderer.render(...)`
+   *  de verdade neste mesmo quadro — o three.js zera e recalcula
+   *  `renderer.info.render` automaticamente a CADA chamada de
+   *  `renderer.render()` (`autoReset` do `WebGLRenderer.info`, ligado por
+   *  padrão nesta versão — não desligamos em lugar nenhum deste projeto),
+   *  então os números aqui são sempre os do quadro que ACABOU de ser
+   *  desenhado na tela, nunca de um quadro antigo.
+   *  - `drawCalls`: `renderer.info.render.calls` — quantas chamadas de
+   *    desenho a GPU recebeu de verdade neste quadro. É o número que mais
+   *    importa pra desempenho: um `THREE.InstancedMesh` com 500 cadeiras
+   *    conta como 1 draw call só (não 500), então este número reflete bem
+   *    melhor o custo real de GPU do que a contagem "lógica" de objetos.
+   *  - `triangles`: `renderer.info.render.triangles` — total de triângulos
+   *    de verdade enviados pra GPU neste quadro (soma todas as instâncias de
+   *    todo InstancedMesh desenhado, não só 1 por pool).
+   *  - `pickables`: `this.pickables.length` — contagem "lógica", 1 por
+   *    objeto/item/câmera do mapa (igual ao 2D), pra dar noção de quantos
+   *    OBJETOS existem no total, independente de quantos viraram draw calls
+   *    (a diferença entre este número e `drawCalls` É o efeito de
+   *    agrupamento do pool de InstancedMesh + frustum/distância culling —
+   *    ver `_rebuildInstancedPools`/`_updateDistanceCulling`). */
+  getRenderInfo() {
+    const info = this.renderer?.info;
+    return {
+      drawCalls: info?.render?.calls || 0,
+      triangles: info?.render?.triangles || 0,
+      pickables: this.pickables?.length || 0,
+    };
   }
 
   /** Chamado a cada quadro — decide se o selo "🔗 item associado"/flags de
@@ -6976,6 +9732,39 @@ class Engine3D {
       const bloqueado = this._raycaster.intersectObjects(meshes, false).length > 0;
       g.sprites.forEach((s) => { s.visible = !bloqueado; });
     });
+  }
+
+  /** [16/09/2026 UTC] NOVO — pedido verbatim do usuário (Trena 3D, seção
+   *  "Visibilidade" de ⚙️ Configurações 3D): "imprimir se estiver visível
+   *  [...] se tiver objetos 'na frente' e a medida estiver atrás desse
+   *  objeto (de acordo com a perspectiva da câmera), então, a medida não
+   *  aparece." DIFERENTE de `_updateItemBadgeOcclusion`/
+   *  `_wallOcclusionMeshes` acima (só parede/porta/janela contam) — aqui
+   *  QUALQUER pickable de verdade bloqueia (inclusive objetos comuns),
+   *  porque o pedido explicitamente cita "objetos na frente", não só
+   *  arquitetura. Usa `this._pickMeshes` (a lista geral, já mantida por
+   *  `setScene`/toda vez que algo é adicionado/removido — ver
+   *  `_setupWallOcclusionMeshes` acima pro subconjunto usado pelos selos)
+   *  em vez de uma lista dedicada nova. Raycast simples de `fromPos` até
+   *  `toPos`; `-0.05` no alcance (mesmo padrão de `_updateItemBadgeOcclusion`)
+   *  evita falso-bloqueio por encostar exatamente na superfície de chegada.
+   *  Retorna `false` (nunca bloqueado) se as malhas ainda não existirem ou
+   *  a distância for desprezível — chamador (`view3d.js`
+   *  `_trena3DAtualizarOclusao`) decide o que fazer com isso. */
+  isSegmentOccluded(fromPos, toPos) {
+    const THREE = this.THREE;
+    const meshes = this._pickMeshes;
+    if (!THREE || !meshes || !meshes.length) return false;
+    const dx = toPos.x - fromPos.x, dy = toPos.y - fromPos.y, dz = toPos.z - fromPos.z;
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist < 1e-4) return false;
+    this._raycaster.set(
+      new THREE.Vector3(fromPos.x, fromPos.y, fromPos.z),
+      new THREE.Vector3(dx / dist, dy / dist, dz / dist),
+    );
+    this._raycaster.near = 0;
+    this._raycaster.far = Math.max(0.01, dist - 0.05);
+    return this._raycaster.intersectObjects(meshes, false).length > 0;
   }
 
   // ---------- "Recolhedor" de itens no 3D (pedido do usuário: "como no
@@ -7549,6 +10338,16 @@ class Engine3D {
     if (this._outlineCtx && this._outlineCanvas) this._outlineCtx.clearRect(0, 0, this._outlineCanvas.width, this._outlineCanvas.height);
   }
 
+  /** [16/09/2026 UTC] NOVO — liga/desliga a supressão do destaque de mira
+   *  (ver o `if` em `render()` acima) — chamado por `view3d.js`
+   *  (`_trena3DAtualizarDestaqueSuprimido`) todo quadro que a "📏 Trena 3D"
+   *  estiver com a âncora ativa e a opção correspondente ligada. Público
+   *  (em vez de `view3d.js` mexer direto num campo interno) pelo mesmo
+   *  espírito de outros setters deste arquivo (`setPickExclude` etc.). */
+  setHoverHighlightSuppressed(v) {
+    this._suppressHoverHighlight = !!v;
+  }
+
   /** Reposiciona/reescala (nunca recria) as 3 malhas de destaque + o canvas
    *  de contorno 2D conforme o resultado de hoverPick deste quadro — só um
    *  destaque fica visível por vez (o mais próximo no raio da mira).
@@ -7575,6 +10374,50 @@ class Engine3D {
     const rayOverride = this._hoverScreenNdc ? this.rayFromScreenPoint(this._hoverScreenNdc.x, this._hoverScreenNdc.y) : null;
     const hit = this.hoverPick(camera, rayOverride);
     if (!hit) return;
+
+    // [13/09/2026] NOVO — pedido verbatim: com "Pixel perfect" marcado
+    // (`raycastPrecision === 'pixelperfect'`), o objeto em destaque/mira
+    // (o único conceito de "selecionado" que existe hoje no 3D — este app
+    // não guarda um objeto "selecionado" persistente à parte do que a mira
+    // está tocando; ver `hoverPick`/`_tryPick` acima) deve ganhar um
+    // CONTORNO PONTILHADO seguindo a silhueta externa 2D dele, estilo
+    // "seleção" de jogos (The Sims/Minecraft), via pós-processamento.
+    //
+    // TÉCNICA PEDIDA vs. TÉCNICA USADA (honestidade, histórico): o usuário
+    // descreveu literalmente uma Outline Pass via Custom Shader — renderizar
+    // o objeto numa máscara/render target à parte, detectar bordas com
+    // Sobel/Laplacian, e aplicar o padrão pontilhado em função de
+    // `gl_FragCoord`. Numa rodada anterior, sem acesso a navegador pra testar
+    // um shader ao vivo, foi implementada por prudência uma versão
+    // SIMPLIFICADA reaproveitando `_drawOutline2D` (fecho convexo 2D +
+    // `ctx.setLineDash`, sem shader nenhum).
+    //
+    // [22/09/2026] Pedido explícito de retomar e implementar de verdade —
+    // ver `_tryOutlineSobelPass`/`_ensureOutlineSobelResources`/
+    // `_renderOutlineSobelPass` (mais abaixo): agora existe um pipeline REAL
+    // de pós-processamento (máscara em render target próprio + `ShaderPass`
+    // manual com kernel de Sobel + padrão pontilhado via `gl_FragCoord`,
+    // adaptado à arquitetura "eye" do motor — three.js deste projeto
+    // continua sem os módulos de `examples/jsm/postprocessing`, então o
+    // "ShaderPass" é escrito à mão com `WebGLRenderTarget`+`ShaderMaterial`+
+    // quad de tela cheia, sem depender deles). `_drawOutline2D` continua
+    // existindo e agora é só o FALLBACK automático (`_tryOutlineSobelPass`
+    // devolve `false` em qualquer erro) — nunca mais é o caminho principal
+    // quando o pipeline Sobel funciona.
+    //
+    // Fica isolado: só entra neste `if` quando pixelperfect está ativo E
+    // já existe um `hit` de mira (aborta antes disso, linha acima) — fora
+    // dessas condições o comportamento é 100% o de antes (zero overhead,
+    // zero mudança), exatamente como pedido.
+    if (this._config.raycastPrecision === 'pixelperfect') {
+      // [22/09/2026] Tenta o pipeline REAL de pós-processamento (Sobel +
+      // pontilhado via shader, ver `_tryOutlineSobelPass`/comentário grande
+      // em `_ensureOutlineSobelResources`) primeiro; qualquer falha (ou
+      // alvo sem malha real, ex. chão/parede) cai automaticamente pro
+      // contorno 2D aproximado de sempre — nunca fica sem contorno nenhum.
+      if (!this._tryOutlineSobelPass(hit, camera)) this._drawOutline2D(hit, camera);
+      return;
+    }
 
     const style = this._config.raycastHighlightStyle;
     if (style === 'outline2d') {
@@ -7740,6 +10583,239 @@ class Engine3D {
     ctx.restore();
   }
 
+  /** [22/09/2026] NOVO — pedido verbatim (retomado): "Sobre o pontilhado na
+   *  silhueta do objeto, se conseguir, implemente." — implementação REAL da
+   *  técnica descrita originalmente pelo usuário ("Pós-processamento com
+   *  Custom Shader (Outline Pass) [...] filtro de detecção de borda (Sobel/
+   *  Laplacian Kernel) [...] padrão pontilhado com base na posição da tela
+   *  fmod(gl_FragCoord.x, dashSize)"), substituindo o contorno 2D aproximado
+   *  (`_drawOutline2D`, acima) sempre que possível — que continua existindo
+   *  e vira o FALLBACK automático (ver `_tryOutlineSobelPass`, chamado por
+   *  `_updateHoverHighlight`) se este pipeline falhar por qualquer motivo.
+   *
+   *  ARQUITETURA (adaptada à arquitetura "eye" já existente do motor — TODA
+   *  instância de Engine3D usa `{eye:true}`, ver comentário grande no
+   *  construtor: a imagem final não vai pro WebGL diretamente, é lida de
+   *  volta pra CPU via `readRenderTargetPixels` e composta em cima de um
+   *  `<canvas>` 2D visível, `_presentToCanvas`. Este pipeline segue
+   *  EXATAMENTE o mesmo padrão já usado por `_renderGlassOnlyPass`/
+   *  `_renderBackdropEnvPass`: um passe GPU extra, à parte, cujo resultado é
+   *  lido pra CPU e composto por cima com `drawImage`):
+   *
+   *  1) `_ensureOutlineSobelResources` (lazy, uma vez só, sob demanda —
+   *     nunca aloca nada enquanto pixelperfect não é usado) cria:
+   *     - `maskScene`/`maskRT`: uma CENA AUXILIAR mínima (nunca a cena
+   *       principal) que só recebe, a cada quadro, CLONES das malhas reais
+   *       do objeto em mira (mesmas malhas de `this._pickMeshes`, na pose
+   *       exata de agora) com um material branco-sólido
+   *       (`MeshBasicMaterial` — a técnica nativa `scene.overrideMaterial`
+   *       funcionaria igual aqui, mas manter uma cena isolada e pequena é
+   *       mais barato do que aplicar/desfazer override na cena principal
+   *       inteira todo quadro). Fundo preto → máscara branco-no-preto.
+   *     - `quadScene`/`quadCamera`/`quadMesh`/`quadRT`: o "ShaderPass"
+   *       manual pedido — um quad de tela cheia (`PlaneGeometry(2,2)` +
+   *       `OrthographicCamera(-1,1,1,-1,0,1)`) com um `ShaderMaterial`
+   *       próprio que roda o kernel de Sobel (8 vizinhos da máscara) e,
+   *       nas bordas encontradas, aplica o padrão pontilhado via
+   *       `gl_FragCoord` — ver o GLSL abaixo pra mais detalhes.
+   *  2) `_renderOutlineSobelPass` roda os dois passes por quadro (máscara →
+   *     Sobel+pontilhado), lê o resultado pra CPU e compõe por cima do
+   *     canvas OVERLAY 2D já existente (`this._outlineCanvas`/`_outlineCtx`
+   *     — o MESMO canvas que `_drawOutline2D` já usava, nunca o canvas
+   *     principal do WebGL) via `putImageData`+`drawImage` — assim não
+   *     precisa se preocupar com a ORDEM em relação a `_presentFrame()`
+   *     (que já reescreve o canvas principal inteiro todo quadro): o
+   *     overlay é sempre desenhado por cima, sempre depois, como já era.
+   *  3) `renderer.autoClear`: NUNCA é tocado por este pipeline — cada passe
+   *     usa `renderer.setRenderTarget(alvo)`+`renderer.render(...)`, que
+   *     limpa/escreve só naquele render target próprio, isolado do canvas
+   *     principal; `finally` garante `setRenderTarget(null)` de volta
+   *     mesmo se o passe do meio falhar, e a cor de limpeza do renderer
+   *     compartilhado é salva/restaurada (ela É global, ao contrário do
+   *     render target).
+   *  4) Redimensionamento: `_resize()` (mesmo handler de sempre, ramo
+   *     "eye") redimensiona `maskRT`/`quadRT`/o buffer de leitura junto com
+   *     os outros render targets da instância, só quando já existem
+   *     (nunca força a criação lazy).
+   *  5) FALLBACK: `_tryOutlineSobelPass` (chamado por
+   *     `_updateHoverHighlight`) envolve TUDO isto em try/catch — qualquer
+   *     erro (falha de compilação do shader, WebGL sem suporte a algo,
+   *     etc.) é logado (`console.warn('[Engine3D] pipeline de contorno
+   *     Sobel falhou...')`), marca `this._outlineSobelUnavailable = true`
+   *     (não tenta de novo nos próximos quadros — sem overhead repetido de
+   *     tentativa-e-erro) e devolve `false`, fazendo `_updateHoverHighlight`
+   *     cair automaticamente de volta pro `_drawOutline2D` de sempre — a
+   *     cena NUNCA fica sem contorno nenhum nem trava por causa disto.
+   *
+   *  LIMITAÇÃO honesta (documentada, aceita conscientemente): a máscara é
+   *  renderizada numa cena isolada contendo SÓ o objeto em mira (sem o
+   *  resto do cenário) — a silhueta detectada pelo Sobel não é ocluída por
+   *  outros objetos reais na frente dele (ao contrário do `_drawOutline2D`
+   *  antigo, que também não fazia isso, então não é uma regressão). Cobrir
+   *  oclusão de verdade exigiria renderizar a CENA PRINCIPAL inteira com
+   *  `overrideMaterial` branco só no alvo e preto/oculto no resto — mais
+   *  caro por quadro e fora do pedido original ("funciona perfeitamente
+   *  para qualquer formato 3D complexo sem criar geometrias extras", que já
+   *  está satisfeito por este pipeline). */
+  _ensureOutlineSobelResources() {
+    if (this._outlineSobel) return this._outlineSobel;
+    const THREE = this.THREE;
+    const w = Math.max(1, this._rtPixelW || 1);
+    const h = Math.max(1, this._rtPixelH || 1);
+    const maskScene = new THREE.Scene();
+    const maskMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const maskRT = new THREE.WebGLRenderTarget(w, h, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true });
+    const quadScene = new THREE.Scene();
+    const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    // GLSL ES 1.00 (WebGL1) — MESMA versão implícita de todo `ShaderMaterial`
+    // do three.js sem `glslVersion` setado (não há nenhum outro
+    // `ShaderMaterial` neste projeto pra confirmar convenção local, mas é o
+    // PADRÃO da própria biblioteca — `attribute`/`varying`/`texture2D`, não
+    // `in`/`out`/`texture` de GLSL3).
+    const quadMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tMask: { value: maskRT.texture },
+        texel: { value: new THREE.Vector2(1 / w, 1 / h) },
+        threshold: { value: 0.35 },
+        dashSize: { value: 9.0 },
+        outlineColor: { value: new THREE.Color(0xfff275) },
+      },
+      vertexShader: [
+        'varying vec2 vUv;',
+        'void main() {',
+        '  vUv = uv;',
+        '  gl_Position = vec4(position.xy, 0.0, 1.0);',
+        '}',
+      ].join('\n'),
+      fragmentShader: [
+        'precision mediump float;',
+        'varying vec2 vUv;',
+        'uniform sampler2D tMask;',
+        'uniform vec2 texel;',
+        'uniform float threshold;',
+        'uniform float dashSize;',
+        'uniform vec3 outlineColor;',
+        'float lum(vec2 uv) {',
+        '  return texture2D(tMask, uv).r;',
+        '}',
+        'void main() {',
+        '  float tl = lum(vUv + texel * vec2(-1.0,  1.0));',
+        '  float tc = lum(vUv + texel * vec2( 0.0,  1.0));',
+        '  float tr = lum(vUv + texel * vec2( 1.0,  1.0));',
+        '  float ml = lum(vUv + texel * vec2(-1.0,  0.0));',
+        '  float mr = lum(vUv + texel * vec2( 1.0,  0.0));',
+        '  float bl = lum(vUv + texel * vec2(-1.0, -1.0));',
+        '  float bc = lum(vUv + texel * vec2( 0.0, -1.0));',
+        '  float br = lum(vUv + texel * vec2( 1.0, -1.0));',
+        '  float gx = -tl - 2.0 * ml - bl + tr + 2.0 * mr + br;',
+        '  float gy = -tl - 2.0 * tc - tr + bl + 2.0 * bc + br;',
+        '  float edge = sqrt(gx * gx + gy * gy);',
+        '  if (edge <= threshold) { discard; }',
+        '  float fase = mod(gl_FragCoord.x + gl_FragCoord.y, dashSize * 2.0);',
+        '  if (fase >= dashSize) { discard; }',
+        '  gl_FragColor = vec4(outlineColor, 1.0);',
+        '}',
+      ].join('\n'),
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const quadMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), quadMaterial);
+    quadMesh.frustumCulled = false;
+    quadScene.add(quadMesh);
+    const quadRT = new THREE.WebGLRenderTarget(w, h, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+    this._outlineSobel = { maskScene, maskMat, maskRT, quadScene, quadCamera, quadMesh, quadMaterial, quadRT, w, h, pixelBuffer: new Uint8Array(w * h * 4) };
+    return this._outlineSobel;
+  }
+
+  /** Roda os 2 passes (máscara → Sobel+pontilhado) e compõe o resultado por
+   *  cima do canvas overlay 2D (`_outlineCanvas`) — ver comentário grande em
+   *  `_ensureOutlineSobelResources` pra arquitetura completa. `meshes` são
+   *  as malhas REAIS (de `this._pickMeshes`) do objeto em mira, já filtradas
+   *  por `_tryOutlineSobelPass`. Devolve `true` em caso de sucesso. Lança
+   *  (não captura) em caso de erro — `_tryOutlineSobelPass` é quem captura e
+   *  aciona o fallback. */
+  _renderOutlineSobelPass(res, meshes) {
+    const THREE = this.THREE;
+    if (res.w !== (this._rtPixelW || res.w) || res.h !== (this._rtPixelH || res.h)) {
+      // Segurança extra: se por algum motivo `_resize()` ainda não rodou
+      // pra este quadro (ex.: primeiro quadro depois de reabrir o 3D),
+      // realinha aqui também — nunca lê/escreve um buffer do tamanho
+      // errado.
+      const w = Math.max(1, this._rtPixelW || res.w), h = Math.max(1, this._rtPixelH || res.h);
+      res.maskRT.setSize(w, h);
+      res.quadRT.setSize(w, h);
+      res.quadMaterial.uniforms.texel.value.set(1 / w, 1 / h);
+      res.pixelBuffer = new Uint8Array(w * h * 4);
+      res.w = w; res.h = h;
+    }
+    while (res.maskScene.children.length) res.maskScene.remove(res.maskScene.children[0]);
+    meshes.forEach((m) => {
+      const clone = new THREE.Mesh(m.geometry, res.maskMat);
+      clone.position.copy(m.position);
+      clone.rotation.copy(m.rotation);
+      clone.scale.copy(m.scale);
+      res.maskScene.add(clone);
+    });
+    const prevClearColor = new THREE.Color();
+    this.renderer.getClearColor(prevClearColor);
+    const prevClearAlpha = this.renderer.getClearAlpha();
+    try {
+      this.renderer.setClearColor(0x000000, 1);
+      this.renderer.setRenderTarget(res.maskRT);
+      this.renderer.setViewport(0, 0, res.w, res.h);
+      this.renderer.render(res.maskScene, this.camera3);
+      res.quadMaterial.uniforms.tMask.value = res.maskRT.texture;
+      this.renderer.setClearColor(0x000000, 0);
+      this.renderer.setRenderTarget(res.quadRT);
+      this.renderer.setViewport(0, 0, res.w, res.h);
+      this.renderer.render(res.quadScene, res.quadCamera);
+      Engine3D._sharedRenderer.readRenderTargetPixels(res.quadRT, 0, 0, res.w, res.h, res.pixelBuffer);
+    } finally {
+      this.renderer.setRenderTarget(null);
+      this.renderer.setClearColor(prevClearColor, prevClearAlpha);
+    }
+    const w = this._outlineCanvas.width, h = this._outlineCanvas.height;
+    if (!w || !h) return false;
+    const imgData = new ImageData(new Uint8ClampedArray(res.pixelBuffer.buffer, res.pixelBuffer.byteOffset, res.pixelBuffer.length), res.w, res.h);
+    this._rtOffCtx.putImageData(imgData, 0, 0);
+    const ctx = this._outlineCtx;
+    ctx.save();
+    // A imagem lida do render target vem em resolução de DISPOSITIVO
+    // (`res.w × res.h`, já multiplicada pelo dpr — ver `_resize`), e com a
+    // linha 0 correspondendo ao canto INFERIOR (convenção OpenGL) — mesma
+    // inversão vertical já feita em `_presentToCanvas` pro canvas
+    // principal, necessária aqui pelo MESMO motivo. `drawImage` com
+    // retângulo de origem/destino faz o reescalonamento pra resolução CSS
+    // (`w × h`) do overlay sozinho.
+    ctx.setTransform(1, 0, 0, -1, 0, h);
+    ctx.drawImage(this._rtOffscreen, 0, 0, res.w, res.h, 0, 0, w, h);
+    ctx.restore();
+    return true;
+  }
+
+  /** Ponto de entrada chamado por `_updateHoverHighlight` quando
+   *  `raycastPrecision === 'pixelperfect'`: tenta o pipeline Sobel de
+   *  verdade (acima); em qualquer falha — inclusive "este tipo de alvo não
+   *  tem malha real registrada", caso de chão/parede — devolve `false` e
+   *  quem chamou cai pro `_drawOutline2D` de sempre. Ver comentário grande
+   *  em `_ensureOutlineSobelResources` pro resto dos detalhes/fallback. */
+  _tryOutlineSobelPass(hit, camera) {
+    if (this._outlineSobelUnavailable) return false;
+    if (!this._outlineCanvas || !this._outlineCtx || !this._rtOffCtx || !this._rtOffscreen) return false;
+    const meshes = (this._pickMeshes || []).filter((m) => m.userData?.pick === hit);
+    if (!meshes.length) return false; // chão/parede etc. não têm _pickMeshes — o 2D já cobre esses via hit.obb
+    try {
+      const res = this._ensureOutlineSobelResources();
+      if (!res) return false;
+      return this._renderOutlineSobelPass(res, meshes);
+    } catch (e) {
+      console.warn('[Engine3D] pipeline de contorno Sobel falhou, revertendo pro contorno 2D simples:', e);
+      this._outlineSobelUnavailable = true;
+      return false;
+    }
+  }
+
   /** Libera os recursos de GPU (contexto WebGL, geometrias, materiais,
    *  texturas) — chamado por View3D.unmount(). Sem isto, abrir/fechar a
    *  visualização 3D repetidamente vazaria contextos WebGL (o navegador só
@@ -7798,6 +10874,20 @@ class Engine3D {
     this._outlineCanvas?.remove?.();
     this._outlineCanvas = null;
     this._outlineCtx = null;
+    // Pipeline Sobel do contorno pontilhado (ver comentário grande em
+    // `_ensureOutlineSobelResources`) — só existe se pixelperfect chegou a
+    // ser usado nesta instância (lazy); libera os 2 render targets/o
+    // material do shader, senão vazaria GPU a cada visita à tela 3D, mesmo
+    // motivo de todo o resto deste dispose().
+    if (this._outlineSobel) {
+      this._outlineSobel.maskRT?.dispose?.();
+      this._outlineSobel.quadRT?.dispose?.();
+      this._outlineSobel.maskMat?.dispose?.();
+      this._outlineSobel.quadMaterial?.dispose?.();
+      this._outlineSobel.quadMesh?.geometry?.dispose?.();
+      this._outlineSobel = null;
+    }
+    this._outlineSobelUnavailable = false;
     // REESCRITO (07/09/2026), arquitetura WebGLRenderTarget — ver "MODO EYE"
     // no construtor. Em modo "eye", `this.renderer` continua sendo
     // `Engine3D._sharedRenderer`, usado por QUALQUER OUTRO "olho" que ainda

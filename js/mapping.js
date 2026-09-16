@@ -397,6 +397,262 @@ const Mapping = {
     };
   },
 
+  /**
+   * [13/09/2026] NOVO — irmã de `filterByLayerVisibility` (mesmo espírito,
+   * mesma forma), só que filtrando por ANDAR em vez de por camada: devolve
+   * uma CÓPIA rasa do mapa com paredes/portas/janelas/objetos/câmeras/fotos
+   * de um andar DIFERENTE de `pisoIdx` removidos (mesmo critério de
+   * `getAndarDaEntidade` — entidade sem andar definível, `null`, sempre
+   * fica; o próprio objeto "Piso" também sempre fica, pra não sumir a laje
+   * de baixo do andar filtrado). `pisoIdx == null` (ou mapa sem nenhum
+   * "Piso", `getPisos` vazio) devolve o mapa como veio, sem filtrar nada —
+   * comportamento idêntico a hoje.
+   *
+   * Usado por view3d.js (`_rebuildScene`, seletor "Andar" da topbar do "Ver
+   * em 3D") ANTES dos dados chegarem no `engine3d.js` — é também a
+   * otimização de desempenho pedida ("renderizar só o andar selecionado ao
+   * invés do prédio inteiro"): o `engine3d.js` nunca vê as entidades dos
+   * outros andares, então nem os pools de InstancedMesh delas são
+   * construídos.
+   */
+  filterByPiso(map, pisoIdx) {
+    if (pisoIdx == null) return map;
+    const pisos = this.getPisos(map);
+    if (!pisos.length) return map;
+    const mantem = (entity) => {
+      if (entity && entity.tipo === 'piso') return true;
+      const andar = this.getAndarDaEntidade(entity, map);
+      return andar == null || andar === pisoIdx;
+    };
+    const filtra = (arr) => (arr || []).filter(mantem);
+    return {
+      ...map,
+      walls: filtra(map.walls),
+      objects: filtra(map.objects),
+      portas: filtra(map.portas),
+      janelas: filtra(map.janelas),
+      cameras: filtra(map.cameras),
+      fotos: filtra(map.fotos),
+    };
+  },
+
+  /* [13/09/2026 UTC] NOVO — sistema de Classes/Grupos, pedido verbatim:
+     "Deve ser possível dar nomes aos objetos no mesmo sistema do 'class'
+     no HTML. No HTML tem o attributo 'name', então, já é como nome do
+     objeto. E o atributo 'class', então, deve ser implementado." +
+     "Monte um sistema para poder agrupar objetos de tal modo que depois
+     em uma lista de opções, ao clicar em uma delas, seja possível
+     ativar/desativar aquele grupo na tela para ser renderizado. E mais,
+     além disso (habilitar/desabilitar a renderização), também, apenas
+     destacar visualmente." + "Uma opção para fazer todas as paredes
+     sumirem e ficar apenas os objetos que não são parede, nem piso." +
+     (resposta do usuário à pergunta de esclarecimento sobre o botão
+     "Andar") "criar um sistema para poder agrupar ativações e
+     desativações ao selecionar uma das opções disponíveis" — por isso
+     'andaresOcultos' mora neste mesmo sistema, junto de
+     'gruposOcultos'/'gruposDestacados'/'ocultarParedesEPiso'.
+     Escopo deliberado: classes só em `map.objects` (não paredes/portas/
+     janelas/câmeras/textos/itens/fotos) — o pedido verbatim foi "dar
+     nomes AOS OBJETOS" (o `name` do HTML já existe como campo "Nome";
+     aqui só o `class` é novo). */
+  getObjectClasses(obj) {
+    return Array.isArray(obj?.classes) ? obj.classes : [];
+  },
+
+  parseClassesInput(texto) {
+    const partes = String(texto || '').split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+    return Array.from(new Set(partes));
+  },
+
+  getAllClasses(map) {
+    const set = new Set();
+    (map?.objects || []).forEach((o) => this.getObjectClasses(o).forEach((c) => set.add(c)));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  },
+
+  /** [14/09/2026 UTC] NOVO — GENERALIZAÇÃO de todo o sistema acima (paredes+piso/
+   *  andar/classe, 3 categorias FIXAS) para um motor de REGRAS genérico,
+   *  tipo `querySelector`, configurável pelo usuário — pedido verbatim,
+   *  adiado desde a RODADA 20 ("7, 8 e 9") por ser reformulação de
+   *  arquitetura: "Assim como... querySelector, deve ser possível fazer
+   *  isso nesse sistema de seleção." / "O 'Grupos' deve ser gerenciável.
+   *  Deve poder dar/editar um nome para cada opção... deve ser possível
+   *  definir o que é ativado/desativado ao selecionar uma opção. Sobre
+   *  isso, é como o display:none/block, visibility:hidden/visible ou
+   *  opacity:0/1."
+   *
+   *  DADOS — `map.grupoRegras`: array de regras, cada uma
+   *  `{ id, nome, selector, efeito, ativo, valor }`:
+   *    - `nome`: rótulo editável pelo usuário (livre, não precisa bater
+   *      com o `selector`).
+   *    - `selector`: string tipo `querySelector` (ver `parseGrupoSelector`/
+   *      `grupoRegraMatches` abaixo) — decide QUAIS entidades a regra
+   *      afeta.
+   *    - `efeito`: `'ocultar'` (display:none — não desenha), `'opacidade'`
+   *      (opacity:X — desenha esmaecido, fator em `valor`) ou `'destacar'`
+   *      (anel de destaque visual, mesmo círculo dourado de sempre).
+   *    - `ativo`: o toggle de verdade (👁️/checkbox no painel) — só regras
+   *      ATIVAS surtem efeito; existirem "desligadas" é o equivalente a
+   *      tê-las editado/guardado sem aplicar ainda.
+   *
+   *  SINTAXE DO SELECTOR (querySelector simplificado, CSS-like):
+   *    - `.classe`      → objeto tem essa classe (`Mapping.getObjectClasses`)
+   *    - `#id`          → id exato da entidade
+   *    - `tipo=valor`   → `entity.tipo === valor` (ex.: `tipo=cadeira`)
+   *    - `forma=valor`  → `entity.forma === valor`
+   *    - `andar=N`      → `Mapping.getAndarDaEntidade(entity,map) === N`
+   *    - `parede`       → é uma parede (`isWall`, repassado por quem chama)
+   *    - `piso`         → `entity.tipo === 'piso'`
+   *    - `*`            → qualquer entidade
+   *    Átomos concatenados SEM espaço = "E" (AND) — ex.: `.sala1tipo=cadeira`
+   *    NÃO é o pedido: use espaço nenhum dentro de um único átomo, e vírgula
+   *    pra "OU" (OR) — ex.: `parede, piso` (regra "Paredes e Piso" de
+   *    sempre, migrada) ou `.classe1, .classe2` (classe1 OU classe2).
+   *
+   *  MIGRAÇÃO — mapas salvos ANTES desta rodada não têm `map.grupoRegras`
+   *  ainda; `getGrupoRegras` cria o array na 1ª leitura
+   *  (`_migrarGruposParaRegras`), convertendo fielmente o estado antigo
+   *  (`ocultarParedesEPiso`/`andaresOcultos`/`gruposOcultos`/
+   *  `gruposDestacados`) em regras equivalentes — nenhuma visibilidade
+   *  muda ao abrir um mapa antigo pela 1ª vez depois desta rodada. Os
+   *  campos antigos são MANTIDOS no objeto `map` (não apagados) por
+   *  seguranca/histórico, mas não são mais lidos por nenhuma função daqui
+   *  pra baixo — só `map.grupoRegras` importa a partir de agora. */
+  getGrupoRegras(map) {
+    if (!map) return [];
+    if (!Array.isArray(map.grupoRegras)) this._migrarGruposParaRegras(map);
+    return map.grupoRegras;
+  },
+
+  _migrarGruposParaRegras(map) {
+    const regras = [];
+    regras.push({ id: Utils.uid('regra'), nome: '🧱 Paredes e Piso', selector: 'parede, piso', efeito: 'ocultar', ativo: !!map.ocultarParedesEPiso, valor: 0.35 });
+    const pisos = this.getPisos(map);
+    pisos.forEach((_, i) => {
+      const nome = i === 0 ? '🏢 Térreo' : `🏢 ${i}º andar`;
+      regras.push({ id: Utils.uid('regra'), nome, selector: `andar=${i}`, efeito: 'ocultar', ativo: (map.andaresOcultos || []).includes(i), valor: 0.35 });
+    });
+    const classes = this.getAllClasses(map);
+    const gruposOcultos = map.gruposOcultos || [];
+    const gruposDestacados = map.gruposDestacados || [];
+    classes.forEach((c) => {
+      regras.push({ id: Utils.uid('regra'), nome: `🏷️ ${c}`, selector: `.${c}`, efeito: 'ocultar', ativo: gruposOcultos.includes(c), valor: 0.35 });
+      // Modelo antigo permitia oculto E destacado ao mesmo tempo (2 toggles
+      // independentes por classe) — o novo modelo é 1 efeito por regra, então
+      // uma 2ª regra "irmã" cobre o caso raro de os dois juntos, sem perder
+      // o dado (só cria a 2ª regra quando realmente havia destaque salvo).
+      if (gruposDestacados.includes(c)) {
+        regras.push({ id: Utils.uid('regra'), nome: `✨ ${c} (destaque)`, selector: `.${c}`, efeito: 'destacar', ativo: true, valor: 0.35 });
+      }
+    });
+    map.grupoRegras = regras;
+  },
+
+  addGrupoRegra(map, { nome, selector, efeito } = {}) {
+    const regras = this.getGrupoRegras(map);
+    const r = { id: Utils.uid('regra'), nome: nome || 'Nova regra', selector: selector || '*', efeito: efeito || 'ocultar', ativo: false, valor: 0.35 };
+    regras.push(r);
+    return r;
+  },
+
+  removeGrupoRegra(map, id) {
+    const regras = this.getGrupoRegras(map);
+    const idx = regras.findIndex((r) => r.id === id);
+    if (idx !== -1) regras.splice(idx, 1);
+  },
+
+  toggleGrupoRegraAtivo(map, id) {
+    const r = this.getGrupoRegras(map).find((r) => r.id === id);
+    if (r) r.ativo = !r.ativo;
+  },
+
+  /** Divide o `selector` em grupos "OU" (vírgula) e cada grupo em átomos
+   *  "E" (concatenados sem espaço) — ver spec completa no comentário
+   *  grande acima de `getGrupoRegras`. */
+  parseGrupoSelector(selector) {
+    return String(selector || '')
+      .split(',')
+      .map((g) => g.trim())
+      .filter(Boolean)
+      .map((g) => {
+        const atoms = [];
+        const re = /\.[^\s.#=]+|#[^\s.#=]+|[a-zA-Z_][a-zA-Z0-9_]*=[^\s.#=]+|\*|[a-zA-Z_][a-zA-Z0-9_]*/g;
+        let m;
+        while ((m = re.exec(g))) atoms.push(m[0]);
+        return atoms;
+      })
+      .filter((atoms) => atoms.length);
+  },
+
+  /** Testa se `entity` bate com `selector` (ver spec acima) — `isWall`
+   *  repassado por quem chama (paredes não têm `entity.tipo`/`.classes`
+   *  próprios, então o átomo `parede` depende de quem itera saber que
+   *  está iterando `map.walls`, mesmo padrão que `isEntityGroupHidden` já
+   *  usava antes desta rodada). */
+  grupoRegraMatches(entity, map, selector, { isWall = false } = {}) {
+    if (!entity) return false;
+    const grupos = this.parseGrupoSelector(selector);
+    if (!grupos.length) return false;
+    const classes = this.getObjectClasses(entity);
+    const testAtom = (atom) => {
+      if (atom === '*') return true;
+      if (atom === 'parede') return isWall;
+      if (atom === 'piso') return entity.tipo === 'piso';
+      if (atom[0] === '.') return classes.includes(atom.slice(1));
+      if (atom[0] === '#') return entity.id === atom.slice(1);
+      const eq = atom.indexOf('=');
+      if (eq > 0) {
+        const chave = atom.slice(0, eq), valor = atom.slice(eq + 1);
+        if (chave === 'andar') return String(this.getAndarDaEntidade(entity, map)) === valor;
+        return String(entity[chave] ?? '') === valor;
+      }
+      return false;
+    };
+    return grupos.some((atoms) => atoms.every(testAtom));
+  },
+
+  isEntityGroupHidden(entity, map, { isWall = false } = {}) {
+    const regras = this.getGrupoRegras(map);
+    return regras.some((r) => r.ativo && r.efeito === 'ocultar' && this.grupoRegraMatches(entity, map, r.selector, { isWall }));
+  },
+
+  isEntityGroupHighlighted(entity, map) {
+    const regras = this.getGrupoRegras(map);
+    return regras.some((r) => r.ativo && r.efeito === 'destacar' && this.grupoRegraMatches(entity, map, r.selector, { isWall: false }));
+  },
+
+  /** [14/09/2026 UTC] NOVO — efeito `'opacidade'` das regras (o 3º efeito
+   *  pedido, "é como o... opacity:0/1"): devolve o multiplicador de alfa
+   *  (0-1, `1` = sem efeito nenhum) resultado de TODAS as regras ativas
+   *  do tipo `'opacidade'` que baterem com `entity` — quando mais de uma
+   *  bate, usa a mais restritiva (`Math.min`). Fiação no desenho: ver
+   *  `Map2DRenderer` (mapview.js), multiplicado em cima do
+   *  `_layerOpacity` de sempre nos 2 passes que desenham `map.objects`
+   *  (mesmo escopo de `getObjectClasses` — "classes só em map.objects",
+   *  ver comentário histórico acima). 3D ainda NÃO lê isto nesta rodada
+   *  (ocultar/destacar já funcionam nos dois; opacidade fica só no 2D por
+   *  ora — ver progresso-sessao.md, RODADA desta mudança, seção
+   *  "pendências"). */
+  getEntityGroupAlpha(entity, map, { isWall = false } = {}) {
+    const regras = this.getGrupoRegras(map);
+    let alpha = 1;
+    regras.forEach((r) => {
+      if (r.ativo && r.efeito === 'opacidade' && this.grupoRegraMatches(entity, map, r.selector, { isWall })) {
+        alpha = Math.min(alpha, Number.isFinite(r.valor) ? r.valor : 0.35);
+      }
+    });
+    return alpha;
+  },
+
+  filterByGrupos(map) {
+    const ocultarPeloGrupo = (isWall) => (entity) => !this.isEntityGroupHidden(entity, map, { isWall });
+    return {
+      ...map,
+      walls: (map.walls || []).filter(ocultarPeloGrupo(true)),
+      objects: (map.objects || []).filter(ocultarPeloGrupo(false)),
+    };
+  },
+
   addLayer(map, nome) {
     if (!map.layers) map.layers = [];
     const l = { id: Utils.uid('layer'), nome: nome || `Camada ${map.layers.length + 1}`, visivel: true, bloqueada: false, opacidade: 255, criadoEm: DB.nowISO() };
@@ -613,6 +869,10 @@ const Mapping = {
     // ferramenta Lápis/Reta" sem mudar a arquitetura de dados (que não foi
     // pedido aqui); reportado ao usuário no changelog do sw.js.
     const wall = { id: Utils.uid('wall'), x1, y1, x2, y2, height: 2.6, espessura: 0.12, colorRGB: null, tipo: 'padrao', piso: 0, nome: this._nextObjectName(map, 'Parede'), ...extra };
+    // NOVO (12/09/2026) — padronização por tipo: ver js/objectstandard.js
+    // (comentário grande no topo do arquivo) — seed dos `components`
+    // configurados como "Comportamento padrão" pra paredes, se houver.
+    window.ObjectStandard?.applyDefaultComponents(wall, 'parede');
     map.walls.push(wall);
     this.recalcBounds(map);
     return wall; // pedido implícito por quem já chamava assumindo isso (ver mapview.js _pasteImageOrClipboard/cola de seleção) — antes não retornava nada
@@ -746,6 +1006,8 @@ const Mapping = {
       nome: this._nextObjectName(map, 'Porta'),
       colorRGB: null, layerId: null, criadoEm: DB.nowISO(), ...extra,
     };
+    // NOVO (12/09/2026) — ver comentário equivalente em `addWall` acima.
+    window.ObjectStandard?.applyDefaultComponents(d, 'porta');
     map.portas.push(d);
     this.recalcBounds(map);
     return d;
@@ -778,6 +1040,8 @@ const Mapping = {
       nome: this._nextObjectName(map, 'Janela'),
       colorRGB: null, layerId: null, criadoEm: DB.nowISO(), ...extra,
     };
+    // NOVO (12/09/2026) — ver comentário equivalente em `addWall` acima.
+    window.ObjectStandard?.applyDefaultComponents(j, 'janela');
     map.janelas.push(j);
     this.recalcBounds(map);
     return j;
@@ -841,6 +1105,8 @@ const Mapping = {
       resolutionX: 1920, resolutionY: 1080,
       ...extra,
     };
+    // NOVO (12/09/2026) — ver comentário equivalente em `addWall` acima.
+    window.ObjectStandard?.applyDefaultComponents(cam, 'camera');
     map.cameras.push(cam);
     this.recalcBounds(map);
     return cam;
@@ -956,6 +1222,30 @@ const Mapping = {
     // (sem noção de "mirar" — sempre teto). Pedido do usuário: "por padrão,
     // ela fica a 3 metros do chão".
     if (tipo === 'luminaria' && typeof obj.elevacao !== 'number') obj.elevacao = 3.0;
+    // NOVO (12/09/2026) — ver comentário grande em js/objectstandard.js:
+    // molde de `components` padrão por TIPO de objeto (chave = `tipo`,
+    // igual à chave usada por `OBJECT3D_PROFILES`/"Acessar modelos").
+    window.ObjectStandard?.applyDefaultComponents(obj, tipo);
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "todos os relógios que são
+    // colocados por 'Objetos'->'Relógio' (ou no 'Ver em 3D' diretamente
+    // pela lista de objetos) tenha um script já carregado nele (como se
+    // alguém o tivesse escrito) [...] deve haver ali um script já guiando
+    // o funcionamento do relógio." Roda DEPOIS de `applyDefaultComponents`
+    // acima (o molde CONFIGURÁVEL por tipo, tela "Acessar modelos" > "⚙️
+    // Comportamento padrão") e só entra se `obj.components` continuar
+    // vazio (mesma guarda que `applyDefaultComponents` já usa — nunca
+    // pisa num molde que o usuário tenha configurado à mão pra 'relogio',
+    // nem em `extra.components` que quem chamou já tenha passado
+    // explicitamente). `window.Components?.` defensivo — `components.js`
+    // carrega DEPOIS de `mapping.js` no `index.html`, mas `addObject` só
+    // roda em runtime (clique do usuário), bem depois de todo script já
+    // ter carregado; o `?.` é só precaução de ordem, nunca deveria faltar
+    // na prática (ver `js/components.js` `DEFAULT_RELOGIO_SCRIPT_CODE`
+    // pro código em si e o porquê dele ser funcionalmente idêntico a não
+    // ter script nenhum).
+    if (tipo === 'relogio' && !(Array.isArray(obj.components) && obj.components.length) && window.Components?.addComponent) {
+      window.Components.addComponent(obj, 'Script', { code: window.Components.DEFAULT_RELOGIO_SCRIPT_CODE });
+    }
     this.applyDefaultShapeToObject(obj);
     // Empilhamento automático (pedido do usuário, 25/08/2026): "se a área da
     // forma de um objeto coincidir com a área de outro objeto já inserido no
@@ -1059,13 +1349,41 @@ const Mapping = {
    *  — os dois sistemas de eixo "concordam" por construção) — e devolve a
    *  altura ACUMULADA até aquele degrau. Cada degrau é bem menor que
    *  `STEP_MAX` (view3d.js), então o personagem sobe andando normalmente,
-   *  um degrau de cada vez, sem precisar pular. */
-  objectTopHeightAt(o, x, y) {
+   *  um degrau de cada vez, sem precisar pular.
+   *
+   *  [13/09/2026, CORRIGIDO de verdade] Causa raiz do bug "a escada não
+   *  alcança o andar de cima" (relatado pelo usuário: "deve ser possível
+   *  transitar fluidamente entre os andares"): `alturaTotal` era FIXA em
+   *  2.0m, um valor completamente desconectado de `map.alturaPiso` (a
+   *  distância REAL entre o piso de um andar e o piso do andar seguinte —
+   *  4m na v3 do prédio). Com uma escada de 2m tentando vencer um pé-direito
+   *  de 4m, o topo do último degrau ficava a meio caminho, literalmente
+   *  "flutuando" no ar — o jogador subia a escada inteira e ainda precisava
+   *  de mais 2m de altura pra alcançar o piso de cima, que `_surfaceHeightAt`
+   *  não tinha como oferecer (o próximo "degrau" não existe mais ali).
+   *  CORREÇÃO: `alturaTotal` agora é `obj.alturaEscada` (campo NOVO, opcional
+   *  — pra quem quiser uma escada que não sobe o andar inteiro de propósito,
+   *  ex. um lance decorativo) OU, por padrão, a MESMA altura de andar do
+   *  mapa (`alturaPiso`, recebido de quem chama — ver view3d.js
+   *  `_surfaceHeightAt`, que passa `this._map?.alturaPiso`) — garantindo que
+   *  o topo do último degrau sempre bate EXATAMENTE no piso de cima, sem
+   *  hardcode nenhum. `alturaPiso` tem 2.8 como último fallback (mesmo
+   *  default usado em todo o resto do app quando `map.alturaPiso` não foi
+   *  definido, ver engine3d.js `mapData.alturaPiso || 2.8`). */
+  objectTopHeightAt(o, x, y, alturaPiso) {
     if (o.tipo !== 'escada') return this.objectTopHeight(o);
     const elevacao = o.elevacao || 0;
     const profundidadeTotal = Math.max(0.05, o.profundidade || 3.0);
-    const alturaTotal = 2.0; // fixa — mesmo valor/motivo de engine3d.js _buildEscadaMesh
-    const degraus = Math.max(1, Math.round(o.escadaDegraus) || 11);
+    const alturaTotal = o.alturaEscada || alturaPiso || 2.8;
+    // Degraus: ver `escadaDegraus` — se o usuário não configurou nenhum
+    // valor customizado, o padrão agora escala com `alturaTotal` (~18cm por
+    // degrau, medida realista de escada de verdade) em vez de um número
+    // fixo (11) que, pra um andar de 4m, resultava em degraus de ~36cm —
+    // MUITO altos pra subir andando (STEP_MAX é 0.6m em view3d.js, então
+    // 36cm até funcionava, mas ficava visualmente/fisicamente irreal e perto
+    // demais do limite). Ver comentário grande na função irmã
+    // `_buildEscadaMesh` (engine3d.js) pra a conta completa.
+    const degraus = Math.max(1, Math.round(o.escadaDegraus) || Math.round(alturaTotal / 0.18) || 11);
     const stepDepth = profundidadeTotal / degraus;
     const stepHeight = alturaTotal / degraus;
     const ang = o.angulo || 0;
@@ -1411,6 +1729,41 @@ const Mapping = {
     return { x: maxX + MARGIN, y: minY + (index || 0) * SPACING, piso: 0 };
   },
 
+  /** RODADA 53 [15/09/2026 UTC], pedido verbatim (item C): "a distância
+   *  entre uma câmera e outra, até que número de inserções para trocar de
+   *  linha [...] a coordenada de partida [...] deve ser possível selecionar
+   *  se elas vão indo sendo colocadas do ponto de origem definida para a
+   *  esquerda/direita/cima/baixo. Se, depois de trocar de linha, a próxima
+   *  linha vai ser para cima ou para baixo". Usado por capture.js
+   *  `_autoPlacePhoto` quando `fotoAutoAtribuirCamera` (MapConfig) não é
+   *  'nao'.
+   *
+   *  RODADA 54 [15/09/2026 UTC] — GENERALIZADA para aceitar `dirPrimaria`
+   *  (direção de avanço dentro de uma linha: 'direita'/'esquerda' —
+   *  avanço horizontal, linhas empilhadas em Y — ou 'cima'/'baixo' —
+   *  avanço vertical, linhas empilhadas em X) e `quebra` (sentido da
+   *  quebra de linha, PERPENDICULAR à `dirPrimaria`: 'cima'/'baixo' quando
+   *  `dirPrimaria` é horizontal, 'esquerda'/'direita' quando é vertical).
+   *  8 combinações possíveis no total (4 primárias × 2 quebras), conforme
+   *  pedido. Ver seletor visual em mapconfig.js (`#mc-foto-grade-dir`).
+   *  Padrão ('direita'/'baixo') preserva o comportamento da RODADA 53. */
+  findGridSlot(origin, index, distancia = 1.2, porLinha = 6, dirPrimaria = 'direita', quebra = 'baixo') {
+    const n = Math.max(1, Math.round(porLinha) || 1);
+    const d = (typeof distancia === 'number' && distancia > 0) ? distancia : 1.2;
+    const col = (index || 0) % n;
+    const row = Math.floor((index || 0) / n);
+    const horizontal = (dirPrimaria === 'esquerda' || dirPrimaria === 'direita');
+    let dx = 0, dy = 0;
+    if (horizontal) {
+      dx = (dirPrimaria === 'esquerda' ? -1 : 1) * col * d;
+      dy = (quebra === 'cima' ? -1 : 1) * row * d;
+    } else {
+      dy = (dirPrimaria === 'cima' ? -1 : 1) * col * d;
+      dx = (quebra === 'esquerda' ? -1 : 1) * row * d;
+    }
+    return { x: (origin?.x || 0) + dx, y: (origin?.y || 0) + dy, piso: 0 };
+  },
+
   /** Amostra a cor média de um frame de vídeo/canvas — usada no modo "colorido" do 3D
    *  e para pintar o trecho de parede correspondente durante o mapeamento assistido. */
   sampleAverageColor(source, sampleSize = 24) {
@@ -1482,6 +1835,110 @@ const Mapping = {
   groupMembers(map, obj) {
     if (!obj?.grupoId) return [];
     return (map?.objects || []).filter((o) => o.grupoId === obj.grupoId && o.id !== obj.id);
+  },
+
+  // =========================================================================
+  // [13/09/2026] NOVO — "Piso" como um NOVO TIPO DE OBJETO GEOMÉTRICO.
+  // =========================================================================
+  // DECISÃO DE DESIGN (pedido literal do usuário: "Sobre o piso, faça de um
+  // jeito simples como um novo objeto. Para poder colocá-lo tanto no 2D
+  // quanto no 3D."): ao invés de adicionar um campo numérico tipo
+  // `andar`/`floorIndex` em CADA entidade (parede/porta/janela/objeto —
+  // abordagem cogitada e DESCARTADA), o "Piso" é um objeto de verdade no
+  // catálogo (`tipo:'piso'`, ver js/engine3d-profiles.js) — uma laje
+  // retangular fina que o usuário planta no mapa como qualquer outro
+  // objeto (arrasta/redimensiona/eleva com os MESMOS controles de sempre,
+  // já que reaproveita 100% o mecanismo `forma:'retangulo'` existente —
+  // ZERO desenho novo precisou ser escrito, nem no 2D nem no 3D).
+  //
+  // O "andar" de QUALQUER OUTRA entidade (parede, porta, janela, objeto,
+  // câmera, foto, texto) não é mais escolhido manualmente — é DERIVADO
+  // geometricamente: pega-se a lista de objetos "Piso" do mapa, ordenados
+  // pela altura da base deles (elevação), e o andar de uma entidade X é o
+  // ÍNDICE do "Piso" mais alto que ainda está ABAIXO (ou na mesma altura)
+  // da base de X. Ou seja, X pertence ao andar cujo "Piso" está por baixo
+  // dela e o PRÓXIMO "Piso" (se existir) está por cima.
+  //
+  // COMPATIBILIDADE — NADA QUEBRA em mapas existentes: se o mapa não tiver
+  // NENHUM objeto "Piso" ainda, `getPisos` devolve `[]` e
+  // `getAndarDaEntidade` devolve `null` pra tudo — o app inteiro continua
+  // se comportando EXATAMENTE como hoje (sem filtragem nenhuma por andar)
+  // até o usuário decidir plantar o primeiro "Piso". O campo `piso`
+  // (inteiro, `obj.piso`/`w.piso`/etc.) que já existe em cada entidade
+  // desde 01/09/2026 continua do jeito que está — ele controla o
+  // EMPILHAMENTO VERTICAL de verdade no 3D (`piso * mapData.alturaPiso`,
+  // ver js/engine3d.js/js/view3d.js) e não foi tocado por esta mudança;
+  // os dois mecanismos coexistem (um decide "em que altura Y a entidade é
+  // desenhada", o outro só serve pra AGRUPAR/FILTRAR entidades por andar
+  // na interface, usando a altura Y resultante — ver getAndarDaEntidade).
+  //
+  // LIMITAÇÃO CONHECIDA (documentada conforme pedido): assume-se que todo
+  // objeto "Piso" é HORIZONTAL (sem inclinação/rotação em X/Z — só
+  // `angulo` no plano XZ, que não afeta a altura). Um "Piso" inclinado não
+  // é suportado por este cálculo (a "altura da laje" usada é só a
+  // elevação dela, um único número).
+  //
+  // USADO POR: seletor "Piso: [Térreo ▾]" no mapa 2D e seletor "Andar" na
+  // barra do "Ver em 3D" (filtragem de exibição/montagem de cena) — ver
+  // pontos de integração comentados em js/mapview.js/js/view3d.js.
+
+  /** Lista os objetos "Piso" (`tipo === 'piso'`) do mapa, ORDENADOS do mais
+   *  baixo pro mais alto (pela elevação/altura da base da laje). Cada item
+   *  devolvido é o PRÓPRIO objeto do mapa (mesma referência), então dá pra
+   *  editar (arrastar, redimensionar) normalmente. Lista vazia se não
+   *  houver nenhum "Piso" plantado ainda — ver comentário grande acima
+   *  sobre compatibilidade com mapas antigos. */
+  getPisos(map) {
+    return (map?.objects || [])
+      .filter((o) => o.tipo === 'piso')
+      .slice()
+      .sort((a, b) => (a.elevacao || 0) - (b.elevacao || 0));
+  },
+
+  /** Altura do "chão" (topo da laje) do "Piso" de índice `i` na lista de
+   *  `getPisos` — usado internamente por `getAndarDaEntidade` pra saber
+   *  onde cada andar começa. */
+  _alturaBasePiso(pisoObj) {
+    return (pisoObj.elevacao || 0) + (pisoObj.altura || 0);
+  },
+
+  /** Devolve o ÍNDICE (na lista de `getPisos(map)`) do andar a que `entity`
+   *  pertence, ou `null` quando não há nenhum "Piso" no mapa (ver
+   *  comentário grande acima — nesse caso NADA deve ser filtrado, `entity`
+   *  deve continuar sempre visível). `entity` pode ser um objeto, parede,
+   *  porta/janela ou câmera — usa-se `alturaEntidade(entity)` (helper
+   *  abaixo) pra achar a altura de referência dela, que varia por tipo de
+   *  entidade (uma parede não tem `elevacao`, por exemplo).
+   *  Regra: pertence ao "Piso" mais alto cuja laje está NA ALTURA OU ABAIXO
+   *  da entidade; se a entidade estiver abaixo de TODOS os "Piso"
+   *  existentes, ela conta como pertencente ao índice 0 (mais próximo) —
+   *  evita "flutuar" sem andar nenhum por um objeto ter ficado alguns
+   *  centímetros abaixo da laje que ele deveria estar em cima. */
+  getAndarDaEntidade(entity, map) {
+    const pisos = this.getPisos(map);
+    if (!pisos.length) return null;
+    const y = this._alturaEntidadeParaPiso(entity);
+    let idx = 0;
+    for (let i = 0; i < pisos.length; i++) {
+      if (this._alturaBasePiso(pisos[i]) <= y + 1e-6) idx = i;
+      else break;
+    }
+    return idx;
+  },
+
+  /** Altura de referência (Y, em metros — SEM contar `piso*alturaPiso`,
+   *  já que este cálculo compara entidades PELA MESMA régua dos objetos
+   *  "Piso", que também só usam `elevacao`) usada por `getAndarDaEntidade`
+   *  pra decidir onde cada tipo de entidade "está" verticalmente:
+   *  - objeto: `elevacao` (chão do próprio objeto).
+   *  - parede: 0 (paredes começam do chão do seu próprio `piso` numérico).
+   *  - porta/janela: `alturaPeitoril` (onde o vão começa).
+   *  - câmera/foto/texto: `elevacao` se existir, senão 0. */
+  _alturaEntidadeParaPiso(entity) {
+    if (entity == null) return 0;
+    if ('alturaPeitoril' in entity) return entity.alturaPeitoril || 0;
+    if ('elevacao' in entity) return entity.elevacao || 0;
+    return 0;
   },
 };
 

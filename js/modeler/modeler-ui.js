@@ -1850,6 +1850,163 @@ const ModelerUI = {
       body.appendChild(this._buildEditTransformPanel(state, idxs));
     }
   },
+
+  /** [15/09/2026 UTC] NOVO — pedido verbatim: "No 'Ver em 3D', as
+   *  transformações a se fazer deve usar a mesma utilizada no Modelador,
+   *  não uma nova [...] os mesmos botões, estilos, HTML. Não é restrito ao
+   *  modelador, se for, modularize para ser usado aqui também." A rodada
+   *  anterior tinha implementado um formulário PRÓPRIO (inputs `<input
+   *  type=number>` simples) pro botão "📐 Propriedades" fora do Modelador —
+   *  o pedido agora é usar de verdade o MESMO widget (`_createNumField`,
+   *  `.m3d-numfield`/arraste-pra-mudar-valor/clique-pra-digitar) e a MESMA
+   *  função de montagem de grupo (`_buildGroup`, logo acima) que
+   *  `_buildObjectTransformPanel` já usa — ambas já eram genéricas o
+   *  bastante (não leem `state.xxx` internamente, só recebem `label` +
+   *  `fieldsCfg[].{axis,value,step,onCommit,...}`), só nunca tinham sido
+   *  chamadas de fora de uma sessão do Modelador. Esta função é a peça
+   *  "modularizada": monta o MESMO layout (Posição/Rotação/Escala/
+   *  Dimensões, mesmos `_buildGroup`/CSS `m3d-*`) só que ligado direto nos
+   *  campos do OBJETO (`obj.x/y/angulo/customMeshXform`), sem depender de
+   *  nenhuma sessão viva do Modelador (`state.group`/`state.meshObj`/
+   *  `ModelerMesh.rebuildMeshGeometry` — que exigem uma malha REAL sendo
+   *  editada na cena, ver `_buildObjectTransformPanel`, acima) — cada
+   *  commit grava direto via `Mapping.updateObject`+`DB.saveMap` e pede
+   *  pro `view3d` refletir ao vivo (`_refreshObjectLiveTransform`, best-
+   *  effort — se não achar a malha do objeto na cena agora, o valor já
+   *  está salvo mesmo assim, só não anima até a próxima montagem).
+   *  Escala só aparece com `obj.customMesh` (mesma regra de
+   *  `_buildObjectTransformPanel`: só faz sentido multiplicar uma malha
+   *  com tamanho-base fixo); Dimensões só é EDITÁVEL quando há
+   *  `obj.customMesh` (calculada da bounding box × escala, igual ao
+   *  Modelador) ou quando o objeto já tem `largura/profundidade/altura`
+   *  próprios (formas desenhadas antigas) — um objeto comum de catálogo
+   *  sem nenhum dos dois (ex.: "Mesa"/"Pilar" novos, só com o tamanho de
+   *  fábrica do perfil 3D) mostra o tamanho de fábrica como TEXTO, não
+   *  como campo editável (não há onde persistir um tamanho por instância
+   *  pra esses objetos). */
+  buildStandaloneObjectTransformPanel(view3d, obj) {
+    const contentWrap = document.createElement('div');
+    const alturaPiso = view3d._map?.alturaPiso || 2.8;
+    const temMalha = !!obj.customMesh;
+    const xf0 = obj.customMeshXform || {};
+
+    const persist = (patch) => {
+      Object.assign(obj, patch);
+      Mapping.updateObject(view3d._map, obj.id, patch);
+      DB.saveMap(view3d._map);
+      view3d._refreshObjectLiveTransform?.(obj);
+    };
+
+    // ---------- Posição ----------
+    const baseYAtual = (obj.piso || 0) * alturaPiso + (obj.elevacao || 0);
+    const posGroup = this._buildGroup('Posição:', [
+      { axis: 'x', value: obj.x || 0, step: 0.01, minDecimals: 5, onCommit: (v) => persist({ x: v }) },
+      { axis: 'y', value: baseYAtual, step: 0.01, minDecimals: 5, onCommit: (v) => persist({ elevacao: v - (obj.piso || 0) * alturaPiso }) },
+      { axis: 'z', value: obj.y || 0, step: 0.01, minDecimals: 5, onCommit: (v) => persist({ y: v }) },
+    ]);
+    contentWrap.appendChild(posGroup.el);
+
+    // ---------- Rotação ----------
+    // [15/09/2026 UTC] CORRIGIDO — pedido verbatim: "Ainda falta poder
+    // girar no z e no x. Atualmente só aparece para girar no y." X/Z
+    // (`customMeshXform.rotX/rotZ`) ANTES só apareciam com `temMalha`
+    // (objeto modelado no Modelador) porque só `_buildCustomMeshObject`
+    // (engine3d.js) sabia aplicar essa rotação — um objeto comum do
+    // catálogo (Mesa/Cadeira/etc.) girava só em Y (`obj.angulo`), sempre.
+    // Agora `Engine3D._applyObjectExtraTransform` (NOVO, ver engine3d.js)
+    // aplica rotX/rotZ (e escala) em CIMA de QUALQUER builder, não só
+    // malha customizada — então os 3 campos aparecem SEMPRE, pra todo
+    // objeto, não só os modelados no Modelador.
+    const rotFields = [
+      { axis: 'x', value: (xf0.rotX || 0) * 180 / Math.PI, step: 0.1, formatMode: 'rotation', suffix: '°', onCommit: (v) => persist({ customMeshXform: { ...(obj.customMeshXform || {}), rotX: v * Math.PI / 180 } }) },
+      { axis: 'y', value: (obj.angulo || 0) * 180 / Math.PI, step: 0.1, formatMode: 'rotation', suffix: '°', onCommit: (v) => persist({ angulo: v * Math.PI / 180 }) },
+      { axis: 'z', value: (xf0.rotZ || 0) * 180 / Math.PI, step: 0.1, formatMode: 'rotation', suffix: '°', onCommit: (v) => persist({ customMeshXform: { ...(obj.customMeshXform || {}), rotZ: v * Math.PI / 180 } }) },
+    ];
+    contentWrap.appendChild(this._buildGroup('Rotação:', rotFields).el);
+
+    // ---------- Escala ----------
+    // [15/09/2026 UTC] CORRIGIDO — pedido verbatim: "A escala (x, y e z)
+    // não está aparecendo também." MESMO motivo do bloco de Rotação acima
+    // — antes só aparecia com `temMalha`. Agora aparece SEMPRE (via
+    // `customMeshXform.scaleX/Y/Z`, também aplicada de verdade por
+    // `Engine3D._applyObjectExtraTransform` pra qualquer objeto) —
+    // "Dimensões" (calculado a partir da bounding box da malha) continua
+    // exclusivo de `temMalha` logo abaixo (um objeto sem `customMesh` não
+    // tem vértices pra calcular bounding box a partir deles), mas a
+    // ESCALA em si (o multiplicador em cima do tamanho de fábrica/malha)
+    // não depende disso.
+    // `aoMudarEscala` — hook opcional, preenchido logo abaixo SÓ quando há
+    // malha (`temMalha`), pra "Escala" avisar "Dimensões" de que precisa
+    // recalcular. Declarado ANTES do grupo de campos (e capturado por
+    // referência no `onCommit` de cada um) porque em JS uma função guarda
+    // a VARIÁVEL, não o valor no instante da criação — atribuir a ela
+    // depois (dentro do `if (temMalha)`) já vale pros campos que já
+    // existem. `null` (objeto sem malha) = no-op, sem custo extra.
+    let aoMudarEscala = null;
+    const escalaGroup = this._buildGroup('Escala:', ['X', 'Y', 'Z'].map((L) => {
+      const key = 'scale' + L;
+      return {
+        axis: L.toLowerCase(), value: xf0[key] ?? 1, step: 0.01, minDecimals: 3,
+        onCommit: (v) => { persist({ customMeshXform: { ...(obj.customMeshXform || {}), [key]: v || 0.01 } }); aoMudarEscala?.(); },
+      };
+    }));
+    contentWrap.appendChild(escalaGroup.el);
+
+    // ---------- Dimensões (só com malha customizada — precisa de vértices
+    // pra calcular a bounding box de origem) ----------
+    // `escalaGroup` (criado acima, agora SEMPRE existe) é reaproveitado
+    // aqui como `scaleGroup` — sem recriar um 2º grupo "Escala:" duplicado.
+    const scaleGroup = escalaGroup;
+    let dimGroup = null;
+    if (temMalha) {
+      aoMudarEscala = () => {
+        const bb2 = ModelerMesh.localBBox(obj.customMesh.vertices);
+        const xfNow = obj.customMeshXform || {};
+        dimGroup?.setValue('x', (bb2.maxX - bb2.minX) * Math.abs(xfNow.scaleX ?? 1));
+        dimGroup?.setValue('y', (bb2.maxY - bb2.minY) * Math.abs(xfNow.scaleY ?? 1));
+        dimGroup?.setValue('z', (bb2.maxZ - bb2.minZ) * Math.abs(xfNow.scaleZ ?? 1));
+      };
+      const bb = ModelerMesh.localBBox(obj.customMesh.vertices);
+      const setScaleFromDim = (axis, targetVal) => {
+        const bb2 = ModelerMesh.localBBox(obj.customMesh.vertices);
+        const base = { x: Math.max(1e-4, bb2.maxX - bb2.minX), y: Math.max(1e-4, bb2.maxY - bb2.minY), z: Math.max(1e-4, bb2.maxZ - bb2.minZ) };
+        const key = axis === 'x' ? 'scaleX' : axis === 'y' ? 'scaleY' : 'scaleZ';
+        const novaEscala = (targetVal || 0.01) / base[axis];
+        persist({ customMeshXform: { ...(obj.customMeshXform || {}), [key]: novaEscala } });
+        scaleGroup.setValue(axis, novaEscala);
+      };
+      dimGroup = this._buildGroup('Dimensões:', [
+        { axis: 'x', value: (bb.maxX - bb.minX) * Math.abs(xf0.scaleX ?? 1), step: 0.01, minDecimals: 5, onCommit: (v) => setScaleFromDim('x', v) },
+        { axis: 'y', value: (bb.maxY - bb.minY) * Math.abs(xf0.scaleY ?? 1), step: 0.01, minDecimals: 5, onCommit: (v) => setScaleFromDim('y', v) },
+        { axis: 'z', value: (bb.maxZ - bb.minZ) * Math.abs(xf0.scaleZ ?? 1), step: 0.01, minDecimals: 5, onCommit: (v) => setScaleFromDim('z', v) },
+      ]);
+      contentWrap.appendChild(dimGroup.el);
+    } else if (obj.largura != null || obj.profundidade != null || obj.altura != null) {
+      // Objeto com dimensões PRÓPRIAS (forma desenhada — retângulo/polígono,
+      // ex.: um objeto antigo ainda com esses campos) — editável direto,
+      // sem passar por escala nenhuma (não há malha-base pra multiplicar).
+      contentWrap.appendChild(this._buildGroup('Dimensões:', [
+        { axis: 'x', value: obj.largura ?? 0.5, step: 0.05, minDecimals: 2, onCommit: (v) => persist({ largura: Math.max(0.05, v) }) },
+        { axis: 'y', value: obj.altura ?? 0.5, step: 0.05, minDecimals: 2, onCommit: (v) => persist({ altura: Math.max(0.05, v) }) },
+        { axis: 'z', value: obj.profundidade ?? 0.5, step: 0.05, minDecimals: 2, onCommit: (v) => persist({ profundidade: Math.max(0.05, v) }) },
+      ]).el);
+    } else {
+      // Objeto comum de catálogo sem malha nem campo de dimensão próprio
+      // (ex.: "Mesa"/"Pilar" novos) — nada aqui pra editar; mostra o
+      // tamanho de FÁBRICA (perfil 3D) só como referência.
+      const perfil = window.OBJECT3D_PROFILES?.[obj.tipo] || window.OBJECT3D_DEFAULT_PROFILE || {};
+      const isCircle = perfil.shape === 'cylinder' || perfil.shape === 'cone';
+      const w = isCircle ? (perfil.r || 0.3) * 2 : (perfil.w || 0.5);
+      const d = isCircle ? (perfil.r || 0.3) * 2 : (perfil.d || 0.5);
+      const h = perfil.h || 0.5;
+      const note = document.createElement('div');
+      note.style.cssText = 'color:#9fb3c8; font-size:11.5px; line-height:1.4; margin-top:6px;';
+      note.textContent = `Dimensões: ${w.toFixed(2)}×${h.toFixed(2)}×${d.toFixed(2)}m (tamanho de fábrica deste tipo — sem malha própria pra redimensionar; use "🔧 Modelar em 3D" se precisar de um tamanho diferente).`;
+      contentWrap.appendChild(note);
+    }
+
+    return contentWrap;
+  },
 };
 
 window.ModelerUI = ModelerUI;

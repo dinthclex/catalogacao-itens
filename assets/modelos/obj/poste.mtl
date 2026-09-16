@@ -1,0 +1,7 @@
+# gerado por ferramentas/gerar_malhas.js — materiais de poste
+
+newmtl haste
+Kd 0.2863 0.3059 0.3412
+
+newmtl lampada
+Kd 1.0000 0.8510 0.6275

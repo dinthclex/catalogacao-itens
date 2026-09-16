@@ -236,6 +236,65 @@
   ].join('\n');
 
   // ---------------------------------------------------------------------
+  // [15/09/2026 UTC] NOVO — pedido verbatim: "todos os relógios que são
+  // colocados por 'Objetos'->'Relógio' (ou no 'Ver em 3D' [...]) tenha um
+  // script já carregado nele (como se alguém o tivesse escrito). [...]
+  // deve haver ali um script já guiando o funcionamento do relógio."
+  // DEFAULT_RELOGIO_SCRIPT_CODE é anexado automaticamente (ver
+  // `js/mapping.js` `addObject`, bloco `if (tipo === 'relogio')`) a TODO
+  // objeto `tipo:'relogio'` recém-criado, por QUALQUER caminho (2D
+  // "Objetos"→"Relógio" ou 3D, ambos passam por `Mapping.addObject` —
+  // ver comentário lá). O código em si é FUNCIONALMENTE EQUIVALENTE a não
+  // ter nenhum script (lê `RelogioMundo.getHoraAtual()` e escreve os 3
+  // campos — ver `Engine3D._updateRelogiosParede`, js/engine3d.js, e o
+  // mecanismo completo em `assets/modelos/_exemplo-script-relogio.txt`) —
+  // é só um PONTO DE PARTIDA já funcionando e editável na hora, em vez de
+  // uma folha em branco: o usuário abre "Propriedades e Scripts" e já
+  // encontra exatamente o comportamento padrão do relógio escrito por
+  // extenso, pronto pra adaptar (trocar o fuso, travar um horário fixo,
+  // etc. — ver os exemplos comentados no rodapé).
+  // ---------------------------------------------------------------------
+  const DEFAULT_RELOGIO_SCRIPT_CODE = [
+    '/**',
+    ' * Este script já vem carregado em todo objeto "Relógio" novo (como se',
+    ' * alguém já o tivesse escrito) — mostra a hora do MUNDO (RelogioMundo),',
+    ' * exatamente igual a um relógio "de fábrica" sem nenhum script. Edite',
+    ' * livremente a partir daqui: é só um ponto de partida.',
+    ' *',
+    ' * Start é chamada antes do primeiro quadro (uma vez, ao iniciar o objeto).',
+    ' */',
+    'function Start() {',
+    '',
+    '}',
+    '',
+    '/**',
+    ' * Update é chamada uma vez por quadro (a cada frame). Os ponteiros do',
+    ' * relógio (hora/minuto/segundo) leem estes 3 campos do objeto sempre',
+    ' * que forem números — obj.horaPonteiro (0-23), obj.minutoPonteiro',
+    ' * (0-59) e obj.segundoPonteiro (0-59). Cada campo é independente: dá',
+    ' * pra sobrescrever só um deles e deixar os outros automáticos.',
+    ' */',
+    'function Update(dt) {',
+    "  if (!window.RelogioMundo) return;",
+    '  const h = window.RelogioMundo.getHoraAtual();',
+    '  obj.horaPonteiro = h.horas;',
+    '  obj.minutoPonteiro = h.minutos;',
+    '  obj.segundoPonteiro = h.segundos;',
+    '}',
+    '',
+    '/*',
+    'IDEIAS PRA ADAPTAR (troque só o cálculo dentro de Update):',
+    '  - Horário FIXO (relógio parado/decoração): tire a leitura de',
+    '    RelogioMundo e, no Start(), escreva os 3 campos uma vez só:',
+    '      obj.horaPonteiro = 10; obj.minutoPonteiro = 10; obj.segundoPonteiro = 0;',
+    '  - Fuso deslocado: some/subtraia horas de h.horas antes de atribuir',
+    '    (ver assets/modelos/_exemplo-script-relogio.txt pro exemplo completo,',
+    '    com normalização 0-23 e mais ideias).',
+    '*/',
+    '',
+  ].join('\n');
+
+  // ---------------------------------------------------------------------
   // [11/09/2026] NOVO — SCRIPT_TEMPLATES: opções de partida pro fluxo
   // "➕ Adicionar Componente"→"Script" (item 4a do pedido) — cada uma é
   // TEXTO de verdade (não uma classe), pré-preenche `code` na criação; o
@@ -335,6 +394,13 @@
     { id: 'onProximityExit', label: 'Ao Afastar', hasRadius: true },
     { id: 'onStart', label: 'Ao Iniciar' },
     { id: 'onUpdate', label: 'A cada quadro' },
+    // [14/09/2026] NOVO — "Porta Automática" (ver assets/modelos/_exemplo-
+    // script-porta-automatica.txt): despachado por view3d.js
+    // `_dispatchMouseHit3D('DoubleClick')` — MESMO listener `dblclick` do
+    // canvas 3D que já chama `onModelDoubleClick`/`onInstanceDoubleClick`
+    // (js/objectassets.js), agora também emitindo pro SceneEventBus, igual
+    // ao `onClick` (ver view3d.js `_tryPick`).
+    { id: 'onDoubleClick', label: 'Ao Clicar Duas Vezes' },
   ];
 
   // ---------------------------------------------------------------------
@@ -343,6 +409,25 @@
   // volta nele — ver "NOTA DE SERIALIZAÇÃO" no topo do arquivo).
   // ---------------------------------------------------------------------
   const _instanceCache = new WeakMap();
+  // [15/09/2026 UTC] NOVO — pedido verbatim: "Quando der erro no script,
+  // deve ficar uma flag na tela do script. Atualmente, uma enchurrada de
+  // notificações está sendo exibida." CAUSA RAIZ: `tickEntity` chama
+  // `Update(dt)` TODO quadro (60x/s) — um script com erro de sintaxe
+  // (`_getOrCreateModule`) ou que lança em runtime
+  // (`invokeScriptComponent`) disparava `Utils.toast` DE NOVO a cada um
+  // desses quadros, virando uma enchurrada visível de notificações
+  // empilhadas. `_lastErrors` (`compData` -> mensagem de erro mais
+  // recente, texto) guarda o estado ATUAL de erro de cada componente —
+  // NUNCA persistido (mesmo espírito de `_instanceCache`/
+  // `_startedScripts`: é estado de execução, não dado de mapa) — pra 2
+  // coisas: (1) `getScriptError` expõe pra UI mostrar uma "flag" (badge
+  // ⚠️) no bloco do Script na tela "🧩 Componentes"/"Propriedades e
+  // Scripts" (ver `js/mapview.js` `scriptBlockHtml`/
+  // `_refreshComponentErrorFlags`); (2) o toast só dispara quando a
+  // mensagem de erro MUDA (erro novo/diferente do último já avisado) —
+  // erros repetidos (o caso comum: o MESMO bug quadro após quadro) não
+  // reabrem toast nenhum, só atualizam a flag silenciosamente.
+  const _lastErrors = new WeakMap();
   // Quais ScriptComponents já tiveram Start() chamada (ciclo de vida
   // automático — ver `tickEntity` abaixo) — também por identidade,
   // também nunca serializado.
@@ -417,18 +502,53 @@
     return new Function('obj', 'SceneObjects', 'Scripting', 'map', 'THREE', 'Utils', 'view3d', body);
   }
 
+  // [15/09/2026 UTC] NOVO — sentinela de "já tentei compilar isto e
+  // falhou" (ver `_lastErrors`/`_getOrCreateModule` logo abaixo) — objeto
+  // truthy próprio (nunca `{}`/`null` comuns) pra `_instanceCache.get`
+  // conseguir distinguir "nunca compilado ainda" (`undefined`) de "já
+  // tentei, deu erro, não tente de novo toda hora" (`_COMPILE_FAILED`)
+  // sem precisar de uma 2ª estrutura de dados só pra isso.
+  const _COMPILE_FAILED = Object.freeze({ _compileFailed: true });
+
   function _getOrCreateModule(compData, owner, ctx) {
     if (!compData || compData.type !== 'Script') return null;
     let mod = _instanceCache.get(compData);
-    if (mod) return mod;
+    if (mod) return mod === _COMPILE_FAILED ? null : mod;
     try {
       const factory = _compileCode(compData.code || '');
       mod = factory(_wrapScriptObj(owner), window.SceneObjects, window.Scripting, ctx?.map || null, window.THREE, window.Utils, ctx?.view3d || null) || {};
       _instanceCache.set(compData, mod);
+      _lastErrors.delete(compData);
       return mod;
     } catch (err) {
+      // [15/09/2026 UTC] CORRIGIDO — ver comentário grande de `_lastErrors`
+      // acima: antes, um erro de COMPILAÇÃO (ex.: "missing ) after
+      // argument list", relatado pelo usuário) nunca era cacheado — cada
+      // quadro (`tickEntity` -> `invokeScriptComponent` ->
+      // `_getOrCreateModule`) tentava `_compileCode` de novo do zero e
+      // disparava outro toast, gerando a "enchurrada de notificações".
+      // Agora: cacheia `_COMPILE_FAILED` (não tenta recompilar até o
+      // usuário editar a folha — `invalidateInstance` limpa o cache),
+      // guarda a mensagem em `_lastErrors` (pra UI mostrar a flag) e só
+      // reemite o toast se a mensagem for DIFERENTE da última já avisada.
+      const msg = err.message || String(err);
+      // [15/09/2026 UTC, RODADA SEGUINTE] REMOVIDO — pedido verbatim: "Elimine
+      // as notificações de erro de script, deixe apenas o texto informativo
+      // na tela de edição do script mesmo. Pois a cada digitada fica
+      // aparecendo uma notificação, acaba por ser uma enxurrada em caso se
+      // continue a digitar." O toast da RODADA anterior já só reemitia numa
+      // mensagem NOVA/diferente (não mais a cada quadro) — mas cada tecla
+      // digitada na folha reseta `_instanceCache`/`_lastErrors`
+      // (`invalidateInstance`, chamado no `onchange`/`oninput` do editor,
+      // ver `js/mapview.js` `_renderScriptCodeEditor`), então cada erro de
+      // COMPILAÇÃO (ex.: parêntese não fechado enquanto o usuário ainda
+      // está digitando a linha) virava uma mensagem "nova" de novo — daí a
+      // enxurrada real. `_lastErrors` continua sendo preenchido (a flag/
+      // faixa fixa da tela de edição, RODADA anterior, continuam
+      // funcionando normalmente) — só o toast em si foi removido.
+      _lastErrors.set(compData, msg);
+      _instanceCache.set(compData, _COMPILE_FAILED);
       console.error('[Components] erro ao compilar/rodar a folha de código do componente', compData.id, err);
-      window.Utils?.toast?.(`⚠️ Erro no script "${owner?.nome || ''}": ${err.message || err}`, { type: 'danger', duration: 5000 });
       return null;
     }
   }
@@ -439,7 +559,7 @@
   window.Components = {
     Component, ScriptComponent, EventTriggerComponent,
     ComponentRegistry, EVENT_CATALOG,
-    SCRIPT_TEMPLATES, DEFAULT_SCRIPT_CODE,
+    SCRIPT_TEMPLATES, DEFAULT_SCRIPT_CODE, DEFAULT_RELOGIO_SCRIPT_CODE,
     extractFunctionNames,
     // [11/09/2026] Exposto pra `js/scripting.js` (`Scripting.run`, o
     // executor "legado" por objeto) reusar o MESMO Proxy de alias
@@ -508,11 +628,42 @@
       const mod = _getOrCreateModule(compData, owner, ctx);
       if (!mod || typeof mod[methodName] !== 'function') return undefined;
       try {
-        return mod[methodName](...(args || []));
+        const ret = mod[methodName](...(args || []));
+        // [15/09/2026 UTC] NOVO — erro anterior sanado (o método rodou sem
+        // lançar desta vez) — limpa a flag/estado de erro (ver `_lastErrors`,
+        // comentário grande perto de `_instanceCache` no topo do arquivo).
+        if (_lastErrors.has(compData)) _lastErrors.delete(compData);
+        return ret;
       } catch (err) {
+        // [15/09/2026 UTC] CORRIGIDO — pedido verbatim: "Quando der erro no
+        // script, deve ficar uma flag na tela do script. Atualmente, uma
+        // enchurrada de notificações está sendo exibida." Antes, um erro de
+        // RUNTIME dentro de Update(dt) (chamado todo quadro) tostava de
+        // novo a CADA quadro enquanto o bug persistisse — mesma causa raiz
+        // do erro de compilação corrigido em `_getOrCreateModule` acima, só
+        // que aqui o erro acontece DEPOIS da compilação ter ido bem. Agora:
+        // só reemite o toast se a mensagem mudou desde a última vez
+        // avisada; `_lastErrors` sempre guarda a mensagem ATUAL (pra a UI
+        // mostrar a flag), toste ou não.
+        const msg = err.message || String(err);
+        // [15/09/2026 UTC, RODADA SEGUINTE] REMOVIDO — mesmo pedido/motivo
+        // do comentário grande em `_getOrCreateModule` acima ("Elimine as
+        // notificações de erro de script [...] deixe apenas o texto
+        // informativo na tela de edição"): toast removido, `_lastErrors`
+        // continua preenchido pra flag/faixa fixa (RODADA anterior).
+        _lastErrors.set(compData, msg);
         console.error(`[Components] erro ao chamar ${methodName}() na folha de código:`, err);
-        window.Utils?.toast?.(`⚠️ Erro no componente de script: ${err.message || err}`, { type: 'danger', duration: 5000 });
       }
+    },
+
+    /** [15/09/2026 UTC] NOVO — pra a UI (ver `js/mapview.js`
+     *  `scriptBlockHtml`/`_refreshComponentErrorFlags`) mostrar uma "flag"
+     *  de erro no bloco do Script, em vez da enchurrada de toasts de antes
+     *  (ver comentário grande de `_lastErrors` no topo do arquivo).
+     *  Devolve a mensagem de erro ATUAL (string) ou `null`/`undefined` se
+     *  o componente estiver rodando sem erro no momento. */
+    getScriptError(compData) {
+      return _lastErrors.get(compData) || null;
     },
 
     /** [11/09/2026] NOVO — ciclo de vida automático estilo Unity: pra
@@ -544,6 +695,11 @@
     invalidateInstance(compData) {
       _instanceCache.delete(compData);
       _startedScripts.delete(compData);
+      // [15/09/2026 UTC] NOVO — a folha mudou (usuário editou o código):
+      // qualquer erro registrado era sobre o texto ANTERIOR, não faz mais
+      // sentido continuar mostrando a flag pro código novo até ele rodar
+      // (com sucesso ou erro) de novo.
+      _lastErrors.delete(compData);
     },
   };
 
@@ -553,6 +709,56 @@
   // clique, loop de distância) chama `emit`; quem decide o que acontece é
   // 100% dado (`EventTriggerComponent.events`).
   // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------
+  // [13/09/2026] NOVO — BARRAMENTO GLOBAL DE EVENTOS (`emitGlobal`/
+  // `onGlobalEvent`), infraestrutura de baixo nível ADICIONADA nesta
+  // rodada pra viabilizar o pedido do elevador ("botão de chamada num
+  // andar liga pra cabine, que pode estar em outro objeto qualquer da
+  // cena"). INVESTIGAÇÃO ANTES DE CRIAR ISSO (documentada aqui pra quem
+  // ler depois e achar estranho ter 2 barramentos parecidos):
+  // `SceneEventBus.emit` (acima, ANTERIOR, inalterado) só entrega o
+  // evento pros EventTrigger/Script DO MESMO `sceneObject` que o
+  // disparou — cada Script roda isolado no contexto do seu PRÓPRIO
+  // `obj` (ver `_getOrCreateModule`/`invokeScriptComponent` acima:
+  // sempre chamado com `owner` = a MESMA entidade). Não existia, em
+  // lugar nenhum do projeto (`grep -rn "SceneEventBus" js/` nesta
+  // rodada), nenhum caminho pra um Script de UM objeto avisar o Script
+  // de OUTRO objeto de algo — motivo pelo qual esta rodada precisou
+  // ADICIONAR essa capacidade (autorização explícita do usuário: "se
+  // precisar de algo que o projeto não dê suporte, implemente").
+  //
+  // DESIGN — deliberadamente o mais simples possível, seguindo a mesma
+  // filosofia de "objeto mutável + closures", sem framework de eventos
+  // novo: um `Map<nomeDoEvento, Set<callback>>` guardado em módulo
+  // (`_globalListeners`), nunca serializado (é comportamento de
+  // execução, não dado de mapa — mesmo espírito de `_instanceCache`/
+  // `_startedScripts` acima). Qualquer Script de QUALQUER objeto pode:
+  //   - `SceneEventBus.onGlobalEvent('chamarElevador', function(dados){...})`
+  //     dentro do seu `Start()`, pra ESCUTAR; devolve uma função pra
+  //     cancelar a inscrição, se algum dia precisar (não usado ainda).
+  //   - `SceneEventBus.emitGlobal('chamarElevador', {piso: 3, direcao: 1})`
+  //     de dentro de QUALQUER outro método (ex.: `aoClicar`) do seu
+  //     próprio Script, pra AVISAR todo mundo inscrito.
+  // `SceneEventBus` já é global (`window.SceneEventBus`) e todo Script
+  // roda em escopo não-estrito de `new Function(...)` (ver
+  // `_compileCode` acima), então `window`/`SceneEventBus` já ficam
+  // visíveis de graça dentro do código colado pelo usuário — não foi
+  // preciso mudar a assinatura de `_compileCode`/`_getOrCreateModule`
+  // pra adicionar isto.
+  //
+  // LIMITAÇÃO CONHECIDA (documentada, não um bug): como cada Script só
+  // "existe" (só tem `Start()` chamada, só entra no `_startedScripts`)
+  // depois que o objeto dono aparece na cena 3D ao menos 1 quadro, um
+  // `emitGlobal` disparado ANTES de outro objeto ainda não ter rodado
+  // seu `Start()` não é perdido de forma alguma incomum — só não há
+  // NENHUM ouvinte cadastrado ainda pra recebê-lo (o registro só
+  // acontece dentro de `Start()`). Na prática, como `tickEntity` roda
+  // `Start()` de TODAS as entidades antes de qualquer `Update()`
+  // (mesma ordem de quadro do motor), isso não chega a ser um problema
+  // real: no primeiro quadro em diante todo mundo já está inscrito.
+  // ---------------------------------------------------------------------
+  const _globalListeners = new Map();
+
   window.SceneEventBus = {
     /** @param {string} eventName - um dos EVENT_CATALOG ids.
      *  @param {object} sceneObject - a referência de verdade do objeto/
@@ -575,6 +781,37 @@
           }
         }
       }
+    },
+
+    /** [13/09/2026] NOVO — dispara `eventName` pra TODO ouvinte inscrito
+     *  via `onGlobalEvent`, em QUALQUER objeto da cena (não só no mesmo
+     *  objeto que emitiu — diferente de `emit` acima). `payload` é
+     *  passado como único argumento de cada callback. Erros num
+     *  ouvinte são isolados (`try/catch` por ouvinte) pra um Script com
+     *  bug não travar a entrega do evento pros demais. */
+    emitGlobal(eventName, payload) {
+      const listeners = _globalListeners.get(eventName);
+      if (!listeners || !listeners.size) return;
+      for (const fn of Array.from(listeners)) {
+        try {
+          fn(payload);
+        } catch (err) {
+          console.error(`[SceneEventBus] erro num ouvinte global de "${eventName}":`, err);
+        }
+      }
+    },
+
+    /** [13/09/2026] NOVO — inscreve `callback` pra ser chamado toda vez
+     *  que `eventName` for emitido via `emitGlobal` (de QUALQUER objeto).
+     *  Devolve uma função `cancelar()` pra remover a inscrição (útil se
+     *  um objeto for destruído/recriado, embora nenhum script existente
+     *  chame isso hoje — cancelar é opcional). */
+    onGlobalEvent(eventName, callback) {
+      if (typeof callback !== 'function') return () => {};
+      if (!_globalListeners.has(eventName)) _globalListeners.set(eventName, new Set());
+      const set = _globalListeners.get(eventName);
+      set.add(callback);
+      return () => set.delete(callback);
     },
   };
 })();

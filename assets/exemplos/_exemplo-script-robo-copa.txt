@@ -1,0 +1,121 @@
+/* assets/modelos/_exemplo-script-robo-copa.txt
+ * NOVO (13/09/2026) — cenário do backlog: ROBÔ DE COPA/CAFÉ. Trajeto entre
+ * uma "copa" (ponto de origem/reabastecimento) e algumas mesas específicas
+ * (waypoints de entrega), com uma PAUSA simulada em cada mesa antes de
+ * seguir pra próxima. Reaproveita o MESMO motor de trajeto de
+ * _exemplo-script-robo-trajeto.txt (ver aquele arquivo pro mecanismo
+ * completo/mais comentado). Use com um objeto do tipo "robo-copa"
+ * (Ferramentas → Objetos), mesmo passo a passo documentado em
+ * robo.model.js.
+ *
+ * [13/09/2026, MESMO DIA — REESCRITO] CORREÇÃO DE ARQUITETURA — ver
+ * comentário grande equivalente em _exemplo-script-robo-trajeto.txt: o
+ * usuário rejeitou guardar "copa" e "mesas" em constantes hardcoded dentro
+ * do texto do script. Agora tudo isso é UM ÚNICO trajeto estruturado —
+ * `obj.propriedades.trajeto` — editável pelo painel de propriedades (seção
+ * "🗺️ Trajeto do robô"), no MODO "🔁 Ciclo": ponto 1 = copa, pontos 2..N =
+ * mesas de entrega, e o "voltar pra copa" já é o próprio ciclo (do último
+ * ponto de volta pro primeiro). A PAUSA em cada mesa (antes só um valor
+ * fixo `PAUSA_EM_MESA_MS` igual pra todas) agora usa o campo `esperaMs` de
+ * CADA ponto — o campo `esperaMs` do ponto 1 (a copa) fica em 0 (sem
+ * pausa lá), os demais recebem `PAUSA_EM_MESA_MS` na geração automática
+ * (ver `_gerarRotaSeVazia` abaixo), mas podem ser ajustados
+ * individualmente pelo painel depois (mesa que demora mais pra servir,
+ * por exemplo).
+ *
+ * MESMO fallback documentado em _exemplo-script-robo-limpeza.txt: se
+ * `obj.propriedades.trajeto` estiver vazio na primeira execução, gera uma
+ * rota-exemplo (copa + 3 mesas, ver EDITE AQUI abaixo) e grava no dado
+ * estruturado — dali em diante o painel de propriedades é a fonte de
+ * verdade, e mudar as constantes abaixo deixa de ter efeito (apague o
+ * trajeto pelo painel pra gerar de novo).
+ *
+ * [13/09/2026] RELÓGIO DO PRÉDIO (ver js/relogio-mundo.js,
+ * `window.RelogioMundo`, já acessível de dentro de QUALQUER Script sem
+ * import): `Update()` só deixa o robô sair entregando café DURANTE o
+ * expediente de verdade (`RelogioMundo.isHorarioComercial()`) — de
+ * madrugada ele simplesmente fica parado onde estiver. A PAUSA em cada
+ * mesa (`esperaMs`) continua em `Date.now()` (tempo REAL) DE PROPÓSITO —
+ * é sobre a DURAÇÃO de uma pausa curta, não sobre "que horas são no
+ * prédio".
+ */
+
+/**
+ * Start é chamada antes do primeiro quadro (uma vez, ao iniciar o objeto).
+ */
+function Start() {
+  this._esperaAte = 0; // timestamp (Date.now()) até quando o robô fica parado neste ponto; 0 = não está esperando
+  _gerarRotaSeVazia();
+}
+
+// ---------------------------------------------------------------------
+// EDITE AQUI — usado SÓ pra gerar a rota-exemplo automática na primeira
+// vez (ver comentário grande no topo do arquivo). Depois de gerada uma
+// vez, o trajeto de verdade mora em obj.propriedades.trajeto — mudar estes
+// valores aqui não afeta mais um trajeto já salvo (apague os pontos pelo
+// painel pra gerar de novo).
+// ---------------------------------------------------------------------
+const COPA = { x: 0.5, y: 0.5 };
+const MESAS = [
+  { x: 4.0, y: 1.5 },
+  { x: 7.0, y: 3.0 },
+  { x: 4.5, y: 5.5 },
+];
+const PAUSA_EM_MESA_MS = 5000; // 5 segundos parado em cada mesa (tempo REAL) — ver nota de limitação acima. Não pausa na copa (índice 0).
+
+const VELOCIDADE = 1.0; // m/s
+const DISTANCIA_CHEGADA = 0.2; // metros
+
+/** Gera copa + mesas como UM trajeto estruturado (ponto 0 = copa, sem
+ *  pausa; pontos seguintes = mesas, com PAUSA_EM_MESA_MS de espera cada) e
+ *  grava em obj.propriedades.trajeto, SÓ SE a lista ainda estiver vazia. */
+function _gerarRotaSeVazia() {
+  if (obj.propriedades?.trajeto?.length) return; // já existe — respeita o que o usuário tem cadastrado/editado
+  const pontos = [{ x: COPA.x, y: COPA.y, esperaMs: 0 }, ...MESAS.map((m) => ({ x: m.x, y: m.y, esperaMs: PAUSA_EM_MESA_MS }))];
+  obj.propriedades = obj.propriedades || {};
+  obj.propriedades.trajeto = pontos;
+  obj.propriedades.trajetoModo = obj.propriedades.trajetoModo || 'ciclo';
+  console.log(`[Robô "${obj.nome || obj.tipo}"] rota copa→mesas gerada automaticamente (${pontos.length} pontos) e salva em obj.propriedades.trajeto — ajustável dali em diante pelo painel de propriedades ("🗺️ Trajeto do robô").`);
+}
+
+/**
+ * Update é chamada uma vez por quadro (a cada frame).
+ */
+function Update(dt) {
+  // Só entrega café durante o expediente de verdade (relógio do mundo,
+  // não Date.now()). Fora do expediente, o robô fica parado onde estiver
+  // (se já estava no meio do trajeto quando o expediente acabou, ele
+  // simplesmente congela ali até o próximo dia útil — comportamento
+  // simples e suficiente pro escopo deste exemplo).
+  if (!window.RelogioMundo?.isHorarioComercial?.()) return;
+
+  const trajeto = obj.propriedades?.trajeto;
+  if (!Array.isArray(trajeto) || !trajeto.length) return;
+
+  // Está parado esperando (numa mesa)? Só volta a andar quando o
+  // temporizador local (Date.now(), tempo real) vencer.
+  if (this._esperaAte && Date.now() < this._esperaAte) return;
+  if (this._esperaAte && Date.now() >= this._esperaAte) this._esperaAte = 0; // terminou a espera
+
+  let idx = obj.propriedades._trajetoIndiceAtual;
+  if (typeof idx !== 'number' || idx < 0 || idx >= trajeto.length) idx = 0;
+
+  const alvo = trajeto[idx];
+  const dx = alvo.x - obj.x;
+  const dy = alvo.y - obj.y;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist <= DISTANCIA_CHEGADA) {
+    // Chegou neste ponto — se ele tiver `esperaMs` configurado (qualquer
+    // ponto que não seja a copa, no cenário padrão), pausa antes de seguir.
+    if (alvo.esperaMs) this._esperaAte = Date.now() + alvo.esperaMs;
+    idx = (idx + 1) % trajeto.length; // sempre em 'ciclo': copa → mesas → copa → ...
+    obj.propriedades._trajetoIndiceAtual = idx;
+    return;
+  }
+
+  const passo = Math.min(VELOCIDADE * dt, dist);
+  obj.x += (dx / dist) * passo;
+  obj.y += (dy / dist) * passo;
+  obj.angulo = Math.atan2(dy, dx);
+}

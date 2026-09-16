@@ -1,0 +1,7 @@
+# gerado por ferramentas/gerar_malhas.js — materiais de teto-gesso
+
+newmtl placa
+Kd 1.0000 1.0000 1.0000
+
+newmtl rodela
+Kd 0.7804 0.7961 0.8196

@@ -1,0 +1,112 @@
+/* assets/modelos/_exemplo-script-relogio.txt
+ * NOVO (14/09/2026 UTC) — pedido verbatim (backlog, adiado desde a
+ * RODADA 20): "Os ponteiros do relógio e seu funcionamento deve
+ * funcionar por meio de scripts [...] seja possível fazer um relógio do
+ * zero." / "Implemente o relógio funcionando 'de verdade' por scripts."
+ *
+ * COMO USAR: coloque um objeto "Relógio" no mapa 2D (Ferramentas →
+ * Objetos → Relógio, mesmo passo a passo de sempre — funciona em
+ * relógio de parede OU de mesa/estante, qualquer um que use o perfil
+ * `relogio`, ver engine3d-profiles.js). Abra as Propriedades → "🎬
+ * Componentes" → "+ Script" e cole este texto. Sem nenhum Script
+ * anexado, o relógio já funciona sozinho — mostra a hora REAL do
+ * mundo (`window.RelogioMundo`, ver js/relogio-mundo.js) e não
+ * precisa deste arquivo pra nada. Este script é só um EXEMPLO de como
+ * assumir o controle dos ponteiros por conta própria — copie e adapte
+ * pra qualquer outro comportamento (ver ideias no fim do arquivo).
+ *
+ * O QUE ESTE SCRIPT FAZ: um "relógio do mundo" — mostra a hora de um
+ * FUSO DIFERENTE do relógio principal do prédio (`RelogioMundo`),
+ * deslocado por `OFFSET_HORAS` (editável logo abaixo) — mesma ideia do
+ * botão "🌗 Hora do dia → Seguir relógio do mundo" (globo 3D), só que
+ * aplicada a um relógio analógico comum em vez do globo.
+ *
+ * MECANISMO — a cada `Update(dt)`, o script lê a hora ATUAL do mundo
+ * (`RelogioMundo.getHoraAtual()` — o MESMO relógio que os robôs de
+ * copa/limpeza/recepcionista já consultam pra saber se é hora do
+ * almoço etc., nunca `Date.now()`/a hora do computador do usuário) e
+ * escreve o resultado, já deslocado, em 3 campos SIMPLES do objeto:
+ *
+ *     obj.horaPonteiro    = 0-23 (pode passar de 23/voltar de 0 — o
+ *                            script já normaliza)
+ *     obj.minutoPonteiro  = 0-59
+ *     obj.segundoPonteiro = 0-59
+ *
+ * Esses 3 campos são NÚMEROS COMUNS (não radianos, não precisa saber de
+ * eixo/sinal de rotação) — o motor 3D (`Engine3D._updateRelogiosParede`,
+ * js/engine3d.js) já sabe ler os 3 e girar os ponteiros certinho, todo
+ * quadro, sozinho. Cada campo é INDEPENDENTE: se este script escrever
+ * só `obj.segundoPonteiro`, por exemplo, hora/minuto continuam vindo
+ * automaticamente do `RelogioMundo` normal — não precisa sobrescrever
+ * os 3 juntos se não fizer sentido pro seu caso.
+ *
+ * "UM RELÓGIO DO ZERO": nada aqui depende do perfil embutido `relogio`
+ * em si além dos NOMES dos 3 campos acima — qualquer objeto que o
+ * motor 3D desenhe com ponteiros animados (hoje só o perfil `relogio`,
+ * ver `Engine3D._buildRelogioMesh`) responde a este mecanismo. Se um
+ * dia existir um relógio TOTALMENTE customizado (peças montadas no
+ * Modelador em vez do perfil de fábrica), os 3 campos continuam sendo o
+ * jeito certo de um Script "dizer que horas são" pro objeto — só falta,
+ * nesse caso, o motor 3D aprender a animar as peças NOMEADAS desse
+ * modelo customizado a partir deles (fora do escopo deste script/
+ * exemplo — ver LIMITAÇÃO no fim).
+ */
+
+/**
+ * Start é chamada antes do primeiro quadro (uma vez, ao iniciar o objeto).
+ */
+function Start() {
+  // nada a inicializar — este script não guarda estado próprio, só lê o
+  // relógio do mundo a cada quadro e escreve os 3 campos.
+}
+
+// ---------------------------------------------------------------------
+// EDITE AQUI — quantas horas este relógio fica à FRENTE (positivo) ou
+// ATRÁS (negativo) do relógio principal do prédio. Ex.: -3 pra mostrar
+// um fuso 3h atrás (Nova York em relação a um prédio em horário de
+// Brasília, por exemplo) — ajuste pro fuso que fizer sentido pro seu mapa.
+// ---------------------------------------------------------------------
+const OFFSET_HORAS = -3;
+
+/**
+ * Update é chamada uma vez por quadro (a cada frame).
+ */
+function Update(dt) {
+  if (!window.RelogioMundo) return; // defensivo — mesma cautela do resto do backlog
+  const h = window.RelogioMundo.getHoraAtual(); // { horas, minutos, segundos, diaDaSemana }
+
+  // Soma o offset e normaliza pra 0-23 (JS `%` pode devolver negativo com
+  // dividendo negativo — o `+ 24` extra garante o resultado sempre
+  // positivo antes do `% 24` final).
+  const horaComOffset = ((h.horas + OFFSET_HORAS) % 24 + 24) % 24;
+
+  obj.horaPonteiro = horaComOffset;
+  obj.minutoPonteiro = h.minutos;   // minutos/segundos não mudam com fuso — só a hora desloca
+  obj.segundoPonteiro = h.segundos;
+}
+
+/* IDEIAS PRA ADAPTAR ESTE SCRIPT (troque só o cálculo dentro de Update):
+ *   - Relógio PARADO num horário fixo (decoração/quebrado): não leia
+ *     RelogioMundo nenhum — só faça, no Start(), `obj.horaPonteiro = 10;
+ *     obj.minutoPonteiro = 10; obj.segundoPonteiro = 0;` uma vez.
+ *   - Relógio ACELERADO (efeito "passagem de tempo" numa cena/demo): em
+ *     vez de ler RelogioMundo, acumule seu PRÓPRIO tempo em Update
+ *     (`this._segAcumulados += dt * MULTIPLICADOR;`) e derive hora/
+ *     minuto/segundo dele.
+ *   - Relógio de CONTAGEM REGRESSIVA (ex.: cronômetro de evento): guarde
+ *     um alvo (`this._alvoSegundos`) e escreva `obj.segundoPonteiro` etc.
+ *     a partir da DIFERENÇA restante, não da hora do dia.
+ *
+ * LIMITAÇÃO JÁ CONHECIDA DO PROJETO: isto resolve os PONTEIROS de um
+ * relógio que já usa o perfil de fábrica `relogio` (ver engine3d-
+ * profiles.js) — um relógio "100% do zero", montado peça por peça no
+ * Modelador (🔧 Modelar em 3D) a partir de QUALQUER objeto, ainda não é
+ * possível: "Modelar em 3D" hoje converte o objeto numa malha genérica
+ * (caixa) e PERDE o perfil especial de relógio (ponteiros/mostrador) no
+ * processo — bug já diagnosticado (causa raiz: `Modeler3D.ensureCustomMesh`,
+ * ver progresso-sessao.md, item ainda adiado por ser uma mudança de alto
+ * risco no pipeline do Modelador, que afeta TODO objeto que passa por
+ * "Modelar em 3D", não só relógios). Esta rodada resolve o pedido de
+ * "ponteiros funcionando de verdade por meio de scripts" pro relógio de
+ * fábrica; o Modelador customizado continua como item separado.
+ */

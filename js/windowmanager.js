@@ -224,6 +224,35 @@ const WindowManager = {
     this._topWindow = w;
     return this._focusZ;
   },
+
+  /** [15/09/2026 UTC] NOVO — pedido verbatim: "Ao 'fechar' a janela, ela
+   *  deve voltar para o seu z-index normal." Antes, fechar uma janela nunca
+   *  devolvia o `_focusZ` (o valor "padrão, mais alto, distante") pra
+   *  ninguém — se a janela fechada era a `_topWindow`, `_topWindow` ficava
+   *  apontando pra um registro "órfão" (elemento removido/oculto do DOM)
+   *  até a PRÓXIMA janela ganhar foco (o que já reequilibra tudo sozinho em
+   *  `focus()`, então não é um bug funcional grave), mas o próprio elemento
+   *  fechado continuava com `style.zIndex` cravado no valor de foco antigo
+   *  — se ele for só OCULTADO (`display:none`, não removido — ver
+   *  `mapview.js _hideOrRemovePanel`) e reaparecer mais tarde por algum
+   *  caminho que não passe por `focus()` de novo, reapareceria já "na
+   *  frente" de qualquer coisa aberta depois dele, sem ter sido clicado.
+   *  `blur(idOrEl)` devolve o elemento pro seu `baseZIndex` de origem (a
+   *  posição "de repouso" no catálogo, nunca o valor de foco) SÓ se ele for
+   *  de fato quem está ocupando `_focusZ` agora — janelas que já não
+   *  estavam em foco (nunca clicadas por último) não têm nada a devolver, e
+   *  ficam intocadas. */
+  blur(idOrEl) {
+    if (!idOrEl) return;
+    const el = (idOrEl.nodeType === 1) ? idOrEl : (this._windows.get(idOrEl)?.el || null);
+    if (!el) return;
+    const w = this._windows.get(el);
+    if (!w) return;
+    if (this._topWindow === w) {
+      el.style.zIndex = String(w.baseZIndex);
+      this._topWindow = null;
+    }
+  },
 };
 
 /**

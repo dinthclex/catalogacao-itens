@@ -1,0 +1,174 @@
+/* assets/modelos/_exemplo-script-robo-trajeto.txt
+ * NOVO (13/09/2026) — SISTEMA DE TRAJETO (waypoints) genérico e reutilizável
+ * pra qualquer robô do backlog do usuário (limpeza, copa/café,
+ * recepcionista). É a peça de infraestrutura BASE que os scripts
+ * especializados (_exemplo-script-robo-limpeza.txt/_exemplo-script-robo-
+ * copa.txt/_exemplo-script-robo-recepcionista.txt) reaproveitam.
+ *
+ * [13/09/2026, MESMO DIA — REESCRITO] CORREÇÃO DE ARQUITETURA, pedido
+ * verbatim do usuário rejeitando a versão anterior deste arquivo: "como
+ * tudo deve ser com os recursos do próprio app, devendo ser implementado
+ * aquilo que ainda não existe neste app, então, ao ser alterado ou criado
+ * pelo usuário o robô deve seguir este script também. Não podendo ficar em
+ * um estado de 'um script totalmente reescrito pelo usuário pode não ser
+ * reconhecido'."
+ *
+ * ANTES (versão anterior deste mesmo arquivo, ver histórico do projeto): a
+ * lista de waypoints vivia numa `const WAYPOINTS = [...]` hardcoded no
+ * TOPO deste texto — o usuário editava direto aqui, colando/editando
+ * código. Motivo documentado na época: "mais simples de editar à mão, sem
+ * precisar de uma UI nova". PROBLEMA (apontado pelo usuário): isso deixava
+ * o dado de navegação MISTURADO com o código livre do Script — o App de
+ * Monitoramento de Robôs (js/view3d.js) tinha que "adivinhar" essa
+ * constante com regex sobre o texto do script pra conseguir mostrar o
+ * trajeto, e qualquer reescrita do script (outro nome de variável, outra
+ * estrutura) quebrava esse reconhecimento.
+ *
+ * AGORA: a lista de waypoints é um DADO ESTRUTURADO de primeira classe do
+ * PRÓPRIO OBJETO — `obj.propriedades.trajeto` (array de `{x, y,
+ * esperaMs?}`) e `obj.propriedades.trajetoModo` ('ciclo' | 'ida-e-volta') —
+ * editável SEM tocar em código nenhum, pela seção "🗺️ Trajeto do robô" do
+ * painel de propriedades do objeto (Mapa 2D → clique no robô → painel →
+ * fieldset "🗺️ Trajeto do robô"; ver js/mapview.js
+ * `_trajetoFieldsetHtml`/`_wireTrajetoFieldset`). Como `obj` é a REFERÊNCIA
+ * DE VERDADE do objeto no mapa — a mesma lida/escrita pelos painéis 2D/3D
+ * e persistida no JSON do mapa —, este Script só precisa LER
+ * `obj.propriedades.trajeto` dentro de `Update()`, sem nenhuma mudança de
+ * sandbox: scripts já têm acesso de leitura/escrita a QUALQUER propriedade
+ * de `obj` (ver js/scripting.js `run`/js/components.js `_wrapScriptObj`).
+ * Isso garante que o App de Monitoramento (js/view3d.js
+ * `lerTrajetoEstruturadoDoRobo`) SEMPRE reconhece o trajeto de QUALQUER
+ * robô, não importa como o usuário reescreveu este Script — o dado não
+ * mora mais dentro do texto dele.
+ *
+ * COMO USAR:
+ *  1. Coloque um objeto do tipo "robo" (ou robo-limpeza/robo-copa/
+ *     robo-recepcionista) no mapa 2D (Ferramentas → Objetos).
+ *  2. Abra o painel do objeto → seção "🗺️ Trajeto do robô" → "➕ Adicionar
+ *     ponto" (ou "📍 Usar posição atual do objeto", andando o robô
+ *     manualmente entre cliques) — cadastre os pontos X/Y do trajeto
+ *     direto ali, sem editar código. Escolha o modo (🔁 Ciclo/↔️ Ida e
+ *     volta) no mesmo painel.
+ *  3. Abra o painel do objeto → "➕ Adicionar Componente" → "Script".
+ *  4. Cole ESTE código (ou um dos 3 especializados) no campo de código.
+ *  5. Pronto — o robô já segue os pontos cadastrados no passo 2. Editar o
+ *     trajeto depois (adicionar/remover/mover pontos, mudar o modo) NÃO
+ *     exige tocar neste código de novo.
+ *
+ * FALLBACK (script sem trajeto cadastrado ainda): se
+ * `obj.propriedades.trajeto` estiver vazio/ausente (objeto novo, painel
+ * ainda não usado), este script NÃO inventa um trajeto-exemplo sozinho —
+ * fica parado e avisa uma vez no console, pedindo pra cadastrar os pontos
+ * pelo painel (ver `Start()` abaixo). Decisão de design: um robô que anda
+ * sozinho por coordenadas de exemplo que o usuário nunca viu/escolheu seria
+ * mais confuso do que fazer nada até ele configurar o trajeto de verdade.
+ *
+ * MECANISMO (motor JÁ EXISTENTE reaproveitado, não uma API nova):
+ *  - Este código roda dentro do MESMO sandbox de Script já usado pelos
+ *    relógios/mesas animados do prédio (js/components.js `ScriptComponent`,
+ *    ciclo de vida Start()/Update(dt) automático a cada quadro — ver
+ *    `tickEntity`). `obj` é a referência de verdade do objeto (mutar
+ *    obj.x/obj.y/obj.angulo já move o objeto de verdade no mapa).
+ *  - A posição em 3D é sincronizada automaticamente a partir de obj.x/
+ *    obj.y/obj.elevacao/obj.angulo TODO quadro por
+ *    `Engine3D._syncScriptedObjectTransforms` (js/engine3d.js) — o MESMO
+ *    mecanismo confirmado funcional pelos relógios animados, sem nenhum
+ *    código novo de sincronização necessário aqui.
+ *  - `obj.angulo` é RADIANOS (mesmo campo lido por `objAnguloToRotY` pra
+ *    desenhar o objeto rotacionado no 2D/3D — ver js/engine3d-
+ *    profiles.js), não graus.
+ */
+
+/**
+ * Start é chamada antes do primeiro quadro (uma vez, ao iniciar o objeto).
+ */
+function Start() {
+  // Direção do "ida e volta" (só usada no modo 'ida-e-volta') — 1 = indo
+  // pra frente na lista, -1 = voltando. O índice do waypoint atual NÃO
+  // fica mais numa variável local (`this._wpIndex`) — foi promovido a
+  // `obj.propriedades._trajetoIndiceAtual` (ver mais abaixo), tanto pra
+  // sobreviver caso a lista de pontos mude de tamanho no meio da execução
+  // (editada pelo painel enquanto o robô anda) quanto pro App de
+  // Monitoramento de Robôs conseguir ler o progresso de fora.
+  this._wpDir = 1;
+  if (!obj.propriedades?.trajeto?.length) {
+    console.warn(`[Robô "${obj.nome || obj.tipo}"] sem trajeto definido — abra o painel de propriedades deste objeto no Mapa 2D e cadastre os pontos na seção "🗺️ Trajeto do robô" (nenhum movimento acontece até isso ser feito).`);
+  }
+}
+
+// Velocidade de deslocamento do robô, em metros por segundo.
+const VELOCIDADE = 1.0; // 1 m/s
+
+// Distância (metros) considerada "chegou perto o suficiente" do waypoint
+// atual pra avançar pro próximo.
+const DISTANCIA_CHEGADA = 0.2; // 20cm
+
+/**
+ * Update é chamada uma vez por quadro (a cada frame). `dt` = segundos
+ * desde o quadro anterior (mesmo parâmetro já usado por outros exemplos de
+ * animação do app, ex.: relógio/mesa animados).
+ */
+function Update(dt) {
+  // [13/09/2026 REESCRITO] Lê o trajeto DIRETO do dado estruturado do
+  // objeto — `obj.propriedades.trajeto`, editável pelo painel de
+  // propriedades (ver comentário grande no topo deste arquivo). Sem
+  // trajeto cadastrado, o robô simplesmente fica parado (o aviso já foi
+  // mostrado uma vez em Start(), acima).
+  const trajeto = obj.propriedades?.trajeto;
+  if (!Array.isArray(trajeto) || !trajeto.length) return;
+
+  // Espera parado neste ponto? (campo opcional `esperaMs` de cada
+  // waypoint — 0/ausente = não espera). Controlado por tempo REAL
+  // (Date.now()), igual à pausa em mesa do robô de copa — é uma duração
+  // curta de "parado fazendo alguma coisa", não um horário do prédio.
+  if (this._esperaAte && Date.now() < this._esperaAte) return;
+  if (this._esperaAte && Date.now() >= this._esperaAte) this._esperaAte = 0;
+
+  // Índice do waypoint atual — persistido em obj.propriedades (não numa
+  // variável local), pra sobreviver a mudanças no tamanho da lista feitas
+  // pelo painel enquanto o robô já está andando, e pro App de
+  // Monitoramento de Robôs conseguir ler ("Ponto X de Y") sem interpretar
+  // este código (ver js/view3d.js `_progressoTrajetoRobo`). Sanitiza pra
+  // dentro dos limites atuais da lista a cada quadro (defensivo — cobre o
+  // caso de o usuário remover pontos deixando o índice salvo fora do
+  // range).
+  let idx = obj.propriedades._trajetoIndiceAtual;
+  if (typeof idx !== 'number' || idx < 0 || idx >= trajeto.length) idx = 0;
+
+  const alvo = trajeto[idx];
+  const dx = alvo.x - obj.x;
+  const dy = alvo.y - obj.y;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist <= DISTANCIA_CHEGADA) {
+    // Chegou no waypoint atual — agenda a espera configurada nele (se
+    // houver) e avança pro próximo, conforme o modo escolhido no painel
+    // (`obj.propriedades.trajetoModo`: 'ciclo' (padrão) ou 'ida-e-volta').
+    if (alvo.esperaMs) this._esperaAte = Date.now() + alvo.esperaMs;
+    const modo = obj.propriedades.trajetoModo === 'ida-e-volta' ? 'ida-e-volta' : 'ciclo';
+    if (modo === 'ida-e-volta') {
+      if (trajeto.length === 1) { idx = 0; } // lista de 1 ponto só — evita loop infinito abaixo
+      else {
+        idx += this._wpDir;
+        if (idx >= trajeto.length) { idx = trajeto.length - 2; this._wpDir = -1; }
+        else if (idx < 0) { idx = 1; this._wpDir = 1; }
+      }
+    } else {
+      idx = (idx + 1) % trajeto.length; // 'ciclo': volta ao primeiro após o último
+    }
+    obj.propriedades._trajetoIndiceAtual = idx;
+    return; // já chegou este quadro — próximo quadro mira no novo alvo
+  }
+
+  // Anda em direção ao waypoint atual, à VELOCIDADE configurada, sem
+  // ultrapassar (limita o passo à distância restante).
+  const passo = Math.min(VELOCIDADE * dt, dist);
+  obj.x += (dx / dist) * passo;
+  obj.y += (dy / dist) * passo;
+
+  // Gira obj.angulo pra apontar na direção do movimento — efeito visual
+  // simples (sem esqueleto/animação), como pedido. `angulo` é radianos;
+  // `Math.atan2(dy, dx)` já devolve o ângulo certo no MESMO sistema usado
+  // por objAnguloToRotY (ver comentário grande no topo deste arquivo).
+  obj.angulo = Math.atan2(dy, dx);
+}

@@ -1,0 +1,7 @@
+# gerado por ferramentas/gerar_malhas.js — materiais de luminaria
+
+newmtl carcaca
+Kd 0.9490 0.9529 0.9608
+
+newmtl tubo
+Kd 0.9608 0.9804 1.0000

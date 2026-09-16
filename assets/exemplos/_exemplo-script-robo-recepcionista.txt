@@ -1,0 +1,200 @@
+/* assets/modelos/_exemplo-script-robo-recepcionista.txt
+ * NOVO (13/09/2026) — cenário do backlog: ROBÔ RECEPCIONISTA.
+ *
+ * [13/09/2026, MESMO DIA — REESCRITO] CORREÇÃO DE ARQUITETURA — pedido
+ * verbatim do usuário rejeitando posições fixas hardcoded dentro do texto
+ * do script (mesma correção aplicada aos outros 3 scripts de robô, ver
+ * comentário grande em _exemplo-script-robo-trajeto.txt). As duas posições
+ * fixas deste script — a recepção (onde o robô fica parado a maior parte
+ * do tempo) e a "sala dos robôs" (destino periódico) — deixam de ser
+ * constantes `RECEPCAO`/`SALA_DOS_ROBOS` no topo do arquivo e passam a
+ * viver no MESMO dado estruturado usado por todos os outros robôs:
+ * `obj.propriedades.trajeto` — ponto 0 = recepção, ponto 1 = sala dos
+ * robôs — editável pela MESMA seção "🗺️ Trajeto do robô" do painel de
+ * propriedades (ver js/mapview.js `_trajetoFieldsetHtml`), sem precisar de
+ * nenhuma UI nova: como este robô só tem DUAS posições fixas (não uma
+ * lista longa de waypoints), elas cabem perfeitamente como um trajeto de 2
+ * pontos no modo "↔️ Ida e volta" (o painel já suporta exatamente essa
+ * variante) — reaproveitamento total do mecanismo já existente, em vez de
+ * inventar `obj.propriedades.posicaoRecepcao`/`posicaoSalaRobos` como
+ * campos soltos que exigiriam uma UI própria.
+ *
+ * [13/09/2026] ESCLARECIMENTO DO USUÁRIO — leia isto ANTES da nota de
+ * "honestidade de escopo" antiga logo abaixo: "Sobre o robô recepcionista
+ * 'trocar de uniforme' é só um nome dado para o momento em que ela vai
+ * desligar o holograma e ligá-lo, depois de alguma coisa feita na sala dos
+ * robôs." O pedido é bem mais simples do que a nota antiga descrevia — NÃO
+ * precisa de um modelo humanoide nem de esqueleto articulado, só um EFEITO
+ * VISUAL de "holograma ligado/desligado" no momento em que o robô está na
+ * sala dos robôs. Isso agora ESTÁ implementado neste script (ver o novo
+ * trecho dentro do estado 'naSala' logo abaixo) — o robô desliga o
+ * holograma (`obj.hologramaLigado = false`) uma parte do tempo em que fica
+ * na sala, religa antes de voltar pra recepção. O efeito visual em si
+ * (troca de material/cor do mesh) é aplicado pelo MOTOR (ver
+ * `Engine3D._syncScriptedObjectTransforms`, js/engine3d.js) — este script
+ * só precisa mudar o campo `obj.hologramaLigado`, igual mudar qualquer
+ * outra propriedade do objeto.
+ *
+ * O QUE ESTE SCRIPT COBRE DE VERDADE: a MOVIMENTAÇÃO/TRAJETO entre a
+ * recepção (posição fixa, onde o robô fica parado a maior parte do tempo) e
+ * a "sala dos robôs" (onde ele vai periodicamente, desliga/religa o
+ * holograma, e volta) — reaproveitando o MESMO dado estruturado de trajeto
+ * (`obj.propriedades.trajeto`) usado por _exemplo-script-robo-trajeto.txt/
+ * _exemplo-script-robo-copa.txt. Use com um objeto do tipo
+ * "robo-recepcionista" (Ferramentas → Objetos), mesmo passo a passo
+ * documentado em robo.model.js.
+ *
+ * [13/09/2026] TROCA DE TURNO USA O RELÓGIO DE VERDADE DO PRÉDIO
+ * (`js/relogio-mundo.js`). A viagem até a "sala dos robôs" é disparada
+ * pelo evento global `trocaDeTurno` (`SceneEventBus.onGlobalEvent`, horário
+ * configurável em `RelogioMundo.setConfig({horaTrocaTurno:'HH:MM'})`,
+ * padrão 18:00) — ver `Start()` abaixo. `TEMPO_NA_SALA_MINUTOS` (quanto
+ * tempo fica lá, e os tempos do efeito de holograma) continuam em
+ * `Date.now()` (tempo REAL) DE PROPÓSITO — são durações curtas de
+ * manutenção, não horários do dia.
+ *
+ * HONESTIDADE DE ESCOPO — NOTA ANTIGA, MANTIDA SÓ COMO HISTÓRICO (o
+ * esclarecimento acima já resolve o que faltava aqui): um modelo 3D
+ * humanoide de verdade (malha articulada) e um efeito de holograma
+ * volumétrico sofisticado continuam sendo peças de CONTEÚDO/ARTE 3D
+ * separadas e maiores, caso um dia sejam pedidos por outro motivo — mas
+ * NÃO fazem falta pro pedido de "trocar de uniforme" já esclarecido.
+ */
+
+/**
+ * Start é chamada antes do primeiro quadro (uma vez, ao iniciar o objeto).
+ */
+function Start() {
+  this._estado = 'recepcao'; // 'recepcao' | 'indoSala' | 'naSala' | 'voltando'
+  this._saiDaSalaEm = 0; // timestamp de quando volta da sala (setado ao chegar lá)
+  // A viagem pra sala dos robôs é disparada pelo relógio do mundo (evento
+  // global `trocaDeTurno`). `_deveViajarAgora` fica true quando o evento
+  // dispara e só é consumido (volta a false) quando o robô de fato começa
+  // a andar (`_estado='recepcao'` -> `'indoSala'` abaixo) — assim não
+  // perde o gatilho mesmo se `Update` só rodar de novo alguns quadros
+  // depois do evento. Registrado 1x por instância do robô (Start só roda
+  // 1x na vida do objeto).
+  this._deveViajarAgora = false;
+  window.SceneEventBus?.onGlobalEvent?.('trocaDeTurno', () => { this._deveViajarAgora = true; });
+  // Controla o "desligar/religar o holograma" dentro da sala dos robôs (ver
+  // EDITE AQUI abaixo pros tempos). `obj.hologramaLigado` começa true
+  // (estado normal, "na recepção") — mesmo padrão que `onModelSpawn` do
+  // .model.js já garante pra qualquer objeto que nasça sem passar por este
+  // Start (defensivo, redundante de propósito).
+  if (obj.hologramaLigado === undefined) obj.hologramaLigado = true;
+  this._hologramaDesligaEm = 0;  // timestamp de quando o holograma DESLIGA (setado ao chegar na sala)
+  this._hologramaReligaEm = 0;   // timestamp de quando o holograma RELIGA (setado quando de fato desliga)
+  _gerarPosicoesSeVazio();
+}
+
+// ---------------------------------------------------------------------
+// EDITE AQUI — usado SÓ pra gerar as 2 posições-exemplo (recepção/sala dos
+// robôs) automaticamente na PRIMEIRA vez que este robô roda (ver
+// `_gerarPosicoesSeVazio` abaixo). Depois de geradas uma vez, as posições
+// de verdade moram em `obj.propriedades.trajeto[0]` (recepção) e
+// `obj.propriedades.trajeto[1]` (sala dos robôs) — editáveis pelo painel
+// de propriedades ("🗺️ Trajeto do robô"), SEM editar código; mudar estes
+// valores aqui não afeta mais um trajeto já salvo (apague os 2 pontos pelo
+// painel pra gerar de novo a partir destas constantes).
+// ---------------------------------------------------------------------
+const RECEPCAO_PADRAO = { x: 1.0, y: 1.0 };
+const SALA_DOS_ROBOS_PADRAO = { x: 12.0, y: 8.0 };
+
+const VELOCIDADE = 1.0; // m/s
+const DISTANCIA_CHEGADA = 0.2; // metros
+
+// Quanto tempo o robô fica parado na sala dos robôs antes de voltar.
+const TEMPO_NA_SALA_MINUTOS = 5;
+const TEMPO_NA_SALA_MS = TEMPO_NA_SALA_MINUTOS * 60 * 1000;
+
+// "Trocar de uniforme": quanto tempo, DEPOIS de chegar na sala dos robôs,
+// o robô espera antes de DESLIGAR o holograma (dá tempo dele "se
+// posicionar" antes do efeito) — e por quanto tempo o holograma fica
+// desligado antes de religar (ainda dentro do tempo total na sala,
+// `TEMPO_NA_SALA_MINUTOS` acima; se este valor for maior que o tempo que
+// sobra na sala, o holograma simplesmente religa exatamente na hora de sair
+// — nunca fica desligado além do tempo em que o robô está fisicamente lá).
+const ATRASO_ATE_DESLIGAR_HOLOGRAMA_SEGUNDOS = 3;
+const HOLOGRAMA_DESLIGADO_POR_SEGUNDOS = 20;
+
+/** Grava as 2 posições-exemplo em obj.propriedades.trajeto, SÓ SE a lista
+ *  ainda não tiver os 2 pontos — respeitando qualquer edição já feita pelo
+ *  usuário no painel de propriedades. Modo 'ida-e-volta' porque este robô
+ *  só oscila entre 2 pontos fixos (não faz sentido "ciclar" — ver
+ *  comentário grande no topo do arquivo). */
+function _gerarPosicoesSeVazio() {
+  if (obj.propriedades?.trajeto?.length >= 2) return;
+  obj.propriedades = obj.propriedades || {};
+  obj.propriedades.trajeto = [
+    { x: RECEPCAO_PADRAO.x, y: RECEPCAO_PADRAO.y, esperaMs: 0 },
+    { x: SALA_DOS_ROBOS_PADRAO.x, y: SALA_DOS_ROBOS_PADRAO.y, esperaMs: 0 },
+  ];
+  obj.propriedades.trajetoModo = 'ida-e-volta';
+  console.log(`[Robô "${obj.nome || obj.tipo}"] posições recepção/sala dos robôs geradas automaticamente e salvas em obj.propriedades.trajeto — ajustáveis dali em diante pelo painel de propriedades ("🗺️ Trajeto do robô", ponto 1 = recepção, ponto 2 = sala dos robôs).`);
+}
+
+/** Lê a posição atual da recepção/sala dos robôs do dado estruturado —
+ *  ponto 0/1 de obj.propriedades.trajeto (ver geração acima). Cai de volta
+ *  pras constantes PADRÃO acima só no caso defensivo de o array ter menos
+ *  de 2 pontos (usuário apagou um deles pelo painel no meio da execução). */
+function _posRecepcao() { return obj.propriedades?.trajeto?.[0] || RECEPCAO_PADRAO; }
+function _posSalaDosRobos() { return obj.propriedades?.trajeto?.[1] || SALA_DOS_ROBOS_PADRAO; }
+
+/**
+ * Update é chamada uma vez por quadro (a cada frame).
+ */
+function Update(dt) {
+  if (this._estado === 'recepcao') {
+    // Parado na recepção — só sai quando o relógio do mundo disparar o
+    // evento `trocaDeTurno` (ver Start acima).
+    if (this._deveViajarAgora) { this._deveViajarAgora = false; this._estado = 'indoSala'; }
+    return;
+  }
+
+  if (this._estado === 'indoSala' || this._estado === 'voltando') {
+    const alvo = this._estado === 'indoSala' ? _posSalaDosRobos() : _posRecepcao();
+    const dx = alvo.x - obj.x;
+    const dy = alvo.y - obj.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= DISTANCIA_CHEGADA) {
+      if (this._estado === 'indoSala') {
+        this._estado = 'naSala';
+        const agora = Date.now();
+        this._saiDaSalaEm = agora + TEMPO_NA_SALA_MS;
+        // Agenda o "desligar o holograma" (ver EDITE AQUI acima) — nunca
+        // depois de `_saiDaSalaEm` (não faz sentido desligar já saindo).
+        this._hologramaDesligaEm = agora + Math.min(ATRASO_ATE_DESLIGAR_HOLOGRAMA_SEGUNDOS * 1000, TEMPO_NA_SALA_MS);
+        this._hologramaReligaEm = 0; // definido só quando o holograma de fato desligar, logo abaixo
+      } else {
+        this._estado = 'recepcao';
+        // Não agenda mais "próxima viagem" aqui — a próxima viagem só
+        // acontece quando o relógio do mundo disparar `trocaDeTurno` de
+        // novo (no dia seguinte, no horário configurado).
+        obj.hologramaLigado = true; // garante religado ao voltar pra recepção, mesmo se algo tiver saído da ordem
+      }
+      return;
+    }
+    const passo = Math.min(VELOCIDADE * dt, dist);
+    obj.x += (dx / dist) * passo;
+    obj.y += (dy / dist) * passo;
+    obj.angulo = Math.atan2(dy, dx);
+    return;
+  }
+
+  if (this._estado === 'naSala') {
+    // Parado na sala dos robôs — espera o tempo configurado antes de voltar.
+    const agora = Date.now();
+    // "trocar de uniforme": desliga o holograma na hora agendada...
+    if (obj.hologramaLigado !== false && agora >= this._hologramaDesligaEm) {
+      obj.hologramaLigado = false;
+      this._hologramaReligaEm = Math.min(agora + HOLOGRAMA_DESLIGADO_POR_SEGUNDOS * 1000, this._saiDaSalaEm);
+    }
+    // ...e religa depois do tempo configurado (sempre antes de sair, ver
+    // clamp com `_saiDaSalaEm` acima e a garantia redundante no 'voltando').
+    if (obj.hologramaLigado === false && this._hologramaReligaEm && agora >= this._hologramaReligaEm) {
+      obj.hologramaLigado = true;
+    }
+    if (agora >= this._saiDaSalaEm) this._estado = 'voltando';
+    return;
+  }
+}

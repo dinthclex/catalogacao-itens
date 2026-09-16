@@ -90,6 +90,29 @@ const Modeler3D = {
    *  'retangulo'` (retrocompatibilidade — é assim que o 2D/vista de cima
    *  continua desenhando uma caixa plausível pra este objeto agora
    *  modelado, sem precisar mexer em Map2DRenderer). */
+  /** [16/09/2026 UTC] NOVO — "Se a escada não for modificada, então ela
+   *  carrega o modelo que veio do arquivo." Compara os campos que alteram a
+   *  geometria da escada (largura/profundidade/nº de degraus/altura) contra
+   *  o padrão do catálogo (`OBJECT3D_PROFILES.escada`) — qualquer
+   *  divergência conta como "modificada", e só nesse caso a escada usa a
+   *  malha procedural (`ModelerMesh.stairsMesh`/`_buildEscadaMesh` em
+   *  engine3d.js) em vez da malha estática do arquivo. Usada tanto aqui
+   *  (`ensureCustomMesh`) quanto pela flag "gerado por código" na UI. */
+  _escadaFoiModificada(obj) {
+    const perfil = window.OBJECT3D_PROFILES?.escada || {};
+    const larguraPadrao = perfil.w ?? 1.3;
+    const profundidadePadrao = perfil.d ?? 3.0;
+    if (obj.largura && Math.abs(obj.largura - larguraPadrao) > 1e-6) return true;
+    if (obj.profundidade && Math.abs(obj.profundidade - profundidadePadrao) > 1e-6) return true;
+    if (obj.escadaDegraus != null && obj.escadaDegraus !== '') {
+      const alturaTotal = obj.alturaEscada || perfil.h || 2.8;
+      const degrausPadrao = Math.round(alturaTotal / 0.18) || 11;
+      if (Math.round(obj.escadaDegraus) !== degrausPadrao) return true;
+    }
+    if (obj.alturaEscada && perfil.h && Math.abs(obj.alturaEscada - perfil.h) > 1e-6) return true;
+    return false;
+  },
+
   ensureCustomMesh(obj) {
     if (obj.customMesh) return;
     // Pedido do usuário (rodada 47) tentou fazer o objeto virar "à parte" do
@@ -119,7 +142,19 @@ const Modeler3D = {
     // Corrigido: retículo métrico sempre semeia com espessura de 1mm (igual
     // ao 3D "de fora"), então entrar no Modelador não distorce a placa —
     // continua fina/reta até a pessoa editar de propósito.
-    const w = obj.largura || 0.5, d = obj.profundidade || 0.5, h = obj.reticuloMetrico ? 0.001 : (obj.altura || 0.5);
+    // [16/09/2026 UTC] CORRIGIDO — bug pré-existente (não só do editor de
+    // molde novo): um objeto REAL `forma:'poligono'` (cilindro/cone —
+    // relógio, poste, coluna, extintor, etc., ver `Mapping.
+    // defaultShapeForTipo`) nunca tem `obj.largura`/`obj.profundidade`
+    // (esses campos só existem pra `forma:'retangulo'`) — `w`/`d` caíam
+    // sempre no fallback fixo de 0,5m, ignorando o raio de verdade do
+    // objeto (`obj.raio`), então "Modelar em 3D" num objeto cilíndrico
+    // sempre semeava um cubo/cilindro de 0,5m de diâmetro, não do tamanho
+    // real dele. Corrigido lendo `obj.raio*2` como diâmetro quando a forma
+    // é 'poligono'.
+    const w = obj.largura || (obj.forma === 'poligono' ? (obj.raio || 0.3) * 2 : 0.5);
+    const d = obj.profundidade || (obj.forma === 'poligono' ? (obj.raio || 0.3) * 2 : 0.5);
+    const h = obj.reticuloMetrico ? 0.001 : (obj.altura || 0.5);
     // Pedido do usuário: "Isso deve ser uma opção nas 'configurações 3D' na
     // seção 'Cubo'" — lê `MapConfig._cache` direto (síncrono: por padrão já
     // populado, `view3d.js` chama `MapConfig.get()` ao montar a tela 3D,
@@ -144,14 +179,63 @@ const Modeler3D = {
     // `_buildLuminariaMesh`) — mesmos valores-padrão quando o campo do
     // objeto ainda não existe. Qualquer OUTRO tipo (sem renderização
     // própria) continua caindo no `defaultCubeMesh` de sempre, sem mudança.
-    if (obj.tipo === 'escada') {
+    // [16/09/2026 UTC] REESCRITO — pedido verbatim: "A malha carregada deve
+    // ser uma própria do objeto, não uma genérica, nem aproximada [...]
+    // Tanto em 'Ver em 3D' (cabeçalho) quanto em 'Acessar Modelos'->'Editar'
+    // e 'Acessar Modelos'->'Ver em 3D' devem carregar o mesmo conteúdo do
+    // arquivo .js do objeto respectivo." CAUSA RAIZ do "caixa genérica": esta
+    // função nunca tentava a malha ESTÁTICA carregada de arquivo
+    // (`.malha.js`/`ObjMeshSource` ou `.glb.js`/`GlbMeshSource` — a mesma
+    // fonte usada pela renderização real em `engine3d.js`
+    // `_buildOneObjectMesh`), só sabia gerar aproximações à mão (caixa/
+    // cilindro/cone/composições dedicadas). Agora: PRIMEIRO tenta a malha
+    // real do arquivo via `ModelerMesh.fromThreeGroup` (novo, ver
+    // modeler-mesh.js) a partir de `GlbMeshSource.getClone`/
+    // `ObjMeshSource.getClone` — SEMPRE a mesma malha usada fora do
+    // Modelador. A EXCEÇÃO é a escada: "ela deve continuar sendo gerada por
+    // código" — MAS "se a escada não for modificada, então ela carrega o
+    // modelo que veio do arquivo" — ver `_escadaFoiModificada` abaixo: só
+    // quando os campos da instância divergem do padrão do catálogo
+    // (`OBJECT3D_PROFILES.escada`) é que a malha procedural
+    // (`ModelerMesh.stairsMesh`) é usada aqui; caso contrário a escada
+    // também recebe a malha real do arquivo, igual aos demais objetos.
+    const tipo = obj.tipo;
+    const escadaModificada = tipo === 'escada' && Modeler3D._escadaFoiModificada(obj);
+    let arquivoMesh = null;
+    if (!escadaModificada) {
+      try {
+        if (window.GlbMeshSource?.hasModel?.(tipo)) {
+          arquivoMesh = ModelerMesh.fromThreeGroup(window.GlbMeshSource.getClone(tipo));
+        } else if (window.ObjMeshSource?.hasModel?.(tipo)) {
+          arquivoMesh = ModelerMesh.fromThreeGroup(window.ObjMeshSource.getClone(tipo));
+        }
+      } catch (e) { arquivoMesh = null; }
+    }
+    if (arquivoMesh && arquivoMesh.vertices && arquivoMesh.vertices.length) {
+      obj.customMesh = arquivoMesh;
+    } else if (tipo === 'escada') {
       obj.customMesh = ModelerMesh.stairsMesh(w, d, obj.escadaDegraus);
-    } else if (obj.tipo === 'mesa') {
+    } else if (tipo === 'mesa') {
       obj.customMesh = ModelerMesh.mesaMesh(w, d, h);
-    } else if (obj.tipo === 'luminaria') {
+    } else if (tipo === 'luminaria') {
       obj.customMesh = ModelerMesh.luminariaMesh(w, d, h);
+    } else if (tipo === 'carro') {
+      obj.customMesh = ModelerMesh.carroMesh(w, d, h);
     } else {
-      obj.customMesh = ModelerMesh.defaultCubeMesh(w, d, h, centered);
+      // Fallback (sem malha de arquivo disponível ainda — ex.: enquanto o
+      // `.malha.js`/`.glb.js` do tipo ainda está sendo baixado/registrado):
+      // consulta `OBJECT3D_PROFILES[obj.tipo]` e semeia com a primitiva mais
+      // próxima da forma real, como antes.
+      const perfil = window.OBJECT3D_PROFILES?.[tipo];
+      if (tipo === 'relogio') {
+        obj.customMesh = ModelerMesh.relogioMesh(perfil?.r || w / 2, perfil?.h || 0.04);
+      } else if (perfil?.shape === 'cylinder') {
+        obj.customMesh = ModelerMesh.cylinderMesh(32, w / 2, h);
+      } else if (perfil?.shape === 'cone') {
+        obj.customMesh = ModelerMesh.coneMesh(32, w / 2, 0, h);
+      } else {
+        obj.customMesh = ModelerMesh.defaultCubeMesh(w, d, h, centered);
+      }
     }
     obj.customMeshXform = { rotX: 0, rotY: 0, rotZ: 0, scaleX: 1, scaleY: 1, scaleZ: 1 };
     if (obj.forma !== 'retangulo' && obj.forma !== 'poligono') {
@@ -471,7 +555,33 @@ const Modeler3D = {
     ModelerMesh.rebuildMeshGeometry(state);
     ModelerUI.build(state);
     ModelerInput.bind(state);
-    this._renderLoop(state);
+    // [13/09/2026] UNIFICAÇÃO DE LOOPS — pedido do usuário: "integrar loop de
+    // renderização geral com o loop de renderização próprio do Modelador,
+    // motor 3D compartilhado [...] para que não haja conflitos entre eles".
+    // ANTES, `_renderLoop` (abaixo) SEMPRE criava sua PRÓPRIA cadeia de
+    // `requestAnimationFrame`, mesmo quando `view3d` era a tela real "Ver em
+    // 3D" (`window.View3D`) — que JÁ tinha a sua própria cadeia rodando
+    // (`View3D._loop`/`this._loopHandle`, ver view3d.js mount()). Resultado:
+    // DOIS `requestAnimationFrame` paralelos disputando o mesmo quadro do
+    // navegador pra mexer na MESMA instância de `Engine3D`/WebGL renderer —
+    // `View3D._loop` ficava com um guarda (`Modeler3D.isActive()`) que
+    // pulava todo o trabalho dele mas continuava se reagendando à toa (loop
+    // "zumbi"), só pra poder retomar sozinho quando o Modelador fechasse.
+    // CORRIGIDO: `state._externallyDriven` marca esta sessão como "dirigida
+    // de fora" sempre que `view3d` for a instância de verdade do "Ver em 3D"
+    // (`view3d === window.View3D`) — nesse caso NÃO criamos loop próprio
+    // nenhum aqui; quem chama o trabalho do quadro, um por vez, é
+    // `View3D._loop` (ver `Modeler3D.driveFrame`, chamado de lá, e o
+    // comentário grande em view3d.js `_loop` explicando o outro lado). Só
+    // segue criando o loop PRÓPRIO (`_renderLoop`, com seu
+    // `requestAnimationFrame` encadeado) quando NÃO há um View3D de verdade
+    // por trás — hoje o único outro chamador de `enter()` é o "editor de
+    // molde" de modelos3d.js (`_abrirEditor`), que monta um `fakeView3d`
+    // plano (sem `_loop` nenhum, numa engine/canvas ISOLADA, própria dessa
+    // sessão) — aí sim o Modelador precisa continuar 100% autônomo, exatamente
+    // como sempre foi.
+    state._externallyDriven = (view3d === window.View3D);
+    if (!state._externallyDriven) this._renderLoop(state);
     Utils.toast?.('🔧 Modelador 3D — Tab alterna Modo Objeto/Edição · botão direito seleciona · G/R/S mover/girar/escalar', { duration: 4200 });
     // Pedido do usuário: a dica "Clique para interagir com o cenário 3D"
     // (ver view3d.js `_bindDesktopControls`/`onPointerLockChange`) só
@@ -975,21 +1085,18 @@ const Modeler3D = {
     state.camera.lookAt(o.target.x, o.target.y, o.target.z);
   },
 
-  /** Loop de render INDEPENDENTE do loop do View3D (que fica pausado
-   *  enquanto o Modelador está ativo — ver os guardas `Modeler3D.isActive()`
-   *  em view3d.js). Renderiza a cena WebGL normalmente e, por cima, o
-   *  overlay 2D (ver modeler-render.js drawFrame).
-   *
-   *  Pedido do usuário: "o fps deve continuar sendo calculado, mesmo no modo
-   *  Modelador". Causa raiz: o HUD de FPS (`Perf`, ver perf.js) só conta
-   *  quadros de verdade quando alguém chama `Perf.markFrameStart()` — antes
-   *  disto, só view3d.js `_loop` e mapview.js `step` chamavam, e o loop do
-   *  View3D fica PAUSADO durante o Modelador (loop próprio, este aqui) —
-   *  então nenhum quadro era contado, e o HUD ficava "travado" no último
-   *  número de antes de entrar. Corrigido chamando `markFrameStart`/
-   *  `markFrameEnd` aqui também, ao redor do mesmo trabalho pesado do quadro
-   *  (render WebGL + overlay 2D) — mesmo padrão de view3d.js `_loop`. */
-  _renderLoop(state) {
+  /** [13/09/2026] Executa UM quadro do Modelador (render WebGL + overlay 2D),
+   *  protegido por try/catch (ver comentário grande abaixo, em `_renderLoop`,
+   *  sobre por que isso é essencial), mas SEM agendar o próximo quadro —
+   *  quem decide QUANDO/SE há um próximo quadro é quem chama este método:
+   *  `_renderLoop` (quando esta sessão roda seu loop PRÓPRIO — sessão não
+   *  `_externallyDriven`, ver `enter()`) ou `driveFrame` (quando é
+   *  `View3D._loop`, em view3d.js, quem dirige, uma sessão por vez, dentro
+   *  da ÚNICA cadeia de `requestAnimationFrame` compartilhada — ver
+   *  comentário grande na unificação, em `enter()` acima). Extraído de
+   *  dentro do que antes era o corpo de `_renderLoop` pra poder ser
+   *  reaproveitado dos dois lugares sem duplicar o try/catch. */
+  _stepFrame(state) {
     if (!state.active || this._state !== state) return;
     // CORRIGIDO (08/09/2026, 39a rodada), pedido verbatim: "clicando para
     // trocar de modo, a tela fica preta (a parte do cenario apenas, os
@@ -1008,16 +1115,64 @@ const Modeler3D = {
     // tambem explica a camera "paralisada no Modo Objeto" relatada
     // (provavel excecao ja no 1o quadro em Modo Objeto, antes do usuario
     // sequer arrastar o mouse). Corrigido envolvendo o quadro inteiro em
-    // try/catch com console.error (para diagnostico futuro) e SEMPRE
-    // reagendando o proximo quadro (bloco finally), nunca deixando uma
-    // excecao isolada travar o loop permanentemente.
+    // try/catch com console.error (para diagnostico futuro). [13/09/2026]
+    // O reagendamento do próximo quadro (antes num `finally` bem aqui) foi
+    // MOVIDO pra fora deste método (ver `_renderLoop`/`driveFrame`, quem
+    // reagenda de acordo com quem está dirigindo esta sessão) — continua
+    // acontecendo sempre, incondicionalmente, do mesmo jeito de antes, só
+    // que agora em código compartilhado com o caminho `_externallyDriven`.
     try {
       this._renderFrame(state);
     } catch (err) {
       console.error('[Modelador] excecao no quadro de render (loop continua, ver stack abaixo):', err);
-    } finally {
-      state.loopHandle = requestAnimationFrame(() => this._renderLoop(state));
     }
+  },
+
+  /** Loop de render PRÓPRIO — usado só quando esta sessão do Modelador NÃO
+   *  tem um `View3D` de verdade por trás (`state._externallyDriven === false`,
+   *  ver comentário grande em `enter()`), ex.: o "editor de molde" de
+   *  modelos3d.js, numa engine/canvas isolada. Mantém a MESMA cadeia de
+   *  `requestAnimationFrame` de sempre, só que agora chamando `_stepFrame`
+   *  (extraído acima) pra fazer o trabalho de verdade do quadro.
+   *
+   *  Pedido do usuário: "o fps deve continuar sendo calculado, mesmo no modo
+   *  Modelador". Causa raiz: o HUD de FPS (`Perf`, ver perf.js) só conta
+   *  quadros de verdade quando alguém chama `Perf.markFrameStart()` —
+   *  `_renderFrame` (chamado por `_stepFrame`) já faz isso, então tanto este
+   *  loop próprio quanto o caminho `driveFrame` (dirigido por `View3D._loop`)
+   *  continuam contando quadros normalmente. */
+  _renderLoop(state) {
+    if (!state.active || this._state !== state) return;
+    try {
+      this._stepFrame(state);
+    } finally {
+      // Reagenda incondicionalmente (mesmo se `_stepFrame` já tiver logado
+      // uma exceção internamente) — nunca deixa uma falha isolada travar o
+      // loop pra sempre (ver comentário grande em `_stepFrame`). Só reagenda
+      // SE a sessão continuar sendo a atual E continuar autônoma — se
+      // `exit()` rodou no meio do quadro (`state.active` virou false) ou se
+      // por algum motivo esta sessão passou a ser dirigida de fora no meio
+      // do caminho, não cria mais um agendamento redundante.
+      if (state.active && this._state === state && !state._externallyDriven) {
+        state.loopHandle = requestAnimationFrame(() => this._renderLoop(state));
+      }
+    }
+  },
+
+  /** [13/09/2026] Chamado por `View3D._loop` (view3d.js), UMA VEZ por
+   *  quadro do loop ÚNICO compartilhado, quando o Modelador está ativo E
+   *  dirigido de fora (`state._externallyDriven`, ver `enter()`) — este é o
+   *  ponto de integração da unificação dos dois loops de
+   *  `requestAnimationFrame` que existiam antes (ver comentário grande em
+   *  `enter()` pra explicação completa do problema/da solução). Não faz
+   *  nada (sem erro, sem log) se não houver sessão ativa ou se a sessão
+   *  ativa estiver rodando seu PRÓPRIO loop (`_renderLoop`) — nesse caso
+   *  quem já está chamando `_stepFrame` é aquele loop, e chamar de novo
+   *  aqui desenharia 2 quadros no mesmo tick. */
+  driveFrame() {
+    const state = this._state;
+    if (!state || !state._externallyDriven) return;
+    this._stepFrame(state);
   },
 
   /** Corpo de verdade de um quadro de `_renderLoop` (extraido pra dentro do

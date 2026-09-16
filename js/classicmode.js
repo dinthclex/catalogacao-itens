@@ -120,6 +120,61 @@ const ClassicMode = {
   // `_opModePickedThisBoot` abaixo), chamado do início de `enter()`.
   _OPMODE_KEY: 'classicOperationMode',
   _opModePickedThisBoot: false,
+  // [15/09/2026 UTC] NOVO -- pedido verbatim: "os botões do rodapé devem
+  // adquirir uma nova configurações [quando 'Mapeamento de ambientes' é
+  // escolhido]." O rodapé (tanto `<nav class="bottomnav">` do modo
+  // Clássico, logo abaixo, quanto o painel 'Botões' do Workspace — ver
+  // js/bsplayout.js) precisa saber o modo de operação escolhido de forma
+  // SÍNCRONA (o próprio HTML dos botões é montado de forma síncrona nos 2
+  // lugares) — mesma técnica já usada por `_LS_KEY`/`_syncLSCache`/
+  // `readCachedPref` acima pra `layoutMode`, aqui duplicada pra
+  // `_OPMODE_KEY`. Espelhado em `localStorage` toda vez que o modo é
+  // escolhido/confirmado (ver `finish()` dentro de
+  // `_showSplashScreenModal` mais abaixo) e lido de volta, sempre que
+  // preciso, por `readCachedOpMode()`.
+  _OPMODE_LS_KEY: 'catalogo_opMode',
+  _syncOpModeLSCache(modo) {
+    try { localStorage.setItem(this._OPMODE_LS_KEY, modo); } catch (e) { /* localStorage indisponível — ignora, só perde a otimização */ }
+  },
+  readCachedOpMode() {
+    try { return localStorage.getItem(this._OPMODE_LS_KEY); } catch (e) { return null; }
+  },
+  /** Devolve `true` só quando o modo de operação escolhido é
+   *  'Mapeamento de ambientes' — usado pelos 2 lugares que desenham o
+   *  rodapé de botões (aqui e js/bsplayout.js) pra decidir entre os 2
+   *  conjuntos de botões (ver `_FOOTER_DEFS_PADRAO`/
+   *  `_FOOTER_DEFS_MAPEAMENTO` abaixo). */
+  isModoMapeamento() { return this.readCachedOpMode() === 'mapeamento'; },
+  // Definição dos 5 botões do rodapé — 2 conjuntos, um por modo de
+  // operação (ver `isModoMapeamento()` acima). `slot` é uma posição FIXA
+  // (0 a 4) independente da chave (`key`) do botão que ocupa aquela
+  // posição no momento — usado por `_ensureShell`/`updateFooterForMode`
+  // abaixo (e pelo equivalente em bsplayout.js) pra sempre achar "o botão
+  // que ocupa o slot 0" (a posição de 'Tabela'/'3D') e "o slot 1"
+  // ('Cartões'/'Caixa') na hora de trocar — só os slots 0 e 1 mudam entre
+  // os 2 conjuntos; os outros 3 (Foto/Mapa/Buscar) são idênticos nos 2.
+  _FOOTER_DEFS_PADRAO: [
+    { slot: 0, key: 'tabela', ic: '📋', texto: 'Tabela', titulo: 'Ver todos os itens catalogados em tabela' },
+    { slot: 1, key: 'flashcards', ic: '🗂️', texto: 'Cartões', titulo: 'Ver os itens catalogados em cartões com foto' },
+    { slot: 2, key: 'capturar', ic: '📷', texto: 'Foto', titulo: 'Abrir a câmera para catalogar um novo item' },
+    { slot: 3, key: 'mapa', ic: '🗺️', texto: 'Mapa', titulo: 'Ver/editar a planta do ambiente' },
+    { slot: 4, key: 'buscar', ic: '🔎', texto: 'Buscar', titulo: 'Buscar um item pelo patrimônio, descrição ou setor' },
+  ],
+  // NOVO (15/09/2026 UTC), pedido verbatim: "ao selecionar 'Mapeamento de
+  // ambientes', os botões do rodapé devem adquirir uma nova configurações.
+  // A botão 'Tabela' deve ser trocado pelo botão '3D'. O botão 'Cartões'
+  // deve ser trocado pelo botão 'Caixa'." — só os slots 0/1 mudam de
+  // chave/ícone/texto; 'ver3d'/'caixa' já existiam como telas próprias
+  // (ver App.views em app.js e BSPLayout.EDITOR_TYPES em bsplayout.js —
+  // reaproveitadas aqui, nenhuma tela nova precisou ser criada).
+  _FOOTER_DEFS_MAPEAMENTO: [
+    { slot: 0, key: 'ver3d', ic: '🧊', texto: '3D', titulo: 'Ver a planta em 3D' },
+    { slot: 1, key: 'caixa', ic: '📦', texto: 'Caixa', titulo: 'Ver patrimônios/fotos ainda sem lugar no mapa' },
+    { slot: 2, key: 'capturar', ic: '📷', texto: 'Foto', titulo: 'Abrir a câmera para catalogar um novo item' },
+    { slot: 3, key: 'mapa', ic: '🗺️', texto: 'Mapa', titulo: 'Ver/editar a planta do ambiente' },
+    { slot: 4, key: 'buscar', ic: '🔎', texto: 'Buscar', titulo: 'Buscar um item pelo patrimônio, descrição ou setor' },
+  ],
+  footerDefsFor(modoMapeamento) { return modoMapeamento ? this._FOOTER_DEFS_MAPEAMENTO : this._FOOTER_DEFS_PADRAO; },
 
   /** [10/09/2026] Pedido verbatim: "transforme-o em um splash screen (Tela
    *  de Abertura) de janela independente, de modo que o app carregue
@@ -231,6 +286,34 @@ const ClassicMode = {
       document.body.appendChild(modal);
       const finish = async (modo) => {
         try { if (typeof DB !== 'undefined') await DB.setSetting(this._OPMODE_KEY, modo); } catch (e) { console.warn('[ClassicMode] falha ao salvar o modo de operação escolhido:', e); }
+        // [15/09/2026 UTC] NOVO — mantém o cache síncrono (localStorage,
+        // ver `_syncOpModeLSCache`/`readCachedOpMode` acima) em dia,
+        // MESMO padrão de `_syncLSCache` já usado aqui pra `layoutMode` —
+        // e, com o cache atualizado, anima a troca do rodapé JÁ visível
+        // (modo Clássico) e do painel 'Botões' do Workspace (BSPLayout,
+        // se algum estiver montado) pros botões do modo recém-escolhido —
+        // pedido verbatim: "ao selecionar 'Mapeamento de ambientes', os
+        // botões do rodapé devem adquirir uma nova configurações [...] A
+        // troca [...] deve ser animada."
+        this._syncOpModeLSCache(modo);
+        const modoMapeamento = modo === 'mapeamento';
+        try { this.updateFooterForMode(modoMapeamento); } catch (e) { console.warn('[ClassicMode] falha ao animar o rodapé do modo Clássico:', e); }
+        try { window.BSPLayout?.updateBotoesForMode?.(modoMapeamento); } catch (e) { console.warn('[ClassicMode] falha ao animar o rodapé do Workspace:', e); }
+        // [15/09/2026 UTC] NOVO — pedido verbatim: "Ao selecionar o
+        // 'Mapeamento de ambientes', na Tela de Abertura, acaba ficando o
+        // 'Tabela' sendo mostrado ainda no corpo da tela. Deve ser
+        // mostrado o 'Planta baixa'." — navega o corpo da tela (por trás
+        // da splash, Clássico OU Workspace — os 2 usam o MESMO
+        // `App.navigate`) direto pra "Mapa"->"Planta baixa" quando o modo
+        // escolhido é 'mapeamento' (`_forcarTelaInicial`, ver
+        // mapview.js `mount()`). Não mexe em nada quando o modo é
+        // 'conferencia' (comportamento de sempre — fica onde estava).
+        if (modoMapeamento) {
+          try {
+            if (typeof MapView !== 'undefined') MapView._forcarTelaInicial = 'planta';
+            await window.App?.navigate?.('mapa');
+          } catch (e) { console.warn('[ClassicMode] falha ao navegar pra "Planta baixa" após escolher "Mapeamento de ambientes":', e); }
+        }
         modal.remove();
         this._opModePickedThisBoot = true;
         // Atualiza o aviso "defina o nome da conferência" na hora (ele
@@ -328,31 +411,71 @@ const ClassicMode = {
     document.documentElement.classList.remove('catalogo-boot-classic');
   },
 
+  /** Cria 1 `<button>` do rodapé a partir de uma def (`_FOOTER_DEFS_PADRAO`/
+   *  `_FOOTER_DEFS_MAPEAMENTO` acima) — `data-slot` fica marcado nele pra
+   *  `updateFooterForMode` conseguir achar de volta "o botão que ocupa
+   *  este slot" na hora de trocar o modo, mesmo depois da chave (`key`)
+   *  ter mudado (Tabela->3D/Cartões->Caixa). */
+  _buildFooterBtn(def) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.view = def.key;
+    btn.dataset.slot = String(def.slot);
+    btn.title = def.titulo || '';
+    btn.innerHTML = `<span class="ic">${def.ic}</span>${Utils.escapeHtml(def.texto)}`;
+    btn.addEventListener('click', () => App.navigate(btn.dataset.view));
+    return btn;
+  },
+
   /** Constrói (só na 1ª vez — idempotente) a `<nav class="bottomnav">`
-   *  dentro de `#classic-shell` (já existe vazio em index.html) e liga os
-   *  cliques a `App.navigate()` — MESMOS 5 destinos/ícones/textos da
-   *  versão de referência (v60), sem o antigo botão "🧩 Workspace" (que
-   *  não faz mais sentido aqui: o Workspace agora é o OUTRO modo inteiro,
-   *  não mais "mais uma tela" dentro da barra — trocar de modo é o botão
-   *  🔀 do cabeçalho, ver index.html/app.js `_wireNav`). */
+   *  dentro de `#classic-shell` (já existe vazio em index.html) — MESMOS
+   *  5 destinos/ícones/textos da versão de referência (v60), sem o antigo
+   *  botão "🧩 Workspace" (que não faz mais sentido aqui: o Workspace
+   *  agora é o OUTRO modo inteiro, não mais "mais uma tela" dentro da
+   *  barra — trocar de modo é o botão 🔀 do cabeçalho, ver
+   *  index.html/app.js `_wireNav`).
+   *  [15/09/2026 UTC] MUDADO -- pedido verbatim: "ao selecionar
+   *  'Mapeamento de ambientes', os botões do rodapé devem adquirir uma
+   *  nova configurações." Os 5 botões, antes HTML estático fixo, agora
+   *  vêm de `footerDefsFor(isModoMapeamento())` — lê o modo já escolhido
+   *  (cache síncrono em localStorage, ver `readCachedOpMode` acima) logo
+   *  na 1ª montagem, sem animação (nada "trocando" ainda, é a 1ª vez que
+   *  o rodapé aparece nesta carga de página). */
   _ensureShell() {
     if (this._shellEl) return this._shellEl;
     const el = document.getElementById('classic-shell');
     if (!el) return null;
-    el.innerHTML = `
-      <nav class="bottomnav">
-        <button type="button" data-view="tabela" title="Ver todos os itens catalogados em tabela"><span class="ic">📋</span>Tabela</button>
-        <button type="button" data-view="flashcards" title="Ver os itens catalogados em cartões com foto"><span class="ic">🗂️</span>Cartões</button>
-        <button type="button" data-view="capturar" title="Abrir a câmera para catalogar um novo item"><span class="ic">📷</span>Fotos</button>
-        <button type="button" data-view="mapa" title="Ver/editar a planta do ambiente"><span class="ic">🗺️</span>Mapa</button>
-        <button type="button" data-view="buscar" title="Buscar um item pelo patrimônio, descrição ou setor"><span class="ic">🔎</span>Buscar</button>
-      </nav>
-    `;
-    el.querySelectorAll('.bottomnav button').forEach((btn) => {
-      btn.addEventListener('click', () => App.navigate(btn.dataset.view));
-    });
+    const nav = document.createElement('nav');
+    nav.className = 'bottomnav';
+    this.footerDefsFor(this.isModoMapeamento()).forEach((def) => nav.appendChild(this._buildFooterBtn(def)));
+    el.innerHTML = '';
+    el.appendChild(nav);
     this._shellEl = el;
     return el;
+  },
+
+  /** [15/09/2026 UTC] NOVO -- pedido verbatim: "ao selecionar 'Mapeamento
+   *  de ambientes', os botões do rodapé devem adquirir uma nova
+   *  configurações [...] A troca dos botões no rodapé deve ser animada."
+   *  Chamada por `finish()` (dentro de `_showSplashScreenModal`, logo
+   *  abaixo) sempre que o modo é escolhido/confirmado — troca só os slots
+   *  0/1 (Tabela<->3D, Cartões<->Caixa) do `<nav class="bottomnav">" JÁ
+   *  montado (se o modo Clássico não estiver ativo/montado ainda, não há
+   *  nada a animar aqui — a próxima montagem de `_ensureShell()` já nasce
+   *  com o modo certo, sem animação, lendo `readCachedOpMode()`). Cada
+   *  slot só é trocado se a chave (`key`) de verdade mudou — evita
+   *  reanimar um botão que já está certo (ex.: escolher 'Mapeamento de
+   *  ambientes' de novo, sem ter mudado de modo antes). */
+  updateFooterForMode(modoMapeamento) {
+    if (!this._shellEl) return;
+    const nav = this._shellEl.querySelector('.bottomnav');
+    if (!nav) return;
+    const defs = this.footerDefsFor(modoMapeamento);
+    defs.forEach((def) => {
+      const atual = nav.querySelector(`.bottomnav button[data-slot="${def.slot}"]`);
+      if (atual && atual.dataset.view === def.key) return; // já está certo, nada a trocar
+      Utils.animateFooterButtonSwap(atual, () => this._buildFooterBtn(def));
+    });
   },
 
   /** Move `header.topbar`/`<main id="view">`/`#bottombar-mapa` (sempre que
@@ -493,6 +616,16 @@ const ClassicMode = {
     try {
       const modo = await DB.getSetting('layoutMode', 'bsp');
       this._syncLSCache(modo); // mantém o espelho em dia mesmo em quem nunca tinha ele (1ª visita com esta correção)
+      // [15/09/2026 UTC] NOVO — mesmo espírito da linha acima, mas pro
+      // "Modo de operação" (Conferência/Mapeamento, `_OPMODE_KEY`) — sem
+      // isto, quem já tinha um modo salvo no IndexedDB ANTES desta rodada
+      // (ver `footerDefsFor`/`_ensureShell`/`updateFooterForMode` acima)
+      // nasceria com `readCachedOpMode()` retornando `null` na 1ª
+      // montagem do rodapé (cache do localStorage nunca escrito ainda),
+      // mostrando os botões padrão (Tabela/Cartões) por engano até a
+      // splash screen aparecer de novo (o que, com um modo já salvo, só
+      // acontece se a pessoa reabrir a Tela de Abertura na mão).
+      try { const opModo = await DB.getSetting(this._OPMODE_KEY, ''); if (opModo) this._syncOpModeLSCache(opModo); } catch (e) { /* melhor esforço */ }
       if (modo === 'classic') await this.enter(); // enter() já sincroniza o cache de novo e #app já está/fica escondido — nenhum flash
     } catch (e) {
       console.warn('[ClassicMode] falha ao restaurar o modo de layout salvo:', e);

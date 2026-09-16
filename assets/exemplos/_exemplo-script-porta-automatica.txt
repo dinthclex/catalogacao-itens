@@ -1,0 +1,73 @@
+Exemplo de Script — "Porta Automática" (duplo clique abre/fecha)
+=================================================================
+
+[14/09/2026] Este NÃO é um arquivo carregado pelo app (não é um
+`.model.js`/`.instance.js` de verdade — repare na extensão `.txt`). É só
+TEXTO PRONTO PRA COLAR no componente "Script" de uma PORTA, pelo editor de
+componentes 2D já existente ("🧩 Editar componentes…" no painel da porta) ou
+pelo painel "Propriedades e Scripts" do 3D — ambos editam a MESMA "folha de
+código" (`entity.components[].code`, ver js/components.js).
+
+COMO USAR
+---------
+1. Selecione uma porta no mapa 2D (ou mire nela no 3D).
+2. Abra "🧩 Editar componentes…" → "➕ Adicionar Componente" → "Script".
+3. Apague o código de exemplo que vier ("Em branco") e cole TUDO daqui pra
+   baixo (a partir de "function Start() {").
+4. Adicione TAMBÉM um componente "Gatilho de Evento" (EventTrigger) na
+   mesma porta, com evento "Ao Clicar Duas Vezes" (onDoubleClick) → ação
+   apontando pro Script acima → método `aoClicarDuasVezes`.
+5. Entre em "Ver em 3D", mire na porta e dê duplo clique nela: ela abre
+   suavemente (animação de ~0,5s); duplo clique de novo, fecha.
+
+POR QUE FUNCIONA
+-----------------
+- `el.anguloAbertura` é um campo NOVO (0 a 90 graus) que, quando definido,
+  tem PRIORIDADE sobre o campo `aberta` (booleano) de sempre pra decidir o
+  ângulo da folha — e é ele que o motor 3D anima suavemente quadro a quadro
+  (`Engine3D._updateDoorAnimations`, js/engine3d.js) até o valor pedido,
+  sem precisar reconstruir a cena.
+- `obj` (dentro do Script) É a referência real da porta — `obj.anguloAbertura`
+  lê/escreve o MESMO campo que o motor 3D anima, exatamente como os scripts
+  de relógio/objeto já leem/escrevem `obj.elevacao`/`obj.x`/`obj.angulo`.
+- `onDoubleClick` é despachado pelo mesmo clique-duplo do canvas 3D que já
+  existia (`view3d.js` `_dispatchMouseHit3D('DoubleClick')`), agora também
+  emitindo pro sistema de Gatilhos de Evento (`SceneEventBus`).
+
+--------------------------- CÓDIGO (copie a partir daqui) ---------------------------
+
+/**
+ * Start é chamada antes do primeiro quadro (uma vez, ao iniciar o objeto).
+ */
+function Start() {
+  // Garante um estado inicial coerente (porta fechada, sem animação em
+  // curso) mesmo se `anguloAbertura` nunca tiver sido definido antes.
+  if (obj.anguloAbertura === undefined) obj.anguloAbertura = obj.aberta ? 90 : 0;
+}
+
+/**
+ * Update é chamada uma vez por quadro (a cada frame).
+ */
+function Update() {
+  // Nada por quadro neste exemplo — a animação suave já é feita pelo
+  // motor 3D sozinho (Engine3D._updateDoorAnimations), só olhando o VALOR
+  // de obj.anguloAbertura definido abaixo em aoClicarDuasVezes().
+}
+
+// Debounce simples: evita que um duplo clique durante a animação em curso
+// (~500ms) dispare uma 2ª troca antes da 1ª terminar visualmente — sem
+// isso, cliques duplos "rápidos demais" alternariam o alvo várias vezes
+// antes do usuário ver a porta terminar de abrir/fechar.
+var _debounceAte = 0;
+
+/**
+ * Chamada pelo Gatilho de Evento "Ao Clicar Duas Vezes" (onDoubleClick) —
+ * alterna a porta entre aberta (90°) e fechada (0°).
+ */
+function aoClicarDuasVezes() {
+  var agora = Date.now();
+  if (agora < _debounceAte) return; // animação anterior ainda em curso — ignora
+  _debounceAte = agora + 550; // um pouco mais que os ~500ms da animação
+  var estaAberta = (obj.anguloAbertura || 0) > 45;
+  obj.anguloAbertura = estaAberta ? 0 : 90;
+}

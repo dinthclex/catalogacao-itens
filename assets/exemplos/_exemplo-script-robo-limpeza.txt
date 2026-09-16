@@ -1,0 +1,137 @@
+/* assets/modelos/_exemplo-script-robo-limpeza.txt
+ * NOVO (13/09/2026) — cenário do backlog: ROBÔ DE LIMPEZA. Varredura em
+ * zigue-zague sistemático de uma sala/andar, e ao terminar a varredura
+ * completa, desloca até uma "área de descarte" antes de reiniciar o ciclo
+ * do zero. Reaproveita o MESMO motor de trajeto de
+ * _exemplo-script-robo-trajeto.txt (ver aquele arquivo pro mecanismo
+ * completo/mais comentado — este aqui foca só no que muda pro cenário de
+ * limpeza). Use com um objeto do tipo "robo-limpeza" (Ferramentas →
+ * Objetos), mesmo passo a passo documentado em robo.model.js.
+ *
+ * [13/09/2026, MESMO DIA — REESCRITO] CORREÇÃO DE ARQUITETURA — ver
+ * comentário grande equivalente em _exemplo-script-robo-trajeto.txt: o
+ * usuário rejeitou guardar o trajeto numa constante hardcoded dentro do
+ * texto do script ("um script totalmente reescrito pelo usuário pode não
+ * ser reconhecido"). O trajeto de VERDADE agora é
+ * `obj.propriedades.trajeto` (dado estruturado, editável pelo painel de
+ * propriedades — seção "🗺️ Trajeto do robô" — sem editar código).
+ *
+ * PARTICULARIDADE deste script (diferente do genérico): o zigue-zague de
+ * varredura é GERADO automaticamente a partir dos limites de uma sala
+ * (`SALA_X_MIN/MAX`/`SALA_Y_MIN/MAX`/`FAIXA_LARGURA` abaixo) — não faz
+ * sentido pedir pro usuário digitar dezenas de pontos de zigue-zague um a
+ * um no painel. Solução adotada (documentada com honestidade, mesma ideia
+ * sugerida no pedido do usuário — "usar um trajeto-exemplo mínimo só na
+ * primeira vez"): SE `obj.propriedades.trajeto` estiver vazio quando este
+ * script iniciar, ele GERA o zigue-zague a partir dos limites SALA_* e
+ * ESCREVE o resultado em `obj.propriedades.trajeto` (uma única vez, em
+ * `Start()`) — a partir daí a lista fica sendo a mesma referência de dado
+ * estruturado que o painel edita/o App de Monitoramento lê, exatamente
+ * como qualquer outro robô. Se o usuário já tiver cadastrado/editado um
+ * trajeto pelo painel (ex.: apagou alguns pontos, moveu outros), este
+ * script RESPEITA o que já está lá — só gera automaticamente na PRIMEIRA
+ * vez (lista vazia). Pra gerar um zigue-zague NOVO depois de já ter um
+ * salvo, apague todos os pontos pelo painel (fica vazio de novo) e
+ * reinicie a Visualização 3D.
+ */
+
+/**
+ * Start é chamada antes do primeiro quadro (uma vez, ao iniciar o objeto).
+ */
+function Start() {
+  this._indoDescartar = false; // true = a caminho da área de descarte
+  this._gerarZigueZagueSeVazio();
+}
+
+// ---------------------------------------------------------------------
+// EDITE AQUI — limites da sala/área a varrer (metros, mesmo sistema de
+// obj.x/obj.y do mapa 2D), usados SÓ pra gerar o zigue-zague automático na
+// primeira vez (ver comentário grande no topo do arquivo). Depois de
+// gerado uma vez, o trajeto de verdade já mora em
+// obj.propriedades.trajeto e pode ser reajustado ponto a ponto pelo painel
+// de propriedades — mudar estes números aqui NÃO altera mais um trajeto
+// já gerado.
+// ---------------------------------------------------------------------
+const SALA_X_MIN = 1.0, SALA_X_MAX = 9.0; // largura da sala
+const SALA_Y_MIN = 1.0, SALA_Y_MAX = 6.0; // profundidade da sala
+const FAIXA_LARGURA = 0.8; // espaçamento entre cada "passada" do zigue-zague (largura efetiva do robô/escova)
+
+// "Área de descarte" — waypoint EXTRA, destino final ao completar uma
+// varredura completa (ex.: perto da porta/lixeira/estação de descarga).
+// Também só usada pra gerar o trajeto automático na primeira vez — depois
+// disso, o ÚLTIMO ponto de obj.propriedades.trajeto É a área de descarte
+// (editável pelo painel como qualquer outro ponto).
+const AREA_DESCARTE = { x: 0.3, y: 0.3 };
+
+const VELOCIDADE = 1.0; // m/s
+const DISTANCIA_CHEGADA = 0.2; // metros
+
+/** Gera o zigue-zague + área de descarte e grava em
+ *  obj.propriedades.trajeto, SÓ SE a lista ainda estiver vazia (primeira
+ *  vez que este robô roda, ou trajeto apagado manualmente pelo painel) —
+ *  ver comentário grande no topo do arquivo sobre esta decisão. */
+function _gerarZigueZagueSeVazio() {
+  if (obj.propriedades?.trajeto?.length) return; // já existe — respeita o que o usuário tem cadastrado/editado
+  const pontos = [];
+  let y = SALA_Y_MIN;
+  let indoDireita = true;
+  while (y <= SALA_Y_MAX) {
+    if (indoDireita) { pontos.push({ x: SALA_X_MIN, y, esperaMs: 0 }); pontos.push({ x: SALA_X_MAX, y, esperaMs: 0 }); }
+    else { pontos.push({ x: SALA_X_MAX, y, esperaMs: 0 }); pontos.push({ x: SALA_X_MIN, y, esperaMs: 0 }); }
+    indoDireita = !indoDireita;
+    y += FAIXA_LARGURA;
+  }
+  pontos.push({ x: AREA_DESCARTE.x, y: AREA_DESCARTE.y, esperaMs: 0 }); // último ponto = área de descarte
+  obj.propriedades = obj.propriedades || {};
+  obj.propriedades.trajeto = pontos;
+  obj.propriedades.trajetoModo = obj.propriedades.trajetoModo || 'ciclo';
+  console.log(`[Robô "${obj.nome || obj.tipo}"] zigue-zague gerado automaticamente (${pontos.length} pontos) e salvo em obj.propriedades.trajeto — ajustável dali em diante pelo painel de propriedades ("🗺️ Trajeto do robô").`);
+}
+
+/**
+ * Update é chamada uma vez por quadro (a cada frame).
+ */
+function Update(dt) {
+  const trajeto = obj.propriedades?.trajeto;
+  if (!Array.isArray(trajeto) || trajeto.length < 2) return; // precisa de pelo menos 1 ponto de varredura + 1 de descarte
+
+  // O ÚLTIMO ponto da lista é sempre tratado como a "área de descarte"
+  // (ver geração acima) — os demais são a varredura em si.
+  const wpVarredura = trajeto.slice(0, -1);
+  const areaDescarte = trajeto[trajeto.length - 1];
+
+  let idx = obj.propriedades._trajetoIndiceAtual;
+  if (typeof idx !== 'number' || idx < 0 || idx >= wpVarredura.length) idx = 0;
+
+  const alvo = this._indoDescartar ? areaDescarte : wpVarredura[idx];
+  const dx = alvo.x - obj.x;
+  const dy = alvo.y - obj.y;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist <= DISTANCIA_CHEGADA) {
+    if (this._indoDescartar) {
+      // Chegou na área de descarte — reinicia o ciclo do zero.
+      this._indoDescartar = false;
+      idx = 0;
+    } else if (idx >= wpVarredura.length - 1) {
+      // Chegou no ÚLTIMO ponto da varredura — varredura completa, vai
+      // descartar antes de reiniciar.
+      this._indoDescartar = true;
+    } else {
+      // Ainda tem passada pela frente — avança pro próximo ponto.
+      idx++;
+    }
+    // Expõe o progresso pro App de Monitoramento de Robôs (ver
+    // js/view3d.js `lerTrajetoEstruturadoDoRobo`/`_progressoTrajetoRobo`).
+    // Enquanto `this._indoDescartar` estiver true, o índice fica
+    // "congelado" no último ponto da varredura — aceitável, é só o estado
+    // de exibição, não afeta a lógica de movimento real acima.
+    obj.propriedades._trajetoIndiceAtual = idx;
+    return;
+  }
+
+  const passo = Math.min(VELOCIDADE * dt, dist);
+  obj.x += (dx / dist) * passo;
+  obj.y += (dy / dist) * passo;
+  obj.angulo = Math.atan2(dy, dx);
+}

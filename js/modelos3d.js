@@ -179,6 +179,41 @@ const Modelos3DView = {
     await this._render();
   },
 
+  /** NOVO (12/09/2026), pedido verbatim: "deve ser possível definir
+   *  características de cada objeto [...] adicionar scrips para os
+   *  objetos [...] Esta padronização é para que ao criar novos objetos,
+   *  eles possam seguir os mesmos modelos." Abre o MESMO editor de
+   *  componentes tela-cheia que `js/mapview.js` já usa pra um objeto
+   *  individual (`_openComponentsEditorFullscreen`/
+   *  `_renderComponentsEditor`) — zero UI nova/duplicada — só que o
+   *  "entity" passado pra ele é um objeto de MENTIRA (`{ components }`),
+   *  representando o MOLDE padrão deste `tipo` (ver js/objectstandard.js),
+   *  não uma entidade real do mapa. `salvar` grava o resultado de volta em
+   *  `ObjectStandard.setDefaultComponents(tipo, ...)` em vez de
+   *  `DB.saveMap` (não há mapa aberto nesta tela). Exige `window.MapView`
+   *  já montado no DOM em algum lugar — como esta tela ("Ferramentas" >
+   *  "Objetos" > "Acessar modelos") só é alcançável de DENTRO do Mapa 2D
+   *  (ver comentário no topo do arquivo: "fica NO PAINEL DE OBJETOS DO
+   *  MAPA"), `MapView` sempre está montado quando este botão é clicável —
+   *  por isso não precisa (re)montá-lo aqui. */
+  async _abrirComportamentoPadrao(tipo) {
+    if (!window.MapView || !window.ObjectStandard) {
+      Utils.toast?.('Não foi possível abrir o editor de comportamento agora.', { type: 'danger' });
+      return;
+    }
+    const componentsAtuais = await window.ObjectStandard.getDefaultComponents(tipo);
+    const molde = { components: componentsAtuais };
+    const salvar = async (patch) => {
+      if (Array.isArray(patch?.components)) {
+        molde.components = patch.components;
+        await window.ObjectStandard.setDefaultComponents(tipo, patch.components);
+      }
+    };
+    window.MapView._openComponentsEditorFullscreen(molde, salvar, () => {
+      Utils.toast?.(`💾 Comportamento padrão de "${this._label(tipo)}" salvo — vale só pra objetos NOVOS deste tipo, a partir de agora.`, { type: 'ok', duration: 4000 });
+    });
+  },
+
   /** Editor 2D de SVG (pedido verbatim: "Deve ser possível fazer uma
    *  representação 2D dele. Com formas SVG em um editor 2D de SVG para
    *  isso.") — modal simples: desenha formas básicas (retângulo/círculo/
@@ -503,6 +538,9 @@ const Modelos3DView = {
       if (btnRenomear) btnRenomear.onclick = () => this._renomearCustom(tipo);
       const btn2D = container.querySelector(`.m3dv-2d[data-tipo="${CSS.escape(tipo)}"]`);
       if (btn2D) btn2D.onclick = () => this._abrirEditor2D(tipo);
+      // NOVO (12/09/2026) — ver comentário grande junto ao botão, acima.
+      const btnComportamento = container.querySelector(`.m3dv-comportamento[data-tipo="${CSS.escape(tipo)}"]`);
+      if (btnComportamento) btnComportamento.onclick = () => this._abrirComportamentoPadrao(tipo);
     });
     tipos.forEach((tipo) => {
       ['detalhado', 'lowpoly'].forEach((nivel) => {
@@ -571,9 +609,22 @@ const Modelos3DView = {
       <div class="modelos3d-row">
         <div class="modelos3d-row-head">
           <span class="ic">${this._svg(tipo)}</span><span class="t">${Utils.escapeHtml(this._label(tipo))}</span>
+          ${tipo === 'escada' ? '<span class="modelos3d-badge-codigo" title="A escada continua sendo gerada por código quando suas dimensões/degraus são alterados dos valores padrão do catálogo — só nesse caso ela não usa a malha do arquivo.">🧩 gerado por código (se modificada)</span>' : ''}
           <span class="modelos3d-row-head-actions">
             ${isCustom ? `<button type="button" class="btn secondary sm m3dv-renomear" data-tipo="${Utils.escapeHtml(tipo)}" title="Trocar o nome deste modelo customizado">✏️ Renomear</button>` : ''}
             <button type="button" class="btn secondary sm m3dv-2d" data-tipo="${Utils.escapeHtml(tipo)}" title="Editar a representação 2D (ícone SVG) deste tipo, usado na planta baixa">🎨 Representação 2D</button>
+            <!-- NOVO (12/09/2026), pedido verbatim: "deve ser possível
+                 definir características de cada objeto [...] Esta
+                 padronização é para que ao criar novos objetos, eles
+                 possam seguir os mesmos modelos." Abre o MESMO editor de
+                 componentes (Script/Gatilho de Evento) que um objeto
+                 individual já usa (js/mapview.js, renderComponentsEditor)
+                 — só que apontando pro MOLDE deste tipo (ver
+                 abrirComportamentoPadrao abaixo), não uma entidade real
+                 do mapa. Todo objeto NOVO deste tipo nasce com uma cópia
+                 do que for salvo aqui (ver js/objectstandard.js/
+                 js/mapping.js). -->
+            <button type="button" class="btn secondary sm m3dv-comportamento" data-tipo="${Utils.escapeHtml(tipo)}" title="Configurar o comportamento padrão (scripts/gatilhos de evento) de objetos NOVOS deste tipo">⚙️ Comportamento padrão</button>
           </span>
         </div>
         <div class="modelos3d-niveis">
@@ -603,16 +654,71 @@ const Modelos3DView = {
   async _montarCenaMolde(tipo, nivel) {
     const perfil = window.OBJECT3D_PROFILES?.[tipo] || window.OBJECT3D_DEFAULT_PROFILE || { shape: 'box', w: 0.4, d: 0.4, h: 0.4, y0: 0, color: 0x8a92a3 };
     const existente = await DB.getObjectModel(tipo, nivel);
-    const largura = perfil.shape === 'box' ? (perfil.w || 0.5) : (perfil.r || 0.3) * 2;
-    const profundidade = perfil.shape === 'box' ? (perfil.d || 0.5) : (perfil.r || 0.3) * 2;
-    const altura = perfil.h || 0.5;
+    // [15/09/2026 UTC] CORRIGIDO — pedido verbatim: "Em 'Objetos'->'Acessar
+    // modelo'->'Editar', o modelo da mesa está aparecendo com as pernas
+    // encurtadas. Porém ao colocar no mapa 2D e, depois, ir em 'Ver em 3D'
+    // está sendo exibido normalmente." CAUSA RAIZ: para tipos que usam a
+    // convenção "antiga" de `OBJECT3D_PROFILES` (`h` = só a ESPESSURA/altura
+    // da peça, `y0` = elevação do chão até a base dela — caso de `mesa`:
+    // `{ h: 0.05, y0: 0.72 }`, ver engine3d-profiles.js), esta linha lia só
+    // `perfil.h` (0.05m — a espessura do TAMPO) como se fosse a altura TOTAL
+    // do objeto falso montado aqui pro preview, ignorando `perfil.y0`
+    // (0.72m, a elevação real do tampo). O objeto falso nasce sempre com
+    // `forma:'retangulo'` (ver `ehCilindroOuCone` abaixo) e `obj.altura`
+    // vira a altura TOTAL que `engine3d.js` usa pra essa forma (ramo
+    // `obj.forma==='retangulo'` reconstrói `perfil` como `{h:obj.altura,
+    // y0:0}`) — com `obj.altura` errado (0.05m em vez de 0.77m),
+    // `_makeMesaMeshes` calculava `pernaAltura = max(0.05, h - tampoEsp) =
+    // max(0.05, 0.05-0.03) = 0.05m`, pernas de 5cm só, "encolhidas". Já na
+    // colocação normal no mapa 2D ("Ver em 3D" de verdade), o objeto vem de
+    // `_MESA_FORMA_DEF` (mapview.js) com `obj.altura=0.74` (altura total de
+    // verdade), por isso aparecia correto lá — não é um problema da malha da
+    // Mesa em si, só deste preview isolado montando um `obj.altura` errado.
+    // CORREÇÃO: somar `perfil.y0` (quando existir) a `perfil.h`, MESMA
+    // normalização já usada por `_makeMesaMeshes` (engine3d.js, ver
+    // comentário datado 13/09/2026 lá) — cobre as duas convenções sem
+    // quebrar tipos que já usam `y0:0` (a soma não muda nada pra eles).
+    const altura = (perfil.y0 || 0) + (perfil.h != null ? perfil.h : 0.5);
     const corHex = typeof perfil.color === 'number' ? '#' + perfil.color.toString(16).padStart(6, '0') : '#8a92a3';
+    // [16/09/2026 UTC] CORRIGIDO — pedido verbatim: "nenhum objeto mais deve
+    // ser por aproximação, deve sempre ser o próprio modelo real a ser
+    // carregado... O que deve aparecer ali no editar/'Ver em 3D' é o que
+    // aparece no 'Ver em 3D' [normal, da Planta baixa] — o mesmo que é
+    // feito lá deve ser feito aqui." CAUSA RAIZ (bem mais profunda do que
+    // parecia): este objeto FALSO sempre nascia com `forma:'retangulo'`,
+    // não importa o tipo — mas `engine3d.js` `_buildOneObjectMesh` decide
+    // TUDO a partir de `obj.forma` (não de `obj.tipo` sozinho): o ramo
+    // `if (obj.forma === 'retangulo')` reconstrói `perfil` do zero como
+    // `{shape:'box', w:obj.largura, ...}` — ou seja, ATÉ os tipos cujo
+    // perfil de catálogo é `shape:'cylinder'`/`'cone'` (relógio, poste,
+    // coluna, extintor, bebedouro, lixeira, ventilador, planta, robô)
+    // ficavam com `perfil.shape` forçado pra `'box'` aqui, e as checagens
+    // defensivas dos builders dedicados (`if (obj.tipo==='poste' &&
+    // perfil.shape==='cylinder')`, `'relogio'` etc.) NUNCA batiam — todos
+    // esses tipos caíam sempre numa CAIXA, tanto no preview do "Editar"
+    // quanto no "Ver em 3D" (que nem chega a ter `customMesh` nenhum pra um
+    // tipo nunca customizado — usava só este `obj` "cru", direto). Objetos
+    // REAIS do catálogo nunca têm esse problema porque `Mapping.
+    // defaultShapeForTipo` (mapping.js) já escolhe `forma:'poligono'`
+    // (com `raio`/`lados`) pra esses tipos, nunca `'retangulo'` — este
+    // objeto FALSO simplesmente não reproduzia essa mesma escolha.
+    // CORRIGIDO: `forma`/campos agora espelham `defaultShapeForTipo`
+    // exatamente — `'poligono'` (raio/lados) pra `shape:'cylinder'`/
+    // `'cone'`, `'retangulo'` (largura/profundidade) pra `shape:'box'` —
+    // fazendo `_buildOneObjectMesh` tomar EXATAMENTE o mesmo caminho (e
+    // os MESMOS builders dedicados: mesa/luminária/escada/poste/relógio/
+    // quadro-mesa/teto-gesso/carro) que a tela "Ver em 3D" normal da Planta
+    // baixa usaria pro mesmo tipo — nenhuma aproximação, mesmo código.
+    const ehCilindroOuCone = perfil.shape === 'cylinder' || perfil.shape === 'cone';
     const obj = {
       id: `molde-preview-${tipo}-${nivel}`,
       tipo,
       x: 0, y: 0, angulo: 0, piso: 0, elevacao: 0,
-      forma: 'retangulo', // mesma retrocompatibilidade que ensureCustomMesh já aplica a qualquer objeto modelado — só do objeto FALSO, nunca salvo em disco
-      largura, profundidade, altura, cor: corHex,
+      altura,
+      cor: corHex,
+      ...(ehCilindroOuCone
+        ? { forma: 'poligono', raio: perfil.r || 0.3, lados: Math.max(3, Math.round(perfil.segments || 24)) }
+        : { forma: 'retangulo', largura: perfil.w || 0.5, profundidade: perfil.d || 0.5 }),
     };
     if (existente?.mesh && Array.isArray(existente.mesh.vertices) && existente.mesh.vertices.length >= 3) {
       obj.customMesh = {
@@ -709,14 +815,26 @@ const Modelos3DView = {
     };
     this._sessao = { modo: 'editor', tipo, nivel, engine: ctx.engine, overlay: ctx.overlay, obj: ctx.obj, fakeView3d, hadExisting };
 
-    // Barra flutuante de saída — o Modelador em si não tem conceito de
-    // "cancelar" (mesmo comportamento de sempre pro Modelador de objeto
-    // único, ver modeler-core.js `exit`/`_commit`: sempre grava ao sair),
-    // este editor de molde segue a MESMA convenção por consistência.
+    // [15/09/2026 UTC] Barra flutuante trocada — pedido verbatim: "Em vez de
+    // só um botão 'Salvar e sair do editor', coloque um botão 'Sair' (se foi
+    // feita alguma alteração, ao clicar nele, deve aparecer uma janela de
+    // confirmação informando para salvar as alterações) e um botão 'Salvar'
+    // (aplica todas as alterações feitas no modelo do objeto, guardando no
+    // IndexedDB). Retire o botão 'Sair do Modelador', pois a tela é para
+    // edição mesmo." — "💾 Salvar" grava no IndexedDB sem fechar o editor
+    // (ver handler abaixo); "🚪 Sair" fecha, perguntando antes se há
+    // alteração não salva (ver `_sairEditor`, reescrito).
+    // [15/09/2026 UTC] Ordem trocada — pedido verbatim: "Inverta a ordem dos
+    // botões: 'Salvar' e 'Sair'. Troque-os de posição." (antes: Salvar,
+    // Sair — agora: Sair, Salvar).
     const barra = document.createElement('div');
     barra.className = 'modelos3d-editor-bar';
-    barra.innerHTML = `<button type="button" class="btn primary sm" id="m3dv-editor-sair">✅ Salvar e sair do editor</button>`;
+    barra.innerHTML = `
+      <button type="button" class="btn primary sm" id="m3dv-editor-sair" title="Fecha o editor — avisa antes se houver alteração ainda não salva">🚪 Sair</button>
+      <button type="button" class="btn secondary sm" id="m3dv-editor-salvar" title="Aplica as alterações feitas no modelo, gravando no IndexedDB — sem fechar o editor">💾 Salvar</button>
+    `;
     ctx.overlay.appendChild(barra);
+    barra.querySelector('#m3dv-editor-salvar').onclick = () => this._salvarEditor();
     barra.querySelector('#m3dv-editor-sair').onclick = () => this._sairEditor();
 
     // NOVO (07/09/2026), pedido verbatim: "inquebrável, tudo com estrutura
@@ -742,18 +860,123 @@ const Modelos3DView = {
       else console.error('Falha ao entrar no Modelador (editor de molde):', err);
       return;
     }
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "Logo que entra no modo editar,
+    // o apontamento da câmera fica na mesma direção do eixo y. Faça o
+    // objeto aparecer de modo que o gizmo fique visualmente na tela com o
+    // eixo y apontando para cima, o eixo x apontando para baixo e à
+    // direita (+110° em relação à linha vertical do eixo y) e o eixo z
+    // apontando para baixo e à esquerda (-110° em relação à linha vertical
+    // do eixo y)." Causa raiz: `Modeler3D.enter()` calcula a órbita inicial
+    // com `_initOrbitFromCamera(state, _poseFromCurrentCamera(state))` — ou
+    // seja, a partir da câmera REAL do motor (`state.camera`, já
+    // posicionada por `engine.setScene()` dentro de `_montarCenaMolde`,
+    // acima), NUNCA do `fakeView3d._camera` (aquele objeto é só um valor de
+    // reserva — ver comentário antigo na sua declaração — nunca chega a ser
+    // usado de fato neste caminho). Sem controle sobre a pose inicial do
+    // motor, ela podia nascer olhando quase reto pra baixo (perto do eixo
+    // Y), tornando o eixo Y do gizmo um pontinho degenerado na tela.
+    // Corrigido sobrescrevendo `state.orbit.yaw`/`pitch` DIRETO, com os
+    // ângulos exatos (derivados por trigonometria, conferidos numericamente
+    // — yaw=45° dá simetria perfeita entre X e Z; pitch≈21,34° faz X cair
+    // exatamente a +110° da vertical e Z a -110°, com Y sempre reto pra
+    // cima nesta convenção de câmera, qualquer que seja o pitch) — não
+    // mexe em `orbit.dist`/`orbit.target` (posição/zoom continuam como
+    // `_initOrbitFromCamera` já calculou).
+    if (window.Modeler3D?._state?.orbit) {
+      window.Modeler3D._state.orbit.yaw = Math.PI / 4; // 45°
+      window.Modeler3D._state.orbit.pitch = 0.37252696585266126; // ~21,34°
+    }
     // Snapshot do PONTO DE PARTIDA — só depois de `enter` (que já garantiu
     // `ctx.obj.customMesh` preenchido, cubo padrão ou molde existente, ver
     // `hadExisting` acima) — comparado em `_persistirMolde` pra decidir se
     // algo mudou de verdade nesta sessão.
     this._sessao.initialSnapshot = this._snapshotMesh(ctx.obj);
+    // [15/09/2026 UTC] Esconde o "✕ Sair do Modelador" nativo (modeler-ui.js
+    // `#m3d-exit-btn`) — pedido verbatim: "Retire o botão 'Sair do
+    // Modelador', pois a tela é para edição mesmo." Causa raiz do porquê
+    // não fazia sentido aqui: aquele botão chama `Modeler3D.exit()` direto
+    // (sem `skipRebuild`/sem persistir o molde no IndexedDB — ver
+    // `_encerrarSessao`), deixando a barra flutuante e o overlay deste
+    // arquivo órfãos na tela (um 2º botão de saída, incompleto, disputando
+    // com "🚪 Sair" logo abaixo). Só oculto (`hidden`) — nunca removido do
+    // DOM — pra não interferir em nada mais do módulo compartilhado
+    // `modeler-ui.js`, usado normalmente (com o botão visível) pelo
+    // Modelador de objeto único dentro de "Ver em 3D".
+    const btnExitNativo = ctx.overlay.querySelector('#m3d-exit-btn');
+    if (btnExitNativo) btnExitNativo.hidden = true;
     Utils.toast?.(`🔧 Editando "${this._label(tipo)}" — ${nivel === 'detalhado' ? 'Detalhado' : 'Low poly'}`, { duration: 3200 });
   },
 
+  /** [15/09/2026 UTC] NOVO — botão "💾 Salvar" da barra flutuante (ver
+   *  `_abrirEditor`): grava o molde no IndexedDB SEM fechar o editor —
+   *  reaproveita a mesma sequência testada de "salvar e reabrir"  já usada
+   *  pelo "+" de `_abrirVisualizador` (sai de verdade — `Modeler3D.exit`
+   *  só sabe commitar/persistir no fechamento — e reabre imediatamente no
+   *  MESMO tipo/nível, já com o molde recém-salvo carregado). */
+  async _salvarEditor() {
+    if (!this._sessao || this._sessao.modo !== 'editor') return;
+    const { tipo, nivel } = this._sessao;
+    await this._encerrarSessao({ persist: true });
+    await this._abrirEditor(tipo, nivel);
+  },
+
+  /** [15/09/2026 UTC] REESCRITO — botão "🚪 Sair" da barra flutuante: pedido
+   *  verbatim "se foi feita alguma alteração, ao clicar nele, deve aparecer
+   *  uma janela de confirmação informando para salvar as alterações".
+   *  DETECÇÃO DE MUDANÇA CORRIGIDA nesta rodada — pedido verbatim: "Mesmo
+   *  clicando em 'Salvar', ao clicar em sair, logo em seguida, ainda
+   *  aparece a pergunta de confirmação. Se não há mais nada para salvar,
+   *  então, não deveria aparecer a pergunta." Causa raiz: a versão anterior
+   *  comparava um SNAPSHOT (`JSON.stringify` da malha) antes/depois — mas
+   *  `Modeler3D.exit()`/`_commit()` reconstrói a malha a partir do estado
+   *  interno do editor (Three.js) ao sair, o que pode reformatar/arredondar
+   *  os números de um jeito levemente diferente do snapshot inicial mesmo
+   *  SEM nenhuma edição de verdade ter acontecido — um "falso positivo"
+   *  (detecta mudança que não existe). Corrigido usando `state.actionLog`
+   *  (o MESMO mecanismo que `_commit`/`enter` já usam pra decisões
+   *  idênticas, ver comentário grande em `enter()`/`_commit()`,
+   *  modeler-core.js — só ações de edição DE VERDADE, nunca reformatação
+   *  interna, empurram algo pra lá): lido de `Modeler3D._state.actionLog`
+   *  ANTES de sair (`Modeler3D.exit()` zera `Modeler3D._state`). Cada
+   *  sessão do editor (`_abrirEditor`, inclusive a reaberta por
+   *  `_salvarEditor` depois de salvar) começa com um `state` NOVO — logo,
+   *  `actionLog` sempre nasce vazio de novo a cada abertura, garantindo que
+   *  "Salvar" seguido de "Sair" sem tocar em mais nada nunca pergunta de
+   *  novo. Sem alteração: fecha direto, sem diálogo. Com alteração: card de
+   *  confirmação (`cards/confirm-card.js`, pedido verbatim: "deve ser um
+   *  card... não um 'alert()'") — "💾 Salvar e sair" grava no IndexedDB
+   *  antes de fechar, "🗑️ Sair sem salvar" fecha descartando a edição desta
+   *  sessão (o molde salvo anteriormente, se havia, continua intacto),
+   *  "✕ Cancelar" fecha o card e mantém o editor aberto, sem fazer nada. */
   async _sairEditor() {
     if (!this._sessao || this._sessao.modo !== 'editor') return;
-    await this._encerrarSessao();
-    await this._render();
+    const s = this._sessao;
+    // Lê `actionLog` com o Modelador AINDA ATIVO (não chama `Modeler3D.exit()`
+    // aqui) — assim, escolhendo "✕ Cancelar" no card abaixo, o editor
+    // simplesmente continua exatamente como estava, sem precisar desfazer
+    // nenhum `exit()` já feito (não dava pra "religar" a UI do Modelador
+    // depois de destruída). Só quando a escolha é "salvar"/"descartar" é
+    // que `_encerrarSessao` (chamada dentro de `onChoose`) sai de verdade.
+    const mudou = !!(window.Modeler3D?._state?.actionLog?.length);
+    if (!mudou) {
+      await this._encerrarSessao({ persist: false });
+      await this._render();
+      return;
+    }
+    window.CardSystem.mount(s.overlay, 'confirm', {
+      title: 'Alterações não salvas',
+      message: 'Este modelo tem alterações que ainda não foram gravadas no IndexedDB.',
+      buttons: [
+        { id: 'salvar', label: '💾 Salvar e sair', variant: 'primary' },
+        { id: 'descartar', label: '🗑️ Sair sem salvar', variant: 'danger' },
+        { id: 'cancelar', label: '✕ Cancelar', variant: 'secondary' },
+      ],
+      onChoose: async (id) => {
+        if (id === 'cancelar') return; // fecha só o card — o editor continua aberto e intacto, nada foi tocado
+        await this._encerrarSessao({ persist: id === 'salvar' });
+        await this._render();
+      },
+    }, {});
   },
 
   async _abrirVisualizador(tipo, nivel) {
@@ -865,21 +1088,24 @@ const Modelos3DView = {
     Utils.toast?.('💾 Molde salvo.', { type: 'ok' });
   },
 
-  /** Descarta a sessão de edição/visualização atual — SEMPRE persiste antes
-   *  se era uma edição em andamento (ver comentário grande em `unmount()`),
-   *  nunca "descarta" silenciosamente (mesma filosofia do resto do app:
-   *  Modelador de objeto único também não tem "cancelar", ver modeler-
-   *  core.js). Libera o contexto WebGL (`engine.dispose()`) e remove o
-   *  overlay da tela — chamado tanto pelos botões "Salvar e sair"/"Fechar
-   *  visualização" quanto por `unmount()` (navegação forçada pra outra
-   *  tela). */
-  async _encerrarSessao() {
+  /** Descarta a sessão de edição/visualização atual — por padrão persiste
+   *  antes se era uma edição em andamento (ver comentário grande em
+   *  `unmount()`). Libera o contexto WebGL (`engine.dispose()`) e remove o
+   *  overlay da tela — chamado pelos botões "💾 Salvar"/"🚪 Sair"/"Fechar
+   *  visualização" e por `unmount()` (navegação forçada pra outra tela).
+   *  [15/09/2026 UTC] `opts.persist` (padrão `true`) — pedido verbatim: "Sair"
+   *  pode fechar SEM gravar no IndexedDB quando o usuário escolhe descartar
+   *  a alteração no diálogo de confirmação (ver `_sairEditor`, que também
+   *  passa `jaSaiuDoModelador:true` quando ele mesmo já chamou
+   *  `Modeler3D.exit()` antes, pra não chamar de novo aqui). */
+  async _encerrarSessao(opts = {}) {
     const s = this._sessao;
     if (!s) return;
-    if (s.modo === 'editor' && window.Modeler3D?.isActive?.()) {
+    const persist = opts.persist !== false;
+    if (s.modo === 'editor' && !opts.jaSaiuDoModelador && window.Modeler3D?.isActive?.()) {
       Modeler3D.exit({ skipRebuild: true }); // grava a malha editada de volta em s.obj (ver _commit em modeler-core.js) — nunca em DB.saveMap/mapa de verdade
-      await this._persistirMolde(s);
     }
+    if (s.modo === 'editor' && persist) await this._persistirMolde(s);
     if (s.orbitCtl) s.orbitCtl.dispose();
     s.engine?.dispose?.();
     s.overlay?.remove?.();
@@ -945,13 +1171,35 @@ const Modelos3DView = {
     let ativo = true;
     const loop = () => {
       if (!ativo) return;
-      engine._resize?.();
+      // [14/09/2026 UTC] CORRIGIDO — pedido verbatim: "a tela do canvas
+      // fica toda preta [...] verifique se o motor 3D está sendo chamado e
+      // se há atualização no canvas usado nesta tela." CAUSA RAIZ: desde a
+      // arquitetura "MODO EYE" (ver comentário grande no construtor de
+      // Engine3D, engine3d.js), o `<canvas>` visível de QUALQUER instância
+      // deixou de ser um canvas WebGL de verdade — é um canvas 2D puro, e
+      // só recebe o resultado do render através de `_presentFrame()`
+      // (posiciona/redimensiona + desenha no WebGLRenderTarget PRÓPRIO
+      // desta instância + copia pro canvas 2D visível via
+      // `_presentToCanvas()`). Chamar `engine.renderer.render(...)` DIRETO
+      // (como este loop fazia) desenha no render target que estiver ativo
+      // no `Engine3D._sharedRenderer` (compartilhado por TODAS as
+      // instâncias) naquele instante, mas NUNCA copia o resultado pro
+      // canvas 2D visível — exatamente o mesmo bug já identificado e
+      // corrigido em `Modeler3D._renderFrame` (modeler-core.js, ver
+      // comentário grande em `_presentFrame`, engine3d.js) em rodada
+      // anterior, só que aqui, no visualizador "Ver em 3D" de "Acessar
+      // modelos", nunca tinha sido corrigido — por isso o canvas ficava
+      // sempre preto (nunca chegou a receber um 1º quadro). Corrigido
+      // chamando `engine._presentFrame()` (mesmo método/mesmo padrão que
+      // `Modeler3D` já usa) no lugar de `renderer.render()` direto —
+      // `_presentFrame()` já chama `_resize()` internamente, então o
+      // `engine._resize?.()` manual daqui também foi removido (duplicado).
       const x = target.x + st.dist * Math.cos(st.pitch) * Math.sin(st.yaw);
       const y = target.y + st.dist * Math.sin(st.pitch);
       const z = target.z + st.dist * Math.cos(st.pitch) * Math.cos(st.yaw);
       engine.camera3.position.set(x, y, z);
       engine.camera3.lookAt(target.x, target.y, target.z);
-      engine.renderer.render(engine.scene, engine.camera3);
+      engine._presentFrame();
       raf = requestAnimationFrame(loop);
     };
     loop();

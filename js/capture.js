@@ -359,8 +359,14 @@ const CaptureView = {
   async _afterPhotoCaptured({ dataUrl, thumbDataUrl, patrimonioSugerido }) {
     const map = await DB.getOrCreateSingleMap();
     let photo;
+    // RODADA 53 [15/09/2026 UTC], pedido verbatim (item D): "Deve haver
+    // outra subseção para definir um nome automático para as fotos que são
+    // tiradas. Por padrão fica ativada. O nome deve indicar a data e hora
+    // [...] 2026-06-07_14-30-00." Ver mapconfig.js DEFAULTS
+    // (fotoNomeAutomaticoAtivo/fotoNomeHoraUTC) e `_autoPhotoName` abaixo.
+    const nomeAuto = await this._autoPhotoName();
     try {
-      photo = await DB.addAmbientePhoto({ ambienteId: map.id, dataUrl, thumbDataUrl, nome: '', setor: this._sessionSetor || sessionStorage.getItem('catalogo_setor_sessao') || '' });
+      photo = await DB.addAmbientePhoto({ ambienteId: map.id, dataUrl, thumbDataUrl, nome: nomeAuto, setor: this._sessionSetor || sessionStorage.getItem('catalogo_setor_sessao') || '' });
     } catch (err) {
       console.error('Falha ao salvar a foto:', err);
       Utils.toast('Não foi possível salvar a foto: ' + (err?.message || err), { type: 'danger', duration: 5000 });
@@ -450,23 +456,82 @@ const CaptureView = {
   },
 
   /**
-   * Posiciona `photoId` automaticamente na periferia de tudo que já existe
-   * no mapa (ver Mapping.findPeripheralSlot) e marca `mapaAuto: true` —
+   * Posiciona `photoId` automaticamente no mapa e marca `mapaAuto: true` —
    * usado tanto pela opção 3 do modal acima quanto por um "Cancelar" no
-   * meio da opção 1 (mesmo resultado nos dois casos, pedido da spec). O
-   * `index` passado pra findPeripheralSlot é a contagem de fotos JÁ
-   * auto-posicionadas antes desta — cada nova foto sem vínculo cai um
-   * pouco mais adiante na mesma fileira, em vez de empilhar exatamente em
-   * cima da anterior.
+   * meio da opção 1 (mesmo resultado nos dois casos, pedido da spec).
+   *
+   * RODADA 53 [15/09/2026 UTC], pedido verbatim (item A confirmado por
+   * leitura de código: ANTES desta rodada, esta função rodava SEMPRE,
+   * incondicionalmente, sempre que a foto não era vinculada manualmente —
+   * exatamente o comportamento que o usuário descreveu: "um objeto Câmera
+   * está sendo atribuída a ela automaticamente. E distanciando a cada
+   * objeto Câmera" (a "distância" vinha de `Mapping.findPeripheralSlot`,
+   * que já usava SPACING=1.2, o mesmo valor pedido como padrão da grade
+   * nova). Pedido (item B): "deve ter uma opção nas 'configurações 2D'
+   * para decidir se isto acontece ou não [...] Opções: 'Não', 'Apenas
+   * quando o mapa estiver vazio' e 'Sim'." Agora lê
+   * MapConfig.fotoAutoAtribuirCamera ('nao'|'vazio'|'sim', padrão 'sim' —
+   * preserva o comportamento antigo por padrão) antes de decidir se
+   * posiciona. Quando 'sim' (ou 'vazio' com mapa vazio) e existir alguma
+   * configuração de grade (`fotoGradeDistancia`/`fotoGradePorLinha`/
+   * `fotoGradeOrigemX`/`Y` — item C, ver Mapping.findGridSlot), usa a
+   * grade configurada em vez do posicionamento antigo na periferia.
    */
   async _autoPlacePhoto(photoId) {
     try {
       const map = await DB.getOrCreateSingleMap();
       const photo = await DB.getAmbientePhoto(photoId);
       if (!photo) return;
+      const cfg = (typeof MapConfig !== 'undefined') ? await MapConfig.get() : {};
+      const modo = cfg.fotoAutoAtribuirCamera || 'sim';
       const todasFotos = await DB.getAllAmbientePhotos();
+      // [15/09/2026 UTC] MUDADO — pedido verbatim: "a opção 'Apenas quando
+      // o mapa estiver vazio' deve trocar sua função para quando houver
+      // apenas câmeras no mapa." Antes, `mapaVazio` checava só se não
+      // havia NENHUMA OUTRA foto posicionada (`outrasPosicionadas`,
+      // abaixo, mantida só para o cálculo de `index`, que continua
+      // contando fotos/Câmeras — não mudou). Agora `mapaSoTemCameras`
+      // checa se o mapa não tem NENHUM objeto/parede/porta/janela/texto —
+      // qualquer quantidade de Câmeras/fotos já posicionadas continua
+      // contando como "só câmeras" (não desativa mais a opção).
+      const outrasPosicionadas = todasFotos.filter((f) => f.id !== photoId && typeof f.mapaX === 'number' && typeof f.mapaY === 'number');
+      const mapaSoTemCameras = !(map.objects?.length || map.walls?.length || map.portas?.length || map.janelas?.length || map.textos?.length);
+
+      if (modo === 'nao' || (modo === 'vazio' && !mapaSoTemCameras)) {
+        // Item B, opções "Não" e "Apenas quando o mapa estiver vazio" (com
+        // o mapa já não-vazio): a foto fica SEM posição — continua
+        // aparecendo em 📦 Caixa, esperando vínculo manual.
+        Utils.toast('Foto guardada na 📦 Caixa, sem posição no mapa (ver "configurações 2D" → "📷 Fotos").', { type: 'ok' });
+        return;
+      }
+
       const index = todasFotos.filter((f) => f.id !== photoId && f.mapaAuto === true).length;
-      const slot = Mapping.findPeripheralSlot(map, index);
+      const origem = { x: Number(cfg.fotoGradeOrigemX) || 0, y: Number(cfg.fotoGradeOrigemY) || 0 };
+      // RODADA 54 [15/09/2026 UTC]: agora passa dirPrimaria/quebra (ver
+      // seletor visual em mapconfig.js e Mapping.findGridSlot).
+      // [15/09/2026 UTC] NOVO — pedido verbatim: "Deve ter uma opção para
+      // considerar colisão com quaisquer objetos. Isto evita a câmera ser
+      // colocada dentro de um objeto [...] no 3D ela ficaria ocultada."
+      // Com `fotoGradeEvitarColisao` ligado, testa cada posição candidata
+      // da grade (começando em `index`, avançando 1 por 1) contra TODOS os
+      // objetos já no mapa (`Mapping.pointInObjectFootprint`, já usada por
+      // empilhamento automático — mesma checagem, sem duplicar lógica) —
+      // some tentativas até achar uma posição livre. `MAX_TENTATIVAS`
+      // evita um loop infinito absurdo (mapa lotado de objetos cobrindo
+      // toda a grade); nesse caso extremo, cai de volta pra posição
+      // original (melhor colocar colidindo do que travar/nunca posicionar
+      // a foto).
+      let slotIndex = index;
+      let slot = Mapping.findGridSlot(origem, slotIndex, cfg.fotoGradeDistancia, cfg.fotoGradePorLinha, cfg.fotoGradeDirPrimaria, cfg.fotoGradeQuebra);
+      if (cfg.fotoGradeEvitarColisao) {
+        const MAX_TENTATIVAS = 500;
+        let tentativas = 0;
+        while (tentativas < MAX_TENTATIVAS && (map.objects || []).some((o) => Mapping.pointInObjectFootprint(o, slot.x, slot.y))) {
+          slotIndex += 1;
+          slot = Mapping.findGridSlot(origem, slotIndex, cfg.fotoGradeDistancia, cfg.fotoGradePorLinha, cfg.fotoGradeDirPrimaria, cfg.fotoGradeQuebra);
+          tentativas += 1;
+        }
+      }
       await DB.saveAmbientePhoto({ ...photo, mapaX: slot.x, mapaY: slot.y, mapaPiso: slot.piso || 0, mapaAuto: true });
       await MapView._refreshMapaIfShowing?.();
       Utils.toast('Foto guardada na 📦 Caixa — dá para vincular a um lugar depois.', { type: 'ok' });
@@ -474,6 +539,25 @@ const CaptureView = {
       console.error('Falha ao posicionar foto automaticamente:', err);
       Utils.toast('Não foi possível guardar a posição da foto: ' + (err?.message || err), { type: 'danger', duration: 5000 });
     }
+  },
+
+  /** RODADA 53 [15/09/2026 UTC], pedido verbatim (item D) — nome
+   *  automático "AAAA-MM-DD_HH-MM-SS" (ex. "2026-06-07_14-30-00"), local
+   *  ou UTC conforme MapConfig.fotoNomeHoraUTC. Retorna '' (sem nome
+   *  automático, comportamento de antes) quando a opção está desligada. */
+  async _autoPhotoName() {
+    const cfg = (typeof MapConfig !== 'undefined') ? await MapConfig.get() : {};
+    if (cfg.fotoNomeAutomaticoAtivo === false) return '';
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const utc = !!cfg.fotoNomeHoraUTC;
+    const ano = utc ? d.getUTCFullYear() : d.getFullYear();
+    const mes = pad((utc ? d.getUTCMonth() : d.getMonth()) + 1);
+    const dia = pad(utc ? d.getUTCDate() : d.getDate());
+    const hh = pad(utc ? d.getUTCHours() : d.getHours());
+    const mm = pad(utc ? d.getUTCMinutes() : d.getMinutes());
+    const ss = pad(utc ? d.getUTCSeconds() : d.getSeconds());
+    return `${ano}-${mes}-${dia}_${hh}-${mm}-${ss}`;
   },
 
   /** Atualiza o contador da sessão e, sem servidor configurado, lembra periodicamente de baixar um backup. */

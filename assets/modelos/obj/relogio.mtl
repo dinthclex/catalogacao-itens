@@ -1,0 +1,7 @@
+# gerado por ferramentas/gerar_malhas.js — materiais de relogio
+
+newmtl mostrador
+Kd 0.9490 0.9294 0.8784
+
+newmtl ponteiro
+Kd 0.1725 0.1922 0.2275

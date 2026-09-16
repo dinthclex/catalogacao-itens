@@ -1,0 +1,103 @@
+Exemplo de Script — "Porta com Maçaneta" (duplo clique abre/fecha)
+====================================================================
+
+[13/09/2026] Este NÃO é um arquivo carregado pelo app (não é um
+`.model.js`/`.instance.js` de verdade — repare na extensão `.txt`). É só
+TEXTO PRONTO PRA COLAR no componente "Script" de uma PORTA com a variante
+`comManeneta: true` (a que tem uma maçaneta de verdade na malha 3D — ver
+`buildDoorOrWindowMesh` em js/engine3d.js), pelo editor de componentes 2D
+já existente ("🧩 Editar componentes…" no painel da porta) ou pelo painel
+"Propriedades e Scripts" do 3D — ambos editam a MESMA "folha de código"
+(`entity.components[].code`, ver js/components.js).
+
+IMPORTANTE — LEIA ANTES DE ACHAR QUE FALTA ALGUMA COISA AQUI
+--------------------------------------------------------------
+Este script é EXATAMENTE A MESMA LÓGICA do
+`_exemplo-script-porta-automatica.txt` (o script de porta "normal", sem
+maçaneta) — alterna `obj.anguloAbertura` entre 0 e 90 no duplo clique, e
+mais nada. Ele não tem, e NÃO PRECISA TER, nenhuma linha extra de código
+pra fazer a maçaneta girar.
+
+Por quê: a animação da MAÇANETA em si (o giro rápido de ~35° no cabo,
+"destrancando", que acontece no exato instante do duplo clique e volta
+sozinha à posição neutra em ~250ms) é feita inteiramente pelo MOTOR 3D
+(`Engine3D._updateDoorAnimations`, js/engine3d.js), e não pelo Script —
+o motor detecta sozinho toda vez que o ALVO de `anguloAbertura` muda
+(não importa QUEM mudou: este script, outro script diferente, ou até
+uma alteração manual) e dispara o giro da maçaneta automaticamente,
+contanto que a porta tenha sido criada com `comManeneta: true` (e por
+consequência tenha `el._doorManetaMesh` montado). Ou seja: o Script aqui
+só decide QUANDO abrir/fechar a porta (o "o quê"); a maçaneta reage
+sozinha a essa decisão (o "como" da animação dela), do mesmo jeito que a
+folha da porta já reagia antes desta rodada — copiar este arquivo pra
+uma porta SEM `comManeneta` funciona igual (só não existe maçaneta pra
+girar), e colar o script "automático" de sempre numa porta COM
+`comManeneta` também funciona igual (a maçaneta gira do mesmo jeito,
+porque quem dispara o giro é o motor observando `anguloAbertura`, não o
+texto deste script específico).
+
+Se um dia você quiser MUDAR como a maçaneta se move (ângulo do giro,
+duração, sentido), o lugar certo é `_updateDoorAnimations` em
+js/engine3d.js (bloco comentado "[13/09/2026] NOVO — animação da
+MAÇANETA"), não este arquivo.
+
+COMO USAR
+---------
+1. Crie/selecione uma porta com `comManeneta: true` (variante nova — ver
+   `dados_gerados/gerar_predio_v3.js`, ou marque o campo manualmente numa
+   porta existente pra testar).
+2. Selecione a porta no mapa 2D (ou mire nela no 3D).
+3. Abra "🧩 Editar componentes…" → "➕ Adicionar Componente" → "Script".
+4. Apague o código de exemplo que vier ("Em branco") e cole TUDO daqui pra
+   baixo (a partir de "function Start() {").
+5. Adicione TAMBÉM um componente "Gatilho de Evento" (EventTrigger) na
+   mesma porta, com evento "Ao Clicar Duas Vezes" (onDoubleClick) → ação
+   apontando pro Script acima → método `aoClicarDuasVezes`.
+6. Entre em "Ver em 3D", mire na porta e dê duplo clique nela: a maçaneta
+   gira rapidinho (~250ms) e, junto/logo em seguida, a folha abre suavemente
+   (~500ms); duplo clique de novo, a maçaneta gira de novo e a folha fecha.
+
+--------------------------- CÓDIGO (copie a partir daqui) ---------------------------
+
+/**
+ * Start é chamada antes do primeiro quadro (uma vez, ao iniciar o objeto).
+ */
+function Start() {
+  // Garante um estado inicial coerente (porta fechada, sem animação em
+  // curso) mesmo se `anguloAbertura` nunca tiver sido definido antes.
+  // A maçaneta não precisa de nenhum estado inicial próprio aqui — ela só
+  // existe (referência guardada pelo motor em `this._doorRuntime`, não em
+  // `obj`) se a porta foi criada com `obj.comManeneta = true`, e o motor
+  // cuida do resto sozinho.
+  if (obj.anguloAbertura === undefined) obj.anguloAbertura = obj.aberta ? 90 : 0;
+}
+
+/**
+ * Update é chamada uma vez por quadro (a cada frame).
+ */
+function Update() {
+  // Nada por quadro neste exemplo — tanto a animação suave da folha quanto
+  // a animação de giro da maçaneta (quando existir) já são feitas pelo
+  // motor 3D sozinho (Engine3D._updateDoorAnimations), só olhando o VALOR
+  // de obj.anguloAbertura definido abaixo em aoClicarDuasVezes().
+}
+
+// Debounce simples: evita que um duplo clique durante a animação em curso
+// (~500ms da folha) dispare uma 2ª troca antes da 1ª terminar visualmente
+// — sem isso, cliques duplos "rápidos demais" alternariam o alvo várias
+// vezes antes do usuário ver a porta (e a maçaneta) terminar de se mexer.
+var _debounceAte = 0;
+
+/**
+ * Chamada pelo Gatilho de Evento "Ao Clicar Duas Vezes" (onDoubleClick) —
+ * alterna a porta entre aberta (90°) e fechada (0°). A maçaneta (se
+ * `comManeneta:true`) gira sozinha no exato instante em que esta função
+ * muda `obj.anguloAbertura` — nenhuma linha extra necessária aqui.
+ */
+function aoClicarDuasVezes() {
+  var agora = Date.now();
+  if (agora < _debounceAte) return; // animação anterior ainda em curso — ignora
+  _debounceAte = agora + 550; // um pouco mais que os ~500ms da animação da folha
+  var estaAberta = (obj.anguloAbertura || 0) > 45;
+  obj.anguloAbertura = estaAberta ? 0 : 90;
+}

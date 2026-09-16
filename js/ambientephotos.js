@@ -219,6 +219,26 @@ const AmbientePhotos = {
   // rascunho em progresso quanto pra uma medida JÁ salva, a qualquer momento
   // com a ferramenta visível). `{ kind:'draft'|'saved', medidaId, which, pointerId }`.
   _medidaDragging: null,
+  // [15/09/2026 UTC] NOVO — pedido verbatim: "Quando estiver selecionado o
+  // botão 'Reposicionar pontas' [...], ao clicar em cima da reta ('Medida'
+  // ou 'Traço guia'), um botão de mover pequeno deve ficar próximo dela
+  // possibilitando mover a reta preservando a sua inclinação e
+  // comprimento." Arraste da RETA INTEIRA (translação pura — os dois
+  // vértices se movem juntos pela MESMA distância, preservando ângulo e
+  // comprimento), como um complemento ao arraste de vértice individual
+  // já existente (_medidaDragging/_tracoDragging, acima) — só entra em
+  // jogo quando o toque foi na LINHA (não numa ponta) e "Reposicionar
+  // pontas" está ligado, ver _hitTestMedidaLine/_hitTestTracoLine no
+  // pointerdown de _attachPanZoom. Formato:
+  // `{ medidaId, aInicial, bInicial, worldInicial:{x,y}, pointerId, moved,
+  //    handleScreen:{x,y} }` — `aInicial`/`bInicial` são cópias dos pontos
+  // NO MOMENTO em que o arraste começou (a translação é sempre calculada a
+  // partir deles + o delta acumulado do ponteiro, nunca incrementalmente
+  // frame a frame, pra não acumular erro de arredondamento). `handleScreen`
+  // é a posição de tela do "botão de mover pequeno" pedido — desenhado por
+  // `_drawLineMoveHandleAmb`, chamada de dentro de render().
+  _medidaLineDragging: null,
+  _tracoLineDragging: null,
   // NOVO (05/09/2026), pedido verbatim: "assim como na ferramenta 'Trena'
   // (em 'Mapa'->'Planta baixa') um círculo aparece quando o cursor está em
   // cima e enquanto move a medida, faça isso também ali para a 'Medida' e
@@ -866,6 +886,17 @@ const AmbientePhotos = {
       this._deletingMedida = !this._deletingMedida;
       this._placingMedida = false;
     }
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "se clicar em 'Adicionar
+    // medida' ou 'Apagar medida' [...], o botão respectivo 'Reposicionar
+    // pontas' [...] deve ser desativado." Ao ligar "Adicionar"/"Apagar",
+    // desliga "Reposicionar pontas" DO MESMO GRUPO (Medidas) — os 3 modos
+    // são mutuamente exclusivos dentro do grupo, ver também
+    // _toggleMedidaReposicionar (caminho inverso).
+    if ((this._placingMedida || this._deletingMedida) && this._medidaReposicionarExtremidadesAtivo) {
+      this._medidaReposicionarExtremidadesAtivo = false;
+      MapConfig?.set?.({ medidaReposicionarExtremidadesAtivo: false });
+      this._updateMedidaReposicionarBtn();
+    }
     this._overlayEl?.querySelector('#ambphotos-medida-add')?.classList.toggle('active', this._placingMedida);
     this._overlayEl?.querySelector('#ambphotos-medida-del')?.classList.toggle('active', this._deletingMedida);
     if (this._placingMedida) Utils.toast('Adicionar medida: toque em 2 pontos da foto para marcar a reta.', { duration: 3500 });
@@ -924,6 +955,14 @@ const AmbientePhotos = {
     } else if (mode === 'del') {
       this._deletingTraco = !this._deletingTraco;
       this._placingTraco = false;
+    }
+    // [15/09/2026 UTC] NOVO — mirror EXATO de _toggleMedidaMode, mesmo
+    // pedido verbatim ("Adicionar traço guia"/"Apagar traço guia" devem
+    // desativar o "Reposicionar pontas" DO TRAÇO GUIA quando ligado).
+    if ((this._placingTraco || this._deletingTraco) && this._tracoReposicionarExtremidadesAtivo) {
+      this._tracoReposicionarExtremidadesAtivo = false;
+      MapConfig?.set?.({ tracoFotoReposicionarExtremidadesAtivo: false });
+      this._updateTracoReposicionarBtn();
     }
     this._overlayEl?.querySelector('#ambphotos-traco-add')?.classList.toggle('active', this._placingTraco);
     this._overlayEl?.querySelector('#ambphotos-traco-del')?.classList.toggle('active', this._deletingTraco);
@@ -1018,8 +1057,24 @@ const AmbientePhotos = {
     const novo = !this._medidaReposicionarExtremidadesAtivo;
     this._medidaReposicionarExtremidadesAtivo = novo;
     MapConfig?.set?.({ medidaReposicionarExtremidadesAtivo: novo });
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "ao clicar em 'Reposicionar
+    // pontas', se o botão 'Adicionar' ou o botão 'Apagar' [...] estiver
+    // habilitado, então, deve ser desabilitado." Ao LIGAR "Reposicionar
+    // pontas", desliga "Adicionar"/"Apagar medida" do MESMO grupo — caminho
+    // inverso de _toggleMedidaMode (que desliga este botão ao ligar aqueles
+    // dois); juntos tornam os 3 modos mutuamente exclusivos dentro do grupo
+    // "Medidas".
+    if (novo && (this._placingMedida || this._deletingMedida)) {
+      this._placingMedida = false;
+      this._deletingMedida = false;
+      this._medidaDraft = null;
+      this._closeMedidaValorModal();
+      this._overlayEl?.querySelector('#ambphotos-medida-add')?.classList.remove('active');
+      this._overlayEl?.querySelector('#ambphotos-medida-del')?.classList.remove('active');
+    }
     this._updateMedidaReposicionarBtn();
     Utils.toast(novo ? '🎯 Reposicionar pontas (Medidas) ligado — toque numa ponta de uma medida já inserida pra movê-la.' : '🎯 Reposicionar pontas (Medidas) desligado.', { duration: 3000 });
+    this.render();
   },
 
   /** Atualiza ícone/estado/title do botão "🎯 Reposicionar pontas" da fileira
@@ -1043,8 +1098,18 @@ const AmbientePhotos = {
     const novo = !this._tracoReposicionarExtremidadesAtivo;
     this._tracoReposicionarExtremidadesAtivo = novo;
     MapConfig?.set?.({ tracoFotoReposicionarExtremidadesAtivo: novo });
+    // [15/09/2026 UTC] NOVO — mirror EXATO de _toggleMedidaReposicionar,
+    // mesmo pedido verbatim, agora pro grupo "Traço guia".
+    if (novo && (this._placingTraco || this._deletingTraco)) {
+      this._placingTraco = false;
+      this._deletingTraco = false;
+      this._tracoDraft = null;
+      this._overlayEl?.querySelector('#ambphotos-traco-add')?.classList.remove('active');
+      this._overlayEl?.querySelector('#ambphotos-traco-del')?.classList.remove('active');
+    }
     this._updateTracoReposicionarBtn();
     Utils.toast(novo ? '🎯 Reposicionar pontas (Traço guia) ligado — toque numa ponta de um traço já inserido pra movê-lo.' : '🎯 Reposicionar pontas (Traço guia) desligado.', { duration: 3000 });
+    this.render();
   },
 
   /** Atualiza ícone/estado/title do botão "🎯 Reposicionar pontas" da fileira
@@ -1932,6 +1997,43 @@ const AmbientePhotos = {
     };
     desenhar('medida', this._medidaDragging || this._medidaVertexHoverAmb, !!this._medidaDragging);
     desenhar('traco', this._tracoDragging || this._tracoVertexHoverAmb, !!this._tracoDragging);
+    this._drawLineMoveHandleAmb();
+  },
+
+  /** [15/09/2026 UTC] NOVO — desenha o "botão de mover pequeno" pedido
+   *  (ver comentário grande em `_medidaLineDragging`) na posição atual do
+   *  ponteiro enquanto uma RETA INTEIRA (Medida ou Traço guia) está sendo
+   *  arrastada por `_medidaLineDragging`/`_tracoLineDragging`. Visual:
+   *  círculo preenchido (mesma cor da ferramenta, âmbar/roxo) com uma
+   *  cruz de "mover" dentro — distinto do anel dos vértices individuais
+   *  (`_drawVertexHighlightAmb`, sem preenchimento), pra não confundir os
+   *  dois tipos de arraste. */
+  _drawLineMoveHandleAmb() {
+    const ctx = this._ctx;
+    const handle = (h, cor) => {
+      if (!h) return;
+      const { x, y } = h.handleScreen;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, 13, 0, Math.PI * 2);
+      ctx.fillStyle = cor;
+      ctx.globalAlpha = 0.92;
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 1;
+      ctx.stroke();
+      // Cruz de "mover" (4 pontas), branca, dentro do círculo.
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x - 6, y); ctx.lineTo(x + 6, y);
+      ctx.moveTo(x, y - 6); ctx.lineTo(x, y + 6);
+      ctx.stroke();
+      ctx.restore();
+    };
+    handle(this._medidaLineDragging, '#ffcc4d');
+    handle(this._tracoLineDragging, '#c9a3ff');
   },
 
   /** NOVO (05/09/2026) — MESMO padrão de `_startOrbHighlight` (`render()`
@@ -2622,6 +2724,27 @@ const AmbientePhotos = {
           this._ensureVertexHighlightLoop(); // NOVO (05/09/2026) — círculo pulsante enquanto arrasta, ver comentário grande na função
           return;
         }
+        // [15/09/2026 UTC] NOVO — pedido verbatim, ver comentário grande em
+        // `_medidaLineDragging` (declaração do campo, acima). Não bateu num
+        // VÉRTICE (bloco acima) — com "Reposicionar pontas" ligado, um toque
+        // na RETA de uma medida já salva (não no rascunho, que não tem "reta
+        // fixa" pra mover) inicia a translação da reta inteira.
+        if (this._medidaReposicionarExtremidadesAtivo) {
+          const lineHit = this._hitTestMedidaLine(sx, sy);
+          if (lineHit) {
+            const world = this.screenToWorld(sx, sy);
+            canvas.setPointerCapture(e.pointerId);
+            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            this._medidaLineDragging = {
+              medidaId: lineHit.id,
+              aInicial: { ...lineHit.a }, bInicial: { ...lineHit.b },
+              worldInicial: { x: world.x, y: world.y },
+              pointerId: e.pointerId, moved: false, handleScreen: { x: sx, y: sy },
+            };
+            this._suppressNextClick = true;
+            return;
+          }
+        }
       }
       // "✏️ Traço guia" — MESMO mecanismo do bloco de Medidas logo acima, só
       // que pra `_hitTestTracoVertex`/`_tracoDragging`. Gatilho ATUALIZADO
@@ -2652,6 +2775,24 @@ const AmbientePhotos = {
           this._suppressNextClick = true;
           this._ensureVertexHighlightLoop(); // NOVO (05/09/2026) — círculo pulsante enquanto arrasta, ver comentário grande na função
           return;
+        }
+        // [15/09/2026 UTC] NOVO — mirror EXATO do bloco de Medidas acima
+        // (mesmo pedido verbatim), agora pro "✏️ Traço guia".
+        if (this._tracoReposicionarExtremidadesAtivo) {
+          const lineHit = this._hitTestTracoLine(sx, sy);
+          if (lineHit) {
+            const world = this.screenToWorld(sx, sy);
+            canvas.setPointerCapture(e.pointerId);
+            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            this._tracoLineDragging = {
+              tracoId: lineHit.id,
+              aInicial: { ...lineHit.a }, bInicial: { ...lineHit.b },
+              worldInicial: { x: world.x, y: world.y },
+              pointerId: e.pointerId, moved: false, handleScreen: { x: sx, y: sy },
+            };
+            this._suppressNextClick = true;
+            return;
+          }
         }
       }
       // Toque/clique esquerdo direto marca/apaga orb (ver _onCanvasClick) —
@@ -2711,6 +2852,48 @@ const AmbientePhotos = {
           const traco = (this._current?.tracos || []).find((t) => t.id === this._tracoDragging.tracoId);
           if (traco) traco[this._tracoDragging.which] = ponto;
         }
+        this.render();
+        return;
+      }
+      // [15/09/2026 UTC] NOVO — translação da RETA INTEIRA (Medida), ver
+      // comentário grande em `_medidaLineDragging`. Delta calculado sempre a
+      // partir do ponto onde o arraste COMEÇOU (`worldInicial`) contra a
+      // posição ATUAL do ponteiro, aplicado aos pontos `aInicial`/`bInicial`
+      // (não incrementalmente) — preserva ângulo/comprimento com exatidão,
+      // sem acumular arredondamento de `xNorm`/`yNorm` a cada frame.
+      if (this._medidaLineDragging && e.pointerId === this._medidaLineDragging.pointerId) {
+        this._medidaLineDragging.moved = true;
+        const rect = canvas.getBoundingClientRect();
+        const sx = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const sy = (e.clientY - rect.top) * (canvas.height / rect.height);
+        const world = this.screenToWorld(sx, sy);
+        const { aInicial, bInicial, worldInicial } = this._medidaLineDragging;
+        const dxNorm = (world.x - worldInicial.x) / this._imgW;
+        const dyNorm = (world.y - worldInicial.y) / this._imgH;
+        const medida = (this._current?.medidas || []).find((m) => m.id === this._medidaLineDragging.medidaId);
+        if (medida) {
+          medida.a = { xNorm: Utils.clamp(aInicial.xNorm + dxNorm, 0, 1), yNorm: Utils.clamp(aInicial.yNorm + dyNorm, 0, 1) };
+          medida.b = { xNorm: Utils.clamp(bInicial.xNorm + dxNorm, 0, 1), yNorm: Utils.clamp(bInicial.yNorm + dyNorm, 0, 1) };
+        }
+        this._medidaLineDragging.handleScreen = { x: sx, y: sy };
+        this.render();
+        return;
+      }
+      if (this._tracoLineDragging && e.pointerId === this._tracoLineDragging.pointerId) {
+        this._tracoLineDragging.moved = true;
+        const rect = canvas.getBoundingClientRect();
+        const sx = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const sy = (e.clientY - rect.top) * (canvas.height / rect.height);
+        const world = this.screenToWorld(sx, sy);
+        const { aInicial, bInicial, worldInicial } = this._tracoLineDragging;
+        const dxNorm = (world.x - worldInicial.x) / this._imgW;
+        const dyNorm = (world.y - worldInicial.y) / this._imgH;
+        const traco = (this._current?.tracos || []).find((t) => t.id === this._tracoLineDragging.tracoId);
+        if (traco) {
+          traco.a = { xNorm: Utils.clamp(aInicial.xNorm + dxNorm, 0, 1), yNorm: Utils.clamp(aInicial.yNorm + dyNorm, 0, 1) };
+          traco.b = { xNorm: Utils.clamp(bInicial.xNorm + dxNorm, 0, 1), yNorm: Utils.clamp(bInicial.yNorm + dyNorm, 0, 1) };
+        }
+        this._tracoLineDragging.handleScreen = { x: sx, y: sy };
         this.render();
         return;
       }
@@ -2793,6 +2976,28 @@ const AmbientePhotos = {
           this._suppressNextClick = true;
           if (kind === 'saved') this._persistCurrent();
         }
+        return;
+      }
+      // [15/09/2026 UTC] NOVO — solta o arraste de RETA INTEIRA (Medida/
+      // Traço guia), ver comentário grande em `_medidaLineDragging`. Sempre
+      // uma medida/traço JÁ SALVO (a reta do rascunho não passa por aqui,
+      // ver o `if` no pointerdown que só testa `_hitTestMedidaLine`/
+      // `_hitTestTracoLine` — funções que só olham `this._current.medidas`/
+      // `.tracos`, nunca o rascunho) — sempre persiste se moveu de verdade.
+      if (this._medidaLineDragging && e.pointerId === this._medidaLineDragging.pointerId) {
+        const moved = this._medidaLineDragging.moved;
+        this._medidaLineDragging = null;
+        pointers.delete(e.pointerId);
+        if (moved) { this._suppressNextClick = true; this._persistCurrent(); }
+        this.render();
+        return;
+      }
+      if (this._tracoLineDragging && e.pointerId === this._tracoLineDragging.pointerId) {
+        const moved = this._tracoLineDragging.moved;
+        this._tracoLineDragging = null;
+        pointers.delete(e.pointerId);
+        if (moved) { this._suppressNextClick = true; this._persistCurrent(); }
+        this.render();
         return;
       }
       if (e.pointerId === pressPointerId) cancelLongPress();

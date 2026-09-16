@@ -39,6 +39,29 @@ const ICON_LIBRARY = {
     <path d="M12 2.5c-3 0-5 2.4-5 6v7c0 3.6 2 6 5 6s5-2.4 5-6v-7c0-3.6-2-6-5-6z"/>
     <line x1="12" y1="2.5" x2="12" y2="9"/>
   `) },
+  // [13/09/2026] NOVO — ícones das "variantes 2" de gabinete/monitor/
+  // teclado/mouse (ver js/engine3d-profiles.js OBJECT3D_PROFILES.gabinete2
+  // etc.) — reaproveita o desenho do ícone original, com uma pequena
+  // variação pra diferenciar visualmente na lista (mesmo padrão de
+  // "editável nas Configurações" do topo do arquivo).
+  gabinete2: { label: 'Gabinete / CPU (Torre)', svg: _iconSvg(`
+    <rect x="8" y="1.5" width="6" height="21" rx="1"/>
+    <circle cx="11" cy="4" r="0.5" fill="currentColor" stroke="none"/>
+    <line x1="9" y1="8" x2="13" y2="8"/><line x1="9" y1="11" x2="13" y2="11"/><line x1="9" y1="14" x2="13" y2="14"/><line x1="9" y1="17" x2="13" y2="17"/>
+  `) },
+  monitor2: { label: 'Monitor (LED)', svg: _iconSvg(`
+    <rect x="2.5" y="5" width="19" height="10.5" rx="0.8"/>
+    <line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="15.5" x2="12" y2="20"/>
+  `) },
+  teclado2: { label: 'Teclado (Compacto)', svg: _iconSvg(`
+    <rect x="5" y="7" width="14" height="11" rx="1.4"/>
+    <line x1="7.5" y1="10" x2="7.51" y2="10"/><line x1="10.5" y1="10" x2="10.51" y2="10"/><line x1="13.5" y1="10" x2="13.51" y2="10"/><line x1="16.5" y1="10" x2="16.51" y2="10"/>
+    <line x1="7" y1="14.5" x2="17" y2="14.5"/>
+  `) },
+  mouse2: { label: 'Mouse (Ergonômico)', svg: _iconSvg(`
+    <path d="M12 2.5c-3.6 0-6 2.6-6 6.5v6.5c0 3.9 2.4 6.5 6 6.5s6-2.6 6-6.5V9c0-3.9-2.4-6.5-6-6.5z"/>
+    <line x1="12" y1="2.5" x2="12" y2="10"/><line x1="9" y1="10" x2="15" y2="10"/>
+  `) },
   notebook: { label: 'Notebook', svg: _iconSvg(`
     <rect x="4" y="5" width="16" height="10" rx="1"/>
     <path d="M2 18h20l-1.5-3h-17z"/>
@@ -251,6 +274,17 @@ const MAP_OBJECT_EXTRAS = {
     <rect x="9" y="4" width="6" height="16"/>
     <rect x="8" y="20" width="8" height="2" rx="0.6"/>
   `) },
+  // [15/09/2026 UTC] NOVO — pedido verbatim: "faça dois novos objetos:
+  // 'Mesa' e 'Pilar' [...] O objeto 'Pilar' deve ter a altura que define a
+  // distância entre um andar e outro e dimensões de 120cmx60cm." Ícone
+  // NOVO, retangular/robusto (bem mais largo que 'coluna' acima, que
+  // continua existindo — só não aparece mais na grade de escolha, ver
+  // `mapObjectCatalog` abaixo — pra sugerir a planta retangular de VERDADE
+  // do novo Pilar, em vez da coluna cilíndrica antiga).
+  pilar: { label: 'Pilar', svg: _iconSvg(`
+    <rect x="7" y="2" width="10" height="20" rx="0.8"/>
+    <path d="M7 6h10M7 18h10"/>
+  `) },
   planta: { label: 'Planta / vaso', svg: _iconSvg(`
     <path d="M12 11v10"/>
     <path d="M12 11c0-3.5-2.5-5.5-6-5.5 0 3.5 2.5 5.5 6 5.5z"/>
@@ -263,13 +297,67 @@ const MAP_OBJECT_EXTRAS = {
     <path d="M6 21V3l9 1.5V21"/>
     <circle cx="12.5" cy="12.5" r="0.7" fill="currentColor" stroke="none"/>
   `) },
+  // [13/09/2026 UTC] TROCADO — pedido verbatim do usuário: "Na janela
+  // 'Ferramentas', troque o ícone do objeto 'Janela' para um ícone
+  // intuitivo (que faça lembrar que se trata de uma janela) e que não seja
+  // igual ao objeto 'Piso'." O ícone anterior (retângulo + cruz central,
+  // sem preenchimento) lia como um quadriculado genérico visto de cima —
+  // MESMA família visual do ícone de 'piso' (retângulo + cruz, só que com
+  // fundo preenchido, ver comentário grande de 'piso' logo abaixo), fácil
+  // de confundir num relance. NOVO: vista em ELEVAÇÃO (de frente, como se
+  // vê uma janela de verdade numa parede) — moldura com 4 vidraças (cruz),
+  // um PEITORIL saliente na base (linha mais larga que a moldura, o detalhe
+  // que só janela tem — piso não tem "peitoril") e um brilho diagonal
+  // sugerindo vidro reflexivo — nada disso existe no ícone de 'piso' (visto
+  // de CIMA, sem peitoril nem brilho).
   janela: { label: 'Janela', svg: _iconSvg(`
-    <rect x="4" y="4" width="16" height="16" rx="1"/>
-    <line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/>
+    <line x1="3" y1="20" x2="21" y2="20"/>
+    <rect x="5.5" y="3.5" width="13" height="15" rx="0.6"/>
+    <line x1="12" y1="3.5" x2="12" y2="18.5"/><line x1="5.5" y1="11" x2="18.5" y2="11"/>
+    <line x1="7.5" y1="6" x2="10" y2="8.5" stroke-opacity="0.55"/>
   `) },
   'caixa-generica': { label: 'Caixa / objeto genérico', svg: _iconSvg(`
     <path d="M3 8l9-4 9 4-9 4-9-4z"/>
     <path d="M3 8v9l9 4 9-4V8"/><line x1="12" y1="12" x2="12" y2="21"/>
+  `) },
+  // [13/09/2026] AJUSTE — pedido verbatim do usuário: "O ícone do piso deve
+  // ser intuitivo (deve trazer uma ideia de que se trata de um piso)." O
+  // ícone anterior (retângulo cheio liso) foi trocado por um padrão de
+  // lajotas 2x2 vistas de cima (mesma família visual do `teto-modular`
+  // abaixo, que também usa grade — mas aqui SÓ 2x2, mais espaçado, e com
+  // fundo levemente preenchido, pra ler como "piso lajotado" e não se
+  // confundir com o teto modular, que é mais denso/sem preenchimento). Esta
+  // entrada continua existindo em `MAP_OBJECT_EXTRAS` mesmo tendo saído do
+  // catálogo "Objetos" (ver `mapObjectCatalog()` acima) por dois motivos: 1)
+  // objetos 'piso' já colocados antes de o "Piso" ganhar ferramenta própria
+  // continuam desenhando normalmente a partir daqui; 2) este `svg` é
+  // reaproveitado como ícone do novo botão dedicado 'piso' em mapview.js
+  // PTOOLS (mesmo esquema já usado para reaproveitar o ícone de 'janela').
+  piso: { label: 'Piso (laje de andar)', svg: _iconSvg(`
+    <rect x="3" y="3" width="18" height="18" rx="1" fill="currentColor" fill-opacity="0.12"/>
+    <rect x="3" y="3" width="18" height="18" rx="1"/>
+    <line x1="12" y1="3" x2="12" y2="21"/>
+    <line x1="3" y1="12" x2="21" y2="12"/>
+  `) },
+  // [13/09/2026] NOVO — "Teto modular" e "Teto de gesso" (pedido do
+  // usuário: "chão lajotado, teto modular (escritórios), teto de gesso com
+  // rodelas de acesso"). Os dois entram no catálogo normal, pra o
+  // usuário conseguir colocá-los na cena como qualquer outro objeto comum
+  // (mesmo raio-x/redimensionamento/edição de painel de um retângulo
+  // qualquer). Ícone: grade de quadrados vista de cima (mesmo espírito
+  // visual do padrão procedural de textura usado nos dois, ver
+  // engine3d.js `_getProceduralFloorTexture`) — só muda o traço mais denso
+  // (modular, quadrados menores) do mais esparso com um círculo central
+  // (gesso, sugerindo UMA rodela de acesso).
+  'teto-modular': { label: 'Teto modular (escritório)', svg: _iconSvg(`
+    <rect x="3" y="3" width="18" height="18" rx="1"/>
+    <line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
+    <line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/>
+  `) },
+  'teto-gesso': { label: 'Teto de gesso (c/ rodelas de acesso)', svg: _iconSvg(`
+    <rect x="3" y="3" width="18" height="18" rx="1"/>
+    <circle cx="8" cy="8" r="1.4"/><circle cx="16" cy="8" r="1.4"/>
+    <circle cx="8" cy="16" r="1.4"/><circle cx="16" cy="16" r="1.4"/>
   `) },
   // Luminária de teto (2 lâmpadas fluorescentes compridas) — pedido do
   // usuário ("faça uma luminária... 2 lâmpadas compridas... para deixar o
@@ -325,6 +413,169 @@ const MAP_OBJECT_EXTRAS = {
     <line x1="20" y1="9" x2="15" y2="9"/>
     <line x1="20" y1="4" x2="15" y2="4"/>
     <path d="M13 6 L16.5 3.2 L16 7.2 Z"/>
+  `) },
+  // [14/09/2026] NOVO — "Interruptor de luz" (ver engine3d-profiles.js
+  // `OBJECT3D_PROFILES.interruptor`/assets/modelos/interruptor.model.js):
+  // placa de parede + alavanca, ícone simples de interruptor.
+  interruptor: { label: 'Interruptor', svg: _iconSvg(`
+    <rect x="6" y="3" width="12" height="18" rx="1.4"/>
+    <rect x="9.5" y="6.5" width="5" height="8" rx="1.2"/>
+  `) },
+  // [15/09/2026] NOVO — "quadro-parede" (quadro/pintura decorativo de
+  // parede, ver engine3d-profiles.js OBJECT3D_PROFILES['quadro-parede']).
+  // Vista de cima simples: moldura retangular + um "X" central sugerindo
+  // uma pintura emoldurada (distinto do ícone do `quadro`/lousa acima, que
+  // tem linhas de texto — este é decorativo, não de escrever).
+  'quadro-parede': { label: 'Quadro de Parede', svg: _iconSvg(`
+    <rect x="4" y="4" width="16" height="16" rx="1"/>
+    <path d="M7 14l3.5-4.5L13 12.5l2-2.5L17 14"/>
+    <circle cx="9.2" cy="8" r="1.1"/>
+  `) },
+  // [15/09/2026] NOVO — "quadro-mesa" (porta-retrato pequeno de mesa/
+  // estante, ver engine3d-profiles.js OBJECT3D_PROFILES['quadro-mesa']).
+  // Mesma ideia do ícone acima, só menor/mais "quadrado" e com um pezinho
+  // de apoio na base — sugerindo o porta-retrato em pé sobre uma mesa,
+  // distinto do `quadro-parede` (retangular, sem pé).
+  'quadro-mesa': { label: 'Porta-retrato de Mesa', svg: _iconSvg(`
+    <rect x="6" y="4" width="12" height="14" rx="1"/>
+    <path d="M8.5 13l2.5-3 1.7 2 1.3-1.6L15.5 13"/>
+    <circle cx="10" cy="7.5" r="0.9"/>
+    <line x1="9" y1="20" x2="15" y2="20"/>
+    <line x1="12" y1="18" x2="12" y2="20"/>
+  `) },
+  // [13/09/2026] NOVO — infraestrutura de robôs (limpeza/copa/
+  // recepcionista, ver js/engine3d-profiles.js OBJECT3D_PROFILES.robo*).
+  // Vista de cima simples: corpo circular (aspirador/robô de serviço) +
+  // sensor/antena no centro.
+  robo: { label: 'Robô (Base)', svg: _iconSvg(`
+    <circle cx="12" cy="12" r="9"/>
+    <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/>
+    <line x1="12" y1="3" x2="12" y2="5.5"/>
+  `) },
+  'robo-limpeza': { label: 'Robô de Limpeza', svg: _iconSvg(`
+    <circle cx="12" cy="12" r="9"/>
+    <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/>
+    <path d="M4 9 A9 9 0 0 1 20 9"/>
+  `) },
+  'robo-copa': { label: 'Robô de Copa', svg: _iconSvg(`
+    <circle cx="12" cy="12" r="9"/>
+    <rect x="9" y="8.5" width="6" height="7" rx="1"/>
+  `) },
+  'robo-recepcionista': { label: 'Robô Recepcionista', svg: _iconSvg(`
+    <circle cx="12" cy="12" r="9"/>
+    <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/>
+    <line x1="12" y1="3" x2="12" y2="5.5"/>
+    <line x1="7.5" y1="4.5" x2="8.7" y2="6.6"/>
+    <line x1="16.5" y1="4.5" x2="15.3" y2="6.6"/>
+  `) },
+
+  // [15/09/2026 UTC] NOVO — pedido verbatim do usuário: "Todos os objetos
+  // que aparecem em 'Objetos'->'Acessar modelo' devem aparecer em
+  // 'Objetos'. Cada um deve ter a sua representação 2D. Atualmente, há
+  // objetos que aparecem em 'Acessar objetos' que não aparecem na lista de
+  // objetos da janela da ferramenta 'Objstos'. Lista dos objetos que não
+  // aparecem na janela 'Objetos': 'cafeteira', 'cancela-haste',
+  // 'cancela-poste', 'carro', 'casa-robo', 'casa-robo-telhado',
+  // 'disjuntor', 'elevador-botao-chamada', 'elevador-cabine',
+  // 'interruptor-remoto', 'mictorio', 'pia', 'vaga-estacionamento' e
+  // 'vaso-sanitario'. Todos eles, também, não tem uma representação 2D.
+  // Devem tê-la." Estes 14 tipos já existiam em `OBJECT3D_PROFILES` (ver
+  // js/engine3d-profiles.js — usados pelo catálogo "Acessar modelos", que
+  // lista `Object.keys(OBJECT3D_PROFILES)`), mas NUNCA tinham entrada aqui
+  // em `MAP_OBJECT_EXTRAS` — e como `Icons.mapObjectCatalog()` (grade da
+  // janela "Objetos") e a "representação 2D" desenhada no mapa
+  // (`Map2DRenderer._drawFormaShape` -> `_getIconImage` ->
+  // `Icons.dataUrlForKey` -> `Icons.svgForAnyKey`, ver js/mapview.js) são
+  // AMBOS resolvidos a partir de `ICON_LIBRARY`/`MAP_OBJECT_EXTRAS`, uma
+  // única entrada aqui resolve as duas metades do pedido de uma vez: 1)
+  // passam a aparecer na grade de "Objetos" e 2) ganham a mesma
+  // "representação 2D" (ícone desenhado sobre o retângulo/forma do objeto
+  // no mapa) que qualquer outro tipo já tem — sem precisar de nenhuma
+  // função de desenho nova/separada (o mecanismo já é genérico, por SVG).
+  // Vista de CIMA (planta), mesmo espírito de traço fino dos ícones acima.
+  // Labels em português: usados o nome já citado no PEDIDO verbatim do
+  // usuário quando havia um sugerido; nos demais, o nome mais claro/comum
+  // do objeto (não havia nome "oficial" pré-existente em nenhum catálogo
+  // pra estes 14 tipos — só a chave técnica em OBJECT3D_PROFILES).
+  cafeteira: { label: 'Cafeteira', svg: _iconSvg(`
+    <rect x="7" y="9" width="9" height="11" rx="1.4"/>
+    <path d="M16 12h2.5a1.6 1.6 0 0 1 0 5H16"/>
+    <path d="M9.5 9V6.5a2.5 2.5 0 0 1 5 0V9"/>
+    <line x1="9.5" y1="13" x2="13.5" y2="13"/>
+  `) },
+  'vaso-sanitario': { label: 'Vaso Sanitário', svg: _iconSvg(`
+    <rect x="7" y="3" width="7" height="4" rx="1"/>
+    <path d="M6.5 9.5c0-1.4 1.6-2.5 5-2.5s5 1.1 5 2.5c0 6-2.2 10.5-5 10.5s-5-4.5-5-10.5z"/>
+    <ellipse cx="11.5" cy="9.6" rx="4.6" ry="1.7"/>
+  `) },
+  mictorio: { label: 'Mictório', svg: _iconSvg(`
+    <path d="M9 3h6v5.2c2 .6 3.2 2.4 3.2 4.8 0 3.6-2.7 8-6.2 8s-6.2-4.4-6.2-8c0-2.4 1.2-4.2 3.2-4.8V3z"/>
+    <line x1="9" y1="6" x2="15" y2="6"/>
+  `) },
+  pia: { label: 'Pia', svg: _iconSvg(`
+    <rect x="3" y="7" width="18" height="9" rx="1.4"/>
+    <ellipse cx="12" cy="11.5" rx="6" ry="2.6"/>
+    <line x1="12" y1="7" x2="12" y2="3.4"/>
+    <path d="M9.5 3.4h5"/>
+  `) },
+  carro: { label: 'Carro', svg: _iconSvg(`
+    <rect x="2.5" y="9" width="19" height="7" rx="2"/>
+    <path d="M5.5 9l2-4.4h9l2 4.4"/>
+    <line x1="9" y1="9" x2="9" y2="4.6"/>
+    <line x1="15" y1="9" x2="15" y2="4.6"/>
+    <circle cx="7" cy="16.5" r="1.6" fill="currentColor" stroke="none"/>
+    <circle cx="17" cy="16.5" r="1.6" fill="currentColor" stroke="none"/>
+  `) },
+  'vaga-estacionamento': { label: 'Vaga de Estacionamento', svg: _iconSvg(`
+    <rect x="3" y="3" width="18" height="18" rx="1" fill="currentColor" fill-opacity="0.08"/>
+    <path d="M8 6v12"/>
+    <path d="M16 6v12"/>
+    <path d="M8 6h5a3 3 0 0 1 0 6H8"/>
+  `) },
+  'cancela-haste': { label: 'Cancela (Haste)', svg: _iconSvg(`
+    <rect x="2" y="10.5" width="17" height="3" rx="1"/>
+    <line x1="4" y1="12" x2="17" y2="12" stroke-dasharray="2 2"/>
+    <rect x="19" y="4" width="2.4" height="16" rx="1"/>
+  `) },
+  'cancela-poste': { label: 'Cancela (Poste)', svg: _iconSvg(`
+    <circle cx="12" cy="12" r="3.2"/>
+    <line x1="12" y1="3" x2="12" y2="8.4"/>
+    <line x1="12" y1="15.6" x2="12" y2="21"/>
+    <line x1="3" y1="12" x2="8.4" y2="12"/>
+    <line x1="15.6" y1="12" x2="21" y2="12"/>
+  `) },
+  'elevador-cabine': { label: 'Cabine do Elevador', svg: _iconSvg(`
+    <rect x="4" y="3" width="16" height="18" rx="1"/>
+    <line x1="12" y1="3" x2="12" y2="21"/>
+    <path d="M8 8l-1.6 4L8 16"/>
+    <path d="M16 8l1.6 4L16 16"/>
+  `) },
+  'elevador-botao-chamada': { label: 'Botão de Chamada do Elevador', svg: _iconSvg(`
+    <rect x="5" y="3" width="14" height="18" rx="1.4"/>
+    <circle cx="12" cy="9.5" r="2.6"/>
+    <path d="M9.6 15.5l2.4-2.6 2.4 2.6"/>
+  `) },
+  disjuntor: { label: 'Disjuntor', svg: _iconSvg(`
+    <rect x="4" y="3" width="16" height="18" rx="1.2"/>
+    <rect x="7" y="6" width="4" height="6" rx="0.8"/>
+    <rect x="13" y="6" width="4" height="6" rx="0.8"/>
+    <line x1="9" y1="16" x2="9" y2="18.4"/>
+    <line x1="15" y1="16" x2="15" y2="18.4"/>
+  `) },
+  'interruptor-remoto': { label: 'Interruptor Remoto', svg: _iconSvg(`
+    <rect x="6" y="3" width="12" height="18" rx="1.4"/>
+    <rect x="9.5" y="6.5" width="5" height="8" rx="1.2"/>
+    <path d="M16.5 4.2l1.8-1.8"/>
+    <path d="M18.5 6.2l2-1"/>
+  `) },
+  'casa-robo': { label: 'Casa do Robô', svg: _iconSvg(`
+    <rect x="4" y="11" width="16" height="9" rx="1"/>
+    <path d="M3 12l9-8 9 8"/>
+    <rect x="9.5" y="14.5" width="5" height="5.5"/>
+  `) },
+  'casa-robo-telhado': { label: 'Casa do Robô (Telhado)', svg: _iconSvg(`
+    <path d="M2.5 13l9.5-9.5 9.5 9.5"/>
+    <path d="M5.5 12.5v3.5l6.5 3.5 6.5-3.5v-3.5"/>
   `) },
 };
  
@@ -451,6 +702,13 @@ const Icons = {
    *  extras só-de-mapa (coluna, planta, porta, janela, caixa genérica). */
   mapObjectCatalog() {
     const out = [];
+    // [15/09/2026 UTC] 'mesa' DE VOLTA — pedido verbatim (rodada seguinte à
+    // que a excluiu): "faça dois novos objetos: 'Mesa' e 'Pilar' [...]
+    // Agora não tem mais o gizmo integrado, é só um objeto comum tanto
+    // para o pilar quanto para a mesa." Volta a ser um objeto de catálogo
+    // comum igual qualquer outro (ver `OBJECT3D_PROFILES.mesa`/
+    // `_buildMesaMesh`, engine3d.js) — sem o mecanismo de "forma com
+    // gizmo"/`_MESA_FORMA_DEF` de antes (removido, não volta).
     Object.keys(this.LIBRARY).forEach((key) => out.push({ key, label: this.LIBRARY[key].label, svg: this.LIBRARY[key].svg }));
     // 'porta'/'janela' SAÍRAM daqui (pedido do usuário: "como porta e janela
     // têm ferramentas separadas, as que estão ali dentro dos objetos deve
@@ -463,8 +721,28 @@ const Icons = {
     // desenhando normalmente; 2) o ícone de janela poder ser reaproveitado
     // como ícone da própria ferramenta "Janela" (pedido do usuário —
     // "aproveite apenas o ícone da janela" — ver mapview.js PTOOLS).
+    // [13/09/2026] NOVO — 'piso' SAIU daqui também (mesmo raciocínio de porta/
+    // janela acima): pedido do usuário para dar ao "Piso" sua própria
+    // ferramenta dedicada no toolbar (ver mapview.js PTOOLS, id 'piso'), que
+    // faz uma colocação simples (sem raio-x de parede) de uma laje 10x10m —
+    // duplicar como item solto dentro de "Objetos" não fazia mais sentido. A
+    // entrada em MAP_OBJECT_EXTRAS.piso continua existindo (não apagada) só
+    // pra objetos já colocados antes desta mudança continuarem desenhando, e
+    // pro ícone poder ser reaproveitado pelo botão da nova ferramenta.
     Object.keys(this.MAP_OBJECT_EXTRAS)
-      .filter((key) => key !== 'porta' && key !== 'janela')
+      // [15/09/2026 UTC] 'coluna' ACRESCENTADO ao filtro — pedido verbatim:
+      // "Remova os objetos 'Mesa' e 'Coluna / Pilar' do app [...] não há a
+      // preocupação de quebrar mapas legados." MESMO tratamento já dado a
+      // porta/janela/piso (comentário grande logo acima) — a entrada em
+      // MAP_OBJECT_EXTRAS.coluna fica, só sai da grade de escolha (não pode
+      // mais ser colocada); como o pedido dispensa compatibilidade com mapas
+      // antigos, os pontos que ainda desenhavam/tratavam 'coluna'/'mesa'
+      // especificamente foram removidos à parte (ver mapview.js
+      // _MESA_FORMA_DEF/_PILAR_FORMA_DEF, engine3d.js/engine3d-profiles.js).
+      // [15/09/2026 UTC] 'coluna' continua fora (substituída por 'pilar',
+      // objeto comum retangular novo, incluído normalmente abaixo por não
+      // estar nesta lista de exclusão).
+      .filter((key) => key !== 'porta' && key !== 'janela' && key !== 'piso' && key !== 'coluna')
       .forEach((key) => out.push({ key, label: this.MAP_OBJECT_EXTRAS[key].label, svg: this.MAP_OBJECT_EXTRAS[key].svg }));
     return out;
   },

@@ -44,12 +44,21 @@
   } catch (e) { /* localStorage indisponivel (ex.: modo privado) -- segue sem o class, comportamento igual a antes */ }
 })();</script>
 <link rel="manifest" href="manifest.json">
-<link rel="icon" href="assets/icon-192.png">
-<link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="css/style.css">
 <!-- Modelador 3D (pedido do usuário, 28/08/2026 — rodada de modularização):
      estilos que antes ficavam inline em js/modeler3d.js, movidos pra cá. -->
 <link rel="stylesheet" href="css/modeler3d.css">
+<!-- [13/09/2026] NOVO — folha de estilo COMPARTILHADA dos cards 3D (ver a
+     pasta `js/cards/` -- [16/09/2026 UTC] movida de `cards/` na raiz pra
+     dentro de `js/`, pedido verbatim -- e o comentário grande no topo de
+     `js/cardsystem.js`). CSS carregado por <link> funciona normalmente de
+     `file://` (só `fetch()`/`XMLHttpRequest` sofrem bloqueio de CORS nesse
+     esquema — uma tag <link>/<script src>/<img src> sempre pôde carregar
+     de arquivo local sem restrição, é assim que o app inteiro já carrega
+     css/js desde sempre). Cada card (js/cards/*.js) pode usar classes
+     definidas aqui, ou incluir um <style> inline escopado no próprio HTML
+     dele quando quiser algo só seu, sem mexer no compartilhado. -->
+<link rel="stylesheet" href="js/cards/cards.css">
 <!-- [11/09/2026] NOVO — CodeMirror 5 VENDORIZADO (arquivos baixados e salvos
      em lib/codemirror/, NÃO carregados de CDN em tempo de execução — pedido
      verbatim: "vendorize para não precisar buscar em CDN toda vez que o app
@@ -276,7 +285,57 @@
      carregamento. Veja README.md para instruções de como vendorizar
      localmente (100% offline desde o início). -->
 
+<!-- [13/09/2026] NOVO — infraestrutura de áudio do zero (pedido verbatim,
+     câmera de segurança estilo PS1: "agora o projeto vai ter som"), ver
+     comentário grande no topo de js/audio.js sobre por que o som do motor é
+     SINTETIZADO via Web Audio API (osciladores) em vez de um arquivo .mp3
+     gravado. Carregado cedo (sem depender de nada) — só registra
+     `window.AudioFX`, nada roda sozinho até algum código chamar
+     `AudioFX.tocarSomMotor(true)`. -->
+<script src="js/audio.js"></script>
+<!-- NOVO (13/09/2026) — RELÓGIO DE TEMPO REAL DO MUNDO (`window.RelogioMundo`),
+     peça de infraestrutura que faltava, documentada como limitação em
+     `_exemplo-script-robo-copa.txt`/`_exemplo-script-robo-recepcionista.txt`
+     (ambos usavam Date.now() como substituto). Ver comentário grande no topo
+     de js/relogio-mundo.js pra API completa/eventos disparados. Carregado
+     cedo, igual js/audio.js — só registra `window.RelogioMundo` e liga seu
+     próprio loop de checagem (setInterval), nada depende de outro script
+     carregar antes (usa window.DB/window.SceneEventBus com `?.`). -->
+<script src="js/relogio-mundo.js"></script>
 <script src="js/db.js"></script>
+<!-- NOVO (13/09/2026), pedido verbatim: "Implemente um pipeline de
+     carregamento de modelo (ex. GLTFLoader do three.js) e um novo campo no
+     perfil tipo modeloArquivo: 'monitor.glb', com fallback pra geometria
+     procedural atual quando o arquivo não existir." Ver comentário grande no
+     topo de js/model3dloader.js pra API completa/limitações. Carregado logo
+     depois de js/db.js (usa `window.DB.getAllModelos3D/putModelo3D/
+     deleteModelo3D`, ver js/db.js store `modelos3d`) — só REGISTRA
+     `window.Model3DLoader` aqui; o parse de verdade espera `window.THREE`
+     carregar sob demanda (igual engine3d.js), então não precisa vir depois
+     dele no HTML. -->
+<script src="js/model3dloader.js"></script>
+<!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Implemente o ObjMeshSource
+     para .glb como você mencionou." Ver comentário grande no topo de
+     js/glbmeshsource.js pra explicação completa — malha `.glb` ESTÁTICA/
+     embutida no próprio projeto (ex. assets/modelos/luminaria.glb.js),
+     diferente de js/model3dloader.js logo acima (que é só pra .glb
+     IMPORTADO PELO USUÁRIO em tempo de execução). Carregado DEPOIS de
+     js/model3dloader.js (reaproveita `Model3DLoader.parseArrayBuffer`) e
+     ANTES de js/objectassets.js (mesmo motivo de js/objmeshsource.js logo
+     abaixo — `ObjectAssets.registerModel`/`def.malhaGlb` precisa deste
+     módulo já existir). -->
+<script src="js/glbmeshsource.js"></script>
+<!-- [15/09/2026 UTC] NOVO — pedido verbatim: "A malha do objeto (o '.obj'
+     dele) deve ficar em um arquivo separado e ser endereçado em
+     '<nome-do-modelo>.config.js', mas deve continuar funcionando com o
+     protocolo 'file:///'." Ver comentário grande no topo de
+     js/objmeshsource.js pra explicação completa (por que um simples
+     "renomear .obj pra .js" não basta, e como isso é resolvido). Carregado
+     ANTES de js/objectassets.js de propósito — `ObjectAssets.registerModel`
+     (campo `malhaEstatica`) chama `window.ObjMeshSource.preload(...)`
+     assim que um `.config.js` carrega, então este módulo precisa já existir
+     nesse instante. -->
+<script src="js/objmeshsource.js"></script>
 <script src="js/utils.js"></script>
 <!-- NOVO (07/09/2026), pedido verbatim: "Faça uma função de gerenciamento
      de janelas para todo o app" — ver js/windowmanager.js. Carregado logo
@@ -343,6 +402,65 @@
      ScriptComponent agora guarda sua "folha de código" (`code`) direto,
      sempre editável, nunca uma classe opaca por trás. -->
 <script src="js/components.js"></script>
+<!-- NOVO (12/09/2026), pedido verbatim: "esta padronização é para que ao
+     criar novos objetos, eles possam seguir os mesmos modelos [...] deve
+     ter uma folha de histórico: 'Histórico deste objeto'." —
+     window.ObjectStandard (ver comentário grande no topo do próprio
+     arquivo): molde de `components` padrão por TIPO + histórico por
+     objeto individual. Depois de components.js (usa
+     Components/entity.components) e de db.js (usa DB.getSetting) — antes
+     de mapping.js seria melhor, mas mapping.js só CHAMA
+     ObjectStandard.applyDefaultComponents em tempo de execução (nunca no
+     carregamento do script), então a ordem aqui não importa de verdade;
+     fica perto de components.js por afinidade de assunto. -->
+<script src="js/objectstandard.js"></script>
+<!-- NOVO (12/09/2026), pedido verbatim: "reescrita completa dos cartões
+     3D hardcoded de câmera/foto para rotearem 100% pelo sistema genérico
+     de componentes [...] Implemente na pasta 'assets/'." —
+     window.ObjectAssets (ver comentário grande no topo do próprio
+     arquivo): carrega sob demanda os arquivos de assets/modelos/ e
+     assets/instancias/ (via <script> injetado, não fetch — file:// não
+     permite fetch de arquivo local por CORS). Só precisa vir ANTES de
+     view3d.js (que chama ObjectAssets.warmupModelsForMap/dispatchClick3D)
+     — carregado aqui perto de objectstandard.js por afinidade. -->
+<script src="js/objectassets.js"></script>
+<!-- [13/09/2026] NOVO — pedido verbatim: "faça algum jeito para poder
+     configurá-las [as janelinhas de card], os estilos e textos [...] faça
+     uma pasta chamada 'cards/' (agora 'js/cards/', movida [16/09/2026 UTC]) e todos eles ficam ali [...] Em vez de ser
+     injeções em innerHTML nos arquivos do projeto." window.CardSystem
+     (js/cardsystem.js, comentário grande no topo do arquivo) é o "motor"
+     — cada arquivo de js/cards/ se AUTO-REGISTRA nele ao carregar. Diferente
+     de assets/modelos/ (carregado SOB DEMANDA, ~60+ tipos possíveis),
+     js/cards/ é um conjunto FIXO e pequeno (6 hoje) — por isso tags <script>
+     ESTÁTICAS aqui, sem precisar de lazy-load. cardsystem.js vem ANTES
+     dos cards individuais (eles chamam `CardSystem.register` ao
+     carregar); a ordem entre eles e view3d.js não importa tecnicamente
+     (só USADOS dentro de métodos chamados em runtime, não no carregamento
+     do script), mas ficam aqui perto de objectassets.js por afinidade de
+     assunto (mesmo "ctx"/mesma convenção de acesso ao app). -->
+<script src="js/cardsystem.js"></script>
+<script src="js/cards/object-card.js"></script>
+<script src="js/cards/camera-card.js"></script>
+<script src="js/cards/foto-pin-card.js"></script>
+<script src="js/cards/tijolo-aglomerado-card.js"></script>
+<script src="js/cards/orphan-patrimonio-card.js"></script>
+<!-- [15/09/2026 UTC] js/cards/confirm-card.js — card genérico de confirmação (título/mensagem/botões), pedido verbatim: "A janelinha de confirmação que aparece deve ser um card... não um 'alert()'." -->
+<script src="js/cards/confirm-card.js"></script>
+<!-- [13/09/2026 UTC] NOVO — pedido verbatim (mesmo pedido de "faça uma
+     pasta cards/" (agora js/cards/)", agora aplicado à janela de propriedades de OBJETO do
+     MAPA 2D, não só aos cards do "Ver em 3D"): "Em vez de ser um template
+     gigante de HTML, transforme-o em um card e coloque na pasta 'cards/' (agora 'js/cards/').
+     Também deixe como '.js' para poder continuar funcionando com
+     'file:///'." `window.ObjectPanelCard` (ver comentário grande no topo
+     do arquivo) NÃO usa `window.CardSystem.register` — é um formato
+     PRÓPRIO (`.build(obj, opts)`, chamado direto por `js/mapview.js`
+     `_openObjectPanel`), porque a janela de propriedades do mapa 2D
+     (`.map2d-props-panel`, arrastável/minimizável) é um mecanismo mais
+     antigo e diferente dos cartões `.flashcard3d-overlay` do "Ver em 3D"
+     — ver a explicação completa no topo do próprio arquivo. Precisa vir
+     ANTES de `js/mapview.js` (que o usa em runtime, dentro de
+     `_openObjectPanel`). -->
+<script src="js/cards/object-panel-card.js"></script>
 <script src="js/organizeview.js"></script>
 <script src="js/ambientephotos.js"></script>
 <!-- "Receitas" dos modelos 3D dos objetos padrão (rodada 51 — pedido do
@@ -351,6 +469,12 @@
      engine3d.js; precisa vir ANTES dele (compartilha o mesmo escopo de
      topo de script, ver comentário no início do arquivo). -->
 <script src="js/engine3d-profiles.js"></script>
+<!-- [13/09/2026] NOVO — geradores de sala reutilizáveis (Sala de
+     Monitoramento/Câmeras por andar/Copa/Banheiro), ver comentário grande
+     no topo de js/geradores-salas.js. Só registra `window.GeradoresSalas`
+     (dados/funções puras) — nada roda sozinho até algum gerador de prédio
+     ou o próprio app chamar uma das funções. -->
+<script src="js/geradores-salas.js"></script>
 <!-- NOVO (01/09/2026) — item GRANDE #9: js/maptxt.js (novo formato de
      arquivo de texto pro mapa — ver comentário grande no topo do próprio
      arquivo). Precisa vir DEPOIS de mapping.js e engine3d-profiles.js (usa
@@ -365,6 +489,12 @@
      Tijolos.buildAll em _rebuildTijolos) e de view3d.js (que chama
      Tijolos.getConfig/setConfig/add/snapXZ). -->
 <script src="js/tijolos.js"></script>
+<!-- [16/09/2026 UTC] NOVO — comandos de canvas 2D do mostrador do relógio,
+     extraídos de engine3d.js (_getProceduralMostradorTexture) pra um
+     arquivo próprio reaproveitável também por ferramentas Node (geração de
+     .glb) — ver assets/js/mostrador-canvas.js. Precisa vir ANTES de
+     engine3d.js (que chama window.MostradorCanvas.desenhar). -->
+<script src="assets/js/mostrador-canvas.js"></script>
 <script src="js/engine3d.js"></script>
 <!-- Modelador 3D (pedido do usuário, 28/08/2026 — rodada de modularização:
      "Modularize o Modelador para que, tudo que seja relacionado a ele, esteja

@@ -211,7 +211,11 @@
     root.classList.add('embedded');
     container.appendChild(root);
     STATE.mounted = true;
-    if(opts.imageFile) window.vanishCamLoadImage(opts.imageFile);
+    // [15/09/2026 UTC] NOVO — `opts.skipCenterImage` (opcional, padrão false) repassado como
+    // `{skipCenter:true}` pra `vanishCamLoadImage`/`loadImageFile` (js/project-io.js) — ver
+    // comentário grande lá pro pedido/motivo completo (app hospedeiro: "se já tiver algo salvo
+    // [para aquela foto], a imagem NÃO deve aparecer centralizada ao abrir").
+    if(opts.imageFile) window.vanishCamLoadImage(opts.imageFile, { skipCenter: !!opts.skipCenterImage });
     // O container pode ainda não ter um tamanho definitivo no instante exato deste appendChild
     // (depende de quando o hospedeiro chama isto em relação ao próprio layout dele) — recalcula o
     // tamanho do canvas no próximo frame, já com o layout assentado.
@@ -252,12 +256,14 @@
   // vanishCam (loadImageFile(), js/project-io.js): se já havia uma imagem carregada, troca só a
   // imagem preservando os pontos/calibração já desenhados; se é a primeira, usa posições padrão.
   // Só funciona depois de vanishCamMount() (é o que carrega loadImageFile() no documento).
-  window.vanishCamLoadImage = function vanishCamLoadImage(fileOrBlob){
+  // [15/09/2026 UTC] `opts.skipCenter` (opcional) — ver comentário grande em `loadImageFile`
+  // (js/project-io.js) e em `vanishCamMount` (`opts.skipCenterImage`) acima.
+  window.vanishCamLoadImage = function vanishCamLoadImage(fileOrBlob, opts){
     if(!fileOrBlob) throw new Error('vanishCamLoadImage: informe um File ou Blob de imagem.');
     if(typeof loadImageFile !== 'function'){
       throw new Error('vanishCamLoadImage: vanishCam ainda não foi montado — chame (e aguarde) vanishCamMount() primeiro.');
     }
-    loadImageFile(fileOrBlob);
+    loadImageFile(fileOrBlob, opts);
     return true;
   };
 

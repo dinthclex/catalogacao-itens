@@ -178,6 +178,89 @@ const ModelerMesh = {
     return this._mergeVF(partes);
   },
 
+  /** [15/09/2026 UTC] NOVO — Carro: carroceria + cabine + 4 rodas, MESMAS
+   *  proporções de `engine3d.js _buildCarroMesh` — pedido verbatim: "Sobre
+   *  'Objetos' → 'Acessar modelos' → 'Editar', não deve ser uma caixa
+   *  padrão, nem aproximações, mas deve ser o próprio modelo a ser
+   *  carregado ali. Formas mais elaboradas (carro, quadro), todas as
+   *  formas." As rodas (cilindros de verdade na malha real) viram PRISMAS
+   *  retangulares aqui — MESMA aproximação já aceita e documentada em
+   *  `luminariaMesh`/`mesaMesh` acima (esta malha editável só suporta
+   *  faces planas/quads); os "vidros" (placas finas semitransparentes da
+   *  malha real) não entraram nesta versão — decoração sem volume próprio,
+   *  fora do essencial da SILHUETA que o pedido buscava corrigir (a
+   *  carroceria/cabine/rodas, que é o que fazia "parecer uma caixa lisa"
+   *  antes desta rodada). */
+  carroMesh(w, d, h) {
+    const raioRoda = 0.32, larguraRoda = 0.22;
+    const alturaCarroceria = h;
+    const yCarroceriaBase = raioRoda * 0.75;
+    const partes = [this._boxVF(0, yCarroceriaBase + alturaCarroceria / 2, 0, w, alturaCarroceria, d)];
+    const cabineW = w * 0.7, cabineD = d * 0.45, cabineH = alturaCarroceria * 0.45;
+    const yCabineBase = yCarroceriaBase + alturaCarroceria;
+    partes.push(this._boxVF(0, yCabineBase + cabineH / 2, -d * 0.05, cabineW, cabineH, cabineD));
+    const offsetX = w / 2 - larguraRoda * 0.15;
+    const offsetZ = d / 2 - raioRoda * 1.1;
+    [-1, 1].forEach((sx) => {
+      [-1, 1].forEach((sz) => {
+        partes.push(this._boxVF(sx * offsetX, raioRoda, sz * offsetZ, larguraRoda, raioRoda * 2, raioRoda * 2));
+      });
+    });
+    return this._mergeVF(partes);
+  },
+
+  /** [15/09/2026 UTC] NOVO — pedido verbatim: "Ao entrar no modo Modelador
+   *  clicando para modelar o objeto 'relógio', o relógio deixa de
+   *  funcionar: perde seus ponteiros e não funciona mais, ficando apenas
+   *  uma rodela 3D. Ao entrar no modo Modelador, o relógio deve continuar
+   *  com os seus ponteiros e sua forma 3D. Este problema deve ser o mesmo
+   *  da substituição por uma 'caixa' padrão, remova isto do Modelador.
+   *  Sempre, é o próprio objeto é que deve ser carregado para modelar (a
+   *  sua malha de pontos, arestas e faces)." CAUSA RAIZ: `ensureCustomMesh`
+   *  (modeler-core.js), mesmo já corrigido (15/09/2026, rodada anterior)
+   *  pra não semear mais uma CAIXA pra tipos com `perfil.shape==='cylinder'`
+   *  (usava `cylinderMesh`, um disco cru sem ponteiro nenhum — melhor que
+   *  caixa, mas ainda "só uma rodela", exatamente a queixa desta rodada),
+   *  continuava sem um caso DEDICADO pro relógio — os ponteiros de verdade
+   *  só existem em `engine3d.js _buildRelogioMesh` (3 caixas finas, filhas
+   *  do disco, giradas a cada quadro pela hora do mundo — ver
+   *  `_updateRelogiosParede`), e esse caminho NUNCA roda pra um objeto com
+   *  `obj.customMesh` (prioridade de `obj.customMesh` sobre os builders
+   *  dedicados por tipo, ver engine3d.js linha ~5041) — então qualquer
+   *  relógio que entra no Modelador (que sempre precisa de `customMesh`
+   *  pra ter algo editável) perde os ponteiros PRA SEMPRE nessa troca de
+   *  caminho de render, mesmo com a correção anterior (que só trocou
+   *  "caixa" por "rodela lisa", não resolveu a perda dos ponteiros).
+   *  CORRIGIDO: gerador dedicado, MESMO espírito de `stairsMesh`/`mesaMesh`/
+   *  `luminariaMesh`/`carroMesh` acima — reproduz a SILHUETA real (disco +
+   *  3 ponteiros, mesmas proporções de `_buildRelogioMesh`) como malha
+   *  editável (vértices/arestas/faces), parados às 12h (pose estática — o
+   *  Modelador edita uma malha fixa, não anima nada; a animação de verdade
+   *  só existe fora do Modelador, no builder dedicado, que volta a valer se
+   *  a pessoa sair sem editar nada de verdade — ver `seedBackup` em
+   *  `enter()`/`_commit()`, modeler-core.js). O disco (cilindro de verdade
+   *  na malha real) vira uma CAIXA achatada aqui — mesma aproximação já
+   *  aceita/documentada em `luminariaMesh`/`carroMesh` acima (esta malha
+   *  editável só suporta faces planas/quads). Nasce já orientado "de pé"
+   *  (mostrador virado pro eixo +Z LOCAL, ponteiros apontando pro +Y LOCAL
+   *  = 12 horas) — igual à postura final que `_buildRelogioMesh` monta com
+   *  `mesh.rotation.set(Math.PI/2, rotY, 0)` — porque `_buildCustomMeshObject`
+   *  (engine3d.js) só aplica a rotação Y de sempre (`obj.angulo`) num
+   *  `customMesh`, nunca a inclinação X extra que o relógio de parede
+   *  precisa; construir essa inclinação DENTRO dos vértices (em vez de
+   *  depender de uma rotação X que este caminho de render não aplica) é
+   *  como a base em pé já sai correta sem nenhuma mudança em engine3d.js. */
+  relogioMesh(r, h) {
+    const espessura = Math.max(0.02, h || 0.04);
+    const partes = [this._boxVF(0, r, espessura / 2, r * 2, r * 2, espessura)];
+    const czFrente = espessura + 0.003;
+    const fazPonteiro = (comprimento, largura, esp) => this._boxVF(0, r + comprimento / 2, czFrente + esp / 2, largura, comprimento, esp);
+    partes.push(fazPonteiro(r * 0.5, 0.012, 0.006));
+    partes.push(fazPonteiro(r * 0.72, 0.008, 0.005));
+    partes.push(fazPonteiro(r * 0.8, 0.006, 0.004));
+    return this._mergeVF(partes);
+  },
+
   localBBox(vertices) {
     let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     vertices.forEach(([x, y, z]) => {
@@ -1239,6 +1322,66 @@ const ModelerMesh = {
     });
     return out;
   },
+  /** Converte um THREE.Group/THREE.Mesh (retornado por
+   *  GlbMeshSource.getClone(tipo) / ObjMeshSource.getClone(tipo)) para o
+   *  formato editável {vertices,edges,faces} do Modelador. Aplica
+   *  matrixWorld de cada submalha (para respeitar transforms embutidos no
+   *  .glb/.obj), solda vértices coincidentes DENTRO de cada peça (para que
+   *  `_edgesFromFaces` não duplique arestas), e concatena as peças soltas
+   *  seguindo a mesma convenção usada pelos marcadores compostos
+   *  (`_mergeVF`/`mergeMeshes`). Usada para que o Modelador edite a MALHA
+   *  PRÓPRIA do objeto (carregada do arquivo), em vez de uma aproximação
+   *  genérica. Retorna null se `group` não tiver nenhuma geometria útil. */
+  fromThreeGroup(group) {
+    if (!group || typeof window === 'undefined' || !window.THREE) return null;
+    const THREE = window.THREE;
+    group.updateMatrixWorld(true);
+    const partes = [];
+    group.traverse((node) => {
+      if (!node.isMesh || !node.geometry) return;
+      const geom = node.geometry;
+      const posAttr = geom.attributes && geom.attributes.position;
+      if (!posAttr) return;
+      const mat = node.matrixWorld;
+      // Solda vértices coincidentes (arredondados) desta peça.
+      const key2idx = new Map();
+      const vertices = [];
+      const remap = new Int32Array(posAttr.count);
+      const v = new THREE.Vector3();
+      for (let i = 0; i < posAttr.count; i++) {
+        v.fromBufferAttribute(posAttr, i).applyMatrix4(mat);
+        const kx = Math.round(v.x * 1e4), ky = Math.round(v.y * 1e4), kz = Math.round(v.z * 1e4);
+        const key = `${kx}_${ky}_${kz}`;
+        let idx = key2idx.get(key);
+        if (idx === undefined) {
+          idx = vertices.length;
+          vertices.push([v.x, v.y, v.z]);
+          key2idx.set(key, idx);
+        }
+        remap[i] = idx;
+      }
+      // Monta faces triangulares (indexadas ou não), filtrando degeneradas.
+      const faces = [];
+      const idxAttr = geom.index;
+      const pushTri = (a, b, c) => {
+        const ra = remap[a], rb = remap[b], rc = remap[c];
+        if (ra === rb || rb === rc || ra === rc) return;
+        faces.push([ra, rb, rc]);
+      };
+      if (idxAttr) {
+        for (let i = 0; i < idxAttr.count; i += 3) {
+          pushTri(idxAttr.getX(i), idxAttr.getX(i + 1), idxAttr.getX(i + 2));
+        }
+      } else {
+        for (let i = 0; i < posAttr.count; i += 3) pushTri(i, i + 1, i + 2);
+      }
+      if (!faces.length) return;
+      partes.push({ vertices, edges: this._edgesFromFaces(faces), faces });
+    });
+    if (!partes.length) return null;
+    return this.mergeMeshes(...partes);
+  },
+
   /** Translada/escala uma malha NO LUGAR (usado pra posicionar sub-peças de
    *  um marcador composto antes de `mergeMeshes`). */
   translateMesh(mesh, dx, dy, dz) {

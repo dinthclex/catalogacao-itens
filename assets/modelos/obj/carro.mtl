@@ -1,0 +1,11 @@
+# gerado por ferramentas/gerar_malhas.js — materiais de carro
+
+newmtl carroceria
+Kd 0.7020 0.2275 0.2275
+
+newmtl roda
+Kd 0.1020 0.1020 0.1020
+
+newmtl vidro
+Kd 0.5333 0.7333 0.8667
+d 0.4

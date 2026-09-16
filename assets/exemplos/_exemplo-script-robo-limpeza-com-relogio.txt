@@ -1,0 +1,113 @@
+/* assets/modelos/_exemplo-script-robo-limpeza-com-relogio.txt
+ * NOVO (13/09/2026) — variante de `_exemplo-script-robo-limpeza.txt`
+ * (mesmo motor de varredura em zigue-zague, ver aquele arquivo pro
+ * mecanismo completo) mostrando o padrão CORRETO de uso do relógio do
+ * prédio (`js/relogio-mundo.js`) pra um robô de LIMPEZA.
+ *
+ * DECISÃO DELIBERADA — NÃO restringe a horário comercial: ao contrário do
+ * robô de copa/recepcionista (que só trabalham DURANTE o expediente, ver
+ * `_exemplo-script-robo-copa.txt`/`_exemplo-script-robo-recepcionista.txt`),
+ * o robô de limpeza é "24 horas" (documentado em rodada anterior sobre o
+ * prédio ser 24h) e TIPICAMENTE limpa justamente FORA do horário comercial
+ * (de madrugada/fora de expediente, quando as salas estão vazias — igual
+ * limpeza de prédio comercial de verdade). Por isso este exemplo NÃO chama
+ * `RelogioMundo.isHorarioComercial()` pra BLOQUEAR a varredura — o robô
+ * varre o dia inteiro, 24h, sem parar por causa do relógio.
+ *
+ * O QUE O RELÓGIO É USADO PRA AQUI, ENTÃO: só pra ESCOLHER O RITMO/MODO de
+ * limpeza conforme o horário — um uso opcional, ilustrativo, mostrando que
+ * o relógio está disponível pra qualquer script que precise dele, sem
+ * forçar um padrão que não faz sentido pro robô de limpeza:
+ *   - Durante o expediente (`isHorarioComercial()===true`) e fora da hora
+ *     do almoço: modo "discreto" — velocidade reduzida e só varre
+ *     corredores/áreas comuns (fica fora do caminho de quem está
+ *     trabalhando). EDITE_MODO_DISCRETO abaixo controla isso.
+ *   - Fora do expediente (noite/madrugada) ou na hora do almoço (salas mais
+ *     vazias): modo "completo" — velocidade normal, varre a sala toda.
+ * Isso é só um EXEMPLO do que dá pra fazer com o relógio — o comportamento
+ * "sempre limpa a sala toda, 24h, sem diferenciar modo" (arquivo original
+ * `_exemplo-script-robo-limpeza.txt`, inalterado) continua igualmente
+ * válido e é o mais simples pra quem não precisar dessa nuance.
+ *
+ * Use com um objeto do tipo "robo-limpeza" (Ferramentas → Objetos), mesmo
+ * passo a passo documentado em robo.model.js.
+ */
+
+/**
+ * Start é chamada antes do primeiro quadro (uma vez, ao iniciar o objeto).
+ */
+function Start() {
+  this._wpIndex = 0;
+  this._indoDescartar = false; // true = a caminho da área de descarte
+}
+
+// ---------------------------------------------------------------------
+// EDITE AQUI — limites da sala/área a varrer (metros, mesmo sistema de
+// obj.x/obj.y do mapa 2D). Troque pelos limites reais da sua sala.
+// ---------------------------------------------------------------------
+const SALA_X_MIN = 1.0, SALA_X_MAX = 9.0; // largura da sala
+const SALA_Y_MIN = 1.0, SALA_Y_MAX = 6.0; // profundidade da sala
+const FAIXA_LARGURA = 0.8; // espaçamento entre cada "passada" do zigue-zague (largura efetiva do robô/escova)
+
+// Gera o zigue-zague automaticamente a partir dos limites acima — não
+// precisa editar esta parte, só os limites SALA_* acima.
+function _gerarZigueZague() {
+  const pontos = [];
+  let y = SALA_Y_MIN;
+  let indoDireita = true;
+  while (y <= SALA_Y_MAX) {
+    if (indoDireita) { pontos.push({ x: SALA_X_MIN, y }); pontos.push({ x: SALA_X_MAX, y }); }
+    else { pontos.push({ x: SALA_X_MAX, y }); pontos.push({ x: SALA_X_MIN, y }); }
+    indoDireita = !indoDireita;
+    y += FAIXA_LARGURA;
+  }
+  return pontos;
+}
+const WAYPOINTS_VARREDURA = _gerarZigueZague();
+
+// "Área de descarte" — waypoint EXTRA, destino final ao completar uma
+// varredura completa (ex.: perto da porta/lixeira/estação de descarga).
+// EDITE com a coordenada real da área de descarte do seu mapa.
+const AREA_DESCARTE = { x: 0.3, y: 0.3 };
+
+const VELOCIDADE_MODO_COMPLETO = 1.0; // m/s — fora do expediente/almoço, sala vazia
+const VELOCIDADE_MODO_DISCRETO = 0.4; // m/s — durante expediente, mais devagar/discreto perto de gente trabalhando
+const DISTANCIA_CHEGADA = 0.2; // metros
+
+/**
+ * Update é chamada uma vez por quadro (a cada frame).
+ */
+function Update(dt) {
+  // [13/09/2026] NOVO — só decide o RITMO (velocidade), nunca SE limpa ou
+  // não (ver nota grande no topo do arquivo — limpeza é 24h, sempre ativa).
+  // `window.RelogioMundo` pode não existir ainda em código muito antigo
+  // (defensivo com `?.`), nesse caso cai no modo completo por padrão.
+  const emExpediente = window.RelogioMundo?.isHorarioComercial?.() ?? false;
+  const velocidade = emExpediente ? VELOCIDADE_MODO_DISCRETO : VELOCIDADE_MODO_COMPLETO;
+
+  const alvo = this._indoDescartar ? AREA_DESCARTE : WAYPOINTS_VARREDURA[this._wpIndex];
+  const dx = alvo.x - obj.x;
+  const dy = alvo.y - obj.y;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist <= DISTANCIA_CHEGADA) {
+    if (this._indoDescartar) {
+      // Chegou na área de descarte — reinicia o ciclo do zero.
+      this._indoDescartar = false;
+      this._wpIndex = 0;
+    } else if (this._wpIndex >= WAYPOINTS_VARREDURA.length - 1) {
+      // Chegou no ÚLTIMO ponto da varredura — varredura completa, vai
+      // descartar antes de reiniciar.
+      this._indoDescartar = true;
+    } else {
+      // Ainda tem passada pela frente — avança pro próximo ponto.
+      this._wpIndex++;
+    }
+    return;
+  }
+
+  const passo = Math.min(velocidade * dt, dist);
+  obj.x += (dx / dist) * passo;
+  obj.y += (dy / dist) * passo;
+  obj.angulo = Math.atan2(dy, dx);
+}

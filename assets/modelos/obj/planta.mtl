@@ -1,0 +1,7 @@
+# gerado por ferramentas/gerar_malhas.js — materiais de planta
+
+newmtl folha
+Kd 0.2471 0.4902 0.2627
+
+newmtl vaso
+Kd 0.7098 0.3961 0.1137

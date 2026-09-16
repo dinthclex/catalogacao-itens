@@ -194,8 +194,13 @@ const BSPLayout = {
       async mount(container) { await FlashcardsView.mount(container); return FlashcardsView; },
       unmount(instance) { instance?.unmount?.(); },
     },
+    // [15/09/2026 UTC] MUDADO — pedido verbatim: "Mudar nome do botão
+    // 'Fotos' para 'Foto'. Preserve o ícone." Ícone (📷) intocado, só o
+    // texto — este botão abre a câmera pra catalogar um novo item (tela
+    // "Capturar"), NÃO a tela "Mapa"->"Fotos" (essa foi renomeada na
+    // direção OPOSTA na mesma rodada — ver mapview.js #mapa-entry-foto).
     capturar: {
-      label: '📷 Fotos',
+      label: '📷 Foto',
       async mount(container) { await CaptureView.mount(container); return CaptureView; },
       unmount(instance) { instance?.unmount?.(); },
     },
@@ -503,37 +508,7 @@ const BSPLayout = {
         container.innerHTML = '';
         const wrap = document.createElement('div');
         wrap.className = 'bsp-botoes-shell';
-        BSPLayout._BOTOES_DEFS.forEach((d) => {
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'bsp-botoes-btn';
-          btn.innerHTML = `<span class="bsp-botoes-ic">${d.ic}</span>${Utils.escapeHtml(d.texto)}`;
-          btn.title = d.titulo || '';
-          btn.dataset.view = d.key;
-          if (BSPLayout._botoesSelectedView === d.key) btn.classList.add('active');
-          btn.onclick = () => {
-            BSPLayout._botoesSelectedView = d.key;
-            BSPLayout._notifyTelasInstances();
-            // ATUALIZADO (08/09/2026): esta divisão ocupa agora o lugar
-            // do antigo <nav class="bottomnav"> (removido de
-            // index.html) — então, além de alimentar qualquer painel
-            // 'Telas', TAMBÉM precisa navegar o conteúdo principal de
-            // verdade, como o rodapé antigo fazia. `App.navigate()` já
-            // atualiza sozinho o destaque "ativo" de TODOS os botões
-            // '.bsp-botoes-btn' da tela (ver js/app.js), então não
-            // precisamos repetir isso aqui — exceto pra 'workspace'
-            // (não navega, ver guarda abaixo), tratado manualmente.
-            // CORRIGIDO (08/09/2026, 39a rodada): App.navigate(d.key) foi
-            // removido daqui (causava um 2o mount concorrente do mesmo
-            // modulo de tela, competindo com o mount feito via
-            // _notifyTelasInstances/EDITOR_TYPES.telas -- o motivo do
-            // "carrega parte do HTML mas nao tudo" relatado, ex.: lista de
-            // patrimonios sumindo na Tabela). O destaque "ativo" agora e
-            // sempre unificado (antes so cobria 'workspace').
-            document.querySelectorAll('.bsp-botoes-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === d.key));
-          };
-          wrap.appendChild(btn);
-        });
+        BSPLayout._getBotoesDefs().forEach((d) => wrap.appendChild(BSPLayout._buildBotoesBtn(d)));
         container.appendChild(wrap);
         return { _isBotoesPanel: true };
       },
@@ -620,13 +595,99 @@ const BSPLayout = {
   // `EDITOR_TYPES.telas._render()` (mais abaixo) já dizia isso: "'Workspace'
   // não pode ser aberto dentro dele mesmo". Removido o botão e o guard
   // (agora inatingível — nenhuma chave 'workspace' chega mais lá).
-  _BOTOES_DEFS: [
-    { key: 'tabela', ic: '📋', texto: 'Tabela', titulo: 'Ver todos os itens catalogados em tabela' },
-    { key: 'flashcards', ic: '🗂️', texto: 'Cartões', titulo: 'Ver os itens catalogados em cartões com foto' },
-    { key: 'capturar', ic: '📷', texto: 'Fotos', titulo: 'Abrir a câmera para catalogar um novo item' },
-    { key: 'mapa', ic: '🗺️', texto: 'Mapa', titulo: 'Ver/editar a planta do ambiente' },
-    { key: 'buscar', ic: '🔎', texto: 'Buscar', titulo: 'Buscar um item pelo patrimônio, descrição ou setor' },
+  // [15/09/2026 UTC] MUDADO — pedido verbatim: "ao selecionar 'Mapeamento
+  // de ambientes', os botões do rodapé devem adquirir uma nova
+  // configurações. A botão 'Tabela' deve ser trocado pelo botão '3D'. O
+  // botão 'Cartões' deve ser trocado pelo botão 'Caixa'." — vira 2
+  // conjuntos (padrão/mapeamento), cada botão com um `slot` FIXO (0-4)
+  // independente da chave que ocupa aquela posição no momento — MESMO
+  // padrão/motivo de `ClassicMode._FOOTER_DEFS_PADRAO`/
+  // `_FOOTER_DEFS_MAPEAMENTO` (js/classicmode.js), inclusive os mesmos
+  // ícones/textos/tooltips pros slots que mudam — só os slots 0/1 mudam
+  // entre os 2 conjuntos. `_getBotoesDefs()` abaixo escolhe qual usar.
+  _BOTOES_DEFS_PADRAO: [
+    { slot: 0, key: 'tabela', ic: '📋', texto: 'Tabela', titulo: 'Ver todos os itens catalogados em tabela' },
+    { slot: 1, key: 'flashcards', ic: '🗂️', texto: 'Cartões', titulo: 'Ver os itens catalogados em cartões com foto' },
+    { slot: 2, key: 'capturar', ic: '📷', texto: 'Foto', titulo: 'Abrir a câmera para catalogar um novo item' }, // [15/09/2026 UTC] MUDADO — ver comentário grande acima, em EDITOR_TYPES.capturar
+    { slot: 3, key: 'mapa', ic: '🗺️', texto: 'Mapa', titulo: 'Ver/editar a planta do ambiente' },
+    { slot: 4, key: 'buscar', ic: '🔎', texto: 'Buscar', titulo: 'Buscar um item pelo patrimônio, descrição ou setor' },
   ],
+  _BOTOES_DEFS_MAPEAMENTO: [
+    { slot: 0, key: 'ver3d', ic: '🧊', texto: '3D', titulo: 'Ver a planta em 3D' },
+    { slot: 1, key: 'caixa', ic: '📦', texto: 'Caixa', titulo: 'Ver patrimônios/fotos ainda sem lugar no mapa' },
+    { slot: 2, key: 'capturar', ic: '📷', texto: 'Foto', titulo: 'Abrir a câmera para catalogar um novo item' },
+    { slot: 3, key: 'mapa', ic: '🗺️', texto: 'Mapa', titulo: 'Ver/editar a planta do ambiente' },
+    { slot: 4, key: 'buscar', ic: '🔎', texto: 'Buscar', titulo: 'Buscar um item pelo patrimônio, descrição ou setor' },
+  ],
+  // Lê o modo de operação (Conferência/Mapeamento) do MESMO cache síncrono
+  // usado por js/classicmode.js (`ClassicMode.isModoMapeamento()`,
+  // localStorage — precisa ser síncrono porque o HTML dos botões aqui
+  // também é montado de forma síncrona) — `window.ClassicMode` pode nem
+  // ter carregado ainda em algum caminho de boot bem cedo, daí o `?.`
+  // (nesse caso cai no conjunto padrão, igual a nunca ter escolhido nada).
+  _getBotoesDefs() {
+    return (window.ClassicMode?.isModoMapeamento?.()) ? this._BOTOES_DEFS_MAPEAMENTO : this._BOTOES_DEFS_PADRAO;
+  },
+  /** Cria 1 botão do painel 'Botões' a partir de uma def (`_BOTOES_DEFS_*`
+   *  acima) — `data-slot` fica marcado nele (mesma ideia de
+   *  `ClassicMode._buildFooterBtn`, js/classicmode.js) pra
+   *  `updateBotoesForMode` conseguir achar de volta "o botão que ocupa
+   *  este slot" mesmo depois da chave ter mudado (Tabela->3D/
+   *  Cartões->Caixa). Onclick idêntico ao que existia inline aqui antes
+   *  (não mexido nesta rodada — ver histórico se precisar entender por
+   *  que não chama `App.navigate` direto). */
+  _buildBotoesBtn(d) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'bsp-botoes-btn';
+    btn.innerHTML = `<span class="bsp-botoes-ic">${d.ic}</span>${Utils.escapeHtml(d.texto)}`;
+    btn.title = d.titulo || '';
+    btn.dataset.view = d.key;
+    btn.dataset.slot = String(d.slot);
+    if (BSPLayout._botoesSelectedView === d.key) btn.classList.add('active');
+    btn.onclick = () => {
+      BSPLayout._botoesSelectedView = d.key;
+      BSPLayout._notifyTelasInstances();
+      document.querySelectorAll('.bsp-botoes-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === d.key));
+    };
+    return btn;
+  },
+  /** [15/09/2026 UTC] NOVO — pedido verbatim: "ao selecionar 'Mapeamento
+   *  de ambientes', os botões do rodapé devem adquirir uma nova
+   *  configurações [...] A troca [...] deve ser animada." Chamado por
+   *  `ClassicMode` (js/classicmode.js `finish()`, dentro de
+   *  `_showSplashScreenModal`) sempre que o modo é escolhido/confirmado —
+   *  percorre a árvore ATIVA inteira procurando folhas 'botoes' com
+   *  instância viva (pode haver mais de uma, em divisões diferentes) e
+   *  troca só os slots 0/1 de cada uma, animado (ver
+   *  `Utils.animateFooterButtonSwap`, js/utils.js), igual ao equivalente
+   *  em `ClassicMode.updateFooterForMode`. Uma folha 'botoes' sem
+   *  instância viva (nunca foi montada, ou foi trocada pra outro tipo)
+   *  nem precisa ser tocada — a próxima vez que for montada já nasce
+   *  certa, via `_getBotoesDefs()`. */
+  updateBotoesForMode(modoMapeamento) {
+    const defs = modoMapeamento ? this._BOTOES_DEFS_MAPEAMENTO : this._BOTOES_DEFS_PADRAO;
+    const walk = (node) => {
+      if (!node) return;
+      if (node.type === 'leaf') {
+        if (node.editorType === 'botoes' && node._instance) {
+          const bodyEl = document.querySelector(`[data-leaf-body="${node.id}"]`);
+          const wrap = bodyEl?.querySelector('.bsp-botoes-shell');
+          if (wrap) {
+            defs.forEach((d) => {
+              const atual = wrap.querySelector(`.bsp-botoes-btn[data-slot="${d.slot}"]`);
+              if (atual && atual.dataset.view === d.key) return;
+              Utils.animateFooterButtonSwap(atual, () => this._buildBotoesBtn(d));
+            });
+          }
+        }
+      } else {
+        walk(node.children[0]);
+        walk(node.children[1]);
+      }
+    };
+    walk(this._tree);
+  },
   // Chave (estilo .bottomnav) do último botão clicado numa tela 'Botões' —
   // `null` até o primeiro clique (estado inicial: "clicar aparentemente
   // não vai surtir efeito" também se aplica ANTES de qualquer clique).
@@ -634,7 +695,9 @@ const BSPLayout = {
   // Mapeia a chave do botão (igual a `data-view` do .bottomnav) pro
   // EDITOR_TYPES que a tela 'Telas' deve montar — 'workspace' fica de
   // fora de propósito (tratado à parte, ver guarda de segurança acima).
-  _MAP_BOTOES_TO_EDITOR: { tabela: 'tabela', flashcards: 'flashcards', capturar: 'capturar', mapa: 'mapa2d', buscar: 'buscar' },
+  // [15/09/2026 UTC] NOVO — 'ver3d'/'caixa' apontam pra si mesmos (já
+  // existiam como EDITOR_TYPES próprios, ver acima — nada novo a montar).
+  _MAP_BOTOES_TO_EDITOR: { tabela: 'tabela', flashcards: 'flashcards', capturar: 'capturar', mapa: 'mapa2d', buscar: 'buscar', ver3d: 'ver3d', caixa: 'caixa' },
   // Painéis 'Telas' vivos no momento (pode haver mais de um, inclusive em
   // layouts nomeados diferentes) — todos são avisados por
   // `_notifyTelasInstances()` sempre que qualquer painel 'Botões' for

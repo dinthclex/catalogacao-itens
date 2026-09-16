@@ -1,0 +1,108 @@
+/* assets/modelos/_exemplo-script-robo-rotina-turno.txt
+ * NOVO (13/09/2026) — cenário do backlog: ROBÔ QUE VAI PRA CASA NO FIM DO
+ * EXPEDIENTE E VOLTA NO INÍCIO, ESTACIONANDO O "CARRO" NA VAGA. A
+ * infraestrutura de casas (`tipo:'casa-robo'`/`'casa-robo-telhado'`, uma
+ * casa por robô, gerada em `js/geradores-salas.js` `gerarCasasDeRobos`) já
+ * existia de uma rodada anterior, mas ficou documentada como "exigiria
+ * integrar com um relógio simulado do prédio" — ver comentário em
+ * `js/geradores-salas.js` linha ~305. Esse relógio agora existe
+ * (`js/relogio-mundo.js`), então este script é a peça que faltava: a
+ * ROTINA de ida/volta em si, plugada nos eventos `fimExpediente`/
+ * `inicioExpediente` do relógio do mundo.
+ *
+ * ESCOPO DELIBERADAMENTE SIMPLES — LEIA ANTES DE ACHAR QUE FALTA "FÍSICA DE
+ * CARRO": este script move o robô (representando "robô + carro" como uma
+ * unidade só, igual todo outro exemplo de robô deste projeto) em linha reta
+ * até a vaga de estacionamento da própria casa dele, depois até dentro da
+ * casa (2 pernas de trajeto: prédio -> vaga -> dentro de casa, e o inverso
+ * de manhã). NÃO simula: inércia real de veículo, rodas/direção, tráfego
+ * com outros robôs, nem troca de modelo 3D "robô" <-> "robô dirigindo carro"
+ * (isso é o item separado, maior, do backlog — "carro dirigível com
+ * inércia real" — documentado na auditoria como pendência grande, fora do
+ * escopo de um script simples). O que ESTE script resolve é só a ROTINA
+ * HORÁRIA (sair/voltar nos horários certos, usando o relógio de verdade do
+ * prédio) — a peça que estava faltando e que ficou viável assim que o
+ * relógio (Tarefa A desta rodada) ficou pronto.
+ *
+ * COMO USAR: aplique este script num objeto `robo-*` (o mesmo tipo genérico
+ * usado pelos outros exemplos, ex. "robo-copa"/"robo-limpeza"/etc. — o
+ * script não é exclusivo de um tipo) que deva ter esse comportamento de "ir
+ * pra casa". Preencha POSICAO_NO_PREDIO (onde ele fica trabalhando/parado
+ * durante o expediente) e POSICAO_CASA (a vaga/porta da casa dele, gerada
+ * por `gerarCasasDeRobos` — confira o nome do objeto `casa-robo` dele no
+ * mapa 2D e copie x/y de lá). Este script SUBSTITUI o script de trabalho
+ * normal do robô enquanto ele estiver "de plantão" — pra combinar com um
+ * script de trabalho já existente (ex. o do robô de copa), o jeito mais
+ * simples é copiar as chamadas de `SceneEventBus.onGlobalEvent` daqui pro
+ * `Start()` do outro script, ao invés de rodar os dois scripts ao mesmo
+ * tempo no mesmo objeto (2 scripts mexendo em `obj.x/obj.y` ao mesmo tempo
+ * brigariam entre si).
+ */
+
+/**
+ * Start é chamada antes do primeiro quadro (uma vez, ao iniciar o objeto).
+ */
+function Start() {
+  // 'emCasa' = começa em casa (fora do prédio) até o primeiro início de
+  // expediente — 'indoTrabalho' | 'trabalhando' | 'indoCasa' completam o
+  // ciclo. Começa assumindo que já é de manhã/já está no prédio se o
+  // relógio já indicar horário comercial agora mesmo (evita o robô nascer
+  // "em casa" no meio do expediente e ficar preso lá até o dia seguinte).
+  this._estado = window.RelogioMundo?.isHorarioComercial?.() ? 'trabalhando' : 'emCasa';
+  if (this._estado === 'emCasa') { obj.x = POSICAO_CASA.x; obj.y = POSICAO_CASA.y; }
+
+  // Flags setadas pelos eventos globais do relógio do mundo (ver
+  // js/relogio-mundo.js) — consumidas em Update, mesmo padrão usado em
+  // _exemplo-script-robo-recepcionista.txt pro evento `trocaDeTurno`.
+  this._deveIrTrabalhar = false;
+  this._deveIrPraCasa = false;
+  window.SceneEventBus?.onGlobalEvent?.('inicioExpediente', () => { this._deveIrTrabalhar = true; });
+  window.SceneEventBus?.onGlobalEvent?.('fimExpediente', () => { this._deveIrPraCasa = true; });
+}
+
+// ---------------------------------------------------------------------
+// EDITE AQUI — posição de trabalho no prédio e posição da casa/vaga do
+// robô (metros, mesmo sistema de obj.x/obj.y do mapa 2D). A posição da
+// casa deve bater com o objeto `casa-robo` gerado pra este robô (ver
+// `js/geradores-salas.js` `gerarCasasDeRobos`).
+// ---------------------------------------------------------------------
+const POSICAO_NO_PREDIO = { x: 5.0, y: 3.0 };
+const POSICAO_CASA = { x: -8.0, y: 12.0 };
+
+const VELOCIDADE = 1.2; // m/s
+const DISTANCIA_CHEGADA = 0.2; // metros
+
+/**
+ * Update é chamada uma vez por quadro (a cada frame).
+ */
+function Update(dt) {
+  if (this._estado === 'emCasa') {
+    if (this._deveIrTrabalhar) { this._deveIrTrabalhar = false; this._estado = 'indoTrabalho'; }
+    return; // parado em casa, só espera o início do expediente
+  }
+
+  if (this._estado === 'trabalhando') {
+    // No prédio, "trabalhando" (parado no ponto de trabalho — se este robô
+    // tiver um trajeto de trabalho de verdade, ex. copa/limpeza, é aqui que
+    // ele rodaria em vez de ficar parado — ver nota no topo do arquivo
+    // sobre combinar com outro script). Só sai quando o expediente acabar.
+    if (this._deveIrPraCasa) { this._deveIrPraCasa = false; this._estado = 'indoCasa'; }
+    return;
+  }
+
+  if (this._estado === 'indoTrabalho' || this._estado === 'indoCasa') {
+    const alvo = this._estado === 'indoTrabalho' ? POSICAO_NO_PREDIO : POSICAO_CASA;
+    const dx = alvo.x - obj.x;
+    const dy = alvo.y - obj.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= DISTANCIA_CHEGADA) {
+      this._estado = (this._estado === 'indoTrabalho') ? 'trabalhando' : 'emCasa';
+      return;
+    }
+    const passo = Math.min(VELOCIDADE * dt, dist);
+    obj.x += (dx / dist) * passo;
+    obj.y += (dy / dist) * passo;
+    obj.angulo = Math.atan2(dy, dx);
+    return;
+  }
+}

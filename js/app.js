@@ -49,13 +49,50 @@ const App = {
     // mount(container)/unmount() de qualquer outra tela — nada de especial
     // precisou mudar aqui em `navigate()` pra acomodar o Workspace.
     workspace: BSPLayout,
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "ao selecionar 'Mapeamento
+    // de ambientes', os botões do rodapé devem adquirir uma nova
+    // configurações. A botão 'Tabela' deve ser trocado pelo botão '3D'. O
+    // botão 'Cartões' deve ser trocado pelo botão 'Caixa'." — o rodapé do
+    // modo Clássico (ver js/classicmode.js) chama `App.navigate(view)`
+    // igual a qualquer outro botão dele, então 'ver3d'/'caixa' precisam
+    // existir aqui com o MESMO contrato `mount(container)`/`unmount()` —
+    // adaptadores finos em cima de `View3D`/`PhotoGrid`, que já
+    // implementavam a mesma tela pro painel 'Botões'/'Telas' do Workspace
+    // (ver `EDITOR_TYPES.ver3d`/`EDITOR_TYPES.caixa` em bsplayout.js —
+    // MESMOS módulos reaproveitados, nenhuma tela nova). `View3D.mount`
+    // precisa de `{ ambienteId }` (não existe um "mapa atual" implícito
+    // fora do Mapa/Workspace) — usa `DB.getOrCreateSingleMap()`, a MESMA
+    // fonte que `MapView`/`PhotoGrid` já usam pra decidir "o" mapa quando
+    // não veio de um contexto mais específico.
+    ver3d: {
+      async mount(container) {
+        const map = await DB.getOrCreateSingleMap();
+        await View3D.mount(container, { ambienteId: map.id });
+      },
+      unmount() { try { View3D.unmount?.(); } catch (e) { console.warn('[App] falha ao desmontar "3D" (rodapé):', e); } },
+    },
+    caixa: {
+      async mount(container) {
+        await PhotoGrid.mountCaixaScreen(container, { onClose: () => App.back('tabela') });
+        return PhotoGrid;
+      },
+      // `App.navigate()` chama `prev.unmount()` SEM argumento nenhum (ver
+      // mais abaixo) — ao contrário do painel 'Botões'/'Telas' do
+      // Workspace (bsplayout.js), que passa a instância de volta pro
+      // `unmount(instance)`. `PhotoGrid.unmountCaixaScreen()` já é um
+      // método estático sem estado próprio (hoje um no-op — ver
+      // photogrid.js), então chamar direto no módulo (em vez de esperar
+      // um `instance`, que nunca chega aqui) é equivalente e correto.
+      unmount() { try { PhotoGrid.unmountCaixaScreen?.(); } catch (e) { console.warn('[App] falha ao desmontar "Caixa" (rodapé):', e); } },
+    },
   },
 
   titles: {
-    tabela: 'Catalogação de Itens', flashcards: 'Cartões', capturar: 'Fotos',
+    tabela: 'Catalogação de Itens', flashcards: 'Cartões', capturar: 'Foto', // [15/09/2026 UTC] MUDADO — pedido verbatim: "Mudar nome do botão 'Fotos' para 'Foto'. Preserve o ícone."
     mapa: 'Mapa do ambiente', buscar: 'Buscar item', configuracoes: 'Configurações',
     unificar: 'Unificar conferência', modelos3d: 'Modelos 3D',
     workspace: 'Workspace',
+    ver3d: 'Visualização 3D', caixa: 'Caixa', // [15/09/2026 UTC] NOVO — títulos das 2 telas novas do rodapé em "Mapeamento de ambientes" (ver views.ver3d/views.caixa acima).
   },
 
   async init() {
@@ -438,6 +475,15 @@ const App = {
           ]);
           if (!modoJaEscolhido && !(nomeJaDefinido && nomeJaDefinido.trim())) telaInicialPadrao = 'mapa';
         } catch (e) { /* melhor esforço — na dúvida, mantém 'tabela' */ }
+        // [15/09/2026 UTC] NOVO — pedido verbatim: "Ao selecionar o
+        // 'Mapeamento de ambientes' [...] Deve ser mostrado o 'Planta
+        // baixa'." — mesma correção de `js/classicmode.js` (`finish()`),
+        // aplicada aqui pro caminho de boot de uma instalação nova (que já
+        // abre direto em 'mapa', ver comentário grande acima): pula a tela
+        // de ENTRADA do Mapa (botões Planta baixa/Fotos/Caixa) e vai
+        // direto pra Planta baixa (`MapView._forcarTelaInicial`, ver
+        // mapview.js `mount()`).
+        if (telaInicialPadrao === 'mapa' && typeof MapView !== 'undefined') MapView._forcarTelaInicial = 'planta';
         console.log(`[BOOT] navigate(${telaInicialPadrao}): iniciando (tela principal ainda não está na tela)...`);
         await this.navigate(telaInicialPadrao);
         console.log(`[BOOT] navigate(${telaInicialPadrao}): concluído em ${(performance.now() - this._dbgBootInicio).toFixed(0)}ms desde o início do boot — tela principal já visível a partir daqui.`);

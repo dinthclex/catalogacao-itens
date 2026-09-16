@@ -1,0 +1,29 @@
+/* js/cards/cards.css
+ * Folha de estilo COMPARTILHADA de todos os cards 3D (ver `js/cards/README.md`
+ * e o comentário grande no topo de `js/cardsystem.js`). Carregada via
+ * <link rel="stylesheet"> no index.html — CSS não sofre a restrição de
+ * CORS que `fetch()` sofre em `file://`, então isso funciona normalmente
+ * sem precisar de nenhum truque de <script>.
+ *
+ * [13/09/2026] Por enquanto vazia de propósito: a base visual do "cartão"
+ * em si (fundo, borda, posição na tela) já existe em `.flashcard3d-overlay`
+ * (css/style.css) — essa classe é COMPARTILHADA com outros overlays do
+ * projeto (não só os 5 cards daqui), então não foi duplicada/movida pra cá
+ * pra não criar duas fontes de verdade pro mesmo visual base. Cada card
+ * (js/cards/*.js) hoje estiliza seu CONTEÚDO com `style=""` inline (mesmo
+ * estilo que já usavam antes desta refatoração, sem regressão visual) ou
+ * classes já existentes em css/style.css (ex.: `.detail-grid`,
+ * `.map-fotopin-thumb`). Este arquivo existe pronto pra quando alguém
+ * quiser adicionar uma classe NOVA reaproveitável entre 2+ cards (evita
+ * repetir a mesma regra em vários `js/cards/*.js`) — adicione aqui, com
+ * comentário dizendo qual(is) card(s) usa(m).
+ */
+
+/* [15/09/2026 UTC] js/cards/confirm-card.js — card genérico de confirmação
+ * (título + mensagem + lista de botões), usado pra substituir `confirm()`
+ * nativo do navegador (pedido verbatim, ver comentário grande no topo de
+ * confirm-card.js). Primeiro card a de fato precisar de uma classe NOVA
+ * reaproveitável neste arquivo compartilhado. */
+.confirm-card-title { text-align: center; font-weight: 700; margin-bottom: 6px; }
+.confirm-card-msg { font-size: 12.5px; color: var(--text-dim); text-align: center; white-space: pre-line; margin: 0 0 12px; }
+.confirm-card-btns { display: flex; flex-direction: column; gap: 6px; }

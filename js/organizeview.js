@@ -1199,7 +1199,12 @@ const OrganizeView = {
           </div>
           <button type="button" class="btn secondary sm" id="organize-merge-btn" title="Mesclar os mapas marcados (2 ou mais)">🔗 Mesclar selecionados</button>
           <span class="organize-sel-count" id="organize-sel-count"></span>
-          <button type="button" class="icon-btn sm" id="organize-toggle-orbs" title="Mostrar as bolinhas dos patrimônios nas fotos (como em Mapa → Foto)">📍 Bolinhas nas fotos</button>
+          <!-- [15/09/2026 UTC] MUDADO -- pedido verbatim: "Troque as referencias
+               nas 'configuracoes 2D' tambem de acordo com os novos nomes. E em
+               outros lugares que apareca no app." Botao Mapa->Foto virou
+               Mapa->Fotos (mapview.js #mapa-entry-foto); referencias textuais
+               atualizadas aqui e nos dois titles abaixo (orbs + medidas). -->
+          <button type="button" class="icon-btn sm" id="organize-toggle-orbs" title="Mostrar as bolinhas dos patrimônios nas fotos (como em Mapa → Fotos)">📍 Bolinhas nas fotos</button>
           <button type="button" class="icon-btn sm" id="organize-toggle-linkmode" title="Ao clicar numa miniatura/vinculação de mapa, abrir a planta em 2D ou em 3D">🧭 Abrir em: 2D</button>
           <!-- ITEM C14 (rodada 57/v311), verbatim: "deve ser possível dar um
                snap na grade dos objetos (mapas), habilitável no cabeçalho."
@@ -1644,7 +1649,7 @@ const OrganizeView = {
       const title = `patrimônio ${patr} — marcado para exclusão (pendente até 'Aplicar alterações')`;
       return `<div class="organize-foto-orbdot organize-foto-orbdot-pending-delete" data-x-norm="${o.xNorm}" data-y-norm="${o.yNorm}" title="${title}" style="left:${(o.xNorm * 100).toFixed(2)}%; top:${(o.yNorm * 100).toFixed(2)}%"></div>`;
     }
-    const title = `patrimônio ${patr}${dup ? ' (⚠️ duplicado)' : ''}, clique para vê-lo em Mapa→Foto (um botão de retorno para esta tela ficará posicionado centralizado à esquerda)`;
+    const title = `patrimônio ${patr}${dup ? ' (⚠️ duplicado)' : ''}, clique para vê-lo em Mapa→Fotos (um botão de retorno para esta tela ficará posicionado centralizado à esquerda)`;
     return `<div class="organize-foto-orbdot${dup ? ' organize-foto-orbdot-dup' : ''}" data-x-norm="${o.xNorm}" data-y-norm="${o.yNorm}" title="${title}" style="left:${(o.xNorm * 100).toFixed(2)}%; top:${(o.yNorm * 100).toFixed(2)}%"></div>`;
   },
 
@@ -3407,7 +3412,7 @@ const OrganizeView = {
           </div>` : ''}
           ${medidas.length ? `
           <div class="organize-grid-section-head organize-grid-section-head-sm">
-            <span class="organize-medidas-head-label" title="Medidas registradas nesta foto — adicione/edite em 'Mapa'→'Foto'→régua 📏">📏 Medidas</span>
+            <span class="organize-medidas-head-label" title="Medidas registradas nesta foto — adicione/edite em 'Mapa'→'Fotos'→régua 📏">📏 Medidas</span>
           </div>
           <div class="organize-medidas-list">
             ${medidas.map((m, i) => this._medidaChipHtml(m, f.id, i, false)).join('')}

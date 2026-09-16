@@ -125,6 +125,21 @@ const PhotoGrid = {
     `;
     container.querySelector('#cx-close').onclick = () => onClose?.();
 
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "Sobre a caixa, deve ter um
+    // 'x' para excluir o item (cada item deve ter o seu 'x'). O estilo do
+    // 'x' deve ser o mesmo que é usado em 'Mapa'->'Fotos' (antes era
+    // 'Mapa'->'Foto', acabamos de trocar)." — o "x" de referência é o botão
+    // `.ambphoto-thumb-del` (ver ambientephotos.js `_renderStrip`, exclui
+    // uma foto ali), um círculo escuro translúcido que fica vermelho
+    // (var(--danger)) no hover — reaproveitado aqui via as MESMAS regras
+    // de CSS (`.ambphoto-thumb-del`, ver css/style.css), tanto nas linhas
+    // de item (`.caixa-item-del`) quanto nas miniaturas de foto
+    // (`.caixa-foto-del`) — cada elemento com seu próprio "x", como pedido
+    // ("cada item deve ter o seu 'x'"). Depois de excluir, a tela inteira é
+    // remontada (`mountCaixaScreen` de novo, mesmo container) — mais
+    // simples que remover só a linha/miniatura na mão e garante que a
+    // contagem do topo ("📦 N sem lugar") e os títulos das 2 seções nunca
+    // ficam desatualizados.
     const itemsEl = container.querySelector('#cx-items');
     unsorted.items.forEach((it) => {
       const row = document.createElement('div');
@@ -136,7 +151,15 @@ const PhotoGrid = {
           <span class="caixa-item-desc">${Utils.escapeHtml(it.descricao || '(sem descrição)')}</span>
         </div>
         <span class="badge">${Utils.escapeHtml(it.tipo || '—')}</span>
+        <button type="button" class="ambphoto-thumb-del caixa-item-del" data-id="${it.id}" title="Excluir este item">✕</button>
       `;
+      row.querySelector('.caixa-item-del').onclick = async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Excluir o item "${it.patrimonio || it.descricao || 'sem descrição'}"? Esta ação não pode ser desfeita.`)) return;
+        await DB.deleteItem(it.id);
+        Utils.toast('Item excluído.', { type: 'warn' });
+        await this.mountCaixaScreen(container, { onClose });
+      };
       row.onclick = () => App.showItemDetail(it.id);
       itemsEl.appendChild(row);
     });
@@ -152,6 +175,19 @@ const PhotoGrid = {
       img.draggable = false;
       img.alt = foto.nome || 'Foto do ambiente';
       tile.appendChild(img);
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'ambphoto-thumb-del caixa-foto-del';
+      delBtn.title = 'Excluir esta foto';
+      delBtn.textContent = '✕';
+      delBtn.onclick = async (e) => {
+        e.stopPropagation();
+        if (!confirm('Excluir esta foto?')) return;
+        await DB.deleteAmbientePhoto(foto.id);
+        Utils.toast('Foto excluída.', { type: 'warn' });
+        await this.mountCaixaScreen(container, { onClose });
+      };
+      tile.appendChild(delBtn);
       tile.onclick = () => this._openFoto(foto);
       fotosEl.appendChild(tile);
     });

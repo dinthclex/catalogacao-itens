@@ -1,0 +1,55 @@
+/* assets/modelos/_exemplo-script-cancela.txt
+ * NOVO (13/09/2026) — TAREFA 4 do backlog: cancela de estacionamento
+ * (haste articulada). Ver cancela.model.js pro raciocínio completo de
+ * por que isto usa `obj.angulo` (rotação genérica) em vez de
+ * `obj.anguloAbertura` (mecanismo específico de `map.portas`, que não se
+ * aplica a um objeto comum como este).
+ *
+ * COMO USAR
+ * ---------
+ * 1. Coloque um objeto `cancela` no mapa (a HASTE) e um `cancela-poste`
+ *    do lado (o poste fixo) — ver js/geradores-salas.js `gerarCancela`,
+ *    que já planta os 2 juntos na posição certa.
+ * 2. Adicione um componente "Script" na cancela (a haste), cole este
+ *    código.
+ * 3. Adicione um componente "Gatilho de Evento" (EventTrigger) na MESMA
+ *    cancela, evento "Ao Clicar" (onClick) → método `aoClicar`.
+ * 4. Em "Ver em 3D", clique na haste: ela ergue suavemente (~0,5s); clique
+ *    de novo, abaixa. SIMPLIFICAÇÃO DELIBERADA (pedido explícito: "ao
+ *    clicar (ou ao detectar um carro perto, mais simples: só clique
+ *    mesmo, documentado como simplificação)") — não há nenhuma detecção
+ *    de veículo se aproximando, só clique manual.
+ */
+
+function Start() {
+  if (obj.abaixada === undefined) obj.abaixada = true;
+  // `obj.angulo` já existe em qualquer objeto do mapa (ângulo de
+  // colocação) — se for `undefined` (nunca colocado com rotação),
+  // assume 0 (haste abaixada, na horizontal, na posição de colocação).
+  if (obj.angulo === undefined) obj.angulo = 0;
+}
+
+// Debounce simples — mesmo motivo da porta automática: evita re-disparo
+// durante a animação em curso.
+var _debounceAte = 0;
+const ANGULO_ABAIXADA = 0;
+const ANGULO_ERGUIDA = -Math.PI / 2; // -90°, na vertical
+const VELOCIDADE_GRAUS_POR_SEG = 180; // curso inteiro (0..90°) em ~0,5s
+
+function Update(dt) {
+  const alvo = obj.abaixada ? ANGULO_ABAIXADA : ANGULO_ERGUIDA;
+  const diff = alvo - obj.angulo;
+  if (Math.abs(diff) < 0.01) {
+    obj.angulo = alvo;
+    return;
+  }
+  const passoRad = (VELOCIDADE_GRAUS_POR_SEG * Math.PI / 180) * dt;
+  obj.angulo += Math.sign(diff) * Math.min(Math.abs(diff), passoRad);
+}
+
+function aoClicar() {
+  var agora = Date.now();
+  if (agora < _debounceAte) return;
+  _debounceAte = agora + 550;
+  obj.abaixada = !obj.abaixada;
+}

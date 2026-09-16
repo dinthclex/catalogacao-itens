@@ -1,0 +1,319 @@
+/* assets/modelos/_exemplo-script-elevador-cabine.txt
+ * NOVO (13/09/2026) — TAREFA 1 do backlog: "Faça uns elevadores com
+ * botões (elevadores em dois lados do acesso central de cada andar,
+ * dando para chamar qualquer elevador e mostrar o botão ativo indicando
+ * que o elevador está vindo), portas automáticas, indicador de andares."
+ *
+ * Este NÃO é um arquivo carregado pelo app (extensão `.txt`, mesma
+ * convenção de _exemplo-script-porta-automatica.txt/_exemplo-script-robo-
+ * trajeto.txt) — é TEXTO PRONTO PRA COLAR no componente "Script" de um
+ * objeto `elevador-cabine`.
+ *
+ * COMO USAR
+ * ---------
+ * 1. Coloque um objeto `elevador-cabine` no mapa 2D, no PISO 0 (térreo) —
+ *    a posição X/Y é o "poço do elevador": ela NÃO muda ao subir/descer
+ *    (só `obj.elevacao` muda — mesma técnica de empilhamento vertical já
+ *    usada pelo prédio inteiro, ver `map.alturaPiso`/`piso*alturaPiso`).
+ * 2. Abra o painel do objeto → "🧩 Editar componentes…" → "➕ Adicionar
+ *    Componente" → "Script" → cole ESTE código.
+ * 3. Ajuste a constante `ALTURA_ANDAR` abaixo se o prédio não usar 4m por
+ *    andar (lido de `map.alturaPiso` quando existir, com fallback pra 4).
+ * 4. Repita para cada cabine (2 de cada lado do acesso central, por
+ *    exemplo) — cada cabine tem seu PRÓPRIO Script/estado, então cabines
+ *    diferentes podem estar em andares diferentes ao mesmo tempo.
+ * 5. Em cada andar, plante um `elevador-botao-chamada` (ver seu próprio
+ *    Modelo, `elevador-botao-chamada.model.js` — já funciona sozinho, SEM
+ *    precisar de Script) — ao clicar nele, TODAS as cabines com Script
+ *    anexado recebem o evento `chamarElevador` e decidem entre si (função
+ *    `_decidirSeAtendo` abaixo) quem vai atender.
+ *
+ * MECANISMO — MOVIMENTO
+ * ----------------------
+ * `obj.elevacao` é o MESMO campo que o motor 3D já sincroniza a cada
+ * quadro pra qualquer objeto "scriptado" (`Engine3D._syncScriptedObjectTransforms`
+ * — confirmado funcional pelos robôs/relógios animados, nenhum código
+ * novo de sincronização necessário). `Update(dt)` incrementa/decrementa
+ * `obj.elevacao` na direção do andar de destino, a `VELOCIDADE` m/s, até
+ * chegar — depois abre a porta.
+ *
+ * MECANISMO — PORTA
+ * ------------------
+ * Reaproveita EXATAMENTE `entity.anguloAbertura` (mesmo campo que já
+ * anima a porta comum do prédio, ver _exemplo-script-porta-automatica.txt
+ * e `Engine3D._updateDoorAnimations`) — a cabine "tem uma porta própria"
+ * no sentido de que o MESMO objeto `elevador-cabine` guarda esse campo
+ * (não plantamos uma porta separada dentro da cabine nesta rodada — ver
+ * LIMITAÇÃO no fim do arquivo).
+ *
+ * MECANISMO — COMUNICAÇÃO BOTÃO↔CABINE (a parte nova de infraestrutura)
+ * ------------------------------------------------------------------
+ * Investigação desta rodada: `SceneEventBus.emit` (o sistema de Gatilho
+ * de Evento já existente) só entrega o evento pros componentes do MESMO
+ * objeto que disparou — cada Script roda isolado no seu próprio `obj`
+ * (confirmado lendo `js/components.js` `_getOrCreateModule`/
+ * `invokeScriptComponent`, sempre chamados com o MESMO `owner`). Não
+ * havia NENHUM jeito de um objeto avisar outro. Por autorização explícita
+ * do usuário ("se precisar de algo que o projeto não dê suporte,
+ * implemente"), foi ADICIONADO um barramento global simples em
+ * `js/components.js`:
+ *     window.SceneEventBus.emitGlobal(nomeEvento, dados)   // avisa geral
+ *     window.SceneEventBus.onGlobalEvent(nomeEvento, fn)   // escuta geral
+ * Isso é NOVO e documentado lá com comentário grande — qualquer Script de
+ * qualquer objeto pode usar dali pra frente, não só o elevador.
+ *
+ * LÓGICA DE ATENDIMENTO (SIMPLES, documentada como tal)
+ * -------------------------------------------------------
+ * "Primeira cabine livre atende" — ao ouvir `chamarElevador({piso})`:
+ *   - se EU já estou atendendo esse piso, ignoro (já vou pra lá).
+ *   - se EU estou ociosa (`estado === 'parado'`), aceito IMEDIATAMENTE
+ *     (sem negociar com outras cabines — ver LIMITAÇÃO).
+ *   - se EU já estou ocupada indo pra outro lugar, ignoro — outra cabine
+ *     (ou eu mesma, depois de ficar livre) atende mais tarde.
+ * NÃO há coordenação entre cabines pra saber "qual está mais perto" nem
+ * fila de pedidos — se TODAS as cabines estiverem ocupadas quando alguém
+ * chama, a chamada simplesmente não é atendida por ninguém até uma delas
+ * ficar livre e... nada a lembra de tentar de novo (ver LIMITAÇÃO).
+ *
+ * LIMITAÇÕES CONHECIDAS (honestas, não escondidas)
+ * --------------------------------------------------
+ * 1. SEM física real de cabo/tração/motor/contrapeso — é `obj.elevacao`
+ *    interpolando linear a `VELOCIDADE` constante (sem aceleração/
+ *    frenagem suave), igual todo outro objeto "scriptado" do projeto.
+ * 2. SEM fila de chamadas: uma chamada feita quando NENHUMA cabine está
+ *    livre é PERDIDA (nenhuma cabine guarda "pendências") — o usuário
+ *    precisa clicar de novo no botão depois que alguma cabine liberar.
+ *    Implementar uma fila de verdade (com múltiplas cabines otimizando
+ *    quem atende, tempo de espera, etc.) é a peça de "elevador de
+ *    prédio inteligente de verdade" — fora de escopo desta rodada
+ *    (pedido aceitava "lógica simples").
+ * 3. A cabine não sabe reagir a "botão interno" (escolher andar de DENTRO
+ *    da cabine) — só reage a chamadas EXTERNAS de andar. Um painel
+ *    interno seria outro `elevador-botao-chamada` dentro da geometria da
+ *    cabine emitindo o MESMO evento com `piso` fixo — não implementado
+ *    nesta rodada por não ter sido pedido explicitamente.
+ * 4. IMPORTANTE, leia com atenção — a cabine é UM objeto de catálogo só
+ *    (`elevador-cabine`, uma caixa única, ver js/engine3d-profiles.js: "não
+ *    modelamos porta/parede internas separadas nesta rodada"), ELA NÃO
+ *    ESTÁ na lista `map.portas` que o motor usa pra animar visualmente
+ *    uma folha de porta pivotando (`Engine3D._updateDoorAnimations` só
+ *    itera `map.portas` — confirmado lendo engine3d.js nesta rodada).
+ *    Por isso `obj.anguloAbertura` aqui é rastreado como ESTADO (0=fechada,
+ *    90=aberta, com a MESMA temporização de uma porta real) mas NÃO
+ *    produz uma folha de porta pivotando visualmente sozinha — o que
+ *    ACONTECE de verdade visualmente é a cor da cabine mudando (ver
+ *    `_atualizarCorPorta` abaixo: mais clara/esverdeada quando a porta
+ *    está aberta, escurecendo ao fechar) — um indicador visual honesto do
+ *    estado, não uma folha de porta de verdade se abrindo. Implementar
+ *    uma folha de porta de verdade pra objetos fora de `map.portas`
+ *    exigiria estender `Engine3D`/a malha da cabine pra ter uma
+ *    sub-peça animável — fora do escopo desta rodada (mudança em
+ *    engine3d.js sem navegador pra testar ao vivo é arriscado demais pra
+ *    isto).
+ * 5. Indicador de andar (texto flutuante) é atualizado por esta MESMA
+ *    cabine, escrevendo em objeto(s) de Texto do mapa se `ID_TEXTO_
+ *    INDICADOR`/`IDS_TEXTO_INDICADOR_FORA` apontarem pra algum (ver seção
+ *    abaixo) — não há verificação de "cabine mais próxima" sofisticada:
+ *    cada indicador é amarrado a UMA cabine específica por id, escolha do
+ *    usuário ao configurar (mais simples e previsível que uma lógica
+ *    automática de "qual cabine está mais perto agora").
+ *
+ * [13/09/2026] NOVO — TAREFA 2 do backlog: PAINEL INTERNO + PARADA DE
+ * EMERGÊNCIA + INDICADOR DENTRO/FORA
+ * ------------------------------------------------------------------------
+ * Pedido verbatim: "Os elevadores devem ter painéis internos e informar em
+ * qual andar estão tanto dentro do elevador quanto fora [...] Estando
+ * dentro do elevador, deve ser possível apertar os botões dos andares [...]
+ * Deve ter o botão de parada (toggle) [...] um botão de 'fechar as portas'
+ * e um botão de 'abrir as portas'."
+ *
+ *   - O PAINEL em si (botões de andar/parada/abrir-fechar porta) é UI —
+ *     mora em `js/view3d.js` (`View3D._abrirPainelElevador3D`, chamado por
+ *     `assets/modelos/elevador-cabine.model.js onModelClick` quando o
+ *     jogador clica na cabine ESTANDO DENTRO dela — ver
+ *     `View3D._jogadorDentroDaCabine`). O painel ESCREVE diretamente nos
+ *     MESMOS campos que este Script já lia/escrevia (`andarDestino`/
+ *     `estado`/`anguloAbertura`, agora também `emergenciaParada` abaixo) —
+ *     nenhum mecanismo de movimento novo, só uma segunda "porta de
+ *     entrada" pros mesmos campos (a primeira sendo o evento global
+ *     `chamarElevador` vindo do botão externo).
+ *   - `emergenciaParada` (NOVO campo, default `false`): quando `true`,
+ *     `Update(dt)` abaixo RETORNA IMEDIATAMENTE sem processar NENHUMA
+ *     transição (nem movimento, nem porta) — a cabine trava exatamente
+ *     onde estava (mesmo com `andarDestino` pendente) até o usuário
+ *     desativar o toggle no painel. Documentado como "parada dura": mesmo
+ *     uma porta no meio do caminho de abrir/fechar TRAVA na abertura atual
+ *     (não conclui o movimento da porta) — mais simples e previsível que
+ *     tentar decidir "termina a ação atual, mas não começa outra".
+ *   - Indicador DENTRO e FORA: `ID_TEXTO_INDICADOR` (singular, já existia)
+ *     continua sendo o texto de DENTRO da cabine; `IDS_TEXTO_INDICADOR_FORA`
+ *     (NOVO, array de ids — um por porta/andar) são os textos do lado de
+ *     FORA de cada porta, ambos atualizados com o MESMO `obj.andarAtual`
+ *     toda vez que ele muda (ver `_atualizarIndicador` reescrita abaixo,
+ *     agora chamada também no `Start()` e em TODO `Update()`, não só
+ *     durante o movimento — antes um indicador só era escrito enquanto a
+ *     cabine estava subindo/descendo, então nunca mostrava nada com a
+ *     cabine parada logo depois de plantada).
+ */
+
+// Velocidade vertical da cabine, em metros por segundo.
+const VELOCIDADE = 1.5;
+
+// Duração (ms) que a porta fica ABERTA antes de fechar sozinha de novo —
+// "portas automáticas" (pedido verbatim): abre ao chegar, fecha sozinha
+// depois de um tempo, sem precisar de clique.
+const TEMPO_PORTA_ABERTA_MS = 2500;
+
+// Tolerância (metros) pra considerar "chegou" no andar de destino — evita
+// oscilação infinita por erro de ponto flutuante.
+const TOLERANCIA_CHEGADA = 0.02;
+
+// [OPCIONAL] id de um objeto de Texto do mapa (ver painel do objeto ->
+// campo "id", ou o console: qualquer objeto tem `.id`) pra usar como
+// "indicador de andar" DENTRO desta cabine — deixe null se não quiser
+// indicador nesta cabine específica (ver LIMITAÇÃO 5 acima sobre por que é
+// manual).
+const ID_TEXTO_INDICADOR = null;
+
+// [13/09/2026] NOVO — [OPCIONAL] lista de ids de objetos de Texto do mapa,
+// um pra cada porta/andar do LADO DE FORA, também mostrando o andar atual
+// DESTA cabine — deixe [] se não quiser nenhum indicador externo. Ex.:
+// `const IDS_TEXTO_INDICADOR_FORA = ['txt-elev1-t0', 'txt-elev1-t1'];`
+const IDS_TEXTO_INDICADOR_FORA = [];
+
+function Start() {
+  const alturaPiso = map?.alturaPiso || 4; // "ALTURA_ANDAR=4m da v2" — lida do mapa quando existe, senão usa 4
+  this._alturaPiso = alturaPiso;
+  if (obj.andarAtual === undefined) obj.andarAtual = Math.round((obj.elevacao || 0) / alturaPiso);
+  if (obj.andarDestino === undefined) obj.andarDestino = obj.andarAtual;
+  if (obj.estado === undefined) obj.estado = 'parado';
+  if (obj.anguloAbertura === undefined) obj.anguloAbertura = 0;
+  // [13/09/2026] NOVO — toggle de "parada de emergência" (painel interno,
+  // ver comentário grande no topo do arquivo) — default desligado.
+  if (obj.emergenciaParada === undefined) obj.emergenciaParada = false;
+  this._tempoAberturaRestante = 0;
+
+  // Inscrição no barramento GLOBAL — ver comentário grande no topo sobre
+  // por que isso teve que ser adicionado nesta rodada.
+  window.SceneEventBus?.onGlobalEvent?.('chamarElevador', (dados) => _aoOuvirChamada(dados));
+
+  // [13/09/2026] NOVO — escreve o indicador (dentro/fora) já no primeiro
+  // quadro, mesmo com a cabine parada (antes só era escrito durante
+  // subindo/descendo, então uma cabine recém-plantada não mostrava nada).
+  _atualizarIndicador();
+}
+
+function _aoOuvirChamada(dados) {
+  if (!dados || typeof dados.piso !== 'number') return;
+  if (obj.andarDestino === dados.piso && obj.estado !== 'parado') return; // já indo pra lá
+  if (obj.estado !== 'parado') return; // ocupada — "primeira cabine livre atende" (ver LIMITAÇÃO 2)
+  obj.andarDestino = dados.piso;
+  obj.estado = obj.andarDestino > obj.andarAtual ? 'subindo' : (obj.andarDestino < obj.andarAtual ? 'descendo' : 'portaAbrindo');
+}
+
+function Update(dt) {
+  // [13/09/2026] NOVO — "parada de emergência" (painel interno, botão
+  // toggle) — CHECADA ANTES de qualquer movimento, pedido verbatim: "um
+  // botão de parada (toggle que para ou faz o elevador continuar sua
+  // operação)". Enquanto `true`, NENHUMA transição roda (nem cabine subindo/
+  // descendo, nem porta abrindo/fechando) — a cabine trava exatamente onde
+  // está, mesmo com `andarDestino` pendente, até o usuário desativar o
+  // toggle (ver LIMITAÇÃO/documentação grande no topo do arquivo: é uma
+  // "parada dura", não espera a ação atual terminar antes de travar).
+  if (obj.emergenciaParada) return;
+  // [13/09/2026] NOVO — chamada AQUI (fora de qualquer `if` de estado),
+  // não só dentro do bloco subindo/descendo como antes — ver comentário
+  // grande de `_atualizarIndicador` acima pro motivo.
+  _atualizarIndicador();
+
+  const alturaPiso = this._alturaPiso || map?.alturaPiso || 4;
+
+  if (obj.estado === 'subindo' || obj.estado === 'descendo') {
+    const alvoY = obj.andarDestino * alturaPiso;
+    const dy = alvoY - (obj.elevacao || 0);
+    const passo = VELOCIDADE * dt;
+    if (Math.abs(dy) <= Math.max(passo, TOLERANCIA_CHEGADA)) {
+      obj.elevacao = alvoY;
+      obj.andarAtual = obj.andarDestino;
+      obj.estado = 'portaAbrindo';
+    } else {
+      obj.elevacao = (obj.elevacao || 0) + Math.sign(dy) * passo;
+    }
+    return;
+  }
+
+  if (obj.estado === 'portaAbrindo') {
+    obj.anguloAbertura = Math.min(90, (obj.anguloAbertura || 0) + 180 * dt); // ~0.5s pra abrir (mesma velocidade da porta comum)
+    _atualizarCorPorta();
+    if (obj.anguloAbertura >= 90) {
+      obj.anguloAbertura = 90;
+      obj.estado = 'portaAberta';
+      this._tempoAberturaRestante = TEMPO_PORTA_ABERTA_MS;
+      // Avisa o(s) botão(ões) desse andar que a cabine chegou — apagam a
+      // luz de "chamando" (ver elevador-botao-chamada.model.js).
+      window.SceneEventBus?.emitGlobal?.('elevadorChegou', { piso: obj.andarAtual });
+    }
+    return;
+  }
+
+  if (obj.estado === 'portaAberta') {
+    this._tempoAberturaRestante -= dt * 1000;
+    if (this._tempoAberturaRestante <= 0) obj.estado = 'portaFechando';
+    return;
+  }
+
+  if (obj.estado === 'portaFechando') {
+    obj.anguloAbertura = Math.max(0, (obj.anguloAbertura || 0) - 180 * dt);
+    _atualizarCorPorta();
+    if (obj.anguloAbertura <= 0) {
+      obj.anguloAbertura = 0;
+      obj.estado = 'parado';
+    }
+    return;
+  }
+
+  // estado === 'parado': nada a fazer, cabine ociosa esperando chamada.
+}
+
+/** Indicador visual HONESTO de porta aberta/fechada (ver LIMITAÇÃO 4
+ *  acima: não é uma folha de porta pivotando de verdade, é a cor da
+ *  cabine — mesma técnica de `_pickMeshes`/cor por material já usada em
+ *  interruptor.model.js/disjuntor.model.js, só que a partir de um
+ *  Script, usando o `view3d` recebido como parâmetro do sandbox). */
+function _atualizarCorPorta() {
+  const engine = view3d?._engine;
+  if (!engine) return;
+  const abertura = (obj.anguloAbertura || 0) / 90; // 0=fechada..1=aberta
+  const corFechada = 0xb8c0cc, corAberta = 0x8fd6a0;
+  const r1 = (corFechada >> 16) & 0xff, g1 = (corFechada >> 8) & 0xff, b1 = corFechada & 0xff;
+  const r2 = (corAberta >> 16) & 0xff, g2 = (corAberta >> 8) & 0xff, b2 = corAberta & 0xff;
+  const r = Math.round(r1 + (r2 - r1) * abertura), g = Math.round(g1 + (g2 - g1) * abertura), b = Math.round(b1 + (b2 - b1) * abertura);
+  const corHex = (r << 16) | (g << 8) | b;
+  (engine._pickMeshes || []).forEach((m) => {
+    if (m.userData?.pick?.ref === obj && m.material && m.material.color) {
+      m.material.color.setHex(corHex);
+    }
+  });
+}
+
+/** [13/09/2026 ATUALIZADO] Escreve o andar atual DENTRO da cabine
+ *  (`ID_TEXTO_INDICADOR`) e em cada texto de FORA configurado
+ *  (`IDS_TEXTO_INDICADOR_FORA`) — reaproveita o sistema de objeto Texto já
+ *  existente (`map.textos`, campo `.content` — ver `Mapping.addText`,
+ *  js/mapping.js). Chamada tanto em `Start()` (mostra o andar já no
+ *  primeiro quadro, cabine parada) quanto em TODO `Update()` (linha
+ *  seguinte à checagem de `emergenciaParada` — cobre também os estados de
+ *  porta, não só subindo/descendo, já que o andar pode "aparecer" errado
+ *  por 1 quadro se só fosse atualizado durante o movimento vertical). */
+function _atualizarIndicador() {
+  if (!map) return;
+  const texto = 'Andar ' + obj.andarAtual;
+  if (ID_TEXTO_INDICADOR) {
+    const dentro = (map.textos || []).find((t) => t.id === ID_TEXTO_INDICADOR);
+    if (dentro) dentro.content = texto;
+  }
+  for (const id of (IDS_TEXTO_INDICADOR_FORA || [])) {
+    const fora = (map.textos || []).find((t) => t.id === id);
+    if (fora) fora.content = texto;
+  }
+}

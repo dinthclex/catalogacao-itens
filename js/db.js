@@ -113,7 +113,19 @@ const DB_NAME = 'catalogacao_itens_db';
 // calculada) à PARTE dos objetos normais do mapa, no mesmo espírito de
 // `mapPhotos` (fotos pesadas não devem viver dentro do documento do mapa,
 // que é salvo com muita frequência).
-const DB_VERSION = 5;
+// [13/09/2026] Pedido verbatim: "Implemente um pipeline de carregamento de
+// modelo (ex. GLTFLoader do three.js) e um novo campo no perfil tipo
+// modeloArquivo: 'monitor.glb' [...] Para poder substituir os modelos 3D por
+// outros modelados em um programa de modelagem 3D." — bump de versão (5 -> 6)
+// pra criar a store nova `modelos3d` (ver onupgradeneeded logo abaixo e
+// `js/model3dloader.js`, que é quem lê/grava aqui). Guarda o ARQUIVO
+// `.glb`/`.gltf` importado (bytes em base64, já que IndexedDB aceita
+// ArrayBuffer/Blob só em navegadores modernos o bastante — base64 dentro de
+// um registro comum evita depender disso e reaproveita o MESMO `tx()`/cache
+// já usado pelas outras stores) associado a um NOME (o mesmo texto que vai
+// no campo `modeloArquivo` do perfil, ex. 'monitor.glb') — não por tipo, já
+// que o mesmo arquivo pode, em tese, ser reaproveitado por perfis diferentes.
+const DB_VERSION = 6;
 
 const STORES = {
   items: 'items',
@@ -122,6 +134,8 @@ const STORES = {
   maps: 'maps',
   mapPhotos: 'mapPhotos',
   settings: 'settings',
+  // NOVO (13/09/2026) — ver comentário grande acima de DB_VERSION.
+  modelos3d: 'modelos3d',
   // NOVO (01/09/2026), item GRANDE #5: modelos 3D customizados POR TIPO (não
   // por objeto individual — isso já existe via `obj.customMesh`, feito no
   // Modeler3D de sempre). Cada registro é UM nível (detalhado OU lowpoly) de
@@ -212,6 +226,13 @@ function openDB() {
       if (!db.objectStoreNames.contains(STORES.perspMatchSessions)) {
         const perspMatch = db.createObjectStore(STORES.perspMatchSessions, { keyPath: 'id' });
         perspMatch.createIndex('mapaId', 'mapaId', { unique: false });
+      }
+
+      // [13/09/2026] Modelos 3D importados (.glb/.gltf) — ver comentário
+      // grande em STORES.modelos3d acima e o CRUD mais abaixo
+      // ('---------- MODELOS 3D IMPORTADOS (ARQUIVO) ----------').
+      if (!db.objectStoreNames.contains(STORES.modelos3d)) {
+        db.createObjectStore(STORES.modelos3d, { keyPath: 'nome' });
       }
     };
 
@@ -1537,6 +1558,40 @@ const DBApi = {
     await tx([STORES.objectModels], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.objectModels).delete(id)));
     const map = await _objectModelsCache.ensure();
     map.delete(id);
+  },
+
+  // ---------- MODELOS 3D IMPORTADOS (ARQUIVO) ----------
+  // [13/09/2026] Ver comentário grande em STORES.modelos3d, no topo do
+  // arquivo. Chamado por `js/model3dloader.js` (`window.Model3DLoader`) —
+  // NÃO usa um cache RAM próprio (diferente de `_objectModelsCache` acima):
+  // o próprio `Model3DLoader` já mantém em memória o resultado PARSEADO
+  // (o `THREE.Group` pronto), então cachear aqui também os bytes crus em
+  // base64 seria duplicar a mesma informação (pesada) duas vezes à toa.
+  async getAllModelos3D() {
+    return tx([STORES.modelos3d], 'readonly', async (t) => {
+      const all = await reqToPromise(t.objectStore(STORES.modelos3d).getAll());
+      return (all || []).map(cloneRec);
+    });
+  },
+
+  async getModelo3D(nome) {
+    return tx([STORES.modelos3d], 'readonly', async (t) => {
+      const rec = await reqToPromise(t.objectStore(STORES.modelos3d).get(nome));
+      return rec ? cloneRec(rec) : null;
+    });
+  },
+
+  /** `base64` = bytes crus do .glb/.gltf, já codificados (ver
+   *  `Model3DLoader.registerFromFile`). `meta` é opcional — hoje só guarda
+   *  `{ tamanhoBytes, importadoEm }` pra eventual tela de gerenciamento. */
+  async putModelo3D(nome, base64, meta) {
+    const rec = { nome, base64, meta: meta || null, modificadoEm: nowISO() };
+    await tx([STORES.modelos3d], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.modelos3d).put(rec)));
+    return cloneRec(rec);
+  },
+
+  async deleteModelo3D(nome) {
+    await tx([STORES.modelos3d], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.modelos3d).delete(nome)));
   },
 
   // ---------- ARMAZENAMENTO PERSISTENTE ----------

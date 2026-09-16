@@ -577,7 +577,16 @@ document.getElementById('fileInputProject').addEventListener('change', (e)=>{
   e.target.value='';
 });
 
-function loadImageFile(file){
+// [15/09/2026 UTC] NOVO — `opts.skipCenter` (opcional, padrão false — preserva 100% do
+// comportamento de sempre pro uso avulso/"Abrir imagem" da própria UI, que NUNCA passa este
+// parâmetro). Adicionado a pedido do app hospedeiro (ver catalogacao-itens/js/mapview.js
+// `_openVanishCamScreen`, comentário grande lá): "na primeira vez em que for usado para aquela
+// foto [...] a imagem deve aparecer centralizada na tela. Se já ter algo salvo, isto não deve
+// acontecer." O hospedeiro passa `skipCenter:true` (via `vanishCamLoadImage(file, {skipCenter})`,
+// ver embed-api.js) quando a foto que está sendo aberta já tem uma calibração salva do lado dele
+// — este arquivo não sabe nada sobre "já salvo", só executa o que for pedido.
+function loadImageFile(file, opts){
+  opts = opts || {};
   // Se já havia uma imagem carregada, "Abrir imagem" deve TROCAR só a imagem, preservando
   // tudo o que estiver desenhado por cima (pares de linha dos eixos, cantos do retângulo,
   // ponto principal manual, gizmo/origem, distância de referência) — só quando não havia
@@ -597,7 +606,9 @@ function loadImageFile(file){
       state.fileName = file.name.replace(/\.[^.]+$/, '') + '.vanishcam.json'; // Rodada 23: era .fspy.json
       state.dirty = true; updateTitle();
       // Apenas centraliza a imagem, sem alterar o nível de zoom atual.
-      centerImage();
+      // [15/09/2026 UTC] `opts.skipCenter` — ver comentário grande na
+      // declaração de `loadImageFile` acima.
+      if(!opts.skipCenter) centerImage();
       // Rodada 15: nova imagem carregada = nova linha de base do histórico de desfazer/refazer.
       if(typeof resetUndoHistory==='function') resetUndoHistory();
       render();

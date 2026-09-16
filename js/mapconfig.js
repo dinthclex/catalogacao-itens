@@ -108,6 +108,129 @@ const MapConfig = {
     // FPS (não AUMENTA o fps de verdade — CAPA num teto pra economizar
     // bateria/evitar esquentar, ao custo de nada de qualidade). ---
     resolucao3D: 'alta', // 'alta' (dpr até 2, padrão/como sempre foi) | 'media' (até 1.5) | 'baixa' (até 1)
+    // [13/09/2026] NOVO — resolução de renderização CUSTOMIZADA do "Ver em
+    // 3D" (independente do "Resolução" acima, que só escala o dpr do
+    // tamanho de tela normal). `null` (padrão) = "Automática": resolução
+    // NATIVA do canvas (tamanho CSS × dpr), pipeline 100% igual a antes
+    // desta rodada — nenhuma chamada extra de render-to-texture acontece.
+    // Um objeto `{ w, h, fit }` (`w`/`h` em pixels, mínimo RES_CUSTOM_MIN;
+    // `fit`: 'esticar' | 'caber') força o motor 3D (engine3d.js, que já
+    // renderiza o "Ver em 3D" via WebGLRenderTarget — "modo eye", ver
+    // comentário grande lá — pra um retângulo próprio, independente do
+    // canvas de tela) a desenhar NAQUELA resolução fixa, componentizada de
+    // volta no canvas visível esticando ('esticar', CSS object-fit:fill) ou
+    // preservando a proporção original com barras pretas ('caber', CSS
+    // object-fit:contain) — ver engine3d.js `_resize`/view3d.js
+    // `_applyResolucaoCustom3D`.
+    resolucaoCustom3D: null,
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve haver snap de posição
+    // configurável nas 'configurações 3D'" (ferramenta "📏 Trena 3D", ver
+    // view3d.js `_trena3DSnap`/`_trena3DSnapStep`) — arredonda X/Y/Z de
+    // cada ponta clicada pro múltiplo mais próximo deste passo (metros).
+    trena3DSnapMetros: 0.1,
+    // [16/09/2026 UTC] NOVO — pedido verbatim, seção "📏 Trena 3D" ganhando
+    // várias subseções novas de aparência/comportamento. Ver view3d.js
+    // (`_trena3DRebuildLines`/`_trena3DUpdatePreview`/`_trena3DEndpointMesh`)
+    // pra como cada campo é lido/aplicado.
+    trena3DSnapAtivo: true, // toggle do snap acima — "cabeçalho igual ao 'Snap de parede' do mapa 2D" (botão liga/desliga + campo de valor ao lado)
+    trena3DLabelEstilo: 'sobreLinha', // 'sobreLinha' (padrão, pedido do usuário) | 'flutuante' (o jeito de antes desta rodada)
+    trena3DVisibilidade: 'seVisivel', // 'seVisivel' (padrão, pedido do usuário — oculta atrás de paredes/objetos) | 'sempre' (o jeito de antes desta rodada, sempre desenha)
+    trena3DEspessuraCm: 2, // espessura da linha entre as 2 pontas de uma medida JÁ finalizada, em centímetros (raio real de um "tubo" 3D — THREE.Line ignora `linewidth` na maioria das GPUs/navegadores, ver comentário grande em `_trena3DBuildFatLine`)
+    trena3DCorLinha: '#ffd166', // cor da linha/pontas de uma medida já FINALIZADA (mesma cor de sempre, agora configurável)
+    trena3DCorAncora: '#ff9f4d', // cor da âncora/linha vertical + indicador quando em "modo Ctrl" (prévia)
+    trena3DCorMira: '#5ec8ff', // cor do indicador/linha guia quando SEM âncora (mira normal contra uma superfície)
+    trena3DPonta: 'esfera', // 'esfera' (padrão, o jeito de sempre) | 'seta' | 'traco' — formato do marcador em cada extremidade de uma medida finalizada
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "deixar de fazer o destaque
+    // feito pelo raycaster (onde ele bate) enquanto está ativa a linha
+    // perpendicular (consequência de ter segurado o ctrl antes). Por
+    // padrão ativa." Ver engine3d.js `setHoverHighlightSuppressed`/
+    // view3d.js `_trena3DAtualizarDestaqueSuprimido`.
+    trena3DSuprimirDestaqueDuranteAncora: true,
+    // [16/09/2026 UTC] REMOVIDO — pedido verbatim: "Colapse as duas
+    // subseções [...] A opção da subseção 'Altura ao vivo' deixa de
+    // existir." `trena3DMostrarAlturaAoVivo` (campo antigo, sem opção de UI
+    // correspondente mais) removido — só sobra `trena3DMostrarAlturaAoVivoAntesDoPonto`
+    // abaixo, sob o cabeçalho combinado "Altura ao vivo (Antes mesmo de
+    // definir o ponto)".
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Ao clicar segurando o ctrl
+    // cria-se uma âncora no chão com uma bolinha laranja [...] mesmo
+    // enquanto não se fixe o outro ponto laranja com um clique, a medida
+    // entre os pontos laranjas deve aparecer [...] uma subseção de 'antes
+    // mesmo de definir o ponto'." Ver view3d.js `_trena3DUpdatePreview`.
+    trena3DMostrarAlturaAoVivoAntesDoPonto: true,
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque uma opção de
+    // continuar desenhando a linha laranja tracejada até o 1º ponto da
+    // medida (por padrão, ativada) [...] Uma subopção [...] infinita ou vai
+    // até o 1º ponto da medida (por padrão [...] 'vai até o 1º ponto'
+    // [...] ativa)." Ver view3d.js `_trena3DUpdatePreview`
+    // (`_trena3DP1HeightLine`).
+    trena3DContinuarLinhaAncoraAposPonto: true,
+    trena3DLinhaAncoraAposPontoModo: 'ateOPonto', // 'ateOPonto' (padrão) | 'infinita'
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Outra subopção é imprimir
+    // junto com a linha laranja tracejada infinita (ou até o 1º ponto, com
+    // isso, não sendo infinita) o texto laranja da medida (logo depois de
+    // definir o 1º ponto da medida)." Ver view3d.js `_trena3DUpdatePreview`
+    // (`_trena3DP1HeightLine`).
+    trena3DMostrarMedidaNaLinhaAncoraAposPonto: true,
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque como outra opção
+    // dentro de 'Altura ao vivo (Antes mesmo de definir o ponto)' para
+    // definir que a medida laranja aparece ou não já ao segurar o ctrl. Em
+    // vez de sempre deixar ativo." Ver view3d.js `_trena3DUpdatePreview`.
+    trena3DMostrarAlturaAoVivoAoSegurarCtrl: true,
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Semelhante a subseção
+    // 'Linha da âncora após o 1º ponto', mas agora nas duas linhas [...]
+    // Deve ter uma subseção para definir se ficam impressas após a medida
+    // ser finalizada (por padrão, desativada). E uma subopção se desenha do
+    // chão até os pontos da medida ou se as duas vão ser infinitas." Ver
+    // view3d.js `_trena3DRebuildLines`.
+    trena3DMostrarLinhasAncoraFinalizada: false,
+    trena3DLinhasAncoraFinalizadaModo: 'ateOPonto', // 'ateOPonto' (padrão) | 'infinita'
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "sobre segurar o ctrl, deve
+    // ter uma subseção sobre como funciona esta funcionalidade [...] Opção
+    // de ter que segurar o ctrl [...] Nesta opção, se o ctrl não for
+    // pressionado, uma medida pode ser feita com apenas 2 cliques. A outra
+    // opção é fazer uma medida com 4 cliques [...] torna-se independente de
+    // ele estar pressionado ou não." 'ctrl' (padrão, comportamento de sempre)
+    // | 'quatroCliques' (novo). Ver view3d.js `_trena3DClick`/
+    // `_trena3DUpdatePreview`/`_trena3DAtualizarDestaqueSuprimido`.
+    trena3DModoAncora: 'ctrl',
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "documento explicando a
+    // funcionalidade desta ferramenta 'Trena 3D' [...] Acessível por um
+    // botão no cabeçalho de início do 'Trena 3D'." Sem campo de config
+    // correspondente (o botão só abre uma janela informativa, ver
+    // `_abrirDocTrena3D` mais abaixo) — comentário aqui só pra manter o
+    // rastro de onde esse pedido foi atendido.
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "mostrar linhas tracejadas
+    // guias a partir do lado do ladrilho do mundo (multiplos de 1m) [...]
+    // Por padrão, fica ativada." Ver view3d.js `_trena3DAtualizarGuiaGrade`.
+    trena3DGuiaGradeAtiva: true,
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Outra opção é como as
+    // medidas vão ser apresentadas no ladrilho, como é atualmente é uma
+    // opção. Outra é sempre partindo da esquerda numa medida e de cima para
+    // a outra medida (esta deve ser a padrão)." Ver view3d.js
+    // `_trena3DAtualizarGuiaGrade`.
+    trena3DGuiaGradeModoMedida: 'esquerdaCima',
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "desenhar um gradeado dentro
+    // do ladrilho de mundo que está sendo alvo no momento, conforme o snap
+    // definido [...] Por padrão ativado." Ver view3d.js
+    // `_trena3DAtualizarGradeSnapLadrilho`.
+    trena3DGradeSnapLadrilhoAtiva: true,
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ter uma opção (sobre o
+    // gradeado) que o desenhe 'nos quatro ladrilhos do entorno', do 'jeito
+    // atual' ou 'metade de cada ladrilho do entorno'." Ver view3d.js
+    // `_trena3DAtualizarGradeSnapLadrilho`.
+    trena3DGradeSnapLadrilhoModo: 'atual',
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possível controlar
+    // a espessura das linhas guias do gradeado no ladrilho do mundo. Por
+    // padrão deve ser a metade do que é atualmente." Ver view3d.js
+    // `_trena3DAtualizarGradeSnapLadrilho` (tamanho, em pixels, de cada
+    // "pontinho" do gradeado — `THREE.PointsMaterial.size`).
+    trena3DGradeSnapEspessuraPx: 3,
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "O pontilhado do gradeado do
+    // ladrilho do mundo deve ser [1,2]." — [traço, vão] em cm, decidindo o
+    // espaçamento entre os "pontinhos" (`_trena3DAtualizarGradeSnapLadrilho`).
+    trena3DGradeSnapDashCm: 1,
+    trena3DGradeSnapGapCm: 2,
     // Pedido do usuário (28/08/2026, rodada do Modelador 3D): "Não use
     // antialiasing" — padrão mudado de `true` pra `false` (desligado custa
     // menos GPU, e é o visual "cru" que o Blender também usa no viewport por
@@ -205,6 +328,43 @@ const MapConfig = {
     // bloco quando ele sai INTEIRO do alcance).
     objetoRenderModo: 'objeto', // 'objeto' (padrão, sempre exato) | 'chunk' (agrupado, mais barato com muitos objetos)
     objetoChunkTamanho: 10, // metros — só usado no modo 'chunk'
+    // [13/09/2026] NOVO — pedido verbatim: "Adicione controles de plano de
+    // corte próximo/distante (z_near/z_far) da câmera na seção 'Desempenho
+    // 3D'... Deve ser atualizado em tempo real." `cameraZNear` é o plano de
+    // corte PRÓXIMO (`THREE.PerspectiveCamera.near`) — 0.1 é o MESMO valor
+    // hardcoded de sempre em `Engine3D._initThree`
+    // (`new THREE.PerspectiveCamera(72, 1, 0.1, ...)`), então este padrão
+    // NÃO muda o comportamento de quem nunca abriu este campo novo.
+    // `cameraZFar` é o plano de corte DISTANTE — `null` (padrão) significa
+    // "automático", preservando o cálculo dinâmico de sempre a partir da
+    // "Distância de renderização" (`Math.max(renderDistance * 2.4, 60)`,
+    // ver Engine3D._initThree/setConfig) — só vira um valor fixo quando o
+    // usuário mexe neste campo novo. Aplicado ao vivo pelo MESMO mecanismo
+    // já usado por TODA a "Desempenho 3D" (MapConfig.set → onChange →
+    // Engine3D.setConfig, ver view3d.js `_onMapConfigChange`), sem precisar
+    // reabrir "Ver em 3D".
+    cameraZNear: 0.1,
+    cameraZFar: null,
+    // [13/09/2026 UTC] NOVO — pedido verbatim: "No 'Ver em 3D', nas
+    // 'configurações 3D', na seção 'Desempenho 3D', coloque uma subseção
+    // para definir um limite de objetos a serem renderizados por frame.
+    // Quando o contador atingir este limite, nenhum outro objeto é mais
+    // desenhado, pulando, então, para o próximo frame. [...] Se já não
+    // houver e não for custoso para o processamento, o que está mais
+    // próximo do personagem é que deve ter maior prioridade. [...] Por
+    // padrão o valor deve ser 1200 objetos. Apesar dos objetos acabarem
+    // ficando de fora da renderização da cena, as lógicas devem continuar a
+    // serem feita." Diferente de `objetoRenderModo` (esconde de vez quem
+    // está fora da distância de renderização/setor — ver Engine3D.
+    // _updateDistanceCulling/_updateSectorOcclusionCulling): este é um
+    // ORÇAMENTO por quadro, sobre quem JÁ passou pelos outros cortes — ver
+    // Engine3D._updateFrameBudgetCulling (novo, chamado em render(),
+    // ORDENA por distância — "o que está mais próximo... maior
+    // prioridade" — e só desenha os N primeiros). `objetoLimitePorFrameAtivo`
+    // (`true` = padrão NOVO, já pedido "ligado") liga/desliga a subseção
+    // inteira sem perder o valor digitado.
+    objetoLimitePorFrameAtivo: true,
+    objetoLimitePorFrame: 1200,
     // ---------- Seção "🧊 Cubo" (pedido do usuário, 28/08/2026): "Assim
     // como no blender, ao inserir o cubo, o centro dele deve ser no meio do
     // cubo. Não apenas no centro da base como é atualmente. Isso deve ser
@@ -289,6 +449,12 @@ const MapConfig = {
     // Tarde/Noite) e a barra (trilha de 0h a 23h59) escrevem NO MESMO campo —
     // por isso já ficam automaticamente "de acordo" um com o outro, sem
     // precisar sincronizar nada à parte (ver open() abaixo, mc-hora-*).
+    // [13/09/2026 UTC] Terceiro valor possível, a STRING 'mundo' (nunca um
+    // número válido, então não colide com os valores manuais acima):
+    // botão novo "🌐 Seguir relógio do mundo" — a cena inteira passa a se
+    // iluminar pela hora de `window.RelogioMundo.getHoraAtual()` (ver
+    // engine3d.js `_horaAtualConfigurada`), mutuamente exclusivo com
+    // `null` (relógio do aparelho) e com qualquer hora fixa.
     horaDoDiaManual: null,
     // Pedido do usuário (rodada 45): "No modo Modelador, com a câmera
     // orbital, ela fica apontando para um ponto fixo no espaço do mundo.
@@ -324,6 +490,11 @@ const MapConfig = {
     // de fechar a miniatura automaticamente (libera o contexto WebGL) ao
     // sair da tela Mapa — ver mapview.js _unmountPlanta.
     miniatura3DFecharAoSairMapa: false,
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possível mover a
+    // janelinha e ativá-la/desativá-la nas 'configurações 2D', na seção
+    // 'Trena 3D'. Por padrão, ativado." Ver view3d.js
+    // `_trena3DEnsurePainelRapido`.
+    trena3DPainelRapidoAtivo: true,
     // NOVO (03/09/2026) — "Configurações 2D": pedido do usuário, "nova
     // seção para escolher quais ferramentas continuam visíveis (apenas
     // como botão, fora da janela Ferramentas) mesmo durante o Modo
@@ -762,7 +933,7 @@ const MapConfig = {
     // de 'reposicionar pontas', em 'Mapa'->'Foto' também, para os botões
     // equivalentes 'Medidas' e 'Traço guia'." — equivalente de
     // `medidaReposicionarExtremidadesAtivo` logo acima, só que pra "✏️
-    // Traço guia" de 'Mapa'->'Foto' (ambientephotos.js
+    // Traço guia" de 'Mapa'->'Fotos' (ambientephotos.js
     // `_tracoReposicionarExtremidadesAtivo`/`_hitTestTracoVertex`) em vez da
     // régua "📏 Medidas". Nome com sufixo "Foto" pra não colidir com
     // `traco2DReposicionarExtremidadesAtivo` (equivalente pro Traço guia do
@@ -807,6 +978,91 @@ const MapConfig = {
     // lá). Valores possíveis: 'jpg' | 'png' | 'webp'. ----------
     fotoDownloadFormatoAtual: 'jpg',
     fotoDownloadFormatoTodas: 'jpg',
+
+    // ---------- RODADA 53 [15/09/2026 UTC], pedido verbatim (item B):
+    // "Nas 'configurações 2D', há uma seção '📷 Fotos'. Adicione ali uma
+    // opção de atribuição automática de objeto Câmera para vincular à foto
+    // tirada [...] Subseção 'Atribuir a um lugar no mapa automaticamente'
+    // [...] Opções: 'Não', 'Apenas quando o mapa estiver vazio' e 'Sim'."
+    // Valores: 'nao' | 'vazio' | 'sim'. Padrão 'sim' — reproduz o
+    // comportamento ATUAL confirmado em capture.js `_autoPlacePhoto`
+    // (sempre posicionava automaticamente, sem exceção — ver comentário lá).
+    // Consumida por capture.js `_autoPlacePhoto`. ----------
+    fotoAutoAtribuirCamera: 'sim',
+
+    // ---------- RODADA 53 [15/09/2026 UTC], pedido verbatim (item C):
+    // "deve aparecer uma opção para definir de que jeito. Por exemplo, a
+    // distância entre uma câmera e outra, até que número de inserções para
+    // trocar de linha. A distância padrão deve ser de '1,2m'. E o
+    // coordenada de partida (por padrão '0,0')."
+    // RODADA 54 [15/09/2026 UTC]: o seletor visual de direção primária +
+    // sentido de quebra de linha (ver `fotoGradeDirPrimaria`/
+    // `fotoGradeQuebra` logo abaixo e `#mc-foto-grade-dir` no HTML) FOI
+    // implementado nesta rodada — `Mapping.findGridSlot` foi generalizada
+    // pra aceitar as 8 combinações possíveis. A rotação (fotoGradeRot*)
+    // continua PENDENTE: é a mesma usada pelo fluxo "🗺️ Mover no mapa" de
+    // uma foto avulsa (mapview.js `enterPhotoPlacementMode`/
+    // `_confirmPhotoPlacement`) — os campos abaixo só guardam o valor, sem
+    // UI pra defini-lo nem aplicação em cada câmera da grade ainda (motivo:
+    // depende do item "Definir origem no mapa" abaixo, que também ficou
+    // pendente — ver progresso-sessao.md RODADA 54). ----------
+    fotoGradeDistancia: 1.2,
+    fotoGradePorLinha: 6,
+    fotoGradeOrigemX: 0,
+    fotoGradeOrigemY: 0,
+    fotoGradeRotDir: 0,
+    fotoGradeRotPerp: 0,
+    // RODADA 54 [15/09/2026 UTC], pedido original (reproduzido na RODADA
+    // 54): "deve ser possível selecionar se elas vão indo sendo colocadas
+    // do ponto de origem definida para a esquerda/direita/cima/baixo. Se,
+    // depois de trocar de linha, a próxima linha vai ser para cima ou para
+    // baixo". `fotoGradeDirPrimaria` é a direção de avanço dentro de uma
+    // linha ('direita'|'esquerda'|'cima'|'baixo'); `fotoGradeQuebra` é o
+    // sentido da quebra de linha, sempre PERPENDICULAR à primária
+    // ('cima'|'baixo' quando a primária é horizontal, 'esquerda'|'direita'
+    // quando é vertical). Padrão preserva o comportamento da RODADA 53
+    // (direita, quebrando pra baixo). Ver Mapping.findGridSlot e o
+    // seletor visual `#mc-foto-grade-dir` mais abaixo.
+    fotoGradeDirPrimaria: 'direita',
+    fotoGradeQuebra: 'baixo',
+
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "Deve ter uma opção para
+    // considerar colisão com quaisquer objetos. Isto evita a câmera ser
+    // colocada dentro de um objeto. No 2D, pode não ser um problema, porém
+    // no 3D ela ficaria ocultada." Quando ligado, `capture.js
+    // _autoPlacePhoto` testa cada posição candidata da grade
+    // (`Mapping.findGridSlot`) contra TODOS os objetos/formas já colocados
+    // no mapa (`Mapping.pointCollidesWithAnyObject`, nova função) e pula
+    // pra próxima posição da grade (`index+1`, `index+2`, ...) até achar
+    // uma livre — nunca fica "preso" numa posição ocupada. Desligado por
+    // padrão (`false`) porque é um custo extra de cálculo a cada foto e o
+    // comportamento de sempre (grade "cega", sem checar colisão) precisa
+    // continuar sendo o padrão pra não surpreender quem já usa o app.
+    fotoGradeEvitarColisao: false,
+
+    // [15/09/2026 UTC] NOVO — pedido verbatim: "Nas 'configurações 2D', se
+    // ainda não houver uma seção que trate disso, coloque uma seção para
+    // definições do mapa 2D. Uma opção é aparecer a origem do mundo.
+    // Quando ativada, desenha uma cruz na origem (0,0) da grade do mapa
+    // 2D. Por padrão, ela fica ativada." — nova seção "🗺️ Mapa 2D" (ver
+    // HTML mais abaixo), só esta opção por enquanto. Lida/desenhada em
+    // mapview.js (Map2DRenderer._drawOrigemMundo/_renderFrame). Padrão
+    // ligada (`true`).
+    mapa2dMostrarOrigemMundo: true,
+
+    // ---------- RODADA 53 [15/09/2026 UTC], pedido verbatim (item D):
+    // "Deve haver outra subseção para definir um nome automático para as
+    // fotos que são tiradas. Por padrão fica ativada. O nome deve indicar a
+    // data e hora [...] 2026-06-07_14-30-00.jpg." Consumida por
+    // capture.js `_afterPhotoCaptured` (formata `nome` no momento da
+    // captura, respeitando `fotoNomeHoraUTC`). SIMPLIFICADO: a escolha
+    // Local/UTC usa um par de rádios simples em vez de reaproveitar o
+    // componente visual completo da seção "🌗 Hora do dia" (globinho canvas
+    // + trilha de horas arrastável) — ver progresso-sessao.md RODADA 53
+    // pro motivo (orçamento da rodada) e o pedido de que uma próxima rodada
+    // extraia esse componente pra reúso real. ----------
+    fotoNomeAutomaticoAtivo: true,
+    fotoNomeHoraUTC: false,
   },
   // NOVO (05/09/2026) — metadados (ícone/rótulo/chave de configuração) de
   // TODAS as ferramentas (mapview.js PTOOLS) e de TODOS os botões do
@@ -908,6 +1164,28 @@ const MapConfig = {
     return this._cache;
   },
 
+  /** [13/09/2026 UTC] NOVO — pedido verbatim: "Na 'Trilha de horas do dia',
+   *  ao variar o valor na barra, a aplicação do efeito deve ser imediata.
+   *  Atualmente, a aplicação do efeito só acontece, quando se solta o
+   *  botão esquerdo do mouse." CAUSA RAIZ: o wiring da trilha só chamava
+   *  `set()` (persiste no IndexedDB) no evento 'change' (solta o botão);
+   *  no 'input' (a cada passo do arraste) só atualizava o TEXTO do label,
+   *  nunca a cena. Simplesmente chamar `set()` a cada 'input' funcionaria
+   *  visualmente, mas um `<input type="range">` dispara 'input' MUITAS
+   *  vezes por segundo durante um arraste — gravar no banco a cada uma
+   *  seria caro/desnecessário (a pessoa pode nem soltar no valor final
+   *  "de verdade"). `previewSet` resolve isso: atualiza `this._cache` e
+   *  avisa os mesmos `onChange` listeners (Engine3D/MapView reagem na hora,
+   *  igual `set()`) SEM tocar no IndexedDB — quem chama continua
+   *  responsável por, ao FIM do gesto (evento 'change'), chamar `set()`
+   *  normal uma vez só, pra persistir de verdade (ver wiring de
+   *  #mc-hora-trilha, mais abaixo). */
+  previewSet(patch) {
+    this._cache = { ...(this._cache || {}), ...patch };
+    this._listeners.forEach((fn) => { try { fn(this._cache); } catch (e) { console.warn('Listener de MapConfig falhou:', e); } });
+    return this._cache;
+  },
+
   /** Chamado sempre que a config muda (por este painel OU por qualquer outro
    *  lugar) — usado pelo Engine3D/MapView pra reagir na hora (ex: religar o
    *  raycast) sem precisar reabrir a tela. */
@@ -922,10 +1200,419 @@ const MapConfig = {
     return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
   },
 
+  // [13/09/2026 UTC] CAUSA RAIZ do bug relatado ("globo preto, parado e
+  // não interativo com 'Seguir relógio do mundo' ativo"):
+  // `RelogioMundo.getHoraAtual()` devolve um OBJETO
+  // `{horas, minutos, segundos, diaDaSemana}` (ver relogio-mundo.js),
+  // NUNCA um número decimal — todo lugar que fazia
+  // `window.RelogioMundo.getHoraAtual() ?? algumNumero` e depois usava o
+  // resultado direto em conta matemática (`% 24`, etc.) estava, na
+  // prática, sempre operando com NaN (objeto não é número), sem nenhum
+  // erro visível — daí o globo "travado" (RAF para na primeira exceção
+  // silenciosa de coordenada NaN) e a trilha nunca realmente acompanhando.
+  // Este helper centraliza a conversão certa (objeto → número decimal de
+  // 0 a 23.999) — usar SEMPRE este, nunca o retorno de getHoraAtual()
+  // direto em conta numérica.
+  _horaMundoDecimal() {
+    const h = window.RelogioMundo?.getHoraAtual?.();
+    if (h && typeof h === 'object' && !isNaN(Number(h.horas))) {
+      return Number(h.horas) + Number(h.minutos || 0) / 60 + Number(h.segundos || 0) / 3600;
+    }
+    const now = new Date();
+    return now.getHours() + now.getMinutes() / 60;
+  },
+
+  // [13/09/2026 UTC] Globo 3D wireframe da seção "🌗 Hora do dia" — pedido
+  // verbatim: "Coloque um globo 3D ao lado do botão 'Noite' com a
+  // referência do meridiano de greenwich (não só o meridiano, mas também
+  // um pontinho indicando 'Londres')... Ao mudar a hora do dia... o globo
+  // se reorienta com uma animação de movimento. A inclinação de 23,5 graus
+  // deve ser representada e o globinho deve ser wireframe. Ao avançar no
+  // dia o globinho gira para a esquerda e, ao retroceder o dia, o globinho
+  // gira para a direita... Deve ser possível clicar e arrastar (com cursor
+  // infinito)... Deve haver uma linha (semicírculo 3D) para indicar o
+  // ponto atual da hora... referências simples de continentes."
+  //
+  // Implementado como projeção manual (sem THREE — esta tela de
+  // configurações pode abrir sem o motor 3D carregado) de uma esfera
+  // wireframe num <canvas 2D>: cada ponto 3D (x,y,z) é rotacionado pela
+  // inclinação axial fixa (23.5°) + pela longitude atual (que representa
+  // a hora — 360°/24h = 15°/h) e projetado ortograficamente (só x,y, z
+  // descartado exceto pra decidir o que fica "atrás" — linhas com z<0 são
+  // desenhadas mais claras/finas, dando a ilusão de esfera sem precisar
+  // de um motor 3D de verdade).
+  //
+  // "Avançar no dia gira pra esquerda, retroceder gira pra direita": a
+  // Terra de verdade gira pra LESTE (fazendo o Sol nascer a leste) — aqui
+  // é só uma convenção visual pedida explicitamente, então a longitude do
+  // globo é `-hora*15°` (sinal invertido de uma rotação "física" pra
+  // direção da tela bater com o pedido).
+  /** [15/09/2026 UTC] Resolve o valor "cru" salvo (número fixo | o
+   *  `altValue` sentinela do widget, ex. 'mundo'/'utc' | null=automático)
+   *  pra uma hora decimal exibível (0-23.999) — usado tanto pelo HTML
+   *  inicial quanto pelo wiring do widget "Hora do dia" (ver
+   *  `_horaDoDiaWidgetHtml`/`_wireHoraDoDiaWidget` logo abaixo). Extraído
+   *  da conta repetida 3x no código original (HTML da trilha, HTML do
+   *  globo, `_syncHoraUI`) — pedido verbatim (RODADA 55): "Mapeie as
+   *  dependências ... e as torne modulares e reaproveitáveis." */
+  _resolveHoraDoWidget(valor, altValue, getAltHoraDecimal) {
+    if (valor === altValue) return getAltHoraDecimal ? getAltHoraDecimal() : (new Date().getHours() + new Date().getMinutes() / 60);
+    if (valor != null) return Number(valor);
+    return new Date().getHours() + new Date().getMinutes() / 60;
+  },
+
+  /** [15/09/2026 UTC] Widget reutilizável "Hora do dia" — EXTRAÍDO da seção
+   *  3D "🌗 Hora do dia" (antes misturada, no mesmo HTML/wiring, com os
+   *  textos de Sol/Lua e SEM fronteira de função própria). Pedido verbatim
+   *  (RODADA 55): "Mapeie as dependências das duas situações ('hora do dia'
+   *  e 'tela do vincular ao mapa') e as torne modulares e reaproveitáveis."
+   *
+   *  DEPENDÊNCIAS MAPEADAS do bloco original (antes de extrair):
+   *   - Lia `cfg.horaDoDiaManual` (número fixo | 'mundo' | null=automático)
+   *     só pra montar o HTML inicial (valor da trilha/label/estado
+   *     disabled dos botões) — não guarda estado próprio.
+   *   - Escrevia SEMPRE via `this.set({horaDoDiaManual: ...})` (persiste) ou
+   *     `this.previewSet({horaDoDiaManual: ...})` (só avisa listeners, sem
+   *     tocar no IndexedDB, usado durante o arrasto da trilha/globo) — os
+   *     2 métodos já eram genéricos (patch de qualquer chave), então NÃO
+   *     precisam de adaptação; o acoplamento real era só o NOME da chave
+   *     ('horaDoDiaManual') estar hard-coded dentro do wiring.
+   *   - Chamava `this._horaMundoDecimal()` pra saber a "hora do mundo"
+   *     quando `horaDoDiaManual === 'mundo'` — específico do uso 3D
+   *     (RelogioMundo); no novo uso (nome automático da foto) não existe
+   *     hora contínua nenhuma, então esse getter passa a ser OPCIONAL
+   *     (`getAltHoraDecimal`), só usado se o widget mostrar globo/trilha.
+   *   - `_mountGloboHora`/`_formatHora` já eram funções à parte, sem
+   *     dependência de `horaDoDiaManual` (recebem hora pronta) — reusadas
+   *     como estão, sem mudança.
+   *  MODULARIZAÇÃO: a chave de config, o texto dos botões, o sentinela do
+   *  "modo alternativo" (`altValue` — 'mundo' no uso 3D, 'utc' no uso do
+   *  nome de foto) e os efeitos (`onPreview`/`onCommit`) agora são
+   *  parâmetros — nenhuma menção a `horaDoDiaManual` nem a
+   *  `fotoNomeHoraUTC` dentro do widget em si.
+   *
+   *  `_horaDoDiaWidgetHtml(o)` monta o HTML (sem tocar no DOM ainda —
+   *  usado dentro do template gigante de `open()`); `_wireHoraDoDiaWidget
+   *  (modal, o)` liga os eventos depois que o modal já está no documento e
+   *  devolve `{getHora(), setHora(h), destroy()}` (mesmo padrão de API
+   *  usado pelos outros componentes "card" do app).
+   *
+   *  `o` (comum aos dois):
+   *   - idPrefix: prefixo dos ids gerados (ex. 'mc-hora', 'mc-fotonome-hora')
+   *   - presets: [{hora, label}] — botões fixos (ex. Manhã/Dia/Tarde/Noite);
+   *     [] pra nenhum
+   *   - mostrarGlobo / mostrarTrilha: bool — o globo/trilha só fazem
+   *     sentido quando existe uma "hora contínua" real pra escolher
+   *   - valorAtual: número fixo | altValue | null (automático)
+   *   - altValue: sentinela string do "modo alternativo" (ex. 'mundo'/'utc')
+   *   - altLabel / autoLabel: texto dos 2 botões "seguir X"
+   *   - getAltHoraDecimal: () => hora decimal quando em modo alternativo
+   *     (só obrigatório se mostrarGlobo/mostrarTrilha === true)
+   *  `o` (só wiring):
+   *   - getValorAtual: () => valor cru atual (lido de fora, ex. `cfg.xxx`)
+   *   - onPreview(valor): chamado a cada passo do arrasto (trilha/globo)
+   *   - onCommit(valor): chamado pra persistir de verdade (preset/mundo/
+   *     auto/soltar a trilha ou o globo)
+   */
+  _horaDoDiaWidgetHtml(o) {
+    const idp = o.idPrefix;
+    const presetsHtml = (o.presets || []).map((p) => `<button type="button" class="btn secondary ${idp}-preset-btn" data-hora="${p.hora}">${p.label}</button>`).join('');
+    const globoHtml = o.mostrarGlobo ? `<canvas id="${idp}-globo" class="mc-hora-globo" width="72" height="72" title="Globo do horário — arraste pra girar (também muda a hora)"></canvas>` : '';
+    const horaInicial = this._resolveHoraDoWidget(o.valorAtual, o.altValue, o.getAltHoraDecimal);
+    const trilhaHtml = o.mostrarTrilha ? `
+          <label class="field" style="margin-top:10px">
+            <span class="lbl">Trilha de horas do dia — <span id="${idp}-trilha-label">${this._formatHora(horaInicial)}</span></span>
+            <input type="range" id="${idp}-trilha" class="mc-hora-trilha" min="0" max="23.983" step="0.25" value="${horaInicial}">
+          </label>` : '';
+    const ehAlt = o.valorAtual === o.altValue;
+    const ehAuto = o.valorAtual == null;
+    return `
+        <div id="${idp}-widget">
+          ${(presetsHtml || globoHtml) ? `<div class="mc-hora-botoes" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center">${presetsHtml}${globoHtml}</div>` : ''}
+          ${trilhaHtml}
+          ${o.altLabel ? `<button type="button" class="btn secondary block" id="${idp}-alt" style="margin-top:8px" ${ehAlt ? 'disabled' : ''}>${o.altLabel} ${ehAlt ? '(ativo)' : ''}</button>` : ''}
+          ${o.autoLabel ? `<button type="button" class="btn secondary block" id="${idp}-auto" style="margin-top:8px" ${ehAuto ? 'disabled' : ''}>${o.autoLabel} ${ehAuto ? '(ativo)' : ''}</button>` : ''}
+        </div>`;
+  },
+
+  _wireHoraDoDiaWidget(modal, o) {
+    const idp = o.idPrefix;
+    const trilhaEl = o.mostrarTrilha ? modal.querySelector(`#${idp}-trilha`) : null;
+    const trilhaLabelEl = o.mostrarTrilha ? modal.querySelector(`#${idp}-trilha-label`) : null;
+    const autoBtnEl = modal.querySelector(`#${idp}-auto`);
+    const altBtnEl = modal.querySelector(`#${idp}-alt`);
+    const globoEl = o.mostrarGlobo ? modal.querySelector(`#${idp}-globo`) : null;
+    const getHoraExibidaAtual = () => this._resolveHoraDoWidget(o.getValorAtual(), o.altValue, o.getAltHoraDecimal);
+    const syncUI = (valor) => {
+      const ehAlt = valor === o.altValue;
+      const horaExibida = this._resolveHoraDoWidget(valor, o.altValue, o.getAltHoraDecimal);
+      if (trilhaEl) trilhaEl.value = String(horaExibida);
+      if (trilhaLabelEl) trilhaLabelEl.textContent = this._formatHora(horaExibida);
+      if (autoBtnEl) { autoBtnEl.disabled = valor == null; autoBtnEl.textContent = `${o.autoLabel} ${valor == null ? '(ativo)' : ''}`; }
+      if (altBtnEl) { altBtnEl.disabled = ehAlt; altBtnEl.textContent = `${o.altLabel} ${ehAlt ? '(ativo)' : ''}`; }
+      globoApi?.setHora(horaExibida);
+    };
+    const globoApi = globoEl ? this._mountGloboHora(
+      globoEl,
+      getHoraExibidaAtual,
+      (hora, solto) => {
+        if (solto) { o.onCommit(hora); syncUI(hora); }
+        else { o.onPreview(hora); if (trilhaEl) trilhaEl.value = String(hora); if (trilhaLabelEl) trilhaLabelEl.textContent = this._formatHora(hora); }
+      }
+    ) : null;
+    modal.querySelectorAll(`#${idp}-widget .${idp}-preset-btn`).forEach((b) => {
+      b.addEventListener('click', async () => {
+        const h = Number(b.dataset.hora);
+        await o.onCommit(h);
+        syncUI(h);
+      });
+    });
+    altBtnEl?.addEventListener('click', async () => { await o.onCommit(o.altValue); syncUI(o.altValue); });
+    autoBtnEl?.addEventListener('click', async () => { await o.onCommit(null); syncUI(null); });
+    trilhaEl?.addEventListener('input', () => {
+      const h = Number(trilhaEl.value);
+      if (trilhaLabelEl) trilhaLabelEl.textContent = this._formatHora(h);
+      o.onPreview(h);
+      globoApi?.setHoraImediato(h);
+    });
+    trilhaEl?.addEventListener('change', async () => {
+      const h = Number(trilhaEl.value);
+      await o.onCommit(h);
+      syncUI(h);
+    });
+    return { getHora: getHoraExibidaAtual, setHora: (h) => syncUI(h), destroy: () => globoApi?.destroy() };
+  },
+
+  _mountGloboHora(canvas, getHora, onArrastarHora) {
+    if (!canvas || canvas._globoMontado) return canvas._globoApi || null;
+    canvas._globoMontado = true;
+    const ctx2d = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 4;
+    const TILT = 23.5 * Math.PI / 180; // inclinação axial pedida
+    // Continentes MUITO simplificados — só um punhado de pontos por
+    // "massa de terra" em (lat,lon) graus, unidos em linha poligonal
+    // aberta, o suficiente pra servir de referência visual, sem
+    // pretensão de precisão geográfica.
+    const CONTINENTES = [
+      [[60, -10], [50, 0], [36, -6], [15, -17], [5, 10], [-15, 15], [-35, 20], [-10, 30], [10, 40], [30, 35], [45, 30], [55, 20], [60, -10]], // Europa/África/Ásia oeste (contorno aproximado)
+      [[70, -170], [65, -140], [50, -125], [30, -115], [15, -95], [8, -80], [-5, -80], [-20, -68], [-35, -70], [-55, -68], [-33, -58], [10, -75], [25, -100], [45, -100], [60, -150], [70, -170]], // Américas
+      [[-12, 130], [-20, 145], [-35, 150], [-32, 115], [-25, 113], [-12, 130]], // Austrália
+    ];
+    let anguloAtual = -((getHora() % 24) / 24) * Math.PI * 2; // longitude atual (rad)
+    let anguloAlvo = anguloAtual;
+    let rafId = null;
+    let horaExibida = getHora();
+    // Arraste manual: enquanto o usuário segura o botão, a rotação passa a
+    // ser controlada pelo movimento do mouse (não pela hora configurada) —
+    // ao soltar, o ângulo final é convertido de volta em hora e aplicado
+    // via `onArrastarHora` (que faz previewSet durante o gesto e set ao
+    // soltar, igual à trilha).
+    let arrastando = false, lastX = 0;
+
+    function rotY(p, ang) {
+      const s = Math.sin(ang), c = Math.cos(ang);
+      return [p[0] * c + p[2] * s, p[1], -p[0] * s + p[2] * c];
+    }
+    function rotX(p, ang) {
+      const s = Math.sin(ang), c = Math.cos(ang);
+      return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c];
+    }
+    function latLonToXYZ(latDeg, lonDeg) {
+      const lat = latDeg * Math.PI / 180, lon = lonDeg * Math.PI / 180;
+      return [Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon)];
+    }
+    function transform(p) {
+      // ordem: gira em Y (longitude/hora), depois inclina em X (eixo de 23.5°)
+      let q = rotY(p, anguloAtual);
+      q = rotX(q, TILT);
+      return q;
+    }
+    function proj(p) { return [cx + p[0] * R, cy - p[1] * R]; }
+
+    function linha3D(pontos, cor, largura) {
+      for (let i = 0; i < pontos.length - 1; i++) {
+        const a = transform(pontos[i]), b = transform(pontos[i + 1]);
+        const zMed = (a[2] + b[2]) / 2;
+        ctx2d.strokeStyle = cor;
+        ctx2d.globalAlpha = zMed < 0 ? 0.28 : 1; // "atrás" da esfera = mais apagado
+        ctx2d.lineWidth = largura;
+        const pa = proj(a), pb = proj(b);
+        ctx2d.beginPath(); ctx2d.moveTo(pa[0], pa[1]); ctx2d.lineTo(pb[0], pb[1]); ctx2d.stroke();
+      }
+      ctx2d.globalAlpha = 1;
+    }
+
+    function desenhar() {
+      ctx2d.clearRect(0, 0, W, H);
+      // silhueta do globo (leve preenchimento pra dar volume)
+      ctx2d.fillStyle = 'rgba(120,170,220,0.08)';
+      ctx2d.beginPath(); ctx2d.arc(cx, cy, R, 0, Math.PI * 2); ctx2d.fill();
+      // grade de paralelos (latitude, a cada 30°)
+      for (let lat = -60; lat <= 60; lat += 30) {
+        const pontos = [];
+        for (let lon = -180; lon <= 180; lon += 12) pontos.push(latLonToXYZ(lat, lon));
+        linha3D(pontos, 'rgba(180,210,255,0.45)', 1);
+      }
+      // grade de meridianos (longitude, a cada 30°) — o de Greenwich (0°) em destaque
+      for (let lon = -180; lon < 180; lon += 30) {
+        const pontos = [];
+        for (let lat = -90; lat <= 90; lat += 10) pontos.push(latLonToXYZ(lat, lon));
+        linha3D(pontos, lon === 0 ? 'rgba(255,210,90,0.95)' : 'rgba(180,210,255,0.3)', lon === 0 ? 2 : 1);
+      }
+      // continentes (referência simples)
+      CONTINENTES.forEach((poli) => linha3D(poli.map(([la, lo]) => latLonToXYZ(la, lo)), 'rgba(150,255,180,0.85)', 1.2));
+      // pontinho de Londres (51.5°N, 0°) — sobre o meridiano de Greenwich
+      const londres = transform(latLonToXYZ(51.5, 0));
+      if (londres[2] > -0.15) {
+        const pl = proj(londres);
+        ctx2d.fillStyle = '#ffd25a';
+        ctx2d.beginPath(); ctx2d.arc(pl[0], pl[1], 2, 0, Math.PI * 2); ctx2d.fill();
+      }
+      // semicírculo 3D indicando a hora representada — um meridiano
+      // "extra" desenhado na longitude 0 do referencial do OBSERVADOR
+      // (ou seja, sempre voltado pra quem olha, marcando o ponto do globo
+      // que está "de frente" = meio-dia local daquela longitude, servindo
+      // de ponteiro visual da hora atual).
+      const semic = [];
+      for (let lat = -90; lat <= 90; lat += 10) semic.push(latLonToXYZ(lat, 0));
+      // desenha este em coordenadas JÁ rotacionadas em Y por -anguloAtual,
+      // pra ficar fixo em relação à TELA (não ao globo) — é o "ponteiro".
+      ctx2d.strokeStyle = 'rgba(255,120,120,0.9)'; ctx2d.lineWidth = 1.6; ctx2d.globalAlpha = 1;
+      ctx2d.beginPath();
+      semic.forEach((p, i) => {
+        const q = rotX(p, TILT);
+        const proj2 = proj(q);
+        if (i === 0) ctx2d.moveTo(proj2[0], proj2[1]); else ctx2d.lineTo(proj2[0], proj2[1]);
+      });
+      ctx2d.stroke();
+    }
+
+    function animar() {
+      // anima suavemente até `anguloAlvo` sempre que a hora configurada
+      // mudar por fora (botões/trilha/auto/mundo) — arraste manual pula
+      // a animação (o próprio gesto já é o movimento).
+      const diff = anguloAlvo - anguloAtual;
+      if (Math.abs(diff) > 0.001) anguloAtual += diff * 0.18;
+      else anguloAtual = anguloAlvo;
+      desenhar();
+      rafId = requestAnimationFrame(animar);
+    }
+    rafId = requestAnimationFrame(animar);
+
+    // Arraste com "cursor infinito": usa Pointer Lock quando disponível
+    // (movementX contínuo, sem o cursor bater na borda da tela); cai pra
+    // arraste comum (delta de posição) se o navegador recusar o lock.
+    canvas.addEventListener('mousedown', (e) => {
+      arrastando = true; lastX = e.clientX;
+      canvas.requestPointerLock?.();
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!arrastando) return;
+      const dx = (document.pointerLockElement === canvas) ? e.movementX : (e.clientX - lastX);
+      lastX = e.clientX;
+      anguloAtual += dx * 0.02;
+      anguloAlvo = anguloAtual;
+      // converte o ângulo de volta em "hora" (mesma convenção invertida
+      // usada em `latLonToXYZ`/inicialização: hora = -angulo/(2π)*24)
+      let hora = (-(anguloAtual) / (Math.PI * 2)) * 24;
+      hora = ((hora % 24) + 24) % 24;
+      horaExibida = hora;
+      onArrastarHora?.(hora, false);
+    });
+    window.addEventListener('mouseup', () => {
+      if (!arrastando) return;
+      arrastando = false;
+      document.exitPointerLock?.();
+      onArrastarHora?.(horaExibida, true);
+    });
+
+    const api = {
+      setHora(h) { anguloAlvo = -((((h % 24) + 24) % 24) / 24) * Math.PI * 2; },
+      // [13/09/2026 UTC] Pedido: "ao mexer na trilha de horas o globinho
+      // deve receber a alteração enquanto se está mexendo na barra, não
+      // apenas quando se solta o botão esquerdo do mouse." `setHora` (acima)
+      // anima suavemente (lerp) até o alvo — ótimo pra uma mudança "de uma
+      // vez" (botão fixo/auto/mundo), mas gera atraso perceptível se
+      // chamado a cada pixel de um arraste contínuo (o globo ficaria sempre
+      // "correndo atrás" do dedo/mouse). `setHoraImediato` pula o lerp:
+      // aplica direto em `anguloAtual` E `anguloAlvo`, pra girar junto com a
+      // trilha em tempo real, sem esperar soltar o botão.
+      setHoraImediato(h) {
+        anguloAtual = -((((h % 24) + 24) % 24) / 24) * Math.PI * 2;
+        anguloAlvo = anguloAtual;
+      },
+      destroy() { if (rafId) cancelAnimationFrame(rafId); canvas._globoMontado = false; },
+    };
+    canvas._globoApi = api;
+    return api;
+  },
+
   /** Remove um listener cadastrado por onChange — usado no unmount de quem
    *  assinou (MapView), pra não empilhar listeners "mortos" (apontando pra
    *  uma tela já fechada) a cada vez que a tela do mapa é reaberta. */
   offChange(fn) { this._listeners = this._listeners.filter((l) => l !== fn); },
+
+  /** [13/09/2026] NOVO — pedido verbatim: "Adicione controles de plano de
+   *  corte próximo/distante (z_near/z_far) da câmera na seção 'Desempenho
+   *  3D', usando o mesmo componente de 'botão triplo'... Deve ser
+   *  atualizado em tempo real." Monta os 2 `ModelerUI._createNumField`
+   *  (near/"Início" e far/"Fim") dentro dos `<div>` vazios do HTML da
+   *  seção "Desempenho 3D" (ver `open()`), MESMO idioma/estrutura de
+   *  `_wireCamPropsFieldset` (js/mapview.js, campos "Corte" da câmera de
+   *  foto) — a diferença é que ALI o corte é por câmera/orb individual
+   *  (`Engine3D.setClipPlanes`, só ativo enquanto "vendo através" daquela
+   *  câmera); AQUI é o corte PADRÃO da câmera de navegação livre
+   *  (`camera3.near`/`far` de fábrica, ver Engine3D._initThree/setConfig),
+   *  persistido em `MapConfig` como qualquer outra opção de "Desempenho
+   *  3D" — por isso passa por `this.set()`, não por uma chamada direta ao
+   *  motor 3D. `min: 0.01` (near) evita frustum degenerado
+   *  (near<=0 trava o Three.js); `far` não tem teto — o próprio Three.js
+   *  já lida bem com valores grandes, e um "Fim" mal digitado só faz o
+   *  usuário ver longe demais, nunca quebra nada. */
+  _wireDesempenho3DCamPlanes(modal, cfg) {
+    if (!window.ModelerUI) return;
+    const nearWrap = modal.querySelector('#mc-cam-znear-wrap');
+    const farWrap = modal.querySelector('#mc-cam-zfar-wrap');
+    let curNear = Number.isFinite(cfg.cameraZNear) && cfg.cameraZNear > 0 ? cfg.cameraZNear : 0.1;
+    // `cameraZFar: null` = "automático" (ver DEFAULTS acima) — o campo
+    // precisa de um número pra MOSTRAR mesmo nesse caso; usa o mesmo
+    // cálculo de fallback do motor (Engine3D._initThree/setConfig) só pra
+    // exibição — não é gravado até o usuário efetivamente mexer no campo.
+    const rdAtual = Math.max(this.RENDER_DISTANCE_MIN, Number(cfg.renderDistance) || 42);
+    let curFar = Number.isFinite(cfg.cameraZFar) && cfg.cameraZFar > 0 ? cfg.cameraZFar : Math.max(rdAtual * 2.4, 60);
+    let nearApi = null, farApi = null;
+    if (nearWrap) {
+      nearApi = ModelerUI._createNumField({
+        label: 'Início', value: Math.round(curNear * 100) / 100, step: 0.01, minDecimals: 2, suffix: 'm',
+        // passo bem fino (near costuma ser < 1m) — `pxPerStep` menor que o
+        // padrão (10) pra não exigir um arraste enorme pra sair de 0.01.
+        pxPerStep: 4,
+        onCommit: async (v) => {
+          curNear = Math.max(0.01, v);
+          nearApi?.setValue(Math.round(curNear * 100) / 100);
+          await this.set({ cameraZNear: curNear });
+        },
+      });
+      nearWrap.appendChild(nearApi.el);
+    }
+    if (farWrap) {
+      farApi = ModelerUI._createNumField({
+        label: 'Fim', value: Math.round(curFar * 10) / 10, step: 10, minDecimals: 1, suffix: 'm',
+        // faixa bem maior que near (10 a milhares de metros) — passo/
+        // sensibilidade maiores (mesma lógica do campo FOV, ver comentário
+        // grande em modeler-ui.js `_createNumField`).
+        pxPerStep: 4,
+        onCommit: async (v) => {
+          curFar = Math.max(0.01, v);
+          farApi?.setValue(Math.round(curFar * 10) / 10);
+          await this.set({ cameraZFar: curFar });
+        },
+      });
+      farWrap.appendChild(farApi.el);
+    }
+  },
 
   /**
    * Abre o painel. `map` é o mapa atualmente aberto (2D ou 3D — ambos usam a
@@ -946,6 +1633,15 @@ const MapConfig = {
   // só pra "está em modo customizado?".
   RENDER_DISTANCE_PRESETS: [20, 42, 80, 150],
   RENDER_DISTANCE_MIN: 3,
+  // [13/09/2026] NOVO — resolução de renderização CUSTOMIZADA do "Ver em
+  // 3D" (largura/altura em pixels, ver seção "Desempenho 3D" mais abaixo).
+  // Mesmo mínimo (64px) que a "Miniatura do 3D" do mapa 2D já tolera bem
+  // sem virar um amontoado de pixels ilegível (não existia uma constante
+  // compartilhada pra essa miniatura antes desta rodada — ela nasce do
+  // tamanho CSS do próprio painel arrastável/redimensionável, sem um campo
+  // numérico dedicado — então esta constante é a referência nova pros dois
+  // lugares que passarem a aceitar um número explícito).
+  RES_CUSTOM_MIN: 64,
   FPS_LIMITE_PRESETS: [30, 45, 60], // 0 ("sem limite") tem opção própria, não entra aqui
   FPS_LIMITE_MIN: 1,
   // Limites do snap magnético de grade da Parede (metros) — pedido do
@@ -1079,7 +1775,17 @@ const MapConfig = {
           <button type="button" class="icon-btn sm" id="mc-close-top" title="Fechar configurações" style="flex:none">✕</button>
         </div>
 
+        <!-- [15/09/2026 UTC] MUDADO -- pedido verbatim: "Verifique se tudo
+             em ambas configuracoes esta atrelado a uma secao, pois deve
+             estar. Por exemplo, nas 'configuracoes 2D', ha o 'Duplicar
+             itens ao colar?' [...] porem nao esta atrelado a uma secao."
+             Esta opcao ja vivia dentro de um <div class="mapconfig-section">
+             (nao estava "solta" no DOM), mas sem <h4> nenhum -- por isso
+             nao parecia uma secao de verdade visualmente, diferente de
+             todas as outras. Adicionado um titulo pra ela ficar igual as
+             demais. -->
         <div class="mapconfig-section">
+          <h4>📋 Colar</h4>
           <label class="radio-opt">
             <input type="checkbox" id="mc-dup-itens-colar" ${cfg.duplicarItensAoColar ? 'checked' : ''}>
             <span><span class="t">Duplicar itens ao colar?</span><br><span class="d">Um item só pode ter uma posição no mapa, então "colar" um item copiado normalmente não faz nada (só avisa). Ligando isto, colar cria um registro de item NOVO (cópia dos campos do original) na posição colada. Recortar+colar sempre funciona (só move o mesmo item), com ou sem isto ligado.</span></span>
@@ -1087,6 +1793,25 @@ const MapConfig = {
         </div>
 
         ${opts.context === '2d' ? `
+        <!-- [15/09/2026 UTC] NOVO -- pedido verbatim: "Nas 'configuracoes
+             2D', se ainda nao houver uma secao que trate disso, coloque
+             uma secao para definicoes do mapa 2D. Uma opcao e aparecer a
+             origem do mundo. Quando ativada, desenha uma cruz na origem
+             (0,0) da grade do mapa 2D. Por padrao, ela fica ativada." --
+             1a secao genuinamente "geral" do mapa 2D (as outras já
+             existentes são todas sobre um assunto específico -- Zoom,
+             Parede, Objeto etc.) -- fica logo no topo das seções
+             exclusivas de 2D, antes até de "Centralização ao voltar pro
+             mapa", pra ficar fácil de achar. Ver DEFAULTS.
+             mapa2dMostrarOrigemMundo acima e mapview.js
+             Map2DRenderer._drawOrigemMundo/_renderFrame. -->
+        <div class="mapconfig-section">
+          <h4>🗺️ Mapa 2D</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-mapa2d-origem-mundo" ${cfg.mapa2dMostrarOrigemMundo !== false ? 'checked' : ''}>
+            <span><span class="t">Mostrar a origem do mundo (padrão: ativado)</span><br><span class="d">Desenha uma cruz laranja na origem (0,0) da grade do mapa 2D — útil como referência fixa pra saber onde fica o "zero" do mundo, não importa o zoom/rotação atual.</span></span>
+          </label>
+        </div>
         <!-- Pedido do usuário (rodada 48): "A câmera 2D, no mapa 2D, deve
              voltar centralizada no personagem. Deve haver uma opção nas
              'configurações 2D' para isso, ou sempre 'volta centrada na
@@ -1131,6 +1856,17 @@ const MapConfig = {
           <label class="radio-opt">
             <input type="checkbox" id="mc-miniatura3d-fechar-ao-sair" ${cfg.miniatura3DFecharAoSairMapa ? 'checked' : ''}>
             <span><span class="t">Fechar janela de miniatura ao sair do Mapa</span><br><span class="d">Desabilitada por padrão: a miniatura 3D continua aberta/renderizando mesmo trocando pra outra aba do app (Tabela, Cartões, Fotos, Buscar). Ligue esta opção pra fechá-la automaticamente sempre que sair da tela Mapa.</span></span>
+          </label>
+        </div>
+        <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possível mover
+             a janelinha e ativá-la/desativá-la nas 'configurações 2D', na
+             seção 'Trena 3D'. Por padrão, ativado." Ver view3d.js
+             '_trena3DEnsurePainelRapido'/'_trena3DTogglePainelRapido'. -->
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-painel-rapido" ${cfg.trena3DPainelRapidoAtivo !== false ? 'checked' : ''}>
+            <span><span class="t">Mostrar janela de acesso rápido da Trena 3D (padrão: ativado)</span><br><span class="d">Uma janelinha pequena, dentro do "Ver em 3D", com ícones pra ligar/desligar rapidamente as principais opções da "📏 Trena 3D" (as mesmas configuráveis na seção "📏 Trena 3D" das Configurações 3D), sem precisar abrir a folha de Configurações. Pode ser arrastada pra qualquer lugar da tela e fechada pelo "✕" dela — desligue aqui pra não mostrá-la mais.</span></span>
           </label>
         </div>
         <!-- NOVO (05/09/2026), pedido verbatim: "No mapa 2D, o 'Réguas' da
@@ -1327,18 +2063,165 @@ const MapConfig = {
              NOVO (06/09/2026), pedido verbatim: "Na seção 'Fotos' das
              'configurações 2D', em vez do ícone '📍', coloque o ícone '📷'."
              — troca simples de emoji do cabeçalho desta seção. -->
+        <!-- [15/09/2026 UTC] MUDADO -- pedido verbatim: "Troque as referencias
+             nas 'configuracoes 2D' tambem de acordo com os novos nomes."
+             Botao do rodape (capturar) trocou de Fotos para Foto; botao
+             Mapa->Foto trocou para Mapa->Fotos. Titulos e textos destas
+             duas secoes atualizados na mesma direcao. -->
         <div class="mapconfig-section">
-          <h4>📷 Fotos</h4>
-          <span class="d" style="display:block; margin-bottom:5px">Ao confirmar "✅ Marcar aqui" (vincular uma foto a uma posição no mapa, em "Fotos" → tirar/escolher foto → 🗺️), o que fazer depois:</span>
+          <h4>📷 Foto</h4>
+          <span class="d" style="display:block; margin-bottom:5px">Ao confirmar "✅ Marcar aqui" (vincular uma foto a uma posição no mapa, em "Foto" → tirar/escolher foto → 🗺️), o que fazer depois:</span>
           <label class="radio-opt">
             <input type="radio" name="mc-fotos-marcar-aqui" value="permanecer" ${fotosMarcarAquiAcao !== 'fotos' ? 'checked' : ''}>
             <span><span class="t">Permanecer em Mapa → Planta baixa (padrão)</span><br><span class="d">Continua na tela onde o botão "Marcar aqui" está — dá pra ajustar mais coisas no mapa em seguida, sem precisar entrar de novo.</span></span>
           </label>
           <label class="radio-opt">
             <input type="radio" name="mc-fotos-marcar-aqui" value="fotos" ${fotosMarcarAquiAcao === 'fotos' ? 'checked' : ''}>
-            <span><span class="t">Voltar para Fotos</span><br><span class="d">Volta pra tela "Fotos" (o mesmo botão do rodapé do app) — comportamento de antes desta rodada.</span></span>
+            <span><span class="t">Voltar para Foto</span><br><span class="d">Volta pra tela "Foto" (o mesmo botão do rodapé do app) — comportamento de antes desta rodada.</span></span>
           </label>
         </div>
+        <!-- RODADA 53 [15/09/2026 UTC], pedido verbatim (item B): "Ao tirar
+             uma foto, um objeto Câmera está sendo atribuída a ela
+             automaticamente [...] deve ter uma opção nas 'configurações 2D'
+             para decidir se isto acontece ou não. Subseção 'Atribuir a um
+             lugar no mapa automaticamente' [...] Opções: 'Não', 'Apenas
+             quando o mapa estiver vazio' e 'Sim'." Lido por capture.js
+             _autoPlacePhoto (chamado quando a pessoa NÃO clica em
+             "📍 Vincular a um lugar no mapa", ou toca fora da tela de
+             opções — ver _openPhotoLinkModal). -->
+                <!-- [15/09/2026 UTC] MUDADO -- pedido verbatim: "A secao '🗺️
+             Atribuir a um lugar no mapa automaticamente' deve ficar logo
+             abaixo da secao '📷 Foto'. A secao '🏷️ Nome automatico da foto'
+             vai junto (ficando logo abaixo de '🗺️ Atribuir...' na sua nova
+             posicao)." Estas duas secoes foram reordenadas pra cá (antes
+             ficavam depois da secao com o SVG "Fotos", que agora foi
+             empurrada pra baixo delas -- nenhum conteudo mudou, só a ORDEM
+             de exibição). -->
+        <div class="mapconfig-section">
+          <h4>🗺️ Atribuir a um lugar no mapa automaticamente</h4>
+          <span class="d" style="display:block; margin-bottom:5px">Quando uma foto é tirada e NÃO se vincula ela a um lugar no mapa (não se clica em "📍 Vincular a um lugar no mapa", ou se toca fora da tela de opções), o que fazer:</span>
+          <label class="radio-opt">
+            <input type="radio" name="mc-foto-auto-camera" value="nao" ${cfg.fotoAutoAtribuirCamera === 'nao' ? 'checked' : ''}>
+            <span><span class="t">Não</span><br><span class="d">A foto fica sem posição no mapa — só aparece na 📦 Caixa, até alguém vincular ela manualmente.</span></span>
+          </label>
+          <!-- [15/09/2026 UTC] MUDADO — pedido verbatim: "a opção 'Apenas
+               quando o mapa estiver vazio' deve trocar sua função para
+               quando houver apenas câmeras no mapa. O nome também deve
+               trocar para 'Quando houver apenas câmeras no mapa'." Antes,
+               "vazio" checava se não havia NENHUMA OUTRA foto/Câmera
+               posicionada (ver capture.js _autoPlacePhoto, variável
+               mapaVazio) — agora checa se o mapa não tem NENHUM objeto/
+               parede/porta/janela/texto (paredes, map.objects,
+               map.portas, map.janelas, map.textos), permitindo
+               qualquer quantidade de Câmeras/fotos já posicionadas. Valor
+               salvo continua 'vazio' (compatibilidade, não precisa migrar
+               dado antigo), só o SIGNIFICADO e o rótulo mudaram. -->
+          <label class="radio-opt" style="margin-top:6px">
+            <input type="radio" name="mc-foto-auto-camera" value="vazio" ${cfg.fotoAutoAtribuirCamera === 'vazio' ? 'checked' : ''}>
+            <span><span class="t">Quando houver apenas câmeras no mapa</span><br><span class="d">Só posiciona automaticamente se o mapa não tiver NENHUM objeto/parede/porta/janela/texto ainda (Câmeras/fotos já posicionadas não contam) — assim que o mapa ganhar algo além de Câmeras, fica sem posição (como em "Não").</span></span>
+          </label>
+          <label class="radio-opt" style="margin-top:6px">
+            <input type="radio" name="mc-foto-auto-camera" value="sim" ${(cfg.fotoAutoAtribuirCamera || 'sim') === 'sim' ? 'checked' : ''}>
+            <span><span class="t">Sim (padrão)</span><br><span class="d">Sempre posiciona automaticamente numa grade a partir da origem definida abaixo.</span></span>
+          </label>
+          <div style="margin-top:10px; padding:10px; border:1px dashed var(--border, #ccc); border-radius:8px">
+            <span class="d" style="display:block; margin-bottom:6px">Como a grade automática de Câmeras é montada:</span>
+            <!-- [15/09/2026 UTC] NOVO — pedido verbatim: "Deve ter uma
+                 opção para considerar colisão com quaisquer objetos. Isto
+                 evita a câmera ser colocada dentro de um objeto. No 2D,
+                 pode não ser um problema, porém no 3D ela ficaria
+                 ocultada." -->
+            <label class="checkbox-opt" style="display:flex; align-items:flex-start; gap:8px; margin-bottom:10px">
+              <input type="checkbox" id="mc-foto-grade-evitar-colisao" ${cfg.fotoGradeEvitarColisao ? 'checked' : ''}>
+              <span><span class="t">Evitar colocar em cima de objetos</span><br><span class="d">Ao posicionar automaticamente, pula posições da grade que colidam com qualquer objeto/forma já no mapa — no 2D pode não incomodar, mas no 3D a Câmera ficaria escondida dentro do objeto.</span></span>
+            </label>
+            <label class="field">
+              <span class="lbl">Distância entre uma Câmera e outra (m)</span>
+              <input type="number" id="mc-foto-grade-dist" min="0.1" step="0.1" value="${cfg.fotoGradeDistancia ?? 1.2}" style="width:100%">
+            </label>
+            <label class="field" style="margin-top:8px">
+              <span class="lbl">Câmeras por linha (antes de quebrar linha)</span>
+              <input type="number" id="mc-foto-grade-porlinha" min="1" step="1" value="${cfg.fotoGradePorLinha ?? 6}" style="width:100%">
+            </label>
+            <div style="display:flex; gap:8px; margin-top:8px">
+              <label class="field" style="flex:1">
+                <span class="lbl">Origem X (m)</span>
+                <input type="number" id="mc-foto-grade-origx" step="0.1" value="${cfg.fotoGradeOrigemX ?? 0}" style="width:100%">
+              </label>
+              <label class="field" style="flex:1">
+                <span class="lbl">Origem Y (m)</span>
+                <input type="number" id="mc-foto-grade-origy" step="0.1" value="${cfg.fotoGradeOrigemY ?? 0}" style="width:100%">
+              </label>
+            </div>
+            <button type="button" class="btn secondary sm block" id="mc-foto-grade-mover" style="margin-top:8px" title="Escolha a origem clicando no mapa (a janela de configurações fica escondida enquanto isso, igual ao botão 'Girar arrastando')">🗺️ Definir origem no mapa</button>
+
+            <!-- RODADA 54 [15/09/2026 UTC], pedido original (reproduzido na
+                 RODADA 54): seletor visual de direção primária (4 setas) +
+                 sentido de quebra de linha (2 setas perpendiculares às
+                 primárias) — 8 combinações no total. Em vez de "câmeras
+                 ghost" desenhadas numa grade completa, optou-se por um
+                 diagrama compacto de setas rotuladas (implementação
+                 legítima do pedido, mesma intenção) que já alimenta o
+                 preview em canvas logo abaixo com o resultado real. -->
+            <div style="margin-top:10px">
+              <span class="lbl" style="display:block; margin-bottom:4px">Direção do avanço (a partir da origem)</span>
+              <div id="mc-foto-grade-dir" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; max-width:150px">
+                <span></span>
+                <button type="button" class="btn secondary sm" data-dir="cima" title="De cima para baixo">↑</button>
+                <span></span>
+                <button type="button" class="btn secondary sm" data-dir="esquerda" title="Da direita para esquerda">←</button>
+                <span style="text-align:center; align-self:center; font-size:11px">▦</span>
+                <button type="button" class="btn secondary sm" data-dir="direita" title="Da esquerda para direita">→</button>
+                <span></span>
+                <button type="button" class="btn secondary sm" data-dir="baixo" title="De baixo para cima">↓</button>
+                <span></span>
+              </div>
+              <span class="lbl" style="display:block; margin:8px 0 4px">Ao trocar de linha, a próxima linha vai para...</span>
+              <div id="mc-foto-grade-quebra" style="display:flex; gap:6px"></div>
+            </div>
+            <div style="margin-top:10px">
+              <span class="lbl" style="display:block; margin-bottom:4px">Pré-visualização (exemplo com várias linhas)</span>
+              <canvas id="mc-foto-grade-preview" width="260" height="140" style="width:100%; max-width:260px; border:1px solid var(--border, #ccc); border-radius:6px; background:#0a0d11"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- RODADA 53, pedido verbatim (item D): "Deve haver outra
+             subseção para definir um nome automático para as fotos que são
+             tiradas. Por padrão fica ativada. O nome deve indicar a data e
+             hora [...] Deve ser possível definir se nesse nome automático
+             vai ser a hora local do aparelho ou se vai ser UTC [...] em vez
+             de 'Seguir relógio do mundo', deve ser 'Seguir horário UTC'."
+             [15/09/2026 UTC] RODADA 55 — trocados os 2 radio buttons pelo
+             MESMO widget "Hora do dia" agora extraído/modular (ver
+             _horaDoDiaWidgetHtml/_wireHoraDoDiaWidget), como pedido
+             ("torne-as modulares e reaproveitáveis"): aqui SEM presets/
+             globo/trilha (mostrarGlobo/mostrarTrilha: false — não há
+             "hora contínua" nenhuma pra escolher, só 2 estados nomeados:
+             local ou UTC), só o par de botões "seguir X" reaproveitado —
+             mesmo texto/HTML/estado-disabled mutuamente exclusivo do uso
+             3D, com altValue='utc' (em vez de 'mundo') e os rótulos
+             ajustados. -->
+        <div class="mapconfig-section">
+          <h4>🏷️ Nome automático da foto</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-foto-nome-auto" ${cfg.fotoNomeAutomaticoAtivo !== false ? 'checked' : ''}>
+            <span><span class="t">Nomear a foto automaticamente com data/hora (padrão: ativado)</span><br><span class="d">Ex.: 2026-06-07_14-30-00. Desligado, a foto fica sem nome até alguém nomear na mão.</span></span>
+          </label>
+          <div style="margin-top:8px">
+            ${this._horaDoDiaWidgetHtml({
+              idPrefix: 'mc-fotonome-hora',
+              presets: [],
+              mostrarGlobo: false,
+              mostrarTrilha: false,
+              valorAtual: cfg.fotoNomeHoraUTC ? 'utc' : null,
+              altValue: 'utc',
+              altLabel: '🌐 Seguir horário UTC',
+              autoLabel: '🕐 Hora local do aparelho',
+            })}
+          </div>
+        </div>
+
         <!-- Seção "Foto" (pedido do usuário, 26/08/2026) — opções da
              ferramenta "📏 Medidas" de "Mapa" → "Foto" (ver ambientephotos.js
              _drawMedida/_openMedidaValorModal). Ver DEFAULTS acima pro
@@ -1354,10 +2237,10 @@ const MapConfig = {
              copiado aqui porque MapConfig é um módulo à parte, sem acesso
              direto aos métodos de MapView). -->
         <div class="mapconfig-section">
-          <h4><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-4px; margin-right:2px"><rect x="3" y="4" width="18" height="16" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.6" fill="currentColor" stroke="none"/><path d="M3 16l5.5-5 4 4 3-3L21 16"/></svg> Foto</h4>
+          <h4><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-4px; margin-right:2px"><rect x="3" y="4" width="18" height="16" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.6" fill="currentColor" stroke="none"/><path d="M3 16l5.5-5 4 4 3-3L21 16"/></svg> Fotos</h4>
           <label class="radio-opt">
             <input type="checkbox" id="mc-medida-setas" ${cfg.medidaSetasAtivo !== false ? 'checked' : ''}>
-            <span><span class="t">Seta nas extremidades da medida</span><br><span class="d">Depois de tocar em "✅ Inserir medida" (ferramenta 📏 Medidas de "Mapa" → "Foto"), a reta ganha uma pequena seta em cada ponta.</span></span>
+            <span><span class="t">Seta nas extremidades da medida</span><br><span class="d">Depois de tocar em "✅ Inserir medida" (ferramenta 📏 Medidas de "Mapa" → "Fotos"), a reta ganha uma pequena seta em cada ponta.</span></span>
           </label>
           <label class="radio-opt" style="margin-top:10px">
             <input type="checkbox" id="mc-medida-circulo" ${cfg.medidaCirculoAposInserirAtivo ? 'checked' : ''}>
@@ -1369,7 +2252,7 @@ const MapConfig = {
           </label>
           <!-- NOVO (04/09/2026), pedido verbatim (item 3) — mesma estrutura
                da opção "Reposicionar medidas..." logo acima, só que pra
-               "✏️ Traço guia" de 'Mapa'->'Foto'. Ver DEFAULTS acima
+               "✏️ Traço guia" de 'Mapa'->'Fotos'. Ver DEFAULTS acima
                (tracoFotoReposicionarExtremidadesAtivo). -->
           <label class="radio-opt" style="margin-top:10px">
             <input type="checkbox" id="mc-traco-foto-reposicionar" ${cfg.tracoFotoReposicionarExtremidadesAtivo ? 'checked' : ''}>
@@ -1378,7 +2261,7 @@ const MapConfig = {
           <!-- ITEM A1 (rodada 57/v311) — ver DEFAULTS acima pro texto do pedido verbatim -->
           <label class="radio-opt" style="margin-top:10px; display:block">
             <span class="t">Formato do arquivo em "⬇️ Baixar esta foto"</span><br>
-            <span class="d">Tipo de imagem gerado ao clicar em "Baixar esta foto" em "Mapa" → "Foto".</span>
+            <span class="d">Tipo de imagem gerado ao clicar em "Baixar esta foto" em "Mapa" → "Fotos".</span>
             <select id="mc-foto-fmt-atual" style="margin-top:4px; display:block">
               <option value="jpg" ${(cfg.fotoDownloadFormatoAtual || 'jpg') === 'jpg' ? 'selected' : ''}>JPG</option>
               <option value="png" ${cfg.fotoDownloadFormatoAtual === 'png' ? 'selected' : ''}>PNG</option>
@@ -1555,25 +2438,32 @@ const MapConfig = {
           </label>
         </div>
         <!-- Seção "🌗 Hora do dia" (pedido do usuário, 03/09/2026) — ver
-             DEFAULTS.horaDoDiaManual acima pro significado completo. Os 4
-             botões e a trilha (range 0h-23h59) escrevem no MESMO campo
-             (horaDoDiaManual), então ficam sempre "de acordo" entre si —
-             ver o wiring em mc-hora-btn/mc-hora-trilha mais abaixo. -->
+             DEFAULTS.horaDoDiaManual acima pro significado completo.
+             [15/09/2026 UTC] EXTRAÍDA para o widget reutilizável
+             _horaDoDiaWidgetHtml/_wireHoraDoDiaWidget (ver comentário
+             grande lá) — pedido verbatim (RODADA 55): "Mapeie as
+             dependências ... e as torne modulares e reaproveitáveis." Só
+             o texto/moldura da seção (Sol/Lua) fica aqui; o widget em si
+             (globo/trilha/presets/botões "seguir X") é genérico. -->
         <div class="mapconfig-section">
           <h4>🌗 Hora do dia</h4>
           <span class="d" style="display:block; margin-bottom:8px">Controla a posição do Sol/Lua e a iluminação da cena. Por padrão, o app segue a hora real do relógio do aparelho — os controles abaixo permitem travar num horário fixo (útil pra testar a iluminação de noite sem esperar a noite chegar de verdade).</span>
-          <div class="mc-hora-botoes" style="display:flex; gap:6px; flex-wrap:wrap">
-            <button type="button" class="btn secondary mc-hora-btn" data-hora="8">🌅 Manhã</button>
-            <button type="button" class="btn secondary mc-hora-btn" data-hora="13">☀️ Dia</button>
-            <button type="button" class="btn secondary mc-hora-btn" data-hora="18">🌇 Tarde</button>
-            <button type="button" class="btn secondary mc-hora-btn" data-hora="22">🌙 Noite</button>
-          </div>
-          <label class="field" style="margin-top:10px">
-            <span class="lbl">Trilha de horas do dia — <span id="mc-hora-trilha-label">${this._formatHora(cfg.horaDoDiaManual != null ? Number(cfg.horaDoDiaManual) : (new Date().getHours() + new Date().getMinutes() / 60))}</span></span>
-            <input type="range" id="mc-hora-trilha" min="0" max="23.983" step="0.25"
-              value="${cfg.horaDoDiaManual != null ? Number(cfg.horaDoDiaManual) : (new Date().getHours() + new Date().getMinutes() / 60)}">
-          </label>
-          <button type="button" class="btn secondary block" id="mc-hora-auto" style="margin-top:8px" ${cfg.horaDoDiaManual == null ? 'disabled' : ''}>🕐 Seguir relógio do aparelho ${cfg.horaDoDiaManual == null ? '(ativo)' : ''}</button>
+          ${this._horaDoDiaWidgetHtml({
+            idPrefix: 'mc-hora',
+            presets: [
+              { hora: 8, label: '🌅 Manhã' },
+              { hora: 13, label: '☀️ Dia' },
+              { hora: 18, label: '🌇 Tarde' },
+              { hora: 22, label: '🌙 Noite' },
+            ],
+            mostrarGlobo: true,
+            mostrarTrilha: true,
+            valorAtual: cfg.horaDoDiaManual,
+            altValue: 'mundo',
+            altLabel: '🌐 Seguir relógio do mundo',
+            autoLabel: '🕐 Seguir relógio do aparelho',
+            getAltHoraDecimal: () => this._horaMundoDecimal(),
+          })}
         </div>
         <div class="mapconfig-section">
           <h4>Raycasting (mira do 3D)</h4>
@@ -1595,6 +2485,11 @@ const MapConfig = {
               <option value="hitbox" ${(cfg.raycastPrecision || 'hitbox') === 'hitbox' ? 'selected' : ''}>Caixa de colisão (rápido — padrão)</option>
               <option value="pixelperfect" ${cfg.raycastPrecision === 'pixelperfect' ? 'selected' : ''}>Pixel perfect (testa a malha real, mais exato nas bordas)</option>
             </select>
+            <!-- [13/09/2026] NOVO — pedido verbatim: com "Pixel perfect" marcado, o
+                 objeto na mira ganha um contorno pontilhado na silhueta (ver
+                 engine3d.js _updateHoverHighlight) independente do "Estilo do
+                 destaque" escolhido acima. -->
+            <span class="d" style="display:block; margin-top:4px">Com "Pixel perfect" marcado, o objeto na mira sempre ganha um contorno pontilhado na silhueta (independente do "Estilo do destaque" acima).</span>
           </label>
         </div>
         <!-- NOVO (07/09/2026), pedido verbatim: "scripts para os objetos
@@ -1717,18 +2612,55 @@ const MapConfig = {
         </div>
         <div class="mapconfig-section">
           <h4>Desempenho 3D</h4>
+          <!-- [13/09/2026] UNIFICADO — antes existiam DUAS configs
+               separadas chamadas "resolução" nesta mesma seção: "Resolução"
+               (teto de devicePixelRatio, cfg.resolucao3D, usado em
+               engine3d.js RESOLUCAO_DPR) e "Resolução de renderização
+               (Ver em 3D)" (tamanho fixo de render target,
+               cfg.resolucaoCustom3D, usado no "modo eye"/render target
+               de engine3d.js + _applyResolucaoCustom3D de view3d.js).
+               São mecanismos tecnicamente diferentes (um é multiplicador
+               de nitidez sobre o tamanho nativo do canvas; o outro é um
+               tamanho de render fixo e independente, depois esticado ou
+               "encaixado" no canvas), mas pro usuário eram "duas coisas
+               chamadas resolução" na mesma tela — confuso. Unificado num
+               único select que grava nos MESMOS DOIS campos de config
+               de sempre (resolucao3D + resolucaoCustom3D), preservando
+               100% da lógica já existente em engine3d.js/view3d.js — só a
+               APRESENTAÇÃO virou uma seção só. Configs antigas continuam
+               funcionando sem migração: o valor selecionado é DERIVADO
+               dos dois campos existentes (ver wiring mais abaixo). -->
           <label class="field">
-            <span class="lbl">Resolução</span>
-            <select id="mc-resolucao3d">
-              <option value="alta" ${(cfg.resolucao3D || 'alta') === 'alta' ? 'selected' : ''}>Alta (mais nítido — padrão)</option>
-              <option value="media" ${cfg.resolucao3D === 'media' ? 'selected' : ''}>Média</option>
-              <option value="baixa" ${cfg.resolucao3D === 'baixa' ? 'selected' : ''}>Baixa (mais FPS)</option>
+            <span class="lbl">Resolução de renderização</span>
+            <select id="mc-res-mode">
+              <option value="alta" ${(!cfg.resolucaoCustom3D && (cfg.resolucao3D || 'alta') === 'alta') ? 'selected' : ''}>Automática (nítido — padrão)</option>
+              <option value="media" ${(!cfg.resolucaoCustom3D && cfg.resolucao3D === 'media') ? 'selected' : ''}>Automática (média)</option>
+              <option value="baixa" ${(!cfg.resolucaoCustom3D && cfg.resolucao3D === 'baixa') ? 'selected' : ''}>Automática (mais FPS)</option>
+              <option value="custom" ${cfg.resolucaoCustom3D ? 'selected' : ''}>Personalizada…</option>
             </select>
+            <span class="d">"Automática" ajusta a nitidez do canvas do jeito de sempre (mais nítido = mais pesado pra GPU). "Personalizada…" define um tamanho de render FIXO em pixels (independente do tamanho da tela), depois esticado ou encaixado no canvas — ignora o nível de nitidez acima enquanto estiver ativa.</span>
           </label>
           <label class="radio-opt" style="margin-top:10px">
             <input type="checkbox" id="mc-antialiasing3d" ${cfg.antialiasing3D !== false ? 'checked' : ''}>
             <span><span class="t">Suavização de bordas (antialiasing)</span><br><span class="d">Desligar custa menos GPU (mais FPS), mas as bordas ficam serrilhadas. Só faz efeito da próxima vez que "Ver em 3D" for aberto — não muda com a tela já aberta.</span></span>
           </label>
+          <div id="mc-res-mode-fields" class="${cfg.resolucaoCustom3D ? '' : 'hidden'}" style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:flex-end">
+            <label class="field" style="flex:1; min-width:100px">
+              <span class="lbl">Largura (px)</span>
+              <input type="number" id="mc-res-custom3d-w" min="${this.RES_CUSTOM_MIN}" step="1" value="${cfg.resolucaoCustom3D?.w || 1280}">
+            </label>
+            <label class="field" style="flex:1; min-width:100px">
+              <span class="lbl">Altura (px)</span>
+              <input type="number" id="mc-res-custom3d-h" min="${this.RES_CUSTOM_MIN}" step="1" value="${cfg.resolucaoCustom3D?.h || 720}">
+            </label>
+            <label class="field" style="flex:1; min-width:140px">
+              <span class="lbl">Modo de ajuste</span>
+              <select id="mc-res-custom3d-fit">
+                <option value="esticar" ${(cfg.resolucaoCustom3D?.fit || 'esticar') === 'esticar' ? 'selected' : ''}>Esticar (preenche tudo)</option>
+                <option value="caber" ${cfg.resolucaoCustom3D?.fit === 'caber' ? 'selected' : ''}>Caber (mantém proporção, barras pretas)</option>
+              </select>
+            </label>
+          </div>
           <label class="field" style="margin-top:10px">
             <span class="lbl">Distância de renderização</span>
             <select id="mc-render-distance">
@@ -1783,6 +2715,40 @@ const MapConfig = {
               style="margin-top:6px" min="2" max="100" step="1"
               value="${Math.round(Utils.clamp(Number(cfg.objetoChunkTamanho) || 10, 2, 100))}"
               placeholder="tamanho do bloco em metros" title="Tamanho de cada bloco/chunk, em metros (mínimo 2m)">
+          </label>
+          <!-- [13/09/2026 UTC] NOVO — ver comentário grande de
+               DEFAULTS.objetoLimitePorFrame, acima, pro pedido/motivo
+               completo. Subseção própria (checkbox liga/desliga + campo de
+               número), mesmo padrão visual do restante desta seção. -->
+          <label class="field checkbox" style="margin-top:10px">
+            <input type="checkbox" id="mc-limite-frame-ativo" ${cfg.objetoLimitePorFrameAtivo !== false ? 'checked' : ''}>
+            <span class="lbl">Limitar objetos renderizados por quadro</span>
+          </label>
+          <label class="field" id="mc-limite-frame-wrap" style="margin-top:6px${cfg.objetoLimitePorFrameAtivo === false ? ';display:none' : ''}">
+            <span class="lbl">Limite de objetos por quadro</span>
+            <input type="number" id="mc-limite-frame-valor" min="1" step="1"
+              value="${Math.max(1, Math.round(Number(cfg.objetoLimitePorFrame) || 1200))}"
+              placeholder="ex: 1200" title="Quantidade máxima de objetos/itens/câmeras desenhados numa mesma cena/quadro">
+            <span class="d">Quando o contador de objetos desenhados numa cena chega neste limite, nenhum outro é desenhado NAQUELE quadro — o resto só aparece (ou não, se sair do alcance/setor antes) no quadro seguinte. Objetos mais PERTO do personagem têm prioridade (são desenhados primeiro); um limite baixo com muitos objetos espalhados pode deixar objetos distantes "piscando" entre quadros — os scripts/rotinas deles (animação, NPC) continuam rodando normalmente mesmo fora da tela, só a malha para de ser desenhada. Padrão: 1200.</span>
+          </label>
+          <!-- [13/09/2026] NOVO — pedido verbatim: "Adicione controles de
+               plano de corte próximo/distante (z_near/z_far) da câmera na
+               seção 'Desempenho 3D', usando o mesmo componente de 'botão
+               triplo' (arrastar/clicar nas setas/clicar no centro para
+               digitar) que já existe. Deve ser atualizado em tempo real."
+               Ver DEFAULTS.cameraZNear/cameraZFar acima pro significado
+               completo dos dois campos. Os divs abaixo ficam VAZIOS —
+               _wireDesempenho3DCamPlanes (chamado no fim de open(), mesmo
+               padrão de _wireCamPropsFieldset em mapview.js) é quem monta
+               e encaixa os widgets de verdade (ModelerUI._createNumField,
+               o "botão triplo"). -->
+          <label class="field" style="margin-top:10px">
+            <span class="lbl">Plano de corte da câmera (near/far)</span>
+            <span class="d">Distância mínima ("Início") e máxima ("Fim") que a câmera do "Ver em 3D" desenha — objetos mais perto que "Início" ou mais longe que "Fim" somem da tela. "Início" bem pequeno pode causar "z-fighting" (tremulação) em objetos distantes; "Fim" não precisa passar da "Distância de renderização" acima (o que estiver além dela já some na neblina). Atualiza a câmera do "Ver em 3D" (se estiver aberta) na hora, sem precisar reabrir.</span>
+            <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap">
+              <div id="mc-cam-znear-wrap"></div>
+              <div id="mc-cam-zfar-wrap"></div>
+            </div>
           </label>
         </div>
         <!-- NOVO (07/09/2026), seção "🖥️ Efeitos de tela" — pedido verbatim
@@ -1931,6 +2897,305 @@ const MapConfig = {
             <span class="d" id="mc-juncao-desc" style="display:block; margin-top:6px">${Utils.escapeHtml((this._WALL_JOIN_TYPES.find((t) => t.key === (cfg.paredeJuncaoTipo || 'atual')) || this._WALL_JOIN_TYPES[0]).desc)}</span>
           </div>
         </div>
+        <!-- Seção "📏 Trena 3D" (pedido do usuário, 16/09/2026 UTC): "Deve
+             haver snap de posição configurável nas 'configurações 3D'" —
+             ver DEFAULTS acima (campos trena3DSnap*/trena3DLabelEstilo/
+             trena3DVisibilidade/trena3DEspessuraCm/trena3DCor*/trena3DPonta)
+             e view3d.js (_trena3DSnap/_trena3DSnapStep/
+             _trena3DRebuildLines/_trena3DUpdatePreview/
+             _trena3DEndpointMesh/_trena3DAtualizarOclusao) pra como cada
+             campo é lido/aplicado. Dividida em subseções (pedido verbatim
+             do usuário, rodada seguinte à que criou o snap): Snap, Aparência
+             da medida, Visibilidade, Espessura/cores e Pontas. -->
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D<button type="button" id="mc-trena3d-sobre-btn" class="btn sm secondary" style="margin-left:10px; vertical-align:middle" title="Abre uma janela explicando em detalhes como usar a ferramenta Trena 3D (modos de ancoragem, snap, cliques).">📖 Sobre a Trena 3D</button></h4>
+          <span class="d" style="display:block">Botão acima abre um documento explicando passo a passo como a ferramenta "📏 Trena 3D" funciona (dentro de "Ver em 3D") — inclusive os 2 modos de ancoragem configuráveis logo abaixo.</span>
+        </div>
+        <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "sobre segurar o ctrl,
+             deve ter uma subseção sobre como funciona esta funcionalidade
+             [...] Opção de ter que segurar o ctrl [...] deixando apenas a 3ª
+             dimensão [...] Nesta opção, se o ctrl não for pressionado, uma
+             medida pode ser feita com apenas 2 cliques. A outra opção é
+             fazer uma medida com 4 cliques [...] torna-se independente de
+             ele estar pressionado ou não." Nova opção 'trena3DModoAncora'
+             ('ctrl', padrão — comportamento de sempre desde a rodada que
+             criou a âncora vertical; 'quatroCliques' — nova, ver
+             view3d.js '_trena3DClick'/'_trena3DUpdatePreview', onde o Ctrl
+             físico é ignorado e a alternância ancora/ponto é 100% automática
+             por estado, sempre exigindo exatamente 4 cliques por medida). -->
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Como funciona a ancoragem (Ctrl)</h4>
+          <span class="d" style="display:block; margin-bottom:8px">A Trena 3D mede entre 2 pontos no espaço 3D. Um clique comum mira DIRETO numa superfície (chão/parede/objeto) pra definir cada ponto. Mas às vezes você quer um ponto "no ar" (ex.: o topo de uma parede, medido a partir do chão) — pra isso existe a <b>âncora</b>: um clique de ancoragem trava X/Z num ponto real do chão/superfície, e o PRÓXIMO clique fixa a altura (Y) livremente sobre essa reta vertical, mirando pra cima/baixo. Escolha abaixo como essa ancoragem é acionada:</span>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-modo-ancora" value="ctrl" ${cfg.trena3DModoAncora !== 'quatroCliques' ? 'checked' : ''} title="Segurar Ctrl e clicar estabelece/move uma âncora (trava X/Z, libera só Y); soltar o Ctrl e clicar fixa o ponto 'no ar' sobre essa reta. Sem usar Ctrl nenhuma vez, uma medida sai com só 2 cliques normais (direto na superfície).">
+            <span><span class="t">Segurando Ctrl (padrão) — medida normal com 2 cliques</span><br><span class="d">Segure Ctrl e clique pra estabelecer (ou mover) um ponto de ancoragem no chão/superfície, fixando X e Z — solte o Ctrl e clique de novo pra fixar a 3ª dimensão (a altura, Y) nesta linha "no ar", livre pra mirar pra cima/baixo. Se você NUNCA segurar Ctrl durante a medição, ela é feita do jeito simples de sempre: só 2 cliques, cada um direto numa superfície real — o Ctrl é 100% opcional, só entra em jogo se você quiser um ponto "no ar".</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-modo-ancora" value="quatroCliques" ${cfg.trena3DModoAncora === 'quatroCliques' ? 'checked' : ''} title="Toda medida sempre usa exatamente 4 cliques, alternando âncora/ponto para os dois pontos da medida — o Ctrl não tem nenhum efeito neste modo.">
+            <span><span class="t">Sempre com 4 cliques (independe do Ctrl)</span><br><span class="d">Toda medida passa a exigir SEMPRE 4 cliques, nesta ordem — segurar Ctrl ou não faz nenhuma diferença neste modo: <b>1º clique</b> estabelece o ponto de ancoragem do 1º ponto (trava X/Z, libera só a altura); <b>2º clique</b> fixa o 1º ponto da medida "no ar" sobre essa reta; <b>3º clique</b> estabelece o ponto de ancoragem do 2º ponto (trava X/Z de novo, num lugar novo); <b>4º clique</b> fixa o 2º ponto da medida e conclui.</span></span>
+          </label>
+        </div>
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Snap</h4>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "A subseção de snap
+               deve ser como no cabeçalho do mapa 2D (na janela
+               'Ferramentas'->'Parede' [...] no cabeçalho é ativado o 'Snap
+               de parede' e do lado direito o valor)" — mesmo par
+               toggle+campo-de-valor lado a lado do cabeçalho de "🧱 Parede"
+               (ver mapview.js, botão "🧲 Snap de parede" + campo numérico ao
+               lado), só que aqui dentro do painel de Configurações (que usa
+               label.field/.radio-opt, não os .icon-btn/
+               .map2d-toolctx-numfield daquele cabeçalho flutuante — o
+               PAR toggle+valor lado a lado é o que foi replicado, não as
+               classes CSS exatas, que pertencem a um contexto diferente). -->
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap">
+            <label class="radio-opt" style="flex:0 0 auto; margin:0">
+              <input type="checkbox" id="mc-trena3d-snap-on" ${cfg.trena3DSnapAtivo !== false ? 'checked' : ''}>
+              <span><span class="t">🧲 Snap de posição</span></span>
+            </label>
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:120px">
+              <span class="lbl">Valor (m)</span>
+              <input type="number" id="mc-trena3d-snap" min="0.01" max="2" step="0.01" value="${Utils.clamp(Number(cfg.trena3DSnapMetros) || 0.1, 0.01, 2)}" ${cfg.trena3DSnapAtivo === false ? 'disabled' : ''}>
+            </label>
+          </div>
+          <span class="d" style="display:block; margin-top:6px">Com o snap LIGADO, cada ponta clicada com a ferramenta "📏 Trena 3D" (dentro de "Ver em 3D") arredonda X/Y/Z pro múltiplo mais próximo do valor ao lado — evita medidas com casas decimais "quebradas" por causa de mira imprecisa. Desligado, usa a posição exata da mira/superfície, sem arredondar. Dica: segurando <b>Shift</b> durante a medição, o snap fica desligado temporariamente, mesmo com esta opção marcada — solte o Shift pra voltar a arredondar normalmente.</span>
+        </div>
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Aparência da medida</h4>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-label" value="sobreLinha" ${cfg.trena3DLabelEstilo !== 'flutuante' ? 'checked' : ''}>
+            <span><span class="t">Em cima da linha, no meio (padrão)</span><br><span class="d">O texto da distância fica centrado bem em cima do traço da medida, no meio dela.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-label" value="flutuante" ${cfg.trena3DLabelEstilo === 'flutuante' ? 'checked' : ''}>
+            <span><span class="t">Flutuante (jeito antigo)</span><br><span class="d">O texto fica um pouco acima do meio da linha, "flutuando" — era o único jeito antes desta opção existir.</span></span>
+          </label>
+        </div>
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Visibilidade</h4>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-vis" value="seVisivel" ${cfg.trena3DVisibilidade !== 'sempre' ? 'checked' : ''}>
+            <span><span class="t">Só se estiver visível (padrão)</span><br><span class="d">Se algo (uma parede, um objeto) estiver na frente da medida, bloqueando a visão dela a partir da câmera, ela some — igual a um objeto de verdade sendo tampado por outro.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-vis" value="sempre" ${cfg.trena3DVisibilidade === 'sempre' ? 'checked' : ''}>
+            <span><span class="t">Sempre aparecer</span><br><span class="d">A medida é sempre desenhada por cima de tudo, não importa a distância ou se há algo na frente dela (jeito antigo, antes desta opção existir).</span></span>
+          </label>
+        </div>
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Espessura e cores</h4>
+          <label class="field">
+            <span class="lbl">Espessura da linha (cm)</span>
+            <input type="number" id="mc-trena3d-espessura" min="0.2" max="15" step="0.2" value="${Utils.clamp(Number(cfg.trena3DEspessuraCm) || 2, 0.2, 15)}">
+            <span class="d">Espessura (diâmetro real, em centímetros) do traço entre as 2 pontas de uma medida já finalizada.</span>
+          </label>
+          <label class="field" style="margin-top:8px"><span class="lbl">Cor da medida finalizada</span><input type="color" id="mc-trena3d-cor-linha" value="${cfg.trena3DCorLinha || '#ffd166'}"></label>
+          <label class="field" style="margin-top:8px"><span class="lbl">Cor da âncora/linha vertical (Ctrl)</span><input type="color" id="mc-trena3d-cor-ancora" value="${cfg.trena3DCorAncora || '#ff9f4d'}"></label>
+          <label class="field" style="margin-top:8px"><span class="lbl">Cor da mira normal (sem âncora)</span><input type="color" id="mc-trena3d-cor-mira" value="${cfg.trena3DCorMira || '#5ec8ff'}"></label>
+          <span class="d" style="display:block; margin-top:6px">Cores usadas em todo o processo de medir: a linha/pontas de uma medida já pronta, a referência vertical enquanto se ancora "no ar" (segurando Ctrl), e o indicador de mira no modo normal.</span>
+        </div>
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Pontas</h4>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-ponta" value="esfera" ${cfg.trena3DPonta !== 'seta' && cfg.trena3DPonta !== 'traco' ? 'checked' : ''}>
+            <span><span class="t">Esfera (padrão)</span><br><span class="d">Uma bolinha em cada extremidade da medida — o jeito de sempre.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-ponta" value="seta" ${cfg.trena3DPonta === 'seta' ? 'checked' : ''}>
+            <span><span class="t">Seta</span><br><span class="d">Uma pequena seta em cada extremidade, apontando ao longo da linha da medida.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-ponta" value="traco" ${cfg.trena3DPonta === 'traco' ? 'checked' : ''}>
+            <span><span class="t">Traço perpendicular</span><br><span class="d">Um tracinho cruzando a linha em cada extremidade, perpendicular à medida — estilo "régua de desenho técnico".</span></span>
+          </label>
+        </div>
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Destaque de mira durante a âncora</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-suprimir-destaque" ${cfg.trena3DSuprimirDestaqueDuranteAncora !== false ? 'checked' : ''}>
+            <span><span class="t">Desativar o destaque do raycaster enquanto a linha perpendicular estiver ativa (padrão: ativado)</span><br><span class="d">Enquanto a referência vertical da âncora está sendo usada (Ctrl segurado, ou já marcada com um clique), o contorno de destaque normal (o que aparece sob a mira ao mirar chão/parede/objeto) fica desligado — nesse momento a mira está escolhendo uma ALTURA na reta, não selecionando algo de verdade.</span></span>
+          </label>
+        </div>
+        <div class="mapconfig-section">
+          <!-- [16/09/2026 UTC] COLAPSADO — pedido verbatim: "Colapse as duas
+               subseções '📏 Trena 3D — Altura ao vivo' e '📏 Trena 3D —
+               Antes mesmo de definir o ponto', ficando '📏 Trena 3D —
+               Altura ao vivo (Antes mesmo de definir o ponto)'. deixe a
+               opção e a descrição textual de 'Antes mesmo de definir o
+               ponto'. A opção da subseção 'Altura ao vivo' deixa de
+               existir." A opção/checkbox "Altura ao vivo" (que cobria o
+               caso "mira comum numa superfície elevada, sem âncora nenhuma
+               em jogo") foi removida por completo — esse caso fica sempre
+               ativo agora (ver view3d.js '_trena3DUpdatePreview', era o
+               padrão de qualquer forma). Só sobra a opção "Antes mesmo de
+               definir o ponto", com o cabeçalho combinado. -->
+          <h4>📏 Trena 3D — Altura ao vivo (Antes mesmo de definir o ponto)</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-altura-antes-ponto" ${cfg.trena3DMostrarAlturaAoVivoAntesDoPonto !== false ? 'checked' : ''}>
+            <span><span class="t">Mostrar a medida entre a âncora e a bolinha "no ar" antes de fixar o ponto (padrão: ativado)</span><br><span class="d">Depois de marcar a âncora no chão (clique segurando Ctrl), enquanto o outro ponto ainda não foi fixado com um clique, a distância entre os 2 já aparece do lado da bolinha que segue o cursor. Desligue pra só ver essa medida depois de fixar o ponto.</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque como outra
+               opcao dentro de 'Altura ao vivo (Antes mesmo de definir o
+               ponto)' para definir que a medida laranja aparece ou nao ja ao
+               segurar o ctrl. Em vez de sempre deixar ativo." Ver view3d.js
+               '_trena3DUpdatePreview' (variavel 'alturaPermitidaPorConfig'). -->
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-altura-ao-segurar-ctrl" ${cfg.trena3DMostrarAlturaAoVivoAoSegurarCtrl !== false ? 'checked' : ''} title="Enquanto o Ctrl está segurado (ou, no modo '4 cliques', antes de marcar a âncora), mesmo sem nenhuma âncora ainda commitada, mostra a medida do chão até a bolinha que segue a mira.">
+            <span><span class="t">Mostrar já ao segurar o Ctrl, antes mesmo de marcar a âncora (padrão: ativado)</span><br><span class="d">Enquanto o Ctrl está sendo segurado (ou, no modo "Sempre com 4 cliques", antes do próximo clique marcar a âncora), a medida do chão até a bolinha que segue a mira já aparece, mesmo sem nenhuma âncora ter sido marcada ainda. Desligue pra só ver essa medida depois de a âncora já estar marcada.</span></span>
+          </label>
+        </div>
+        <div class="mapconfig-section">
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque uma opção de
+               continuar desenhando a linha laranja tracejada ate o 1o ponto
+               da medida (por padrao, ativada), apos ela ser definida.
+               Atualmente, a linha laranja tracejada infinita fica aparente
+               apenas apos ser definida a 1a ancora ate ser definido o 1o
+               ponto da medida. Depois que o 1o ponto da medida e definido,
+               a linha laranja tracejada infinita desaparece. Esta nova
+               opcao faz a linha laranja tracejada infinita continuar a ser
+               impressa. Uma subopcao deve ter para definir se a linha
+               laranja tracejada fica infinita ou vai ate o 1o ponto da
+               medida (por padrao, a opcao do 'vai ate o 1o ponto da
+               medida' deve ficar ativa)." Ver view3d.js
+               '_trena3DUpdatePreview' (bloco de '_trena3DP1HeightLine'). -->
+          <h4>📏 Trena 3D — Linha da âncora após o 1º ponto</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-continuar-linha-ancora" ${cfg.trena3DContinuarLinhaAncoraAposPonto !== false ? 'checked' : ''} title="Depois que o 1º ponto da medida é fixado, a âncora (o clique com Ctrl) é 'consumida' e a linha laranja tracejada perpendicular ao chão desaparecia. Esta opção faz ela continuar sendo desenhada.">
+            <span><span class="t">Continuar desenhando a linha tracejada depois do 1º ponto ser definido (padrão: ativado)</span><br><span class="d">Sem esta opção, a linha laranja tracejada perpendicular ao chão só aparece entre marcar a âncora e fixar o 1º ponto da medida — depois disso ela some. Com esta opção ativada, ela continua sendo desenhada mesmo depois do 1º ponto já fixado.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-linha-ancora-modo" value="ateOPonto" ${cfg.trena3DLinhaAncoraAposPontoModo !== 'infinita' ? 'checked' : ''} title="A linha vai só até a altura real do 1º ponto da medida — o comprimento dela já mostra a medida.">
+            <span><span class="t">Vai até o 1º ponto da medida (padrão)</span><br><span class="d">A linha para exatamente na altura do 1º ponto já fixado — o próprio comprimento dela representa a medida.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-linha-ancora-modo" value="infinita" ${cfg.trena3DLinhaAncoraAposPontoModo === 'infinita' ? 'checked' : ''} title="A linha continua até o teto de 6m, como a referência vertical mostrada durante a ancoragem, em vez de parar na altura do 1º ponto.">
+            <span><span class="t">Infinita</span><br><span class="d">A linha continua até o teto de 6m (mesmo comprimento da referência mostrada durante a ancoragem), independente da altura real do 1º ponto.</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Outra subopcao e
+               imprimir junto com a linha laranja tracejada infinita (ou ate
+               o 1o ponto, com isso, nao sendo infinita) o texto laranja da
+               medida (logo depois de definir o 1o ponto da medida)." Ver
+               view3d.js '_trena3DUpdatePreview' (bloco de
+               '_trena3DP1HeightLine'). -->
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-mostrar-medida-linha-ancora" ${cfg.trena3DMostrarMedidaNaLinhaAncoraAposPonto !== false ? 'checked' : ''} title="Além da linha em si, mostra o texto laranja com o valor da medida (⬍ Xm) junto dela, mesmo depois do 1º ponto já ter sido fixado.">
+            <span><span class="t">Mostrar também o texto da medida junto com essa linha (padrão: ativado)</span><br><span class="d">Com esta opção, o texto laranja da medida (⬍ Xm) continua aparecendo junto com a linha tracejada acima, mesmo depois do 1º ponto da medida já ter sido definido. Desligue para deixar só a linha, sem o texto.</span></span>
+          </label>
+        </div>
+        <div class="mapconfig-section">
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Semelhante a
+               subsecao 'Linha da ancora apos o 1o ponto', mas agora nas duas
+               linhas (a linha [...] que vai do 1o ponto ancora ate o 1o
+               ponto da medida e a [...] do 2o ponto ancora ate o 2o ponto da
+               medida). Deve te uma subsecao para definir se ficam impressas
+               apos a medida ser finalizada (por padrao, desativada). E uma
+               subopcao se desenha do chao ate os pontos da medida ou se as
+               duas vao ser infinitas." Ver view3d.js '_trena3DRebuildLines'. -->
+          <h4>📏 Trena 3D — Linhas verticais das medidas finalizadas</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-linhas-finalizada" ${cfg.trena3DMostrarLinhasAncoraFinalizada === true ? 'checked' : ''} title="Depois que uma medida com pontos 'no ar' (ancorados) é finalizada, mostra as 2 linhas tracejadas laranja (do chão até cada ponto) permanentemente junto com ela, não só durante a medição.">
+            <span><span class="t">Mostrar depois da medida finalizada (padrão: desativado)</span><br><span class="d">Para cada ponto da medida que tenha sido fixado "no ar" (com âncora), mostra uma linha tracejada do chão até ele, junto com a medida já pronta — não some mais depois de clicar o 2º ponto. Se um ponto da medida já está no chão (y=0), não há linha pra desenhar nele.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-linhas-finalizada-modo" value="ateOPonto" ${cfg.trena3DLinhasAncoraFinalizadaModo !== 'infinita' ? 'checked' : ''} title="Cada linha vai só até a altura real do ponto correspondente — o comprimento dela já mostra a altura daquele ponto.">
+            <span><span class="t">Vai até o ponto da medida (padrão)</span><br><span class="d">Cada linha para exatamente na altura do ponto correspondente.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-linhas-finalizada-modo" value="infinita" ${cfg.trena3DLinhasAncoraFinalizadaModo === 'infinita' ? 'checked' : ''} title="As 2 linhas continuam até o teto de 6m, como a referência vertical mostrada durante a ancoragem, em vez de parar na altura de cada ponto.">
+            <span><span class="t">Infinita</span><br><span class="d">As 2 linhas continuam até o teto de 6m, independente da altura real de cada ponto.</span></span>
+          </label>
+        </div>
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Guia de grade do mundo</h4>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "mostrar linhas
+               tracejadas guias a partir do lado do ladrilho do mundo (na
+               verdade, dos multiplos de 1m [...]). Por exemplo, aponta-se
+               para um ponto 0,3m a direita do ladrilho que esta a esquerda
+               (uma linha tracejada guia deve ser impressa ai) e 0,4m a
+               baixo do ladrilho que esta em cima (uma linha tracejada guia
+               deve ser impressa ai tambem). As medidas tambem devem
+               aparecer (no meio e centralizadas). Por padrao, fica
+               ativada." -- ver view3d.js _trena3DAtualizarGuiaGrade. -->
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-guia-grade" ${cfg.trena3DGuiaGradeAtiva !== false ? 'checked' : ''}>
+            <span><span class="t">Mostrar linhas guia até o ladrilho do mundo mais próximo (padrão: ativado)</span><br><span class="d">Enquanto mira com a "📏 Trena 3D", 2 linhas curtas SÓLIDAS (uma no eixo X, outra no eixo Z) mostram a distância do ponto mirado até a linha de grade mais próxima (múltiplo de 1m — o mesmo espaçamento do ladrilho do chão), com a medida de cada uma centralizada no meio da linha. Some sozinha quando o ponto já está exatamente em cima da grade naquele eixo.</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "faça um preview de
+               canvas para se ter noção do que se trata." Preview 2D
+               ilustrativo (não é a cena 3D de verdade) — desenhado/atualizado
+               em '_trena3DDesenharPreviewGuiaGrade' logo abaixo, reagindo ao
+               radio "esquerdaCima"/"maisPerto". -->
+          <div style="margin:8px 0 4px; display:flex; justify-content:center">
+            <canvas id="mc-trena3d-guia-grade-preview" width="180" height="180" style="background:#1a1c22; border:1px solid var(--border); border-radius:6px; max-width:100%"></canvas>
+          </div>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Outra opção e como
+               as medidas vao ser apresentadas no ladrilho, como e
+               atualmente e uma opcao. Outra e sempre partindo da esquerda
+               numa medida e de cima para a outra medida (esta deve ser a
+               padrao)." -->
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-guia-modo" value="esquerdaCima" ${cfg.trena3DGuiaGradeModoMedida !== 'maisPerto' ? 'checked' : ''}>
+            <span><span class="t">Sempre a partir da esquerda (eixo X) e de cima (eixo Z) (padrão)</span><br><span class="d">As 2 medidas sempre partem do mesmo lado do ladrilho, não importa se o ponto mirado está mais perto do lado oposto — mais previsível pra comparar medidas entre pontos diferentes.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-guia-modo" value="maisPerto" ${cfg.trena3DGuiaGradeModoMedida === 'maisPerto' ? 'checked' : ''}>
+            <span><span class="t">Sempre até o lado mais próximo (jeito antigo)</span><br><span class="d">Cada medida vai até o múltiplo de 1m mais perto do ponto mirado naquele eixo — pode ser o da esquerda OU o da direita/de cima OU o de baixo, o que estiver mais perto.</span></span>
+          </label>
+        </div>
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Gradeado do ladrilho mirado</h4>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "desenhar um
+               gradeado dentro do ladrilho de mundo que esta sendo alvo no
+               momento, conforme o snap definido. Um gradeado feito com
+               linha pontilhadas. Por padrao ativado." -- ver view3d.js
+               _trena3DAtualizarGradeSnapLadrilho. -->
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-grade-snap" ${cfg.trena3DGradeSnapLadrilhoAtiva !== false ? 'checked' : ''}>
+            <span><span class="t">Mostrar gradeado (pontilhado) dentro da área mirada, no espaçamento do snap (padrão: ativado)</span><br><span class="d">Enquanto mira com a "📏 Trena 3D", a área sob a mira (ver opção abaixo) ganha linhas pontilhadas internas, espaçadas conforme o valor do snap configurado acima (ex.: snap de 0,1m desenha um gradeado 10×10 por ladrilho de 1m) — ajuda a visualizar onde o snap vai cair antes de clicar. Se o snap estiver desligado ou o valor for 1m ou mais, não há linha interna pra desenhar (o próprio ladrilho já seria a menor unidade).</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "o preview deve ficar
+               logo abaixo da opção 'Mostrar gradeado (pontilhado)...'."
+               Movido pra cá (era logo depois de "Espessura"/"Vão"). -->
+          <div style="margin:8px 0 4px; display:flex; justify-content:center">
+            <canvas id="mc-trena3d-grade-snap-preview" width="180" height="180" style="background:#1a1c22; border:1px solid var(--border); border-radius:6px; max-width:100%"></canvas>
+          </div>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ter uma opcao
+               (sobre o gradeado) que o desenhe 'nos quatro ladrilhos do
+               entorno', do 'jeito atual' ou 'metade de cada ladrilho do
+               entorno'." -->
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-grade-snap-modo" value="atual" ${cfg.trena3DGradeSnapLadrilhoModo !== 'quatroLadrilhos' && cfg.trena3DGradeSnapLadrilhoModo !== 'metadeEntorno' ? 'checked' : ''}>
+            <span><span class="t">Jeito atual — só o ladrilho de 1m sob a mira (padrão)</span><br><span class="d">O gradeado cobre só o ladrilho de 1m×1m que contém o ponto mirado.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-grade-snap-modo" value="quatroLadrilhos" ${cfg.trena3DGradeSnapLadrilhoModo === 'quatroLadrilhos' ? 'checked' : ''}>
+            <span><span class="t">Nos 4 ladrilhos do entorno</span><br><span class="d">O gradeado cobre os 4 ladrilhos inteiros de 1m que se tocam no canto/vértice de grade mais próximo do ponto mirado — área de 2m×2m.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-grade-snap-modo" value="metadeEntorno" ${cfg.trena3DGradeSnapLadrilhoModo === 'metadeEntorno' ? 'checked' : ''}>
+            <span><span class="t">Metade de cada ladrilho do entorno</span><br><span class="d">O gradeado cobre só a metade mais próxima de cada um dos 4 ladrilhos do entorno — um quadrado de 1m×1m centrado no vértice de grade mais próximo, em vez de com o canto nele.</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possivel
+               controlar a espessura das linhas guias do gradeado [...] Por
+               padrao deve ser a metade do que e atualmente." e "O
+               pontilhado do gradeado [...] deve ser [1,2]." -->
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:110px">
+              <span class="lbl">Espessura (px)</span>
+              <input type="number" id="mc-trena3d-grade-snap-espessura" min="0.5" max="10" step="0.5" value="${Utils.clamp(Number(cfg.trena3DGradeSnapEspessuraPx) || 3, 0.5, 10)}">
+            </label>
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:90px">
+              <span class="lbl">Vão (cm)</span>
+              <input type="number" id="mc-trena3d-grade-snap-gap" min="0.1" max="50" step="0.1" value="${Utils.clamp(Number(cfg.trena3DGradeSnapGapCm) || 2, 0.1, 50)}">
+            </label>
+          </div>
+          <!-- [16/09/2026 UTC] REMOVIDO — pedido verbatim: "remova o 'Traço',
+               ficando apenas a 'Espessura' e o 'Vão'." O campo 'trena3DGradeSnapDashCm'
+               continua existindo em DEFAULTS/config (fixo no padrão de 1cm,
+               ver view3d.js '_trena3DAtualizarGradeSnapLadrilho') — só o
+               campo de UI pra ele foi removido daqui. -->
+          <span class="d" style="display:block; margin-top:6px">"Espessura" é o tamanho de cada pontinho do gradeado, em pixels na tela (padrão: 3px). "Vão" decide o espaçamento entre pontinhos ao longo de cada linha (padrão 2cm).</span>
+        </div>
         <!-- Seção "🚪 Porta / Janela" (pedido do usuário, 25/08/2026) —
              encaixe no centro do quadrado do chão ao posicionar "no ar"
              (longe de parede). Ver DEFAULTS acima pro significado de cada
@@ -2044,15 +3309,31 @@ const MapConfig = {
       </div>`;
     document.body.appendChild(modal);
 
-    const close = () => { opts.onClose?.(); modal.remove(); };
+    // [13/09/2026 UTC] Limpa o loop de animação do globo (requestAnimationFrame)
+    // e o intervalo de refresh do relógio real/mundo ao fechar o painel —
+    // sem isso o RAF do globo continuaria rodando pra sempre em segundo
+    // plano depois do modal ser removido do DOM.
+    // [13/09/2026 UTC] Pedido: "o globinho... e a barra da 'Trilha de
+    // horas do dia' devem acompanhar simultaneamente [o relógio do
+    // mundo]." Reduzido de 15s pra 1s — com 15s entre atualizações, o
+    // globo (que anima suavemente até o ângulo alvo, ver `setHora`) e a
+    // trilha davam a impressão de ficar "pulando" em saltos grandes, em
+    // vez de acompanhar o relógio em tempo real.
+    const _globoRefreshInterval = setInterval(() => {
+      if (cfg.horaDoDiaManual == null || cfg.horaDoDiaManual === 'mundo') horaWidgetApi?.setHora(cfg.horaDoDiaManual);
+    }, 1000);
+    const close = () => { opts.onClose?.(); clearInterval(_globoRefreshInterval); horaWidgetApi?.destroy(); modal.remove(); };
     modal.querySelector('#mc-close').onclick = close;
     modal.querySelector('#mc-close-top').onclick = close; // NOVO (07/09/2026) — ✕ do cabeçalho fixo, ver comentário na criação do HTML
     modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
 
     modal.querySelector('#mc-dup-itens-colar').onchange = async (e) => { await this.set({ duplicarItensAoColar: e.target.checked }); };
+    // [15/09/2026 UTC] NOVO — seção "🗺️ Mapa 2D" (ver HTML acima).
+    modal.querySelector('#mc-mapa2d-origem-mundo')?.addEventListener('change', async (e) => { await this.set({ mapa2dMostrarOrigemMundo: e.target.checked }); });
     modal.querySelector('#mc-miniatura3d')?.addEventListener('change', async (e) => { await this.set({ miniatura3DAtiva: e.target.checked }); });
     // NOVO (07/09/2026) — ver DEFAULTS.miniatura3DFecharAoSairMapa acima.
     modal.querySelector('#mc-miniatura3d-fechar-ao-sair')?.addEventListener('change', async (e) => { await this.set({ miniatura3DFecharAoSairMapa: e.target.checked }); });
+    modal.querySelector('#mc-trena3d-painel-rapido')?.addEventListener('change', async (e) => { await this.set({ trena3DPainelRapidoAtivo: e.target.checked }); });
     // BUG CORRIGIDO (05/09/2026), pedido verbatim — teste do usuário:
     // "desabilitei o Retículo métrico e desabilitei a Trena, depois,
     // habilitei a Trena e o Retículo métrico apareceu junto." Causa raiz:
@@ -2223,8 +3504,299 @@ const MapConfig = {
     // ITEM A1 (rodada 57/v311)
     modal.querySelector('#mc-foto-fmt-atual')?.addEventListener('change', async (e) => { await this.set({ fotoDownloadFormatoAtual: e.target.value }); });
     modal.querySelector('#mc-foto-fmt-todas')?.addEventListener('change', async (e) => { await this.set({ fotoDownloadFormatoTodas: e.target.value }); });
-    modal.querySelector('#mc-resolucao3d')?.addEventListener('change', async (e) => { await this.set({ resolucao3D: e.target.value }); });
+
+    // RODADA 53 [15/09/2026 UTC] — item B: as 3 opções de atribuição
+    // automática de Câmera à foto (ver DEFAULTS.fotoAutoAtribuirCamera).
+    modal.querySelectorAll('input[name="mc-foto-auto-camera"]').forEach((r) => {
+      r.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ fotoAutoAtribuirCamera: e.target.value }); });
+    });
+    // [15/09/2026 UTC] NOVO — checkbox "Evitar colocar em cima de objetos"
+    // (ver DEFAULTS.fotoGradeEvitarColisao e capture.js _autoPlacePhoto).
+    modal.querySelector('#mc-foto-grade-evitar-colisao')?.addEventListener('change', async (e) => {
+      await this.set({ fotoGradeEvitarColisao: !!e.target.checked });
+    });
+    // RODADA 53/54 [15/09/2026 UTC] — item C (parâmetros da grade). O
+    // preview agora usa o MESMO Mapping.findGridSlot usado de verdade na
+    // captura (capture.js _autoPlacePhoto), em vez de reimplementar o
+    // cálculo aqui — garante que o desenho reflete exatamente o resultado
+    // real, inclusive a direção/quebra escolhidas (RODADA 54).
+    // [15/09/2026 UTC] MUDADO -- pedido verbatim (2ª correção): "o ícone
+    // que deve aparecer na disposição de exemplo é o ícone do bola com a
+    // ícone de foto e a seta verde (mesma desenho que aparece na grade ao
+    // ir na janela de 'Ferramentas', clicar na ferramenta 'Câmera' e
+    // inserir uma câmera na grade [...] um ícone de bolinha com o desenho
+    // de foto no centro e uma seta verde apontando para o norte). Em vez
+    // de ser um fundo branco, deve simular a grade do mapa 2D." CAUSA
+    // RAIZ da 1ª tentativa (rodada anterior): a ferramenta "Câmera" da
+    // janela "Ferramentas" (`_ptool === 'foto-orb'`, ver mapview.js linha
+    // ~4450) NÃO usa `_drawCameraShape` (o leque/cunha de campo de visão,
+    // usado por `mapData.cameras` — um conceito ANTIGO/diferente, ligado
+    // ao `_mode === 'camera'`) — ela cria um "orb de foto"
+    // (`mapData.fotos`), desenhado como uma bolinha verde (`#7cffb2`) com
+    // o emoji 🖼️ no centro e uma seta saindo dela na direção
+    // `foto.dirAngulo` (ver `this.mapData.fotos.forEach` em mapview.js,
+    // logo depois do desenho das câmeras) — É ESSE o desenho reproduzido
+    // agora aqui (ícone/cores/proporções copiados 1:1 daquela função).
+    // MapConfig é um módulo à parte, sem acesso aos métodos de MapView
+    // (mesmo motivo documentado no h4 SVG da seção "Fotos" logo abaixo),
+    // então o desenho foi reproduzido aqui em vez de chamado direto.
+    const gradePreviewEl = modal.querySelector('#mc-foto-grade-preview');
+    const _drawGradePreviewBackground = (ctx, w, h) => {
+      // Simula a grade escura do mapa 2D (ver MapView._drawWorldGrid) —
+      // fundo quase preto + linhas claras tracejadas espaçadas de 20px
+      // (não precisa ser matematicamente igual à grade real — é só um
+      // "cenário" de fundo pro ícone de exemplo, sem zoom/mundo de verdade
+      // por trás aqui).
+      ctx.fillStyle = '#0a0d11';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = '#2a2d31';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([1, 4]);
+      ctx.beginPath();
+      for (let x = 0; x <= w; x += 20) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+      for (let y = 0; y <= h; y += 20) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    };
+    // [15/09/2026 UTC] ALTERADO — pedido verbatim: "Nas 'configurações
+    // 2D' [...] em 'Pré-visualização', a câmera de icínio [início] deve ter
+    // um destaque maior." Antes, "destaque" só trocava a COR (amarelo em
+    // vez de verde) do ícone de início (`i === 0`) — o tamanho ficava
+    // igual ao dos demais. Agora, quando `destaque` é verdade, o ícone
+    // nasce ~35% maior (`r * 1.35`, afeta bolinha/seta/emoji juntos, já
+    // que todo o desenho é proporcional a `r`) E ganha um halo/glow atrás
+    // (círculo maior, semitransparente, na mesma cor) — destaque bem mais
+    // perceptível que só a mudança de cor de antes.
+    const _drawCameraPreviewIcon = (ctx, cx, cy, rBase, destaque, ordem) => {
+      const cor = destaque ? '#ffd166' : '#7cffb2';
+      const r = destaque ? rBase * 1.35 : rBase;
+      if (destaque) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 1.7, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 209, 102, 0.22)';
+        ctx.fill();
+      }
+      const compr = r + 16; // MESMA fórmula de mapview.js ("(selected?10:8)+16"), com r no lugar do raio fixo 8/10
+      // Seta apontando pro norte (ângulo 0, sem rotação de mapa nem
+      // direção customizada — é só um exemplo estático).
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.strokeStyle = cor; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -compr); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -compr - 4); ctx.lineTo(-3.5, -compr + 2); ctx.lineTo(3.5, -compr + 2); ctx.closePath();
+      ctx.fillStyle = cor; ctx.fill();
+      ctx.restore();
+      // Corpo (bolinha) por cima, com o emoji 🖼️ no centro — MESMA ordem
+      // de desenho de mapview.js (seta primeiro, "atrás"; bolinha depois).
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = cor;
+      ctx.fill();
+      ctx.strokeStyle = '#0a0d11'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.font = `${Math.max(8, r * 1.15)}px sans-serif`; ctx.fillStyle = '#0a0d11'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('🖼️', cx, cy + 0.5);
+      ctx.textBaseline = 'alphabetic';
+      // [15/09/2026 UTC] NOVO — pedido verbatim: "em 'Pré-visualização',
+      // deve haver um pequeno número (em cada uma), indicando a ordem das
+      // câmeras." Numerozinho pequeno (1-based) num selo redondo escuro no
+      // canto inferior-direito de cada ícone — MESMO espírito visual de um
+      // "badge" de contagem, não disputa espaço com o emoji 🖼️ do centro.
+      if (Number.isFinite(ordem)) {
+        const raioSelo = Math.max(5, r * 0.42);
+        const sx = cx + r * 0.72, sy = cy + r * 0.72;
+        ctx.beginPath();
+        ctx.arc(sx, sy, raioSelo, 0, Math.PI * 2);
+        ctx.fillStyle = '#0a0d11';
+        ctx.fill();
+        ctx.strokeStyle = cor; ctx.lineWidth = 1; ctx.stroke();
+        ctx.font = `700 ${Math.max(7, raioSelo * 1.15)}px sans-serif`;
+        ctx.fillStyle = cor;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(ordem), sx, sy + 0.5);
+        ctx.textBaseline = 'alphabetic';
+      }
+    };
+    const drawGradePreview = () => {
+      if (!gradePreviewEl || typeof Mapping === 'undefined') return;
+      const ctx = gradePreviewEl.getContext('2d');
+      const w = gradePreviewEl.width, h = gradePreviewEl.height;
+      ctx.clearRect(0, 0, w, h);
+      _drawGradePreviewBackground(ctx, w, h);
+      const porLinha = Math.max(1, Number(modal.querySelector('#mc-foto-grade-porlinha')?.value) || 1);
+      const dirPrimaria = modal.querySelector('#mc-foto-grade-dir')?.dataset.sel || 'direita';
+      const quebra = modal.querySelector('#mc-foto-grade-quebra')?.dataset.sel || 'baixo';
+      const N = Math.min(porLinha * 3, 18); // exemplo com 3 linhas completas (pedido: "que fique várias linhas")
+      const pts = [];
+      for (let i = 0; i < N; i++) pts.push(Mapping.findGridSlot({ x: 0, y: 0 }, i, 1, porLinha, dirPrimaria, quebra));
+      const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+      const cell = Math.min((w - 24) / Math.max(1, maxX - minX + 1), (h - 24) / Math.max(1, maxY - minY + 1), 28);
+      pts.forEach((p, i) => {
+        const cx = 12 + (p.x - minX) * cell + cell / 2;
+        const cy = 12 + (p.y - minY) * cell + cell / 2;
+        _drawCameraPreviewIcon(ctx, cx, cy, cell * 0.22, i === 0, i + 1);
+      });
+    };
+    modal.querySelector('#mc-foto-grade-dist')?.addEventListener('change', async (e) => {
+      const v = Number(e.target.value); if (Number.isFinite(v) && v > 0) await this.set({ fotoGradeDistancia: v });
+    });
+    modal.querySelector('#mc-foto-grade-porlinha')?.addEventListener('input', () => drawGradePreview());
+    modal.querySelector('#mc-foto-grade-porlinha')?.addEventListener('change', async (e) => {
+      const v = Math.max(1, Math.round(Number(e.target.value) || 1)); await this.set({ fotoGradePorLinha: v });
+    });
+    modal.querySelector('#mc-foto-grade-origx')?.addEventListener('change', async (e) => {
+      const v = Number(e.target.value); if (Number.isFinite(v)) await this.set({ fotoGradeOrigemX: v });
+    });
+    modal.querySelector('#mc-foto-grade-origy')?.addEventListener('change', async (e) => {
+      const v = Number(e.target.value); if (Number.isFinite(v)) await this.set({ fotoGradeOrigemY: v });
+    });
+    // RODADA 54 [15/09/2026 UTC] — seletor visual de direção primária (4
+    // setas ↑↓←→) + sentido de quebra de linha (2 setas, sempre
+    // perpendiculares à primária escolhida — 8 combinações no total,
+    // conforme pedido original reproduzido na RODADA 54).
+    const dirWrap = modal.querySelector('#mc-foto-grade-dir');
+    const quebraWrap = modal.querySelector('#mc-foto-grade-quebra');
+    const QUEBRA_OPCOES = {
+      // primária horizontal -> quebra é vertical (cima/baixo); vice-versa.
+      direita: [['baixo', '↓ Baixo'], ['cima', '↑ Cima']],
+      esquerda: [['baixo', '↓ Baixo'], ['cima', '↑ Cima']],
+      cima: [['direita', '→ Direita'], ['esquerda', '← Esquerda']],
+      baixo: [['direita', '→ Direita'], ['esquerda', '← Esquerda']],
+    };
+    const renderQuebraOpts = (dirPrimaria, quebraSel) => {
+      if (!quebraWrap) return;
+      const opcoes = QUEBRA_OPCOES[dirPrimaria] || QUEBRA_OPCOES.direita;
+      // Se a quebra salva não é válida pra essa primária (ex.: veio de uma
+      // primária vertical e agora é horizontal), cai no 1º valor válido.
+      const valido = opcoes.some(([v]) => v === quebraSel) ? quebraSel : opcoes[0][0];
+      quebraWrap.dataset.sel = valido;
+      quebraWrap.innerHTML = opcoes.map(([v, label]) => `<button type="button" class="btn ${v === valido ? '' : 'secondary'} sm" data-quebra="${v}">${label}</button>`).join('');
+      quebraWrap.querySelectorAll('button[data-quebra]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          quebraWrap.dataset.sel = btn.dataset.quebra;
+          renderQuebraOpts(dirWrap?.dataset.sel || 'direita', btn.dataset.quebra);
+          await this.set({ fotoGradeQuebra: btn.dataset.quebra });
+          drawGradePreview();
+        });
+      });
+      return valido;
+    };
+    if (dirWrap) {
+      const dirInicial = cfg.fotoGradeDirPrimaria || 'direita';
+      dirWrap.dataset.sel = dirInicial;
+      const marcarDirAtiva = () => {
+        dirWrap.querySelectorAll('button[data-dir]').forEach((b) => {
+          b.classList.toggle('secondary', b.dataset.dir !== dirWrap.dataset.sel);
+        });
+      };
+      marcarDirAtiva();
+      dirWrap.querySelectorAll('button[data-dir]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          dirWrap.dataset.sel = btn.dataset.dir;
+          marcarDirAtiva();
+          const quebraValida = renderQuebraOpts(btn.dataset.dir, quebraWrap?.dataset.sel);
+          await this.set({ fotoGradeDirPrimaria: btn.dataset.dir, fotoGradeQuebra: quebraValida });
+          drawGradePreview();
+        });
+      });
+      renderQuebraOpts(dirInicial, cfg.fotoGradeQuebra || 'baixo');
+    }
+    // RODADA 53/54 — PENDENTE anterior, RESOLVIDA nesta rodada (RODADA 55,
+    // [15/09/2026 UTC]): pedido verbatim "Mapeie as dependências ... e as
+    // torne modulares e reaproveitáveis." Ver o mapeamento de dependências
+    // completo no comentário grande de `MapView.enterMapPositionPickerMode`
+    // (js/mapview.js) — resumo: o fluxo "Mover no mapa" da câmera
+    // (`enterPhotoPlacementMode`) pressupõe um `photoId` já salvo só pra 3
+    // coisas (ler/gravar o registro da foto, e abrir a roda de rotação);
+    // NENHUMA das 3 se aplica aqui — a infraestrutura realmente comum (cruz
+    // fixa + faixa "Marcar aqui"/"Cancelar" + guards de prioridade) foi
+    // extraída pra `enterMapPositionPickerMode({onConfirm,onCancel})`, uma
+    // 3ª variante do mesmo padrão já usado por foto E por item (2 cópias
+    // existentes — ver enterItemPlacementMode), sem nenhum id de registro.
+    modal.querySelector('#mc-foto-grade-mover')?.addEventListener('click', () => {
+      const origXEl = modal.querySelector('#mc-foto-grade-origx');
+      const origYEl = modal.querySelector('#mc-foto-grade-origy');
+      // Mesmo padrão "esconde o .modal-backdrop inteiro enquanto o gesto
+      // dura" já usado pelo botão "Girar arrastando" acima (ver comentário
+      // grande dele) — sem isto, o modal (z-index por cima da grade)
+      // bloquearia o clique no mapa/na faixa "Marcar aqui" por trás.
+      const sheetEl = modal.querySelector('.modal-sheet');
+      const scrollTop = sheetEl?.scrollTop || 0;
+      modal.style.display = 'none';
+      const restaurar = () => {
+        modal.style.display = '';
+        if (sheetEl) sheetEl.scrollTop = scrollTop;
+      };
+      window.MapView?.enterMapPositionPickerMode({
+        onConfirm: (pos) => {
+          restaurar();
+          if (origXEl) origXEl.value = pos.x.toFixed(2);
+          if (origYEl) origYEl.value = pos.y.toFixed(2);
+          this.set({ fotoGradeOrigemX: pos.x, fotoGradeOrigemY: pos.y });
+          Utils.toast('Origem da grade definida ✓', { type: 'ok' });
+          drawGradePreview();
+        },
+        onCancel: () => {
+          restaurar();
+          Utils.toast('Cancelado — origem da grade não foi alterada.', { type: 'info' });
+        },
+      });
+    });
+    drawGradePreview();
+
+    // RODADA 53 [15/09/2026 UTC] — item D: nome automático (data/hora,
+    // local ou UTC) — ver capture.js `_afterPhotoCaptured`.
+    modal.querySelector('#mc-foto-nome-auto')?.addEventListener('change', async (e) => { await this.set({ fotoNomeAutomaticoAtivo: e.target.checked }); });
+    // [15/09/2026 UTC] RODADA 55 — trocado o wiring dos 2 radios pelo mesmo
+    // `_wireHoraDoDiaWidget` do uso 3D (ver comentário grande dele), sem
+    // globo/trilha (só o par de botões "seguir X"/local-UTC).
+    this._wireHoraDoDiaWidget(modal, {
+      idPrefix: 'mc-fotonome-hora',
+      mostrarGlobo: false,
+      mostrarTrilha: false,
+      altValue: 'utc',
+      altLabel: '🌐 Seguir horário UTC',
+      autoLabel: '🕐 Hora local do aparelho',
+      getValorAtual: () => (cfg.fotoNomeHoraUTC ? 'utc' : null),
+      onPreview: () => {},
+      onCommit: async (v) => { await this.set({ fotoNomeHoraUTC: v === 'utc' }); },
+    });
     modal.querySelector('#mc-antialiasing3d')?.addEventListener('change', async (e) => { await this.set({ antialiasing3D: e.target.checked }); });
+    // [13/09/2026] UNIFICADO — wiring do <select> único "Resolução de
+    // renderização" (ver HTML acima). Ele grava nos MESMOS DOIS campos de
+    // sempre (`resolucao3D` + `resolucaoCustom3D`) — nenhuma lógica de
+    // leitura em engine3d.js/view3d.js precisou mudar. "Alta/Média/Baixa"
+    // gravam `resolucao3D` e ZERAM `resolucaoCustom3D` (equivalente à
+    // antiga opção "Automática" da resolução customizada); "Personalizada…"
+    // revela os 3 campos (largura/altura/modo de ajuste, que formam UM
+    // objeto só em `resolucaoCustom3D`) sem tocar em `resolucao3D` (fica
+    // guardado, mas ignorado internamente por engine3d.js enquanto
+    // `_customRes` estiver setado — ver `effDpr = custom ? 1 : dpr`).
+    const resModeSel = modal.querySelector('#mc-res-mode');
+    const resCustomFields = modal.querySelector('#mc-res-mode-fields');
+    const resCustomW = modal.querySelector('#mc-res-custom3d-w');
+    const resCustomH = modal.querySelector('#mc-res-custom3d-h');
+    const resCustomFit = modal.querySelector('#mc-res-custom3d-fit');
+    const gravarResCustom3D = async () => {
+      const w = Math.max(this.RES_CUSTOM_MIN, Math.round(Number(resCustomW.value)) || this.RES_CUSTOM_MIN);
+      const h = Math.max(this.RES_CUSTOM_MIN, Math.round(Number(resCustomH.value)) || this.RES_CUSTOM_MIN);
+      resCustomW.value = w; resCustomH.value = h;
+      await this.set({ resolucaoCustom3D: { w, h, fit: resCustomFit.value === 'caber' ? 'caber' : 'esticar' } });
+    };
+    resModeSel?.addEventListener('change', async (e) => {
+      const v = e.target.value;
+      if (v === 'custom') {
+        resCustomFields.classList.remove('hidden');
+        await gravarResCustom3D();
+        return;
+      }
+      resCustomFields.classList.add('hidden');
+      await this.set({ resolucao3D: v, resolucaoCustom3D: null });
+    });
+    resCustomW?.addEventListener('change', gravarResCustom3D);
+    resCustomH?.addEventListener('change', gravarResCustom3D);
+    resCustomFit?.addEventListener('change', gravarResCustom3D);
     // NOVO (07/09/2026) — ver DEFAULTS.efeitoTelaEscurecida3D acima.
     modal.querySelector('#mc-efeito-tela-escurecida3d')?.addEventListener('change', async (e) => { await this.set({ efeitoTelaEscurecida3D: e.target.checked }); });
     modal.querySelector('#mc-cubo-origem-centro')?.addEventListener('change', async (e) => { await this.set({ cuboOrigemCentro: e.target.checked }); });
@@ -2270,6 +3842,31 @@ const MapConfig = {
       e.target.value = v;
       await this.set({ objetoChunkTamanho: v });
     });
+    // [13/09/2026 UTC] NOVO — ver DEFAULTS.objetoLimitePorFrame acima pro
+    // pedido/motivo completo. Mesmo padrão visual mostra/esconde de
+    // #mc-objeto-chunk-tam logo acima.
+    const limiteFrameAtivo = modal.querySelector('#mc-limite-frame-ativo');
+    const limiteFrameWrap = modal.querySelector('#mc-limite-frame-wrap');
+    const limiteFrameValor = modal.querySelector('#mc-limite-frame-valor');
+    limiteFrameAtivo?.addEventListener('change', async (e) => {
+      if (limiteFrameWrap) limiteFrameWrap.style.display = e.target.checked ? '' : 'none';
+      await this.set({ objetoLimitePorFrameAtivo: e.target.checked });
+    });
+    limiteFrameValor?.addEventListener('change', async (e) => {
+      const v = Math.max(1, Math.round(Number(e.target.value)) || 1200);
+      e.target.value = v;
+      await this.set({ objetoLimitePorFrame: v });
+    });
+    // [13/09/2026] NOVO — ver DEFAULTS.cameraZNear/cameraZFar e o HTML
+    // `#mc-cam-znear-wrap`/`#mc-cam-zfar-wrap` acima. Monta os 2 "botões
+    // triplos" (ModelerUI._createNumField, MESMO componente/idioma de
+    // `_wireCamPropsFieldset` em mapview.js, incluindo o clamp manual de
+    // `min` — o widget não tem essa opção embutida) e persiste cada
+    // mudança via `this.set()` — o MESMO mecanismo de toda esta tela, que
+    // já propaga ao vivo pra `Engine3D.setConfig()` (ver view3d.js
+    // `_onMapConfigChange`), satisfazendo o pedido de "tempo real" sem
+    // nenhum código novo de aplicação — só extrai/lê os 2 campos.
+    this._wireDesempenho3DCamPlanes(modal, cfg);
     // Seção "🐞 Debug" — ver DEFAULTS.debugTransferidorAtivo/
     // debugProlongamentoAtivo acima.
     // [12/09/2026] NOVO — handler do interruptor mestre `debugModoAtivo`
@@ -2360,40 +3957,28 @@ const MapConfig = {
     modal.querySelectorAll('input[name="mc-modovoo3d"]').forEach((el) => {
       el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ modoVoo3D: e.target.value }); });
     });
-    // Seção "🌗 Hora do dia" (pedido do usuário, 03/09/2026) — os 4 botões
-    // (Manhã/Dia/Tarde/Noite) E a trilha escrevem no MESMO campo
-    // (`horaDoDiaManual`), então ficam sempre "de acordo": mudar um atualiza
-    // o valor salvo, e a trilha/label é redesenhada na hora (sem esperar
-    // reabrir o painel) pra refletir o novo valor imediatamente — ver
-    // `_syncHoraUI` abaixo, chamada pelos três wirings.
-    const trilhaEl = modal.querySelector('#mc-hora-trilha');
-    const trilhaLabelEl = modal.querySelector('#mc-hora-trilha-label');
-    const autoBtnEl = modal.querySelector('#mc-hora-auto');
-    const _syncHoraUI = (horaManual) => {
-      const horaExibida = horaManual != null ? Number(horaManual) : (new Date().getHours() + new Date().getMinutes() / 60);
-      if (trilhaEl) trilhaEl.value = String(horaExibida);
-      if (trilhaLabelEl) trilhaLabelEl.textContent = this._formatHora(horaExibida);
-      if (autoBtnEl) {
-        autoBtnEl.disabled = horaManual == null;
-        autoBtnEl.textContent = `🕐 Seguir relógio do aparelho ${horaManual == null ? '(ativo)' : ''}`;
-      }
-    };
-    modal.querySelectorAll('.mc-hora-btn').forEach((b) => {
-      b.addEventListener('click', async () => {
-        const h = Number(b.dataset.hora);
-        await this.set({ horaDoDiaManual: h });
-        _syncHoraUI(h);
-      });
-    });
-    trilhaEl?.addEventListener('input', () => { if (trilhaLabelEl) trilhaLabelEl.textContent = this._formatHora(Number(trilhaEl.value)); });
-    trilhaEl?.addEventListener('change', async () => {
-      const h = Number(trilhaEl.value);
-      await this.set({ horaDoDiaManual: h });
-      _syncHoraUI(h);
-    });
-    autoBtnEl?.addEventListener('click', async () => {
-      await this.set({ horaDoDiaManual: null });
-      _syncHoraUI(null);
+    // Seção "🌗 Hora do dia" (pedido do usuário, 03/09/2026).
+    // [15/09/2026 UTC] EXTRAÍDA para `_wireHoraDoDiaWidget` (ver comentário
+    // grande dela, acima) — RODADA 55, pedido verbatim: "Mapeie as
+    // dependências ... e as torne modulares e reaproveitáveis." O antigo
+    // `_syncHoraUI` local virou o `syncUI` genérico dentro do widget; a
+    // chave `horaDoDiaManual`/o sentinela 'mundo' agora só existem aqui,
+    // nos callbacks passados (o widget em si não conhece nenhum dos dois).
+    // [15/09/2026 UTC] `horaWidgetApi` guarda o {getHora,setHora,destroy}
+    // devolvido pelo widget — usado logo abaixo pelo refresh do relógio do
+    // mundo (setHora, no lugar do antigo `_syncHoraUI`) e pelo `close()` do
+    // modal (destroy, no lugar do antigo `globoApi?.destroy()`).
+    const horaWidgetApi = this._wireHoraDoDiaWidget(modal, {
+      idPrefix: 'mc-hora',
+      mostrarGlobo: true,
+      mostrarTrilha: true,
+      altValue: 'mundo',
+      altLabel: '🌐 Seguir relógio do mundo',
+      autoLabel: '🕐 Seguir relógio do aparelho',
+      getValorAtual: () => cfg.horaDoDiaManual,
+      getAltHoraDecimal: () => this._horaMundoDecimal(),
+      onPreview: (h) => this.previewSet({ horaDoDiaManual: h }),
+      onCommit: async (v) => { await this.set({ horaDoDiaManual: v }); },
     });
     // Seção "📍 Centralização ao voltar pro mapa" (contexto 2D, rodada 48).
     modal.querySelectorAll('input[name="mc-2d-centralizar"]').forEach((r) => {
@@ -2442,6 +4027,93 @@ const MapConfig = {
         await this.set({ paredeJuncaoTipo: tipo });
       });
     });
+
+    // ---------- Seção "📏 Trena 3D" — botão "Sobre" (documentação) e modo de
+    // ancoragem (Ctrl x 4 cliques), ver HTML acima. ----------
+    modal.querySelector('#mc-trena3d-sobre-btn')?.addEventListener('click', () => this._abrirDocTrena3D());
+    modal.querySelectorAll('input[name="mc-trena3d-modo-ancora"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DModoAncora: e.target.value }); });
+    });
+
+    // ---------- Seção "📏 Trena 3D" — snap (toggle + valor), aparência,
+    // visibilidade, espessura/cores e pontas (5 subseções, ver HTML acima). ----------
+    modal.querySelector('#mc-trena3d-snap-on')?.addEventListener('change', async (e) => {
+      const campo = modal.querySelector('#mc-trena3d-snap');
+      if (campo) campo.disabled = !e.target.checked;
+      await this.set({ trena3DSnapAtivo: e.target.checked });
+    });
+    modal.querySelector('#mc-trena3d-snap')?.addEventListener('change', async (e) => {
+      const v = Utils.clamp(Number(e.target.value) || 0.1, 0.01, 2);
+      e.target.value = v;
+      await this.set({ trena3DSnapMetros: v });
+    });
+    modal.querySelectorAll('input[name="mc-trena3d-label"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DLabelEstilo: e.target.value }); });
+    });
+    modal.querySelectorAll('input[name="mc-trena3d-vis"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DVisibilidade: e.target.value }); });
+    });
+    modal.querySelector('#mc-trena3d-espessura')?.addEventListener('change', async (e) => {
+      const v = Utils.clamp(Number(e.target.value) || 2, 0.2, 15);
+      e.target.value = v;
+      await this.set({ trena3DEspessuraCm: v });
+    });
+    modal.querySelector('#mc-trena3d-cor-linha')?.addEventListener('input', async (e) => { await this.set({ trena3DCorLinha: e.target.value }); });
+    modal.querySelector('#mc-trena3d-cor-ancora')?.addEventListener('input', async (e) => { await this.set({ trena3DCorAncora: e.target.value }); });
+    modal.querySelector('#mc-trena3d-cor-mira')?.addEventListener('input', async (e) => { await this.set({ trena3DCorMira: e.target.value }); });
+    modal.querySelectorAll('input[name="mc-trena3d-ponta"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DPonta: e.target.value }); });
+    });
+    modal.querySelector('#mc-trena3d-suprimir-destaque')?.addEventListener('change', async (e) => { await this.set({ trena3DSuprimirDestaqueDuranteAncora: e.target.checked }); });
+    modal.querySelector('#mc-trena3d-continuar-linha-ancora')?.addEventListener('change', async (e) => { await this.set({ trena3DContinuarLinhaAncoraAposPonto: e.target.checked }); });
+    modal.querySelectorAll('input[name="mc-trena3d-linha-ancora-modo"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DLinhaAncoraAposPontoModo: e.target.value }); });
+    });
+    modal.querySelector('#mc-trena3d-mostrar-medida-linha-ancora')?.addEventListener('change', async (e) => { await this.set({ trena3DMostrarMedidaNaLinhaAncoraAposPonto: e.target.checked }); });
+    modal.querySelector('#mc-trena3d-altura-antes-ponto')?.addEventListener('change', async (e) => { await this.set({ trena3DMostrarAlturaAoVivoAntesDoPonto: e.target.checked }); });
+    modal.querySelector('#mc-trena3d-altura-ao-segurar-ctrl')?.addEventListener('change', async (e) => { await this.set({ trena3DMostrarAlturaAoVivoAoSegurarCtrl: e.target.checked }); });
+    modal.querySelector('#mc-trena3d-linhas-finalizada')?.addEventListener('change', async (e) => { await this.set({ trena3DMostrarLinhasAncoraFinalizada: e.target.checked }); });
+    modal.querySelectorAll('input[name="mc-trena3d-linhas-finalizada-modo"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DLinhasAncoraFinalizadaModo: e.target.value }); });
+    });
+    modal.querySelector('#mc-trena3d-guia-grade')?.addEventListener('change', async (e) => { await this.set({ trena3DGuiaGradeAtiva: e.target.checked }); });
+    modal.querySelectorAll('input[name="mc-trena3d-guia-modo"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DGuiaGradeModoMedida: e.target.value }); });
+    });
+    modal.querySelector('#mc-trena3d-grade-snap')?.addEventListener('change', async (e) => { await this.set({ trena3DGradeSnapLadrilhoAtiva: e.target.checked }); });
+    modal.querySelectorAll('input[name="mc-trena3d-grade-snap-modo"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DGradeSnapLadrilhoModo: e.target.value }); });
+    });
+    modal.querySelector('#mc-trena3d-grade-snap-espessura')?.addEventListener('change', async (e) => {
+      const v = Utils.clamp(parseFloat(e.target.value) || 3, 0.5, 10);
+      e.target.value = v;
+      await this.set({ trena3DGradeSnapEspessuraPx: v });
+    });
+    modal.querySelector('#mc-trena3d-grade-snap-gap')?.addEventListener('change', async (e) => {
+      const v = Utils.clamp(parseFloat(e.target.value) || 2, 0.1, 50);
+      e.target.value = v;
+      await this.set({ trena3DGradeSnapGapCm: v });
+      this._trena3DDesenharPreviewGradeSnap(modal);
+    });
+
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "faça um preview de canvas
+    // para se ter noção do que se trata." Preview 2D ilustrativo (não é a
+    // cena 3D de verdade — só um esquema simplificado visto de cima) para
+    // as seções "Guia de grade do mundo" e "Gradeado do ladrilho mirado".
+    // Redesenhado a cada mudança de opção relevante e uma vez ao abrir o
+    // modal (chamadas logo abaixo, fora desta lista de listeners).
+    this._trena3DDesenharPreviewGuiaGrade(modal);
+    this._trena3DDesenharPreviewGradeSnap(modal);
+    modal.querySelector('#mc-trena3d-guia-grade')?.addEventListener('change', () => this._trena3DDesenharPreviewGuiaGrade(modal));
+    modal.querySelectorAll('input[name="mc-trena3d-guia-modo"]').forEach((el) => {
+      el.addEventListener('change', () => this._trena3DDesenharPreviewGuiaGrade(modal));
+    });
+    modal.querySelector('#mc-trena3d-grade-snap')?.addEventListener('change', () => this._trena3DDesenharPreviewGradeSnap(modal));
+    modal.querySelectorAll('input[name="mc-trena3d-grade-snap-modo"]').forEach((el) => {
+      el.addEventListener('change', () => this._trena3DDesenharPreviewGradeSnap(modal));
+    });
+    modal.querySelector('#mc-trena3d-grade-snap-espessura')?.addEventListener('input', () => this._trena3DDesenharPreviewGradeSnap(modal));
+    modal.querySelector('#mc-trena3d-grade-snap-gap')?.addEventListener('input', () => this._trena3DDesenharPreviewGradeSnap(modal));
 
     // ---------- Seção "🚪 Porta / Janela" — mesmo espírito do "Modificador
     // por tecla" da seção 🧱 Parede acima. ----------
@@ -2579,6 +4251,209 @@ const MapConfig = {
     };
     modal.querySelector('#mc-rot2d-snap-salvar').onclick = salvar;
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') salvar(); });
+  },
+
+  /** [16/09/2026 UTC] NOVO — pedido verbatim: "Em '📏 Trena 3D — Guia de
+   *  grade do mundo' [...] faça um preview de canvas para se ter noção do
+   *  que se trata." Desenho 2D simplificado, visto de cima, de UM ladrilho
+   *  de 1m×1m com um ponto mirado (bolinha azul) fora do canto, e as 2
+   *  linhas guia sólidas (X e Z) até a borda do ladrilho conforme o modo
+   *  escolhido no radio "esquerdaCima"/"maisPerto" — é só ilustrativo
+   *  (não usa nenhum dado real da cena 3D), pra dar noção do conceito. */
+  _trena3DDesenharPreviewGuiaGrade(modal) {
+    const canvas = modal.querySelector('#mc-trena3d-guia-grade-preview');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    const pad = 24;
+    const x0 = pad, y0 = pad, x1 = W - pad, y1 = H - pad;
+    // Ladrilho (quadrado do mundo, 1m×1m)
+    ctx.strokeStyle = '#4a4f5c';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    // Ponto mirado — fixo num lugar assimétrico (mais perto da direita/baixo
+    // do que da esquerda/cima) pra deixar claro a diferença entre os 2 modos.
+    const px = x0 + (x1 - x0) * 0.72;
+    const py = y0 + (y1 - y0) * 0.62;
+    const modoMaisPerto = modal.querySelector('input[name="mc-trena3d-guia-modo"][value="maisPerto"]')?.checked;
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "ao desmarcar a opção
+    // 'Mostrar linhas guia...', o desenho azul das linhas na preview deve
+    // deixar de ser desenhado também." As linhas/rótulos azuis só são
+    // desenhados se a opção estiver ativa — o ladrilho (cinza) continua
+    // sempre visível, só de contexto.
+    const guiaAtiva = modal.querySelector('#mc-trena3d-guia-grade')?.checked !== false;
+    if (guiaAtiva) {
+      ctx.strokeStyle = '#5ec8ff';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+      // Linha X: esquerda→ponto (padrão) ou lado mais próximo (direita, no exemplo)
+      ctx.beginPath();
+      if (modoMaisPerto) { ctx.moveTo(x1, py); ctx.lineTo(px, py); } else { ctx.moveTo(x0, py); ctx.lineTo(px, py); }
+      ctx.stroke();
+      // Linha Z: cima→ponto (padrão) ou lado mais próximo (baixo, no exemplo)
+      ctx.beginPath();
+      if (modoMaisPerto) { ctx.moveTo(px, y1); ctx.lineTo(px, py); } else { ctx.moveTo(px, y0); ctx.lineTo(px, py); }
+      ctx.stroke();
+      // Rótulos das medidas, centralizados no meio de cada linha
+      ctx.fillStyle = '#5ec8ff';
+      ctx.font = '600 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      const mxTxt = modoMaisPerto ? '0,28m' : '0,72m';
+      const mzTxt = modoMaisPerto ? '0,38m' : '0,62m';
+      const midX = modoMaisPerto ? (x1 + px) / 2 : (x0 + px) / 2;
+      ctx.fillText(mxTxt, midX, py - 6);
+      ctx.save();
+      const midY = modoMaisPerto ? (y1 + py) / 2 : (y0 + py) / 2;
+      ctx.translate(px + 6, midY);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText(mzTxt, 0, 0);
+      ctx.restore();
+    }
+    // Bolinha do ponto mirado
+    ctx.fillStyle = '#5ec8ff';
+    ctx.beginPath();
+    ctx.arc(px, py, 5, 0, Math.PI * 2);
+    ctx.fill();
+  },
+
+  /** [16/09/2026 UTC] NOVO — pedido verbatim: "Em [...] '📏 Trena 3D —
+   *  Gradeado do ladrilho mirado', faça um preview de canvas para se ter
+   *  noção do que se trata." Desenho 2D simplificado, visto de cima, do(s)
+   *  ladrilho(s) cobertos pelo gradeado conforme o modo escolhido
+   *  ("atual"/"quatroLadrilhos"/"metadeEntorno"), com pontinhos cujo
+   *  tamanho reage ao campo "Espessura" e cujo espaçamento reage ao campo
+   *  "Vão" — mesma ideia ilustrativa do preview acima, sem dado real da
+   *  cena 3D. */
+  _trena3DDesenharPreviewGradeSnap(modal) {
+    const canvas = modal.querySelector('#mc-trena3d-grade-snap-preview');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    const modo = modal.querySelector('input[name="mc-trena3d-grade-snap-modo"]:checked')?.value || 'atual';
+    const espessuraPx = Utils.clamp(parseFloat(modal.querySelector('#mc-trena3d-grade-snap-espessura')?.value) || 3, 0.5, 10);
+    const gapCm = Utils.clamp(parseFloat(modal.querySelector('#mc-trena3d-grade-snap-gap')?.value) || 2, 0.1, 50);
+    const pad = 20;
+    const areaLado = Math.min(W, H) - pad * 2;
+    // "quatroLadrilhos"/"metadeEntorno" cobrem uma área 2m×2m (4 ladrilhos
+    // de 1m se tocando no vértice); "atual" cobre só 1 ladrilho de 1m — o
+    // desenho usa a MESMA moldura de 2×2 ladrilhos nos 3 casos só pra dar
+    // contexto (mostrando os vizinhos), mudando é a área PONTILHADA.
+    const ladrilhoPx = areaLado / 2;
+    const cx = pad + ladrilhoPx, cy = pad + ladrilhoPx; // vértice de grade central
+    ctx.strokeStyle = '#3a3d47';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 2; i++) {
+      ctx.beginPath(); ctx.moveTo(pad, pad + i * ladrilhoPx); ctx.lineTo(pad + areaLado, pad + i * ladrilhoPx); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pad + i * ladrilhoPx, pad); ctx.lineTo(pad + i * ladrilhoPx, pad + areaLado); ctx.stroke();
+    }
+    // Área pontilhada, conforme o modo
+    let ax0, ay0, ax1, ay1;
+    if (modo === 'quatroLadrilhos') {
+      ax0 = pad; ay0 = pad; ax1 = pad + areaLado; ay1 = pad + areaLado;
+    } else if (modo === 'metadeEntorno') {
+      ax0 = cx - ladrilhoPx / 2; ay0 = cy - ladrilhoPx / 2; ax1 = cx + ladrilhoPx / 2; ay1 = cy + ladrilhoPx / 2;
+    } else {
+      ax0 = pad; ay0 = pad; ax1 = pad + ladrilhoPx; ay1 = pad + ladrilhoPx; // "atual" — só o 1º ladrilho (canto superior esquerdo)
+    }
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "ao desmarca a opção
+    // 'Mostrar gradeado (pontilhado)...', o gradeado amarelo no preview deve
+    // deixar de ser desenhado." A moldura cinza (ladrilhos vizinhos) continua
+    // sempre visível, só de contexto — o amarelo (contorno da área + os
+    // pontinhos) só aparece com a opção ativa.
+    const gradeSnapAtivo = modal.querySelector('#mc-trena3d-grade-snap')?.checked !== false;
+    if (gradeSnapAtivo) {
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(ax0, ay0, ax1 - ax0, ay1 - ay0);
+      // Pontinhos — espaçamento proporcional ao "Vão" (mapeado numa faixa
+      // razoável de pixels só pro preview, já que a escala real depende do
+      // snap configurado em outra seção) e tamanho igual à "Espessura".
+      const espacamentoPx = Utils.clamp(4 + gapCm * 2.2, 6, 24);
+      ctx.fillStyle = '#ffd166';
+      for (let gx = ax0; gx <= ax1 + 0.01; gx += espacamentoPx) {
+        for (let gy = ay0; gy <= ay1 + 0.01; gy += espacamentoPx) {
+          ctx.beginPath();
+          ctx.arc(gx, gy, espessuraPx / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  },
+
+  /** [16/09/2026 UTC] NOVO — pedido verbatim: "Crie um documento explicando
+   *  a funcionalidade desta ferramenta 'Trena 3D' [...] Acessível por um
+   *  botão no cabeçalho de início do 'Trena 3D' (nas configurações 3D)."
+   *  Janela própria (mesmo padrão visual `modal-backdrop`/`modal-sheet` do
+   *  resto do app, ver `_openMapRotationSnapDialog` acima e o próprio `open()`
+   *  desta folha), só com texto explicativo — sem nenhum campo de config
+   *  aqui, é 100% documentação. Fica por cima da folha de Configurações
+   *  (que continua aberta atrás, sem fechar) — só remove a si mesma. */
+  _abrirDocTrena3D() {
+    document.getElementById('mc-trena3d-doc-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'mc-trena3d-doc-modal';
+    modal.className = 'modal-backdrop';
+    modal.style.zIndex = '10001'; // por cima da folha de Configurações (que continua aberta atrás)
+    modal.innerHTML = `
+      <div class="modal-sheet" style="max-width:640px; max-height:82vh; overflow:auto">
+        <div class="handle"></div>
+        <div style="position:sticky; top:-16px; z-index:1; background:var(--bg-elev); margin:-16px -16px 0; padding:16px 16px 8px; display:flex; align-items:center; justify-content:space-between; gap:8px">
+          <h3 style="margin:0">📏 Sobre a ferramenta "Trena 3D"</h3>
+          <button type="button" class="icon-btn sm" id="mc-trena3d-doc-close-top" title="Fechar" style="flex:none">✕</button>
+        </div>
+        <div style="line-height:1.5">
+          <h4>O que ela faz</h4>
+          <p>A "📏 Trena 3D" mede a distância reta entre 2 pontos dentro do "Ver em 3D" (Mapa → Planta baixa → Ver em 3D → barra de ferramentas). Cada medida fica salva no mapa (some só se você excluir ela) e pode ser configurada (aparência, cor, espessura, visibilidade etc.) na seção "📏 Trena 3D" das Configurações 3D.</p>
+
+          <h4>O básico: 2 cliques numa superfície</h4>
+          <p>Com a ferramenta selecionada, mire com o cursor (a mira fica no centro da tela) e clique — o 1º clique marca o 1º ponto DIRETO onde a mira estiver tocando uma superfície real (chão, parede, objeto). Mire outro lugar e clique de novo — o 2º clique marca o 2º ponto e conclui a medida na hora, mostrando a distância entre os 2 pontos.</p>
+
+          <h4>Medindo pontos "no ar" — a âncora</h4>
+          <p>Nem todo ponto que você quer medir está numa superfície de verdade — por exemplo, o topo de uma parede a 2,5m de altura, medido a partir do chão bem abaixo dele. Pra esses casos existe a <b>âncora</b>: um clique de ancoragem trava as 2 dimensões horizontais (X e Z) num ponto real da superfície mirada, e libera só a 3ª dimensão (a altura, Y) — o próximo clique fixa essa altura livremente, mirando pra cima ou pra baixo ao longo dessa reta vertical "no ar".</p>
+          <p>Há 2 jeitos configuráveis de acionar a âncora (escolha em Configurações 3D → "📏 Trena 3D — Como funciona a ancoragem (Ctrl)"):</p>
+
+          <p><b>Modo "Segurando Ctrl" (padrão):</b></p>
+          <ol style="padding-left:20px; margin:6px 0">
+            <li>Segure <b>Ctrl</b> e clique mirando numa superfície — isso marca (ou move, se repetir) o ponto de ancoragem, travando X/Z ali. Pode repetir quantas vezes quiser antes de decidir a altura.</li>
+            <li>Solte o Ctrl e clique de novo — isso fixa a 3ª dimensão (a altura) nessa reta vertical, completando o ponto "no ar".</li>
+          </ol>
+          <p>Nesse modo, se você <b>nunca segurar Ctrl</b> durante toda a medição, ela sai do jeito simples de sempre: só 2 cliques, cada um direto numa superfície — o Ctrl é 100% opcional, só usado quando você realmente precisa de um ponto "no ar".</p>
+
+          <p><b>Modo "Sempre com 4 cliques":</b></p>
+          <p>Nesse modo o Ctrl não faz nenhuma diferença — toda medida usa exatamente 4 cliques, sempre alternando entre ancorar e fixar, nesta ordem:</p>
+          <ol style="padding-left:20px; margin:6px 0">
+            <li><b>1º clique</b> — estabelece o ponto de ancoragem do 1º ponto (trava X/Z, libera só a altura).</li>
+            <li><b>2º clique</b> — fixa o 1º ponto da medida "no ar", na altura mirada sobre essa reta.</li>
+            <li><b>3º clique</b> — estabelece o ponto de ancoragem do 2º ponto (trava X/Z de novo, num lugar novo).</li>
+            <li><b>4º clique</b> — fixa o 2º ponto da medida e conclui, mostrando a distância.</li>
+          </ol>
+
+          <h4>Enquanto mira, antes de clicar</h4>
+          <p>Sempre que uma referência vertical estiver "em jogo" (Ctrl fisicamente segurado no modo Ctrl, ou aguardando o clique de ancoragem no modo 4 cliques), a bolinha de mira e a linha guia tracejada infinita (do chão até o teto de 6m) ficam laranja em vez de azul. Se a âncora ainda não foi commitada (você está só segurando Ctrl, decidindo onde ela vai cair), a opção "Mostrar já ao segurar o Ctrl" decide se a medida do chão até a bolinha já aparece nesse momento, ou só depois de a âncora ser marcada de fato. Depois que a âncora já foi marcada (clique feito) mas o ponto "no ar" ainda não foi fixado, a opção "Mostrar a medida entre a âncora e a bolinha 'no ar' antes de fixar o ponto" cobre essa 2ª etapa. Ambas ficam em Configurações 3D → "📏 Trena 3D — Altura ao vivo (Antes mesmo de definir o ponto)".</p>
+
+          <h4>A linha da âncora depois do 1º ponto já fixado</h4>
+          <p>Por padrão, assim que o 1º ponto da medida é fixado "no ar", a linha tracejada laranja daquela âncora some — só volta a aparecer uma referência vertical quando você ancorar de novo pro 2º ponto. Em Configurações 3D → "📏 Trena 3D — Linha da âncora após o 1º ponto" dá pra fazer ela continuar desenhada mesmo depois disso (opção "Continuar desenhando a linha tracejada..."), escolhendo se ela para na altura real do 1º ponto ou continua infinita até o teto de 6m — e, numa subopção separada, se o texto da medida (⬍ Xm) some junto com o texto ou continua aparecendo do lado da linha.</p>
+
+          <h4>Linhas verticais depois da medida pronta</h4>
+          <p>As 2 linhas acima (a do 1º e a do 2º ponto ancorados) somem por padrão assim que a medida é finalizada (os 2 pontos já fixados). Em Configurações 3D → "📏 Trena 3D — Linhas verticais das medidas finalizadas" (desativada por padrão) dá pra manter as 2 linhas desenhadas permanentemente junto com a medida já pronta, do chão até cada ponto "no ar" — com a mesma subopção de "até o ponto" ou "infinita" até o teto de 6m. Pontos que já estavam no chão (sem âncora nenhuma envolvida) não geram linha nenhuma, já que a altura deles já é zero.</p>
+
+          <h4>Cancelando uma medida em andamento</h4>
+          <p>Pressione <b>Esc</b> a qualquer momento durante uma medida ainda não concluída — isso descarta o(s) ponto(s) já marcado(s) e qualquer âncora pendente, sem criar nenhuma medida.</p>
+
+          <h4>Outras opções relacionadas</h4>
+          <p>Snap de posição (arredonda cada ponto pro múltiplo mais próximo de um valor configurável — segure <b>Shift</b> pra desligar o snap temporariamente), guias de grade do mundo, gradeado do ladrilho mirado (ambos com um preview de canvas ilustrativo, logo abaixo da opção de ativar cada um), estilo/cor/espessura/pontas da medida finalizada, e visibilidade (some ou não quando algo bloqueia a visão) — todas na mesma seção "📏 Trena 3D" das Configurações 3D, aplicadas imediatamente às medidas já desenhadas.</p>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:14px">
+          <button type="button" class="btn" id="mc-trena3d-doc-close" style="flex:1">Fechar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    const fechar = () => modal.remove();
+    modal.querySelector('#mc-trena3d-doc-close-top').onclick = fechar;
+    modal.querySelector('#mc-trena3d-doc-close').onclick = fechar;
+    modal.addEventListener('pointerdown', (e) => { if (e.target === modal) fechar(); });
   },
 };
 

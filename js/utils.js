@@ -111,6 +111,46 @@ const Utils = {
     };
   },
 
+  // [15/09/2026 UTC] NOVO -- pedido verbatim: "A troca dos botões no
+  // rodapé deve ser animada, o botão que está vai sumindo em direção ao
+  // seu próprio centro e o outro aparece vindo do centro até aparecer
+  // completamente." Usado quando o "Modo de operação" (Conferência de
+  // patrimônios/Mapeamento de ambientes, ver classicmode.js) muda com o
+  // rodapé JÁ visível na tela (troca de mapa em tempo real) — a versão do
+  // botão antigo encolhe/some pro próprio centro (`.footernav-btn-swap-out`,
+  // ver css/style.css), e SÓ DEPOIS (`animationend`, nunca simultâneo — o
+  // pedido descreve uma sequência, não os dois botões brigando pelo mesmo
+  // espaço ao mesmo tempo) o botão novo nasce do centro crescendo até o
+  // tamanho normal (`.footernav-btn-swap-in`). Compartilhada entre
+  // js/classicmode.js (`<nav class="bottomnav">` do modo Clássico) e
+  // js/bsplayout.js (painel 'Botões' do Workspace) — os 2 lugares onde o
+  // rodapé de botões é desenhado (ver RODADA 56, progresso-sessao.md).
+  // `oldBtn` pode ser `null` (1ª montagem, nada a animar) — nesse caso só
+  // cria e devolve o botão novo direto, sem classe/animação nenhuma.
+  animateFooterButtonSwap(oldBtn, buildNewBtnFn) {
+    if (!oldBtn || !oldBtn.parentElement) return buildNewBtnFn();
+    const parent = oldBtn.parentElement;
+    const nextSibling = oldBtn.nextSibling;
+    let done = false;
+    const finish = () => {
+      if (done) return; // 'animationend' pode disparar mais de uma vez (várias propriedades animadas) — só a 1ª conta
+      done = true;
+      const novo = buildNewBtnFn();
+      novo.classList.add('footernav-btn-swap-in');
+      if (nextSibling && nextSibling.parentElement === parent) parent.insertBefore(novo, nextSibling);
+      else parent.appendChild(novo);
+      oldBtn.remove();
+      novo.addEventListener('animationend', () => novo.classList.remove('footernav-btn-swap-in'), { once: true });
+    };
+    oldBtn.classList.add('footernav-btn-swap-out');
+    oldBtn.addEventListener('animationend', finish, { once: true });
+    // Rede de segurança: se por algum motivo a animação não disparar (ex.:
+    // `prefers-reduced-motion`/navegador sem suporte), garante a troca
+    // mesmo assim depois de um tempo — nunca deixa o botão antigo "preso".
+    setTimeout(finish, 400);
+    return null; // o botão novo só existe depois do fim da animação (assíncrono) — chamador não precisa da referência aqui
+  },
+
   escapeHtml(str) {
     return (str ?? '').toString()
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -940,6 +980,21 @@ Utils.bringToFront = function bringToFront(el) {
   _frontZCounterFallback += 1;
   el.style.zIndex = String(_frontZCounterFallback);
   return _frontZCounterFallback;
+};
+
+/** [15/09/2026 UTC] NOVO — pedido verbatim: "Ao 'fechar' a janela, ela deve
+ *  voltar para o seu z-index normal." Wrapper fino sobre `WindowManager.
+ *  blur` (mesmo espírito do wrapper `Utils.bringToFront`/`WindowManager.
+ *  focus` acima) — chamado no fechamento de cada janela flutuante do mapa
+ *  (ver mapview.js `_hideOrRemovePanel`/`_closeObjectPickerPanel`/
+ *  `_closeLayersPanelImpl`/`_closeCoresPanel`). Sem `WindowManager`
+ *  (não esperado em produção), não há nada a fazer — o fallback de
+ *  `bringToFront` acima também não tem noção de "z-index normal" pra
+ *  devolver, então esta função só age quando o gerenciador de verdade
+ *  existe. */
+Utils.releaseFront = function releaseFront(el) {
+  if (!el) return;
+  if (typeof window.WindowManager !== 'undefined') window.WindowManager.blur(el);
 };
 
 window.Utils = Utils;

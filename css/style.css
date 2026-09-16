@@ -557,6 +557,20 @@ body.classic-mode-active #topbar-info-layoutbar { display: none; }
 .icon-btn:active { transform: scale(0.97); }
 .icon-btn.sm { padding: 4px 9px; font-size: 12px; }
 .icon-btn:disabled { opacity: .35; cursor: default; }
+/* [13/09/2026] NOVO — seletor "Piso: [Todos ▾]" da barra do mapa 2D e do
+   "Ver em 3D" (ver #tbm-piso-wrap em mapview.js / #v3d-piso-wrap em
+   view3d.js). Estilo minimalista igual aos outros controles da barra
+   (.icon-btn) pra não destoar — só aparece quando o mapa tem "Piso". */
+.tbm-piso-select, .v3d-piso-select {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tbm-piso-select:hover, .v3d-piso-select:hover { background: var(--bg-elev-2); }
 /* Badge pequeno no canto inferior-direito de um botão de ícone (ver
    #map-config em mapview.js: o mesmo ⚙️ é usado também no 3D, #v3d-config
    em view3d.js — o "2D" deixa claro, à primeira vista, qual dos dois é
@@ -641,6 +655,27 @@ main#view {
 .bottomnav button .ic { font-size: 19px; }
 .bottomnav button.active { color: var(--accent); background: var(--accent-dim); }
 .bottomnav button.active:hover { background: var(--accent-dim); }
+
+/* [15/09/2026 UTC] NOVO -- pedido verbatim: "A troca dos botões no rodapé
+   deve ser animada, o botão que está vai sumindo em direção ao seu
+   próprio centro e o outro aparece vindo do centro até aparecer
+   completamente." Usado por Utils.animateFooterButtonSwap (js/utils.js)
+   quando o botão 'Tabela'/'Cartões' vira '3D'/'Caixa' (ou volta) com o
+   rodapé já visível, ao trocar o "Modo de operação" na splash screen —
+   ver js/classicmode.js/js/bsplayout.js. Compartilhada entre o
+   <nav class="bottomnav"> do modo Clássico E o painel "Botões" do
+   Workspace (.bsp-botoes-btn, ver mais abaixo) -- por isso fica aqui,
+   perto do primeiro dos dois, em vez de duplicada nos dois lugares. */
+@keyframes footernav-btn-shrink-out {
+  from { transform: scale(1); opacity: 1; }
+  to { transform: scale(0); opacity: 0; }
+}
+@keyframes footernav-btn-grow-in {
+  from { transform: scale(0); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.footernav-btn-swap-out { animation: footernav-btn-shrink-out .18s ease-in forwards; transform-origin: center; }
+.footernav-btn-swap-in { animation: footernav-btn-grow-in .22s ease-out forwards; transform-origin: center; }
 
 /* ---------- Barra inferior do Mapa (#bottombar-mapa, só na Planta baixa) ----------
    Sibling de main#view/.bottomnav (ver index.html), preenchida/esvaziada por mapview.js
@@ -775,6 +810,21 @@ body:not(.view-mapa-planta) .bottombar-mapa { display: none; }
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
+/* [14/09/2026 UTC] NOVO — pedido verbatim: "Faça os valores de 'X:' e 'Y:'
+   (no rodapé da grade) ficarem dentro de uma box com largura fixa para que
+   o tipo e nome de objeto quando aparecer ao lado esquerdo não fique se
+   mexendo também (por causa da variação do comprimento de texto de
+   'X: — Y: —')." CAUSA RAIZ: #bbm-coords-readout (ver _mountBottombarMapa/
+   _updateBottombarMapa em js/mapview.js) só tinha `white-space:nowrap`, sem
+   nenhuma largura mínima — o texto muda de comprimento a cada frame (ex.:
+   "X: — Y: —" vs "X: -123,4cm Y: 56,7cm" vs "X: 12,34pol Y: -5,67pol"),
+   então tudo que vem DEPOIS dele na mesma linha (#bbm-selection-readout,
+   o campo de tipo+nome do objeto selecionado, item (b) deste mesmo pedido)
+   ficava "pulando" de posição a cada atualização. `min-width` fixo (valor
+   generoso o bastante pra caber o texto mais longo plausível, nas 3
+   unidades — pixels/polegadas/cm-m — inclusive com sinal negativo) resolve
+   sem precisar mexer no JS que gera o texto. */
+.bbm-coords-readout { min-width: 172px; }
 /* Zoom% clicável — só o NÚMERO (#bbm-zoom-value), não o rótulo "Zoom:" (ver
    _mountBottombarMapa/_updateBottombarMapa) — o sublinhado pontilhado (ver estilo inline em
    _mountBottombarMapa) fica só nele, pra não sugerir que o rótulo também é clicável. */
@@ -1804,6 +1854,20 @@ datalist {}
   opacity: .35; pointer-events: none;
 }
 #map-navtoggle.active { background: rgba(255,209,102,0.22); border-color: #ffd166; color: #ffd166; }
+/* [14/09/2026 UTC] NOVO — pedido verbatim: "No mapa 2D, ao estar no 'Modo
+   Navegação', o botão fica com um estilo amarelado. No 'Ver em 3D', ao
+   estar no 'Modo Navegação', este estilo amarelado deve aparecer também,
+   para manter mesmo estilo visual nos dois botões." OBS: no 3D o botão é o
+   INVERSO do 2D — fica ATIVO (amarelo) quando NÃO habilitado o "Modo
+   Edição" (ou seja, quando ESTÁ em "🧭 Modo Navegação"), já que o próprio
+   texto/estado alterna entre os dois modos (ver `_syncModelarToggleUI3D`,
+   js/view3d.js, que já tinha `classList.toggle('active', ligado)` só que
+   sem CSS nenhum pra ele — este botão nunca tinha ganhado nenhum estilo
+   próprio de estado, então "ligado" (Modo Edição) ficava sem destaque
+   nenhum, e "Modo Navegação" (o estado que deveria ficar amarelo) também.
+   Corrigido invertendo a classe: o botão recebe '.active' quando em Modo
+   NAVEGAÇÃO (não quando em Modo Edição), pra bater com o 2D. */
+#v3d-modelar-toggle.active { background: rgba(255,209,102,0.22); border-color: #ffd166; color: #ffd166; }
 /* Tela "Organizar" aberta (ver mapview.js _openOrganizeView/organizeview.js,
    pedido do usuário 22/08/2026: "a janela de ferramentas, a miniatura e
    quaisquer outros itens que não sejam da janela organizar não devem ficar
@@ -2104,7 +2168,32 @@ datalist {}
   display: flex; flex-direction: column; gap: 4px;
   background: rgba(23,27,33,.85); backdrop-filter: blur(4px);
   border: 1px solid var(--border); border-radius: 12px; padding: 6px;
-  max-height: 80vh;
+  /* [14/09/2026 UTC] NOVO — pedido verbatim: "No mapa 2D, diminua a janela
+     'Ferramentas' de 591px para 490px." Antes sem `width` explícita
+     (largura só de conteúdo/hug); agora um valor fixo, mais estreito.
+     [14/09/2026 UTC, CORRIGIDO na mesma rodada seguinte] pedido verbatim:
+     "ela ficou com uma largura maior do que o normal [...] deve ser
+     alguma regra do CSS conflitando. A largura deve voltar ao que era."
+     [14/09/2026 UTC, CORRIGIDO DE NOVO] pedido verbatim: "A largura da
+     janela de ferramentas deve ser 129px e a altura é que é 490px." — 490px
+     sempre foi a medida de ALTURA pretendida (não de largura); 129px virou
+     a largura fixa nessa rodada.
+     [14/09/2026 UTC, CORRIGIDO MAIS UMA VEZ] pedido verbatim: "A largura de
+     'Ferramentas' deve ser de tal modo que caibam os dois botões e não
+     gere scroll, podendo ficar diferente da largura fixada, mas deve ser o
+     suficiente apenas." Ou seja: nenhum valor FIXO em px é o pedido de
+     verdade — a largura deve se ajustar sozinha ao conteúdo (2 colunas de
+     botões), nunca mais precisando de scroll horizontal nem sobrando
+     espaço à toa. `width: fit-content` faz exatamente isso: o contêiner
+     encolhe/cresce pro tamanho intrínseco da grade de 2 colunas por baixo
+     (cada botão já tem largura própria, `.map2d-ptool-btn { width:58px }`)
+     — sem nenhum número mágico pra manter sincronizado à mão toda vez que
+     o conteúdo dos botões mudar. `max-width:95vw` só como segurança (nunca
+     ocupar a tela inteira em conteúdo anormalmente largo); `min-width:0` na
+     grade (ver `.map2d-toolsidebar-grid` abaixo) continua útil pra nunca
+     mais vazar largura além do que `fit-content` calculou. */
+  width: fit-content; max-width: 95vw;
+  height: 490px; max-height: 490px;
   /* Pedido do usuário: "a barra de ferramentas quase que não cabe mais na
      tela (verticalmente)... aumente o scroll, para poder acessar os botões
      novos que estão sendo colocados mais abaixo." O `overflow-y:auto` já
@@ -2142,6 +2231,11 @@ datalist {}
 }
 .map2d-toolsidebar-grid {
   display: grid; grid-template-columns: repeat(2, 1fr);
+  /* [14/09/2026 UTC] `min-width: 0` — ver comentário grande em
+     `.map2d-toolsidebar` (width:490px) sobre por que a largura estava
+     "vazando" pra fora do contêiner: sem isto, o min-content dos itens
+     do grid podia forçar a trilha `1fr` além da fatia disponível. */
+  min-width: 0;
   /* `gap` sozinho (sem row-gap/column-gap separados) já vale IGUAL nas duas
      direções — pedido do usuário: "a distância entre eles, horizontal e
      vertical, deve ser a mesma". Reduzido de 5px pra 3px no mesmo pedido:
@@ -2206,6 +2300,37 @@ datalist {}
   background: transparent; border: none; border-radius: 0; padding: 0;
   backdrop-filter: none;
 }
+/* [14/09/2026 UTC] NOVO — pedido verbatim: "Quando o gizmo é ativado em
+   algum objeto, a altura do cabeçalho da grade aumenta um pouco. Faça não
+   ter esta variação [...] de modo que sua altura permaneça a mesma."
+   CAUSA RAIZ: a linha 4 (`#tbm-row4`, `.topbar-mapa-row` — `display:flex`
+   sem altura própria, cresce pro tamanho do filho mais alto) fica mais
+   baixa sem nada dentro de `#map-toolctx` além de um botão comum
+   (`.icon-btn.sm`, ~26px) e mais ALTA quando a seção "Âncoras"
+   (`.map2d-anchor-legend`, título 9px + gap 2px + ícone 16px ≈ 27-30px)
+   aparece — a diferença é pequena, mas empurra visualmente o resto do
+   cabeçalho pra baixo (o "aumenta um pouco" relatado). `min-height` fixo
+   reserva sempre o espaço da maior variante possível, mesmo com o gizmo
+   desligado (linha com só texto/botões comuns) — a altura do cabeçalho
+   nunca mais varia entre os dois estados.
+   [14/09/2026 UTC, CORRIGIDO na mesma rodada seguinte] pedido verbatim:
+   "alguma coisa muda para que a altura da tag header (class='topbar')
+   mude. Ela deve permanecer com altura fixa." `min-height` sozinho não
+   travava de fato: como o valor (30px) era maior que a altura natural das
+   DUAS variantes de conteúdo (~24px sem gizmo, ~27px com), a REGRA nunca
+   chegava a agir (o `min-height` nunca "puxava" nada porque o conteúdo já
+   nascia menor) — MAS um `min-height` num item `display:flex` (que é o
+   caso de `.topbar-mapa-row`) só define um PISO, nunca um teto: nada aqui
+   impedia esta linha de crescer além de 30px se, em algum estado, o
+   conteúdo (ex.: quebra por falta de espaço horizontal) precisasse de
+   mais altura — e como o restante do cabeçalho (`.topbar`/`.topbar-mapa`,
+   ambos flex-column sem altura própria) sempre cresce pro tamanho da
+   soma dos filhos, qualquer variação aqui se propagava pra cima. Trocado
+   por `height` fixo (em vez de `min-height`) — um TETO de verdade: a
+   linha nunca mais muda de altura entre os dois estados, e a barra de
+   contexto usa `overflow-x:auto` (já existente) pra rolar horizontalmente
+   em vez de crescer verticalmente caso algum conteúdo futuro não caiba. */
+#tbm-row4 { height: 30px; }
 /* Botão da linha 4 (ícone da ferramenta atual) + popover com todas as
    ferramentas (ver mapview.js _toggleToolPicker) — mesmos botões/estilo da
    barra lateral (.map2d-ptool-btn), só numa grade flutuante ancorada perto
@@ -2277,6 +2402,22 @@ datalist {}
    centralizado, logo abaixo". */
 .map2d-anchor-legend { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; flex: none; }
 .map2d-anchor-legend-title { font-size: 9px; line-height: 1; color: var(--text-dim); white-space: nowrap; }
+/* [14/09/2026 UTC] NOVO — pedido verbatim: "quando os hit tests dos dois
+   botões de âncora estiverem com algum ponto em comum, [...] devem se
+   transformar em toggle clicável [...] Visualmente continuam a mesma
+   coisa" — reset de aparência de <button> (fundo/borda transparentes,
+   herda fonte, cursor pointer) pra ficar visualmente IDÊNTICO à legenda
+   estática de sempre (`.map2d-anchor-legend`, de onde herda o resto do
+   estilo — mesma classe nos dois casos, ver _formaAnchorSectionHtml) só
+   que agora clicável; `.active` (âncora travada no momento) ganha um
+   contorno arredondado sutil, mesmo espírito visual de `.icon-btn.active`
+   usado no resto do app. */
+.map2d-anchor-legend-toggle {
+  background: transparent; border: none; padding: 2px 4px; margin: 0;
+  font: inherit; color: inherit; cursor: pointer; border-radius: 6px;
+}
+.map2d-anchor-legend-toggle:hover { background: rgba(255,255,255,.08); }
+.map2d-anchor-legend-toggle.active { background: rgba(0,229,255,0.14); box-shadow: inset 0 0 0 1px rgba(0,229,255,.5); }
 .map2d-anchor-resize-mini circle[data-anchor] { cursor: pointer; }
 .map2d-toolctx .icon-btn#toolctx-forma-pick { display: inline-flex; align-items: center; gap: 5px; }
 .map2d-formactx-split { display: inline-flex; align-items: center; gap: 4px; }
@@ -2386,6 +2527,32 @@ datalist {}
    _makePanelDraggable), left/top passam a ser pixels explícitos, então o
    right/margin de centralização original tem que sair do caminho. */
 .map-obj-picker-panel.dragged { right: auto; margin: 0; }
+/* [15/09/2026 UTC] NOVO — pedido verbatim: "A janela de objetos [...] deve
+   ser redimensionável. Às vezes, ela aparece com uma largura e, às vezes
+   com uma largura menor. Ela deve preservar nas dimensões ao ser
+   fechada/aberta." Causa raiz da largura inconsistente: `.map-obj-picker-
+   panel` (regra acima) nunca teve `width` própria — só `left:10px;
+   right:10px; max-width:420px`, ou seja, a largura sempre foi "o que sobrar
+   da tela até 420px", mudando conforme o tamanho da janela do navegador.
+   `.map-obj-picker-panel-resizable` dá a este painel o MESMO tratamento já
+   usado por `.map-layers-panel` (largura/altura FIXAS em px, guardadas via
+   `_makePanelResizable`/`DB.setSetting`, ver mapview.js
+   `_openObjectPickerPanel`) — mesma técnica de `.map-panel-clip` (recorte
+   dos cantos arredondados) + alças de redimensionar. */
+.map-obj-picker-panel-resizable {
+  display: flex; flex-direction: column;
+  left: 10px; right: auto; margin: 0;
+  max-width: none; max-height: none;
+  overflow: visible;
+  padding: 0;
+}
+.map-obj-picker-panel-resizable.dragged { right: auto; margin: 0; }
+.map-obj-picker-panel-resizable .map-obj-picker-head {
+  margin: 0; padding: 10px 12px 6px; flex: none;
+}
+.map-obj-picker-panel-resizable .map-obj-picker-grid {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 10px;
+}
 .map-obj-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
 .map-obj-picker-grid .map-obj-pick-item.active { border-color: #ffd166; background: rgba(255,209,102,0.14); }
 
@@ -2445,6 +2612,18 @@ datalist {}
 .map-layers-panel {
   display: flex; flex-direction: column;
   left: 10px; right: auto; margin: 0; /* sobrescreve left/right/margin do .map-obj-picker-panel — aqui a largura já é fixa (abaixo), não precisa centralizar */
+  /* [15/09/2026 UTC] NOVO — pedido verbatim: "ela atinge algum 'limite' de
+     redimensionamento de largura e começa a andar para a esquerda [...]
+     Não deve ter esse limite". CAUSA RAIZ: esta classe nunca sobrescrevia o
+     `max-width:420px` herdado de `.map-obj-picker-panel` (ver acima) —
+     `_makePanelResizable` (mapview.js) já calcula width/left corretamente
+     até 560px (o maxWidth passado a ela), mas o NAVEGADOR limitava a
+     largura RENDERIZADA em 420px por causa deste CSS, enquanto o JS seguia
+     avançando `left` com base na largura MAIOR (não limitada) que ele
+     mesmo calculava — dava exatamente a impressão de "bater num limite e
+     andar pra esquerda". Mesma correção já usada por
+     `.map-obj-picker-panel-resizable` (ver comentário dela abaixo). */
+  max-width: none;
   /* [10/09/2026] width/height base 300×340 -> 220×340 — pedido verbatim:
      "por padrão, no app (de fábrica), ela vem com a mínima largura dela."
      220px é a MESMA largura mínima passada a `_makePanelResizable`
@@ -2508,6 +2687,90 @@ datalist {}
 .map-layer-row.active { border-color: #00e5ff; background: rgba(0,229,255,0.10); }
 .map-layer-name-label { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map-layer-vis { flex: none; } /* olho sempre à direita — a ordem no HTML já cuida disso, isto só evita que encolha */
+
+/* [13/09/2026 UTC] Painel 'Grupos' (botão 🏷️ #map-grupos) — pedido verbatim:
+   'Monte um sistema para poder agrupar objetos de tal modo que depois em
+   uma lista de opções, ao clicar em uma delas, seja possível ativar/
+   desativar aquele grupo na tela para ser renderizado. E mais, além disso
+   (habilitar/desabilitar a renderização), também, apenas destacar
+   visualmente.' + 'Uma opção para fazer todas as paredes sumirem e ficar
+   apenas os objetos que não são parede, nem piso.' + (resposta do usuário
+   à pergunta de esclarecimento sobre o botão 'Andar') 'criar um sistema
+   para poder agrupar ativações e desativações ao selecionar uma das
+   opções disponíveis'. Reaproveita a base '.map-obj-picker-panel' (ver
+   acima) sem as sobrescritas mais elaboradas de '.map-layers-panel'
+   (esta caixa não é redimensionável nem tem lista com scroll próprio
+   isolado do cabeçalho — mais simples que '_openLayersPanelImpl',
+   decisão de escopo documentada em mapview.js). */
+/* [14/09/2026 UTC] largura 260px -> 340px — o editor de regras (nome +
+   seletor + efeito, ver _renderGruposPanelBody em mapview.js) precisa de
+   mais espaço que a lista simples de antes; painel 3D usa a MESMA classe,
+   ganha a largura nova de graça. */
+.map-grupos-panel { width: 340px; }
+.map-grupos-body { display: flex; flex-direction: column; gap: 2px; padding-top: 4px; }
+.map-grupos-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 4px; border-radius: 6px;
+}
+.map-grupos-row:hover { background: var(--bg-elev-2); }
+/* Linha fixa 'Paredes e Piso' — visualmente destacada das linhas de
+   classe/andar por um traço à esquerda, pra deixar claro que não é uma
+   classe do usuário e sim uma opção embutida do app. */
+.map-grupos-row-fixa { border-left: 2px solid var(--border); padding-left: 8px; }
+.map-grupos-label { flex: 1 1 auto; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 👁️/🚫 — mesmo padrão visual do olho de '.map-layer-vis', mas com estado
+   'apagado' (.off) pra ficar óbvio que aquele grupo está oculto mesmo com
+   o painel fechado depois. */
+.map-grupos-eye { flex: none; background: none; border: none; cursor: pointer; font-size: 15px; padding: 2px 4px; opacity: .9; }
+.map-grupos-eye.off { opacity: .45; }
+/* ✨ — toggle de destaque visual (o "apenas destacar todos os elementos
+   internos de uma sala", pedido do usuário), independente do 👁️ acima —
+   por isso os dois botões convivem lado a lado na mesma linha. */
+.map-grupos-star { flex: none; background: none; border: none; cursor: pointer; font-size: 15px; padding: 2px 4px; opacity: .45; }
+.map-grupos-star.active { opacity: 1; filter: drop-shadow(0 0 3px #ffd54a); }
+.map-grupos-sep { height: 1px; background: var(--border); margin: 6px 2px; }
+.map-grupos-vazio { font-size: 12px; color: var(--text-dim); padding: 6px 4px; text-align: center; }
+
+/* [14/09/2026 UTC] NOVO — editor de regras do sistema "Grupos" generalizado (ver
+   Mapping.getGrupoRegras/comentário grande em mapping.js e
+   MapView._renderGruposPanelBody). Cada regra ocupa 2 linhas: nome +
+   toggle + excluir (row1), seletor + efeito + valor opcional (row2). */
+.map-grupos-regra {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 6px 4px; border-radius: 6px; border-left: 2px solid transparent;
+}
+.map-grupos-regra:hover { background: var(--bg-elev-2); }
+.map-grupos-regra.ativa { border-left-color: #7cffb2; }
+.map-grupos-regra-row1, .map-grupos-regra-row2 { display: flex; align-items: center; gap: 4px; }
+.map-grupos-nome-input {
+  flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 600;
+  background: transparent; border: 1px solid transparent; border-radius: 4px;
+  color: var(--text); padding: 2px 4px;
+}
+.map-grupos-nome-input:hover, .map-grupos-nome-input:focus { border-color: var(--border); background: var(--bg-elev-1); }
+.map-grupos-selector-input {
+  flex: 1 1 auto; min-width: 0; font-size: 11px; font-family: monospace;
+  background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text-dim); padding: 2px 4px;
+}
+.map-grupos-selector-input:focus { color: var(--text); border-color: #7cffb2; }
+.map-grupos-efeito-select {
+  flex: none; font-size: 11px; background: var(--bg-elev-1); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text); padding: 1px 2px; max-width: 108px;
+}
+.map-grupos-valor-input {
+  flex: none; width: 46px; font-size: 11px; background: var(--bg-elev-1);
+  border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 1px 4px;
+}
+.map-grupos-del { flex: none; background: none; border: none; cursor: pointer; font-size: 13px; padding: 2px 4px; opacity: .55; }
+.map-grupos-del:hover { opacity: 1; }
+.map-grupos-add {
+  margin-top: 4px; align-self: stretch; text-align: center; font-size: 13px;
+  background: var(--bg-elev-1); border: 1px dashed var(--border); border-radius: 6px;
+  color: var(--text); padding: 6px; cursor: pointer;
+}
+.map-grupos-add:hover { background: var(--bg-elev-2); border-color: #7cffb2; }
+
 
 /* Barra de ações — 7 botões quadrados, alinhados à ESQUERDA, na parte de
    baixo da caixa (pedido explícito do usuário) — agem sobre a camada
@@ -2827,6 +3090,33 @@ datalist {}
 .map-panel-comp-row { font-size: 12.5px; padding: 3px 0; color: var(--text); }
 .map-panel-comp-row em { color: var(--text-dim); font-style: normal; }
 .comp-event-row select, .comp-action-row select { flex: 1 1 auto; min-width: 0; }
+/* NOVO (12/09/2026) — "Histórico deste objeto" (ver js/objectstandard.js
+   ObjectStandard.historicoHtml/wireHistoricoUi, e js/mapview.js
+   _historicoFieldsetHtml/js/view3d.js _historicoCardHtml — mesmo HTML
+   compartilhado nos dois lados, 2D e 3D). Lista compacta + campo de
+   adicionar, mesmo espírito visual do resumo de componentes acima. */
+.objstd-historico { font-size: 12.5px; }
+.objstd-hist-lista { max-height: 160px; overflow-y: auto; margin-bottom: 6px; }
+.objstd-hist-row { display: flex; align-items: flex-start; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--border, rgba(255,255,255,0.08)); }
+/* [13/09/2026] "Modificado em" agora fica numa linha própria, abaixo de
+ * "Criado em" (pedido do usuário) — cada data vira um <div> dentro deste
+ * bloco, então o nowrap é por linha, não no bloco todo. */
+.objstd-hist-data { color: var(--text-dim); font-size: 11px; }
+.objstd-hist-data div { white-space: nowrap; }
+.objstd-hist-texto { flex: 1 1 auto; min-width: 0; word-break: break-word; color: var(--text); }
+.objstd-hist-del { flex: 0 0 auto; opacity: 0.7; }
+.objstd-hist-del:hover { opacity: 1; }
+.objstd-hist-vazio { color: var(--text-dim); font-style: italic; padding: 4px 0; }
+.objstd-hist-add { display: flex; gap: 6px; }
+.objstd-hist-input { flex: 1 1 auto; min-width: 0; }
+/* [14/09/2026] NOVO — editar entrada/ordenar histórico (ver js/objectstandard.js historicoHtml). */
+.objstd-hist-acoes { flex: 0 0 auto; display: flex; gap: 4px; }
+.objstd-hist-edit { opacity: 0.7; }
+.objstd-hist-edit:hover { opacity: 1; }
+.objstd-hist-edit-input { flex: 1 1 auto; min-width: 0; min-height: 44px; resize: vertical; }
+.objstd-hist-sort { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 11.5px; color: var(--text-dim); }
+.objstd-hist-sort select { font-size: 11.5px; }
+.objstd-hist-dir { flex: 0 0 auto; font-size: 11px; padding: 2px 6px; }
 /* [11/09/2026] NOVO — pivot pra "folha de código" (js/components.js/
    mapview.js `_renderComponentsEditor`/`_renderScriptCodeEditor`): pedido
    verbatim "todas aquelas opções clicáveis geram um código por trás. Deve
@@ -2839,6 +3129,40 @@ datalist {}
    do pivot desta rodada; este app não tem bundler pra puxar um editor de
    código de verdade (CodeMirror/Monaco) de um CDN que o runtime não
    alcança, então uma textarea grande e bem estilizada é a escolha honesta. */
+/* [15/09/2026 UTC] NOVO -- pedido verbatim: "Quando der erro no script,
+   deve ficar uma flag na tela do script." Badge pequeno, alto contraste
+   (mesmo tom de "perigo" ja usado pelo toast de erro, window.Utils.toast
+   type:'danger'), mostrado no cabecalho do bloco Script quando
+   Components.getScriptError(c) tiver algo -- ver js/mapview.js
+   scriptBlockHtml/_refreshComponentErrorFlags. */
+.comp-script-error-flag {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11px; font-weight: 600; line-height: 1;
+  color: #ffb4a8; background: rgba(220, 53, 69, .18);
+  border: 1px solid rgba(220, 53, 69, .5); border-radius: 999px;
+  padding: 3px 8px; cursor: help; white-space: nowrap;
+}
+/* [15/09/2026 UTC] NOVO -- pedido verbatim: "deve ser uma mensagem que
+   deve ficar logo acima do codigo centralizada entre o nome do script e
+   o botao de 'fechar'. Enquanto persistir algum erro, a mensagem deve
+   ficar aparente. Deve haver um campo no HTML ja definido para isso com
+   altura fixa, para nao gerar um salto de posicao." ALTURA FIXA de
+   propósito (nao min-height) -- o elemento (ver js/mapview.js
+   _renderScriptCodeEditor, #comp-code-error-banner) fica sempre no HTML,
+   vazio ou nao; ":empty" só troca a aparência (sem fundo/borda), nunca a
+   altura -- é isso que garante nenhum salto de posição no textarea/resto
+   da tela ao erro aparecer/sumir. Fica dentro do mesmo wrapper sticky do
+   cabeçalho (".comp-code-head-sticky"), entao continua visível mesmo
+   rolando uma folha de código grande. */
+.comp-code-head-sticky { position: sticky; top: 0; z-index: 1; }
+.comp-code-error-banner {
+  height: 34px; display: flex; align-items: center; justify-content: center;
+  font-size: 12.5px; font-weight: 600; text-align: center;
+  color: #ffb4a8; background: rgba(220, 53, 69, .14);
+  border-bottom: 1px solid rgba(220, 53, 69, .4);
+  padding: 0 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.comp-code-error-banner:empty { background: transparent; border-bottom-color: transparent; }
 .comp-code-preview {
   font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace; font-size: 11.5px;
   color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -2988,6 +3312,10 @@ datalist {}
 .modelos3d-overlay .view3d-wrap { width: 100%; height: 100%; }
 .modelos3d-editor-bar {
   position: absolute; top: calc(10px + env(safe-area-inset-top, 0)); left: 10px; z-index: 10;
+  /* [15/09/2026 UTC] Agora com 2 botões ("💾 Salvar"/"🚪 Sair", ver
+     js/modelos3d.js _abrirEditor) — precisa de layout em linha com espaço
+     entre eles (antes só tinha 1 botão, sem necessidade de flex). */
+  display: flex; gap: 8px;
 }
 
 /* NOVO (02/09/2026) — "criar novo modelo" / "trocar o nome" / "representação
@@ -3311,10 +3639,69 @@ datalist {}
    nenhum, como pedido). */
 .v3d-fotocam-sair-topcenter:active { transform: translateX(-50%); }
 
+/* [13/09/2026] CORRIGIDO — pedido verbatim: HUD 3D (posição/qtd. de
+   objetos/fps) ilegível em cima de fundo claro/branco da cena 3D (o texto
+   usava `color: var(--text-dim)`, um cinza médio, sem contorno/sombra
+   nenhuma). Trocado pela técnica clássica de "HUD de jogo": texto branco
+   com contorno escuro via múltiplas camadas de `text-shadow` (4 offsets +
+   1 blur central) — fica legível tanto em cenas claras quanto escuras,
+   já que o contorno escuro sempre contrasta com o preenchimento branco
+   independente do fundo por trás. `.hud3d` só define `color`/`text-shadow`
+   (não tem texto próprio, só os 3 <span> filhos), então herda por cascata
+   pros 3 spans (#v3d-pos, #v3d-objcount, #v3d-fps e o span de dica
+   WASD/espaço/shift), que não sobrescrevem `color` nenhum. */
 .hud3d {
   position: absolute; bottom: 14px; left: 14px; right: 14px;
   display: flex; justify-content: space-between; align-items: flex-end;
-  pointer-events: none; font-size: 11px; color: var(--text-dim);
+  pointer-events: none; font-size: 11px; color: #fff;
+  text-shadow:
+    -1px -1px 0 rgba(0,0,0,.9), 1px -1px 0 rgba(0,0,0,.9),
+    -1px 1px 0 rgba(0,0,0,.9), 1px 1px 0 rgba(0,0,0,.9),
+    0 0 4px rgba(0,0,0,.7);
+}
+/* [13/09/2026] CORRIGIDO — pedido verbatim: "quando mudar o fps de '10'
+   (2 caracteres) para '9' (1 caractere)... o outro texto fique mudando de
+   posição" — o usuário quer que isso PARE de acontecer. CAUSA RAIZ: os 3
+   <span> do `.hud3d` (dica WASD, #v3d-pos, #v3d-objcount, #v3d-fps) vivem
+   num flex row com `justify-content:space-between` SEM largura fixa —
+   então cada vez que o textContent de um span muda de nº de caracteres
+   (ex.: fps "10 fps"→"9 fps", ou X/Y/Z e contagem de objetos variando de
+   dígito), o flexbox recalcula os espaços e os spans vizinhos visivelmente
+   "pulam" de posição. CORRIGIDO: cada span passa a ter `min-width` fixo
+   (generoso o bastante pro pior caso realista de cada formato, ver
+   comentários de cada regra abaixo, valores conferidos contra o código
+   que preenche o textContent em view3d.js) + `font-variant-numeric:
+   tabular-nums` (dígitos com largura de glifo sempre igual, então nem a
+   troca de um dígito por outro dentro do mesmo min-width causa
+   "chacoalhada" sub-pixel) + `display:inline-block` (min-width só
+   funciona em elementos block/inline-block, <span> é inline por padrão).
+   O 1º span (dica "WASD mover...") é fixo/curto e já fica bem no início
+   da row (`justify-content:space-between` o mantém colado à esquerda,
+   1º item), então não precisou de min-width. */
+#v3d-pos {
+  /* view3d.js ~10792-10796: `x ${x} · y ${y} · z ${z}` (1 casa decimal),
+     cada coordenada pode ser negativa/multi-dígito, ex.:
+     "x -123.4 · y 45.6 · z -78.9" (~26 caracteres) — alinhado à ESQUERDA
+     porque é o span do meio mais próximo do início da row (fica estável
+     "crescendo pra direita" sem empurrar o texto anterior). */
+  display: inline-block; min-width: 22ch; text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+#v3d-objcount {
+  /* view3d.js ~10775-10778: `Objetos: ${pickables} (${drawCalls} draw
+     calls)` — contagens podem chegar a 4-5 dígitos; alinhado à DIREITA
+     porque fica mais perto do #v3d-fps (lado direito da row), mantendo o
+     bloco "objetos + fps" com uma borda direita/esquerda previsível. */
+  display: inline-block; min-width: 28ch; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+#v3d-fps {
+  /* view3d.js ~10785-10786: `${Math.round(1000/dt)} fps` — 1 a 3 dígitos
+     + " fps"; é o ÚLTIMO item da row (pinado na borda direita pelo
+     `justify-content:space-between`), alinhado à direita pra ficar
+     sempre rente à borda mesmo quando o nº de dígitos muda. */
+  display: inline-block; min-width: 7ch; text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 /* "Inventário"/hotbar de construção do 3D (ver view3d.js _renderHotbar) —
    estilo hotbar de jogo (pedido do usuário: "assim como no jogo Minecraft"),
@@ -6658,7 +7045,134 @@ body.view-mapa .history-widget { display: none; }
   -webkit-user-select: text !important;
   -moz-user-select: text !important;
 }
-.mapconfig-section { margin-bottom: 16px; }
+/* [15/09/2026 UTC] MUDADO -- pedido verbatim: "Nas configuracoes 2D e 3D,
+   as secoes devem ter uma largura maior, se estender de ponta a ponta da
+   janela de configuracoes. Deste modo, o que estiver 'dentro' fica como se
+   estivesse indentado." Antes cada .mapconfig-section só tinha uma margem
+   inferior -- o conteúdo (h4/labels) ficava alinhado com a borda do
+   próprio modal (.modal-sheet tem padding:16px nas laterais, ver regra
+   acima), sem nenhum "limite" visual da seção em si. Agora a seção BRIGA
+   pra fora com margin:-16px nas laterais (cancela exatamente o padding do
+   .modal-sheet/.mapconfig-sheet, chegando ponta-a-ponta) e recupera
+   padding:16px nas laterais pra si mesma -- o conteúdo interno volta a
+   ficar na MESMA posição horizontal de antes, só que agora visualmente
+   "dentro" de uma faixa com fundo/borda própria que vai de ponta a ponta,
+   em vez de se misturar direto com o fundo do modal. */
+.mapconfig-section {
+  margin: 0 -16px 16px;
+  padding: 14px 16px 16px;
+  background: rgba(128, 128, 128, .06);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+/* [13/09/2026 UTC] NOVO — pedido verbatim: "Nas 'configurações 3D', na
+   seção '🌗 Hora do dia', na 'Trilha de horas do dia' [...] Faça esta
+   barrinha cobrir a largura toda e coloque a representação gráfica de 24
+   fusos atrás. Em vez de ser uma bolinha, coloque uma barrinha vertical."
+   `width:100%` sozinho já resolve "cobrir a largura toda" (um
+   `<input type="range">` sem largura definida nasce com uma largura
+   intrínseca pequena do navegador, bem menor que o container — não havia
+   NENHUMA regra de CSS pra esta trilha até agora, por isso o tamanho
+   "encolhido" relatado). O fundo de "24 fusos" é um `repeating-linear-
+   gradient` com 24 fatias iguais (uma por hora do dia — a MESMA faixa de
+   0h-24h da trilha, `min=0 max=23.983` em mapconfig.js) alternando 2 tons
+   bem sutis + uma linha um pouco mais forte a cada 6 fatias (0h/6h/12h/18h
+   — os mesmos "quartos do dia" dos botões Manhã/Dia/Tarde/Noite). A
+   "barrinha vertical" no lugar da bolinha é o `::-webkit-slider-thumb`/
+   `::-moz-range-thumb` customizado — precisa REDEFINIR o track também
+   (`-webkit-appearance:none` no input remove o visual nativo inteiro,
+   thumb E track juntos; navegadores baseados em WebKit/Blink e Firefox
+   exigem pseudo-elementos SEPARADOS e não padronizados entre si — daí a
+   duplicação de regras `::-webkit-*`/`::-moz-*` abaixo, técnica padrão pra
+   estilizar range input entre navegadores). */
+.mc-hora-trilha {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  margin: 4px 0;
+  background:
+    repeating-linear-gradient(
+      to right,
+      rgba(255,255,255,0.16) 0, rgba(255,255,255,0.16) 1px,
+      transparent 1px, transparent calc(100% / 24)
+    ),
+    repeating-linear-gradient(
+      to right,
+      rgba(255,255,255,0.32) 0, rgba(255,255,255,0.32) 1.5px,
+      transparent 1.5px, transparent calc(100% / 4)
+    ),
+    linear-gradient(to right, #1a2540 0%, #3a4a72 25%, #cfd8e8 50%, #3a4a72 75%, #1a2540 100%);
+  background-size: 100% 100%;
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+}
+.mc-hora-trilha::-webkit-slider-runnable-track { -webkit-appearance: none; height: 22px; border-radius: 4px; background: transparent; }
+.mc-hora-trilha::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 6px;
+  height: 30px;
+  margin-top: -4px; /* centraliza a barrinha (30px) sobre a trilha (22px) */
+  border-radius: 2px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.4);
+  box-shadow: 0 0 3px rgba(0,0,0,0.6);
+  cursor: grab;
+}
+.mc-hora-trilha::-moz-range-track { height: 22px; border-radius: 4px; background: transparent; border: none; }
+.mc-hora-trilha::-moz-range-thumb {
+  width: 6px;
+  height: 30px;
+  border-radius: 2px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.4);
+  box-shadow: 0 0 3px rgba(0,0,0,0.6);
+  cursor: grab;
+}
+/* [13/09/2026 UTC] Globo 3D wireframe da seção "Hora do dia" — ver
+   MapConfig._mountGloboHora (mapconfig.js). Redondo, fundo escuro sutil
+   (simula "espaço"), cursor de arraste (o próprio JS troca pra
+   pointer-lock quando disponível, mas o cursor CSS já dá a dica visual). */
+.mc-hora-globo {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(90,130,180,0.18), rgba(5,8,14,0.9) 75%);
+  border: 1px solid rgba(180,210,255,0.35);
+  cursor: grab;
+  touch-action: none;
+  flex-shrink: 0;
+}
+.mc-hora-globo:active { cursor: grabbing; }
+/* [13/09/2026 UTC] Botão flutuante "🗒️ Propriedades" do gizmo do Retículo
+   métrico/Piso, no mapa 2D — ver MapView._syncFormaDraftPropBtn
+   (mapview.js). `position:fixed` porque é posicionado em coordenadas de
+   VIEWPORT (convertidas do canvas via _canvasScreenToViewportPx), não
+   relativas a nenhum container do layout normal — acompanha o gizmo
+   mesmo com o mapa girado/com zoom, sem precisar reposicionar via layout.
+   `hidden` (atributo HTML, não classe) esconde/mostra — ver JS. */
+.map2d-forma-prop-btn {
+  position: fixed;
+  z-index: 70;
+  transform: translate(-50%, -50%);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.35);
+  background: #2a6df5;
+  color: #fff;
+  font-size: 15px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  padding: 0;
+}
+.map2d-forma-prop-btn:hover { background: #3f7bff; }
+.map2d-forma-prop-btn:active { transform: translate(-50%, -50%) scale(0.92); }
 /* Fundo mais claro no título de cada seção (pedido do usuário, 26/08/2026):
    "Para destacar que, dali até um outro destaque do mesmo tipo, trata-se de
    opções relacionadas a aquela mesma seção" — uma barra clara atrás do texto
@@ -6702,6 +7216,31 @@ body.view-mapa .history-widget { display: none; }
 .mapa-entry-wrap {
   display: flex; flex-direction: column; gap: 14px;
   height: 100%; box-sizing: border-box;
+}
+/* [15/09/2026 UTC] Barra de carregamento (spinner) exibida em
+   `_mountEntryScreen` ANTES dos dados do mapa/Caixa carregarem (pedido:
+   "Quando há muitos mapas no IndexedDB [...] Faça alguma barra de
+   carregamento no meio desta tela"). Pertence só a esta tela — some sozinha
+   quando o `container.innerHTML` é reescrito com o conteúdo final, ou
+   quando o usuário sai da tela Mapa (ver checagem `this._rootEl !==
+   container` em mapview.js). */
+.mapa-entry-loading {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; height: 100%; box-sizing: border-box;
+}
+.mapa-entry-loading-bar {
+  width: min(220px, 60vw); height: 6px; border-radius: 999px;
+  background: var(--panel-2, rgba(255,255,255,0.08)); overflow: hidden;
+}
+.mapa-entry-loading-bar-fill {
+  width: 40%; height: 100%; border-radius: 999px; background: var(--accent);
+  animation: mapaEntryLoadingSlide 1.1s ease-in-out infinite;
+}
+.mapa-entry-loading-label { font-size: 13px; opacity: 0.7; }
+@keyframes mapaEntryLoadingSlide {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(80%); }
+  100% { transform: translateX(220%); }
 }
 /* Pedido do usuário (27/08/2026): "Deve haver a possibilidade de fazer mais
    mapas" — botão "🗺️ {nome do mapa} ▾" no topo, abre
@@ -6847,6 +7386,18 @@ body.view-mapa .history-widget { display: none; }
 .caixa-item-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .caixa-item-patr { font-family: monospace; font-size: 12.5px; color: var(--text-dim); }
 .caixa-item-desc { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* [15/09/2026 UTC] NOVO -- pedido verbatim: "Sobre a caixa, deve ter um
+   'x' para excluir o item (cada item deve ter o seu 'x'). O estilo do 'x'
+   deve ser o mesmo que é usado em 'Mapa'->'Fotos'." Reaproveita as
+   propriedades visuais de `.ambphoto-thumb-del` (círculo escuro
+   translúcido, fica vermelho no hover — ver regra dela logo acima, junto
+   das miniaturas de "Mapa"->"Fotos") só com posicionamento diferente pra
+   caber nos 2 contextos da tela Caixa: `.caixa-item-del` fica INLINE (a
+   linha de item é uma lista horizontal comum, não uma miniatura — não faz
+   sentido posicionar "por cima" de nada), `.caixa-foto-del` fica ABSOLUTO
+   no canto superior direito da miniatura, igual ao original. */
+.caixa-item-del { position: static; flex: 0 0 auto; margin-left: 4px; }
+.caixa-foto-del { position: absolute; top: 4px; right: 4px; }
 
 /* ---------- "Ver lista simples" — chips horizontais com arrastar-e-soltar
    (FLIP), trocando os antigos botões verticais ▲/▼ — combina melhor com a

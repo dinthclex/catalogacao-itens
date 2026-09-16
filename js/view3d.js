@@ -67,29 +67,28 @@
  * - _enterCameraView(camId)/_exitCameraView()/_computeWatchCameraPose() —
  *   modo ESPECTADOR assistindo uma câmera de segurança fixa (pan/tilt/
  *   zoom por cima; jogador anda sozinho por trás, ver _updateAutopilot).
- * - _cameraExitViewMode() — [12/09/2026, NOVO; FUNDIDA NESTA RODADA] lê a
- *   config "Configurações 3D" seção única "Ver através desta câmera"
- *   (MapConfig.cameraExitViewMode) que decide o que "Sair da câmera" faz:
- *   manter o ponto de vista travado (padrão) ou voltar ao ponto de vista
- *   original do personagem — usada por `_exitCameraOrbView` E por
- *   `_exitFotoCameraView` (via `_fotoOrbExitViewMode()` logo abaixo, que só
- *   delega). Histórico: chegou a ser 1 chave única, depois 2 chaves
- *   independentes (correção por "orb de câmera" ser sinônimo de "orb de
- *   foto", não de "Câmeras"), e voltou a ser 1 chave única nesta rodada por
- *   pedido explícito do usuário — ver nota grande em mapconfig.js
- *   DEFAULTS.cameraExitViewMode para os detalhes completos, incluindo a
- *   investigação desta rodada que NÃO encontrou unificação real dos 2 tipos
- *   de objeto no código-fonte.
- * - _fotoOrbExitViewMode() — [12/09/2026, FUNDIDA NESTA RODADA] irmã de
- *   `_cameraExitViewMode()`, agora só delega pra ela (chave única) — usada
- *   só por `_exitFotoCameraView`.
+ * - _cameraExitViewMode() — [12/09/2026, NOVO; FUNDIDA NESTA RODADA; ver
+ *   15/09/2026 UTC abaixo] lê a config "Configurações 3D" seção única "Ver
+ *   através desta câmera" (MapConfig.cameraExitViewMode) que decide o que
+ *   "Sair da câmera" faz: manter o ponto de vista travado (padrão) ou
+ *   voltar ao ponto de vista original do personagem — usada DIRETO por
+ *   `_exitCameraOrbView` E por `_exitFotoCameraView` (histórico: chegou a
+ *   ser 1 chave única, depois 2 chaves independentes — correção por "orb
+ *   de câmera" ser sinônimo de "orb de foto", não de "Câmeras" —, voltou a
+ *   ser 1 chave única em 12/09/2026 por pedido explícito do usuário, e em
+ *   15/09/2026 UTC o wrapper `_fotoOrbExitViewMode()`, que só delegava pra
+ *   esta função, foi removido — pedido verbatim: "Remova todas as
+ *   referências de duplicidade [...] Não considere compatibilidade com
+ *   código legado" — `_exitFotoCameraView` passou a chamar
+ *   `_cameraExitViewMode()` direto). Ver nota grande em mapconfig.js
+ *   DEFAULTS.cameraExitViewMode para o histórico completo.
  * - _enterFotoCameraView(fotoId)/_exitFotoCameraView()/
  *   _computeFotoCamPose()/_fotoCamFovFor(foto) — modo ESPECTADOR "ver
  *   através desta foto" (vanishCam/orb de foto — TAMBÉM chamado de "orb de
  *   câmera" na fala do usuário), mesmo espírito do anterior. [12/09/2026:
  *   entrada esconde a malha esfera+cone(+placa) do próprio orb de foto
  *   vista através — `setFotoMeshVisible`; saída posiciona `this._camera`
- *   na pose travada OU na pose original, conforme `_fotoOrbExitViewMode()`
+ *   na pose travada OU na pose original, conforme `_cameraExitViewMode()`
  *   — antes desta rodada não tocava `this._camera` nenhuma, deixando-o
  *   onde o passeio automático de fundo tivesse levado.]
  * - _getFotoCamOpacidade()/_setFotoCamOpacidade(v) — opacidade do guia
@@ -198,6 +197,17 @@
  *   selecionado (aglomerado de tijolos, objeto genérico, câmera, orb de
  *   foto, patrimônio órfão, item único, múltiplos itens no mesmo ponto).
  *
+ * Carro dirigível (NOVO, 13/09/2026 — "entrar/sair, inércia real"):
+ * - _entrarNoCarro(entity)/_sairDoCarro() — liga/desliga
+ *   `this._carroControlado` (chamado por assets/modelos/carro.model.js
+ *   onModelClick / tecla "E" respectivamente).
+ * - _updateCarrosControlados(dt) — física de inércia (aceleração/fricção/
+ *   virada) do carro sendo dirigido; ver comentário grande lá pras
+ *   fórmulas exatas e as limitações honestas (sem colisão veicular, sem
+ *   suspensão).
+ * - _updateCarroCamera() — câmera de 3ª pessoa simplificada atrás do
+ *   carro, sem colisão contra paredes.
+ *
  * Scripts/componentes (ciclo de vida automático, ver components.js):
  * - _updateScriptProximityTriggers() — dispara `onProximity` dos
  *   EventTrigger quando o jogador se aproxima/afasta de uma entidade.
@@ -256,6 +266,29 @@ const View3D = {
   _vel: { y: 0 },
   _keys: {},
   _grounded: true,
+  // [13/09/2026] NOVO — "carro dirigível" (pedido verbatim: "Faça um
+  // carro, que é possível entrar nele e sair andando [...] considerando a
+  // inércia de movimento"). `_carroControlado` é a referência do objeto
+  // `tipo:'carro'` (entidade do mapa, `map.objects`) sendo dirigido no
+  // momento — `null`/`undefined` = ninguém dirigindo, controle normal do
+  // jogador (WASD/pointer-lock/gravidade, o de sempre). Ver
+  // `_entrarNoCarro`/`_sairDoCarro`/`_updateCarrosControlados`/
+  // `_updateCarroCamera` mais abaixo, e `assets/modelos/carro.model.js`
+  // (onModelClick chama `_entrarNoCarro`).
+  _carroControlado: null,
+  _posAntesDoCarro: null, // pose completa do jogador (x/y/z/yaw/pitch) ANTES de entrar — restaurada ao sair
+  // [13/09/2026] NOVO — "MODO COMPUTADOR" (pedido verbatim: "O aplicativo do
+  // pc deve ser acessível como se estivesse usando a tela [...] a área de
+  // trabalho deve ter um ícone de aplicativo [...] deve ser possível sair do
+  // pc e deixar o programa 'rodando'"). MESMO PADRÃO já usado pelo carro
+  // (`_carroControlado`/`_posAntesDoCarro` acima) — `_computadorAcessado` é a
+  // referência do objeto `tipo:'monitor'`/`'monitor2'` cuja "tela" o jogador
+  // está usando agora (null = ninguém usando, controle normal). Ver
+  // `_acessarComputador3D`/`_sairDoComputador3D` mais abaixo, e
+  // `assets/modelos/monitor.model.js`/`monitor2.model.js`
+  // (`onModelCardButtons` chama `_acessarComputador3D`).
+  _computadorAcessado: null,
+  _posAntesDoComputador: null, // pose completa do jogador ANTES de acessar — restaurada ao sair
   _joystick: { active: false, dx: 0, dy: 0, touchId: null },
   _look: { active: false, lastX: 0, lastY: 0, touchId: null },
   PLAYER_RADIUS: 0.32,
@@ -359,12 +392,42 @@ const View3D = {
         <div class="v3d-lockstate" id="v3d-lockstate"><span class="v3d-lockstate-hint">🖱️ Clique para interagir com o cenário 3D</span></div>
         <div class="camera-topbar">
           <button class="icon-btn" id="v3d-close" title="Sair da visualização 3D e voltar para o Mapa">✕ Sair do 3D</button>
+          <!-- [15/09/2026 UTC] ALTERADO — pedido verbatim: "na seleção do
+               modo de visualização [...] deixe apenas 'Sólido' e
+               'Wireframe'. Remova os modos 'Colorido' e 'Sólido+wireframe'."
+               As 2 opções removidas ('colorido'/'hibrido') não tinham
+               nenhum código PRÓPRIO delas removido — this.mode só é lido em
+               comparações (this.mode === 'colorido'/'hibrido', engine3d.js)
+               que continuam existindo mas nunca mais são verdadeiras (o
+               seletor não oferece mais esses valores, e a preferência
+               salva 'render3dModo' nunca teve um gravador ativo — sempre
+               cai no padrão 'solido'), então nada mais fica inalcançável
+               de propósito, sem precisar caçar/apagar cada ponto que
+               checava esses 2 modos. -->
           <select class="icon-btn" id="v3d-mode" title="Estilo de renderização das paredes/piso">
             <option value="solido">Sólido</option>
-            <option value="colorido">Colorido (câmera)</option>
             <option value="wireframe">Wireframe</option>
-            <option value="hibrido">Sólido+wireframe (desempenho)</option>
           </select>
+          <!-- [13/09/2026] NOVO — seletor "Andar" da topbar do "Ver em 3D".
+               Só aparece quando o mapa tem pelo menos um objeto "Piso"
+               plantado (ver Mapping.getPisos/_syncPisoSeletor3D) — mapa sem
+               nenhum "Piso" continua com a barra idêntica a antes de hoje.
+               "Todos os andares" (padrão) preserva 100% o comportamento
+               atual; escolher um andar filtra a MONTAGEM da cena
+               (Mapping.filterByPiso em _rebuildScene) — é também a
+               otimização de desempenho pedida (só o andar escolhido é
+               enviado pro engine3d.js, prédio inteiro não é montado). -->
+          <!-- [14/09/2026 UTC] REMOVIDO — pedido verbatim: "Esse novo botão
+               'Grupos' que você criou deve substituir o antigo botão
+               'Andar'. Remova do projeto o botão 'Andar'." O seletor
+               '#v3d-piso-wrap'/'_syncPisoSeletor3D' saiu; a mesma função
+               (ocultar andar(es)) agora vive só no painel '🏷️ Grupos'
+               (toggle por andar, 'map.andaresOcultos' — ver
+               '_renderGruposPanelBody3D'). 'this._pisoFiltro3D' fica
+               permanentemente 'null' (nunca mais setado por UI nenhuma) —
+               'Mapping.filterByPiso' continua chamado em '_rebuildScene'
+               por segurança/compatibilidade, mas sempre com 'null' (sem
+               efeito nenhum, sempre "Todos os andares"). -->
           <!-- Badge "3D" no canto (mesmo tratamento do ⚙️ de Configurações
                do mapa 2D, #map-config em mapview.js — ver .icon-btn-corner/
                .icon-btn-corner-badge em style.css, pedido do usuário: "assim
@@ -408,11 +471,79 @@ const View3D = {
                histórico/backup se precisar reverter) — js/perspmatch.js/
                js/perspmatch-math.js continuam intactos em disco, só não são
                mais chamados daqui. -->
+          <!-- [14/09/2026] NOVO — pedido verbatim: botão habilitador
+               "🛠️ Modelar objetos" no rodapé de "Ver em 3D". Quando LIGADO,
+               o cartão de clique de um objeto (função _showObjectCard3D)
+               ganha a opção "🔧 Modelar em 3D" no menu; DESLIGADO (padrão),
+               a opção some do menu — reduz o cartão ao essencial
+               (histórico/fechar) pra quem não está no meio de um trabalho
+               de modelagem. Estado em memória, dura só enquanto o app está
+               aberto (não existe hoje nenhum padrão de persistência de
+               preferência de UI — tipo localStorage/IndexedDB — pra
+               "ligar/desligar um recurso da tela 3D" no projeto; ver
+               propriedade _modelarObjetosHabilitado desta view).
+               [13/09/2026] MOVIDO — o BOTÃO em si saiu daqui e foi pra logo
+               depois do seletor de modo (ver comentário grande lá, "não está
+               aparecendo" — barra rola na horizontal e este botão nascia
+               fora da 1ª tela visível); este comentário fica só de histórico
+               do pedido original, o id v3d-modelar-toggle (usado pelo
+               binding em mount(), mais abaixo) agora vive só naquele outro
+               lugar. -->
+          <!-- [14/09/2026 UTC] MOVIDO + RESTILIZADO — pedido verbatim: "No
+               'Ver em 3D', no cabeçalho, há o botão 'Modelar objetos', este
+               botão é o toggle entre 'Modo Navegação' e 'Modo Edição'. No
+               mapa 2D, há um botão de toggle entre 'Modo Navegação' e 'Modo
+               Desenho'. Use os mesmos ícones, e estilos no botão do 'Ver em
+               3D' também. E assim como no mapa 2D o botão de toggle fica na
+               ponta do grupo de botões da esquerda, faça com que, no 'Ver
+               em 3D', fique na ponta do grupo de botões da esquerda
+               também." Antes ficava logo depois do seletor de modo (ver
+               histórico do pedido de 13/09/2026 acima), com classe só
+               "icon-btn" e texto FIXO "🛠️ Modelar objetos" (só a classe
+               '.active' mudava, sem trocar ícone/texto). Movido pra cá —
+               a PONTA do grupo de botões da esquerda desta barra (logo
+               antes do "⚙️" de Configurações, que é um ícone à parte, fora
+               do grupo — mesma posição relativa que "🧭 Modo Navegação"
+               ocupa no 2D: a ponta de #tbm-row0, ver mapview.js) — e
+               restilizado com "icon-btn sm" (mesma classe do botão irmão
+               do 2D, '#map-navtoggle') e o MESMO padrão de ícone/texto que
+               troca conforme o estado (🧭 Modo Navegação / 🛠️ Modo Edição),
+               em vez de um texto fixo com só a classe '.active' mudando —
+               ver '_syncModelarToggleUI3D', que espelha '_syncNavModeUI'
+               do mapview.js. Nenhuma mudança de COMPORTAMENTO — continua
+               só ligando/desligando '_modelarObjetosHabilitado' (a opção
+               "🔧 Modelar em 3D" aparecer ou não no menu de um objeto). -->
+          <button type="button" class="icon-btn sm" id="v3d-modelar-toggle" title="Alterna entre Modo Navegação (só olhar/andar) e Modo Edição (o menu de um objeto, ao clicar nele, ganha a opção 'Modelar em 3D')">🧭 Modo Navegação</button>
+          <!-- [13/09/2026 UTC] NOVO — pedido verbatim: 'Implemente isso em
+               algum lugar de algum jeito, havendo correspondência entre 2D
+               e 3D.' (sistema de classes/grupos). O botão espelha o '🏷️'
+               do mapa 2D ('#map-grupos', mapview.js) e abre um painel
+               equivalente aqui dentro do 'Ver em 3D', operando sobre o
+               MESMO 'this._map' (ver '_openGruposPanel3D'/
+               '_renderGruposPanelBody3D') — toda mudança chama
+               'this._rebuildScene()' de novo, que já usa
+               'Mapping.filterByGrupos' (ver comentário em '_rebuildScene').
+               O destaque visual ('gruposDestacados', ✨) fica de fora do 3D
+               por enquanto — só o 2D desenha o brilho dourado por cima do
+               objeto (ver 'Map2DRenderer._drawDestaqueExtraObj' em
+               mapview.js); reproduzir esse efeito em cima de uma malha do
+               engine3d.js (troca de material/emissive por objeto, sem poder
+               testar ao vivo no navegador) é um risco maior do que dá pra
+               assumir nesta rodada — limitação registrada em
+               progresso-sessao.md. O toggle de ocultar (👁️/🚫), por
+               andar/classe/paredes+piso, funciona igual ao 2D. -->
+          <button type="button" class="icon-btn sm" id="v3d-grupos" title="Grupos: ative/desative a renderização de todo objeto de uma mesma 'classe' de uma vez (igual ao atributo 'class' do HTML), por andar, ou oculte todas as paredes/piso — mesmo sistema do mapa 2D">🏷️ Grupos</button>
           <button class="icon-btn icon-btn-corner" id="v3d-config" title="Configurações do 3D (raycasting/destaque)">⚙️<span class="icon-btn-corner-badge">3D</span></button>
         </div>
         <div class="hud3d">
           <span>WASD mover · espaço pular · shift correr · clique seleciona</span>
           <span id="v3d-pos"></span>
+          <!-- [13/09/2026] NOVO — pedido verbatim: "Entre eles [posição
+               X/Y/Z e FPS], coloque a quantidade de objetos que está sendo
+               renderizada naquele frame." Ver getRenderInfo() (engine3d.js)
+               e o preenchimento deste span no loop de render, mais abaixo
+               (mesmo lugar que já atualiza #v3d-fps a cada quadro). -->
+          <span id="v3d-objcount" title="Objetos do catálogo (2D) vs. draw calls de verdade mandados pra GPU neste quadro — InstancedMesh agrupa vários objetos do mesmo tipo/andar num draw call só, e frustum/distância culling descartam o que está fora de vista"></span>
           <span id="v3d-fps"></span>
         </div>
         <!-- HUD "estilo jogo" da ferramenta "📍 Adicionar orb" (pedido do
@@ -684,7 +815,15 @@ const View3D = {
     // idênticos não importa o tamanho/posição do retângulo). Ver CSS em
     // style.css (`.view3d-wrap`) — o fundo sólido que existia ali precisou
     // virar transparente, senão cobriria o canvas global por trás.
-    this._engine = new Engine3D(canvas, cfgInicial, { eye: true });
+    // [13/09/2026] NOVO — "Resolução de renderização (Ver em 3D)" das
+    // Configurações 3D (ver mapconfig.js DEFAULTS.resolucaoCustom3D) — lida
+    // aqui junto com `cfgInicial` (mesmo motivo do comentário logo acima:
+    // só faz efeito de verdade se já estiver certa na 1ª montagem). `null`
+    // ("Automática", padrão) não passa `customRes` nenhum pro Engine3D —
+    // pipeline 100% igual a antes desta rodada. Ver `_applyResolucaoCustom3D`
+    // (aplica o CSS object-fit/fundo do canvas de acordo com `fit`).
+    this._engine = new Engine3D(canvas, cfgInicial, { eye: true, customRes: cfgInicial?.resolucaoCustom3D || null });
+    this._applyResolucaoCustom3D(canvas, cfgInicial?.resolucaoCustom3D || null);
     // [10/09/2026, CORRIGIDO na mesma rodada] a preferência GLOBAL de
     // enquadramento foi removida (virou um botão por câmera, no rodapé —
     // ver comentário grande junto ao HTML de `#v3d-frustum-toggle`, agora
@@ -703,6 +842,48 @@ const View3D = {
 
     if (typeof MapConfig !== 'undefined') {
       this._onMapConfigChange = (c) => {
+        // [16/09/2026 UTC] NOVO — mantém a janelinha de acesso rápido da
+        // Trena 3D (ver `_trena3DEnsurePainelRapido`) sincronizada: mostra/
+        // esconde conforme `trena3DPainelRapidoAtivo` e atualiza os ícones
+        // conforme qualquer opção correspondente mudar (inclusive mudada por
+        // fora da própria janelinha, direto nas Configurações 3D).
+        this._trena3DEnsurePainelRapido();
+        this._trena3DAtualizarPainelRapido();
+        // [16/09/2026 UTC] NOVO — pedido verbatim: "As alterações feitas
+        // nas 'configurações 3D' devem ser aplicadas imediatamente no mapa.
+        // Por exemplo, ao mudar a ponta de seta para reta (perpendicular),
+        // só ao inserir uma nova medida que houve a mudança. Não deve ser
+        // assim, deve ser imediato." CAUSA: `_trena3DRebuildLines()` (a
+        // única função que desenha as medidas JÁ SALVAS, lendo a config
+        // toda vez que roda — `_trena3DCfg()`) só era chamada em 3
+        // situações: abrir "Ver em 3D" (`_rebuildScene`), trocar de andar, e
+        // salvar uma medida nova (`_trena3DFinalize`) — nunca por SÓ mudar
+        // uma opção em ⚙️ Configurações 3D com medidas já existentes na
+        // tela. CORRIGIDO: compara um "retrato" das opções da seção "📏
+        // Trena 3D" que afetam a APARÊNCIA das medidas JÁ DESENHADAS
+        // (estilo do rótulo, visibilidade/oclusão, espessura, cores, ponta)
+        // a cada mudança de config — muda alguma, refaz as linhas na hora,
+        // sem precisar inserir uma medida nova ou reabrir o 3D. Opções que
+        // só afetam a PRÉVIA (ainda não commitada, ex.: cor da mira, guias
+        // de grade) não precisam disso — `_trena3DUpdatePreview` já lê a
+        // config do zero every quadro, sempre ao vivo por natureza.
+        // [16/09/2026 UTC] NOVO — pedido verbatim: "'Linhas verticais das
+        // medidas finalizadas', ao marcar 'Mostrar...' deve ser de
+        // aplicação imediata, não após inserir uma nova medida." Faltavam
+        // `trena3DMostrarLinhasAncoraFinalizada`/`trena3DLinhasAncoraFinalizadaModo`
+        // neste "retrato" — sem eles aqui, marcar/desmarcar a opção só tinha
+        // efeito visual na PRÓXIMA medida nova ou reabertura do 3D (mesmo
+        // bug de fundo que este retrato inteiro já existe pra evitar, ver
+        // comentário grande acima).
+        const trena3DRetratoAgora = JSON.stringify({
+          le: c.trena3DLabelEstilo, vi: c.trena3DVisibilidade, es: c.trena3DEspessuraCm,
+          cl: c.trena3DCorLinha, ca: c.trena3DCorAncora, cm: c.trena3DCorMira, po: c.trena3DPonta,
+          lf: c.trena3DMostrarLinhasAncoraFinalizada, lfm: c.trena3DLinhasAncoraFinalizadaModo,
+        });
+        if (this._trena3DUltimoRetrato != null && this._trena3DUltimoRetrato !== trena3DRetratoAgora) {
+          this._trena3DRebuildLines();
+        }
+        this._trena3DUltimoRetrato = trena3DRetratoAgora;
         // modoLuminarias3D (ver mapconfig.js/engine3d.js _tintForLight) é
         // decidido na HORA DE MONTAR a cena (luz de verdade x cor estática),
         // não algo que setConfig sozinho consiga trocar ao vivo — precisa
@@ -737,6 +918,19 @@ const View3D = {
         const atravesParedesPlaquinhaAntes = this._engine?._config?.itemBadge3DAtravesParedesAtivo;
         const atravesParedesDouradoAntes = this._engine?._config?.anelDourado3DAtravesParedesAtivo;
         const atravesParedesRaioAntes = this._engine?._config?.raioAzul3DAtravesParedesAtivo;
+        // "Resolução de renderização (Ver em 3D)" (ver
+        // mapconfig.js/_applyResolucaoCustom3D) — reage AO VIVO, sem
+        // precisar fechar/reabrir a tela: `setCustomRes3D` (engine3d.js)
+        // troca só o tamanho do render target no próximo `_resize()` (o
+        // loop de render já chama isso a cada quadro sozinho), e
+        // `_applyResolucaoCustom3D` (mesma função de `mount()`, ver acima)
+        // reaplica o CSS object-fit/fundo do canvas conforme o `fit` novo.
+        const resAntes = JSON.stringify(this._engine?._customRes || null);
+        const resDepois = JSON.stringify(c.resolucaoCustom3D || null);
+        if (resAntes !== resDepois) {
+          this._engine?.setCustomRes3D?.(c.resolucaoCustom3D || null);
+          this._applyResolucaoCustom3D(canvas, c.resolucaoCustom3D || null);
+        }
         this._engine?.setConfig(c);
         if (c.modoLuminarias3D !== modoAntes || c.paredeJuncaoTipo !== juncaoAntes
           || c.itemAssociado3DContorno !== contornoAntes || c.itemAssociado3DSelo !== seloAntes
@@ -795,6 +989,11 @@ const View3D = {
       };
       MapConfig.onChange(this._onMapConfigChange);
     }
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Faça uma janelinha com todas
+    // as opções do 'Trena 3D' [...] Será como um acesso rápido [...] Por
+    // padrão, ativado." Ver `_trena3DEnsurePainelRapido` — a própria função
+    // já decide se mostra ou não, conforme `trena3DPainelRapidoAtivo`.
+    this._trena3DEnsurePainelRapido();
     // Estado inicial do anel de bússola (config já lida acima em cfgInicial)
     // — ver DEFAULTS.bussola3DAtiva em mapconfig.js.
     this._applyBussola3DVisibilidade(cfgInicial?.bussola3DAtiva);
@@ -810,6 +1009,13 @@ const View3D = {
       // senão eles ficariam "presos visíveis" (ver isLayerVisible) mesmo
       // com todas as camadas desligadas. Ver Mapping.ensureAllElementsLayered.
       if (Mapping.ensureAllElementsLayered(this._map)) await DB.saveMap(this._map);
+      // NOVO (12/09/2026) — pré-carrega (em paralelo, sem travar a entrada
+      // na tela) os arquivos de assets/modelos/ de todo `tipo` de objeto
+      // presente neste mapa, ANTES do usuário poder clicar em qualquer
+      // coisa — ver comentário grande em js/objectassets.js
+      // `warmupModelsForMap`/`dispatchClick3D`, e o novo dispatch de
+      // clique mais abaixo neste mesmo arquivo (raycaster hit).
+      window.ObjectAssets?.warmupModelsForMap(this._map);
       await this._buildItensNoMapa();
       // [09/09/2026] Ver comentário grande em _buildFotosNoMapa — sem isto,
       // "orb de foto" nunca aparecia na cena 3D (this._map.fotos nunca era
@@ -851,7 +1057,7 @@ const View3D = {
     this._gravityEnabled = true;
     const camAtiva = (this._map?.cameras || []).find((c) => c.ativo3D);
     if (camAtiva) {
-      const baseY = (camAtiva.piso || 0) * 2.8;
+      const baseY = (camAtiva.piso || 0) * (this._map?.alturaPiso || 2.8);
       // Conversão ângulo (convenção 2D: 0 = eixo X, ver mapview.js) -> yaw do
       // jogador. NÃO é `Math.atan2(dirX, dirZ)` (essa fórmula é a certa só
       // pra orientar MALHAS do Three.js via mesh.rotation.y — ver a câmera/
@@ -911,7 +1117,26 @@ const View3D = {
     container.querySelector('#v3d-close').onclick = () => { document.exitPointerLock?.(); App.closeView3D(); };
     const modeSel = container.querySelector('#v3d-mode');
     modeSel.onchange = () => { this._engine.setMode(modeSel.value); this._rebuildScene(); };
+    // [14/09/2026 UTC] REMOVIDO — chamada a '_syncPisoSeletor3D' (botão
+    // "Andar", ver comentário grande no template acima).
     container.querySelector('#v3d-config').onclick = () => this._openMapConfig();
+    // [14/09/2026 UTC] Botão "🧭 Modo Navegação"/"🛠️ Modo Edição" (ver
+    // comentário grande junto do botão, no HTML) — só alterna
+    // `_modelarObjetosHabilitado`; quem realmente lê esse estado é
+    // `_showObjectCard3D`, na hora de montar o menu do objeto. Ícone/texto
+    // trocam conforme o estado, igual ao botão irmão do 2D (ver
+    // `_syncModelarToggleUI3D` abaixo, espelha `_syncNavModeUI` do
+    // mapview.js).
+    this._syncModelarToggleUI3D(container);
+    const modelarToggleBtn = container.querySelector('#v3d-modelar-toggle');
+    if (modelarToggleBtn) {
+      modelarToggleBtn.onclick = () => {
+        this._modelarObjetosHabilitado = !this._modelarObjetosHabilitado;
+        this._syncModelarToggleUI3D(container);
+      };
+    }
+    const gruposBtn3D = container.querySelector('#v3d-grupos');
+    if (gruposBtn3D) gruposBtn3D.onclick = () => this._toggleGruposPanel3D(container);
     // "🧊 Novo Cubo" (ver comentário grande junto do botão, acima, no HTML)
     // — mesmo caminho do botão irmão em mapview.js (Mapping.addObject +
     // Modeler3D.ensureCustomMesh + o "combinado" window.__modelerPendingObjectId
@@ -992,6 +1217,13 @@ const View3D = {
     // Modelador) — ver comentário em `Perf.setCanvasAnchor`.
     window.Perf?.setCanvasAnchor?.(container.querySelector('.view3d-wrap'));
 
+    // [13/09/2026] NOVO — pequeno indicador de hora do relógio do mundo
+    // (ver js/relogio-mundo.js), plugado no MESMO wrapper do HUD de FPS
+    // acima (canto superior ESQUERDO, pra não brigar com o de FPS/pos, que
+    // fica no direito). Idempotente — attachHUD já não duplica se chamado
+    // de novo pro mesmo container (reconstrução de cena, etc.).
+    window.RelogioMundo?.attachHUD?.(container.querySelector('.view3d-wrap'));
+
     // "🔧 Modelar em 3D" (mapview.js, painel do objeto — pedido do usuário,
     // 28/08/2026): se o painel 2D pediu pra abrir já editando um objeto
     // específico, entra direto no modelador assim que a cena termina de
@@ -1022,6 +1254,79 @@ const View3D = {
   },
 
   unmount() {
+    // [16/09/2026 UTC] MOVIDO PRA CÁ (era o ÚLTIMO bloco desta função) —
+    // pedido verbatim: "Ao iniciar o app e ir direto no botão 'Ver em 3D'
+    // (quando está no rodapé do app), e clicar no botão 'Sair do 3D', as
+    // medidas ficam ainda sendo impressas na tela do app." CAUSA RAIZ
+    // SUSPEITA: os rótulos (`<div>`) da Trena 3D são anexados a
+    // `document.body` DE PROPÓSITO (`position:fixed`, ver comentário grande
+    // logo abaixo/`_trena3DRebuildLines`) — só removidos manualmente aqui em
+    // `unmount()`, já que não são filhos de `this._container`. Esta função é
+    // uma sequência longa de vários passos (Modelador/câmeras especiais/
+    // sobrevoo/sincronização com MapView._personagem2D/dispose do
+    // Engine3D/etc.) — ESTE bloco de limpeza da Trena 3D era o ÚLTIMO de
+    // todos: se QUALQUER passo anterior lançasse uma exceção (mais provável
+    // justamente entrando por um caminho diferente do "Mapa → Planta baixa"
+    // de sempre, ex. um atalho direto no rodapé do app, que pode deixar
+    // `this._map`/`window.MapView`/outro estado assumido pelos passos
+    // anteriores diferente do usual), a função inteira parava no meio e este
+    // bloco NUNCA rodava — os `<div>` ficavam pendurados no `<body>` pra
+    // sempre, visíveis por cima de QUALQUER tela seguinte do app (não só
+    // "Ver em 3D"). CORRIGIDO: bloco inteiro movido pra rodar PRIMEIRO,
+    // antes de qualquer outro passo que possa falhar — garante que os
+    // rótulos da Trena 3D somem do `<body>` sempre que `unmount()` for
+    // chamado, não importa o que aconteça depois.
+    (this._trena3DLabelEls || []).forEach((el) => el.remove());
+    this._trena3DLabelEls = null;
+    this._trena3DGroup = null;
+    if (this._trena3DPreviewLabelEl) this._trena3DPreviewLabelEl.remove();
+    this._trena3DPreviewLabelEl = null;
+    this._trena3DPreviewGroup = null;
+    this._trena3DHoverMesh = null;
+    this._trena3DGuideLine = null;
+    this._trena3DAnchorGroundMesh = null;
+    this._trena3DAnchorLine = null;
+    if (this._trena3DP1HeightLabelEl) this._trena3DP1HeightLabelEl.remove();
+    this._trena3DP1HeightLabelEl = null;
+    this._trena3DP1HeightLine = null;
+    if (this._trena3DLiveHeightLabelEl) this._trena3DLiveHeightLabelEl.remove();
+    this._trena3DLiveHeightLabelEl = null;
+    this._trena3DLiveHeightLine = null;
+    if (this._trena3DGuiaGradeXLabelEl) this._trena3DGuiaGradeXLabelEl.remove();
+    this._trena3DGuiaGradeXLabelEl = null;
+    this._trena3DGuiaGradeXLine = null;
+    if (this._trena3DGuiaGradeZLabelEl) this._trena3DGuiaGradeZLabelEl.remove();
+    this._trena3DGuiaGradeZLabelEl = null;
+    this._trena3DGuiaGradeZLine = null;
+    this._trena3DGradeSnapLines = null;
+    this._trena3DEntries = [];
+    this._trena3DRaycaster = null;
+    this._trena3DPendingRebuild = false;
+    this._trena3DUltimoRetrato = null;
+    this._trena3DPendingP1 = null;
+    this._trena3DVerticalAnchor = null;
+    this._trena3DLastClickAt = null;
+    // [16/09/2026 UTC] NOVO — REFORÇO extra pro mesmo bug: varredura direta
+    // no DOM por classe (`.v3d-trena3d-label`, ver `_trena3DUpdatePreview`/
+    // `_trena3DRebuildLines`), cobrindo qualquer rótulo que por algum motivo
+    // não estivesse mais referenciado nas variáveis acima (ex.: uma sessão
+    // 3D anterior cujo `unmount()` teria sido pulado por completo, sem
+    // `this` ter sido reiniciado entre uma sessão e outra — o módulo View3D
+    // é um singleton reaproveitado por toda a vida da página).
+    document.querySelectorAll('.v3d-trena3d-label').forEach((el) => el.remove());
+    // [16/09/2026 UTC] NOVO — janelinha de acesso rápido da Trena 3D (ver
+    // `_trena3DEnsurePainelRapido`), mesmo tratamento de limpeza acima
+    // (anexada em `document.body`, não em `this._container`).
+    if (this._trena3DPainelRapidoEl) this._trena3DPainelRapidoEl.remove();
+    this._trena3DPainelRapidoEl = null;
+    document.querySelectorAll('.v3d-trena3d-painel-rapido').forEach((el) => el.remove());
+    // [16/09/2026 UTC] NOVO — botão flutuante de reabrir (ver
+    // `_trena3DMostrarBotaoReabrirPainelRapido`), mesmo tratamento acima.
+    if (this._trena3DBotaoReabrirEl) this._trena3DBotaoReabrirEl.remove();
+    this._trena3DBotaoReabrirEl = null;
+    this._trena3DPainelRapidoFechadoManualmente = false;
+    document.querySelectorAll('.v3d-trena3d-painel-rapido-reabrir').forEach((el) => el.remove());
+
     // Sessão do Modelador 3D (js/modeler/*.js) em andamento? Encerra AGORA
     // (salvando o que estava editado) antes do resto da limpeza abaixo —
     // `this._engine.dispose()`, logo adiante, destrói cena/malhas/listeners
@@ -1155,6 +1460,8 @@ const View3D = {
     if (this._modeladorFullscreenActive && this._container) this._container.classList.remove('view3d-modelador-fullscreen');
     if (typeof WindowManager !== 'undefined') WindowManager.unregister('view3d-modelador-fullscreen');
     this._modeladorFullscreenActive = false;
+    // [16/09/2026 UTC] Limpeza da "📏 Trena 3D" MOVIDA pro TOPO desta função
+    // (ver comentário grande lá) — não duplicada aqui.
     this._container = null;
   },
 
@@ -1179,10 +1486,60 @@ const View3D = {
     // compartilhado com a miniatura 3D do 2D — mapview.js). Como o painel
     // de Camadas só existe no 2D, não precisa reagir "ao vivo" aqui dentro:
     // a visibilidade só pode ter mudado ANTES de abrir/reconstruir o 3D.
-    const mapaVisivel = Mapping.filterByLayerVisibility(this._map);
+    let mapaVisivel = Mapping.filterByLayerVisibility(this._map);
+    // [13/09/2026] NOVO — seletor "Andar" da topbar do "Ver em 3D" (ver
+    // _syncPisoSeletor3D/#v3d-piso-wrap mais abaixo): filtra por andar
+    // (Mapping.filterByPiso) DEPOIS do filtro de camada, mesma ordem/mesmo
+    // espírito de "cópia que só a montagem da cena vê" — `this._map`
+    // continua com o prédio inteiro. `this._pisoFiltro3D` é `null` ("Todos
+    // os andares", padrão — sem custo nenhum extra) ou o índice do andar
+    // escolhido; ver comentário grande em Mapping.filterByPiso sobre a
+    // entidade sem andar definível (`null`) e o próprio objeto "Piso"
+    // sempre ficarem, e sobre esta filtragem já ser, ela mesma, a
+    // otimização de desempenho pedida (o engine3d.js nunca constrói pool
+    // pros outros andares).
+    mapaVisivel = Mapping.filterByPiso(mapaVisivel, this._pisoFiltro3D);
+    // [14/09/2026 UTC] NOVO — sistema de grupos/classes (ver comentário
+    // grande em Mapping.isEntityGroupHidden/filterByGrupos, mapping.js):
+    // mesma ordem/mesmo espírito dos 2 filtros acima ("cópia que só a
+    // montagem da cena vê" — this._map continua com tudo). Cobre tanto
+    // "ocultar objetos com esta classe" quanto a opção fixa "ocultar
+    // paredes e piso" — em ambos os casos lidas de `this._map`, não de
+    // `mapaVisivel` (o estado de grupos é do MAPA, não muda por camada/
+    // andar já terem sido filtrados).
+    mapaVisivel = Mapping.filterByGrupos(mapaVisivel);
     const walls = Mapping.analyzeWalls(mapaVisivel, { cornerJoinDist });
     this._analyzedWalls = walls;
+    // [13/09/2026] NOVO — pipeline `modeloArquivo` (ver comentário grande em
+    // js/model3dloader.js): garante que TODO modelo `.glb`/`.gltf` já
+    // importado esteja parseado em memória (`Model3DLoader.hasModel`)
+    // ANTES de `Engine3D.setScene` — que é síncrono e decide, objeto a
+    // objeto, se acha um modelo pronto ou cai no fallback procedural (ver
+    // `_buildOneObjectMesh`/`_buildModeloArquivoMesh`, engine3d.js). Sem
+    // este `await`, a 1ª renderização depois de abrir "Ver em 3D" sempre
+    // cairia no fallback mesmo com o arquivo já importado (preload ainda
+    // rodando em paralelo) — só a 2ª reconstrução da cena acertaria.
+    await window.Model3DLoader?.preloadAll?.();
+    // [15/09/2026 UTC] NOVO — MESMO motivo/MESMO espírito do `await` logo
+    // acima, agora pra malha `.obj` estática (`assets/modelos/<tipo>.
+    // malha.js`, ver js/objmeshsource.js e `ObjectAssets.registerModel`
+    // campo `malhaEstatica`) — pedido verbatim: "A malha do objeto (o
+    // '.obj' dele) deve ficar em um arquivo separado [...] mas deve
+    // continuar funcionando com o protocolo 'file:///'." Usa `mapaVisivel`
+    // (não `this._map`) de propósito — mesma fonte que `Engine3D.setScene`
+    // vai efetivamente desenhar logo abaixo.
+    await window.ObjectAssets?.ensureMeshesReadyForMap?.(mapaVisivel);
     this._engine.setScene({ ...mapaVisivel, walls });
+    // [14/09/2026] NOVO — pedido verbatim: "Faça um jeito de integrar os
+    // scripts de objeto com o que acabamos de fazer." Dispara
+    // onModelSpawn/onInstanceSpawn (assets/modelos|instancias/) pra
+    // câmera/objeto/foto do mapa — ver comentário grande em
+    // js/objectassets.js `dispatchSpawn3D`/`dispatchSpawnAllForMap` (idem-
+    // potente: só tem efeito na 1ª vez de cada objeto, mesmo chamado a
+    // cada rebuild). Usa `this._map` (não `mapaVisivel`, a cópia filtrada
+    // por camada só pra desenhar) — spawn roda pro objeto de VERDADE,
+    // mesmo se a camada dele estiver oculta agora.
+    window.ObjectAssets?.dispatchSpawnAllForMap(this._map, { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map });
     // [14/09/2026] CORRIGIDO — pedido verbatim: "ao clicar em uma câmera e
     // selecionar 'Ver através desta câmera', no Modelador, ao entrar e sair
     // do Modelador, o cone da câmera selecionada acaba voltando a parecer e
@@ -1239,7 +1596,153 @@ const View3D = {
     // fechar/reabrir) é tratada à parte, no handler `_onMapConfigChange`
     // (ver `mount()`, mais acima).
     this._engine?.setCameraFrustumsVisible?.(this._isDebugEnquadramentoCameraAtivo());
+    // [16/09/2026 UTC] NOVO — "📏 Trena 3D" (ver comentário grande em
+    // `_trena3DClick` abaixo): as medidas já salvas (`map.medidas2d`)
+    // precisam ser redesenhadas em THREE toda vez que a cena é reconstruída
+    // (mesmo espírito de `setCameraFrustumsVisible` acima) — sem isto,
+    // medidas feitas numa sessão anterior nunca apareceriam ao reabrir o
+    // "Ver em 3D".
+    this._trena3DRebuildLines();
   },
+
+  /** [13/09/2026] NOVO — aplica o CSS que decide COMO o buffer de pixels do
+   *  canvas 3D (`#v3d-canvas`, resolução = `resCustom.w`×`resCustom.h`
+   *  quando customizada, ver engine3d.js `_resize`) aparece dentro da caixa
+   *  CSS normal da tela (o "Ver em 3D" continua ocupando o mesmo espaço de
+   *  sempre no layout — só o CONTEÚDO desenhado dentro do canvas muda de
+   *  resolução): `resCustom` `null`/sem `fit` ("Automática") limpa
+   *  qualquer `object-fit` custom (`''`, volta ao comportamento nativo do
+   *  navegador — irrelevante de qualquer forma quando a resolução já é a
+   *  nativa do canvas); `'esticar'` também limpa (o navegador já estica o
+   *  buffer pra preencher a caixa inteira por padrão, sem precisar de
+   *  `object-fit` nenhum — `fill` é o valor padrão do CSS); `'caber'` seta
+   *  `object-fit:contain` (preserva a proporção `w:h` configurada, sobra
+   *  virando barra vazia nas bordas) + um fundo preto no PRÓPRIO canvas
+   *  (`background-color`, pinta as barras — o canvas, como qualquer
+   *  elemento substituído por `object-fit`, não desenha nada fora da área
+   *  encaixada; sem um fundo explícito, a barra mostraria o que estiver
+   *  atrás dele no DOM, que pode não ser preto). */
+  _applyResolucaoCustom3D(canvas, resCustom) {
+    if (!canvas) return;
+    if (resCustom && resCustom.fit === 'caber') {
+      canvas.style.objectFit = 'contain';
+      canvas.style.backgroundColor = '#000';
+    } else {
+      canvas.style.objectFit = '';
+      canvas.style.backgroundColor = '';
+    }
+  },
+
+  /** Nome de exibição do andar de índice `i` — mesma convenção do mapa 2D
+   *  (ver Map2DRenderer._nomeAndar em mapview.js): 0 = "Térreo", 1 = "1º
+   *  andar", etc. */
+  _nomeAndar3D(i) {
+    return i === 0 ? 'Térreo' : `${i}º andar`;
+  },
+
+  /** [14/09/2026 UTC] NOVO — aplica no DOM o ícone/texto do botão
+   *  "#v3d-modelar-toggle" conforme `this._modelarObjetosHabilitado` —
+   *  mesmo espírito de `_syncNavModeUI` (mapview.js): mostra o nome do
+   *  modo ATUAL (não o modo pro qual vai trocar ao clicar de novo).
+   *  Desabilitado (padrão) = "🧭 Modo Navegação" (só olhar/andar, igual ao
+   *  2D); habilitado = "🛠️ Modo Edição" (menu de objeto ganha "Modelar em
+   *  3D"). */
+  _syncModelarToggleUI3D(container) {
+    const btn = (container || this._container)?.querySelector?.('#v3d-modelar-toggle');
+    if (!btn) return;
+    const ligado = !!this._modelarObjetosHabilitado;
+    btn.textContent = ligado ? '🛠️ Modo Edição' : '🧭 Modo Navegação';
+    // [14/09/2026 UTC] `.active` (estilo amarelado) vai no modo NAVEGAÇÃO
+    // (`!ligado`), não no modo Edição — mesmo critério do botão irmão do
+    // 2D (`_syncNavModeUI`: `.active` quando `this._navMode` é true, ou
+    // seja, quando ESTÁ em Modo Navegação). Ver CSS '#v3d-modelar-toggle.
+    // active' em style.css.
+    btn.classList.toggle('active', !ligado);
+  },
+
+  /** [13/09/2026 UTC] NOVO — abre/fecha o painel '🏷️ Grupos' dentro do 'Ver
+   *  em 3D' (botão '#v3d-grupos', ver comentário grande junto dele no
+   *  template). Reaproveita 'this._map' (a MESMA instância editada no 2D —
+   *  não é uma cópia), então marcar/desmarcar um grupo aqui também reflete
+   *  de volta no 2D quando o usuário voltar pro mapa; a única diferença
+   *  entre as duas telas é a UI de cada uma, o dado ('map.gruposOcultos'/
+   *  'andaresOcultos'/'ocultarParedesEPiso', ver Mapping.js) é único. */
+  _toggleGruposPanel3D(container) {
+    if (this._gruposPanelEl3D) { this._closeGruposPanel3D(); return; }
+    this._openGruposPanel3D(container);
+  },
+
+  _closeGruposPanel3D() {
+    this._gruposPanelEl3D?.remove();
+    this._gruposPanelEl3D = null;
+    this._container?.querySelector?.('#v3d-grupos')?.classList.remove('active');
+  },
+
+  _openGruposPanel3D(container) {
+    if (!this._map) return;
+    const panel = document.createElement('div');
+    panel.className = 'map-obj-picker-panel map-grupos-panel';
+    panel.style.top = '58px';
+    panel.style.right = '12px';
+    panel.style.left = 'auto';
+    (container || this._container).appendChild(panel);
+    this._gruposPanelEl3D = panel;
+    container.querySelector('#v3d-grupos')?.classList.add('active');
+    this._renderGruposPanelBody3D(panel, container);
+  },
+
+  /** [14/09/2026 UTC] REESCRITO — mesmo motor de regras generalizado do
+   *  painel 2D (ver comentário grande de `Mapping.getGrupoRegras` em
+   *  mapping.js e `MapView._renderGruposPanelBody`, mapview.js). Escopo
+   *  DELIBERADAMENTE menor aqui: lista as regras com nome + toggle
+   *  👁️/🚫 (liga/desliga), mas EDITAR nome/seletor/efeito continua
+   *  exclusivo do painel 2D — duplicar o editor completo (3 campos por
+   *  regra, select de efeito, campo de opacidade condicional) nos dois
+   *  lugares, sem navegador pra testar nenhum dos dois, era risco alto
+   *  demais pra esta rodada; o toggle sozinho já resolve "acessível no 2D
+   *  e 3D" pro caso de uso mais comum (ligar/desligar uma regra já
+   *  criada). Sem toggle de ✨ destaque aqui (ver comentário grande junto
+   *  do botão '#v3d-grupos' — destaque visual em 3D ficou fora do escopo
+   *  desta rodada, mesma decisão de antes). */
+  _renderGruposPanelBody3D(panel, container) {
+    const map = this._map;
+    const regras = Mapping.getGrupoRegras(map);
+    const salvarERebuild = () => { DB.saveMap(map); this._rebuildScene(); };
+
+    const linhasRegras = regras.length
+      ? regras.map((r) => `
+      <div class="map-grupos-row" data-id="${Utils.escapeHtml(r.id)}">
+        <span class="map-grupos-label" title="${Utils.escapeHtml(r.selector)} — ${Utils.escapeHtml(r.efeito)}">${Utils.escapeHtml(r.nome)}</span>
+        <button type="button" class="map-grupos-eye${r.ativo ? '' : ' off'}" data-acao="toggle-ativo" title="${r.ativo ? 'Desligar regra' : 'Ligar regra'}">${r.ativo ? '👁️' : '🚫'}</button>
+      </div>`).join('')
+      : '<div class="map-grupos-vazio">Nenhuma regra ainda — crie no painel "🏷️ Grupos" do Mapa 2D.</div>';
+
+    panel.innerHTML = `
+      <div class="map-panel-head"><b>🏷️ Grupos</b><button type="button" class="icon-btn sm map-panel-close" id="v3d-grupos-close" title="Fechar">✕</button></div>
+      <div class="map-grupos-body">
+        ${linhasRegras}
+        <div class="map-grupos-vazio" style="opacity:.7">Editar nome/seletor/efeito: use o painel "🏷️ Grupos" do Mapa 2D.</div>
+      </div>
+    `;
+
+    panel.querySelector('#v3d-grupos-close').onclick = () => this._closeGruposPanel3D();
+    panel.querySelectorAll('[data-acao="toggle-ativo"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.closest('.map-grupos-row')?.dataset.id;
+        if (!id) return;
+        Mapping.toggleGrupoRegraAtivo(map, id);
+        salvarERebuild();
+        this._renderGruposPanelBody3D(panel, container);
+      });
+    });
+  },
+
+  /* [14/09/2026 UTC] REMOVIDO — '_syncPisoSeletor3D' (o botão/select
+     "Andar" da topbar do "Ver em 3D"). Pedido verbatim: "Esse novo botão
+     'Grupos' que você criou deve substituir o antigo botão 'Andar'.
+     Remova do projeto o botão 'Andar'." A mesma função (ocultar andar(es))
+     agora vive só no painel '🏷️ Grupos' (toggle por andar,
+     `map.andaresOcultos`). `this._pisoFiltro3D` fica sempre `null`. */
 
   /** Painel único de configurações do mapa 2D/3D (ver mapconfig.js), aberto
    *  aqui no contexto '3d': mostra as opções de raycasting (liga/desliga,
@@ -1448,7 +1951,7 @@ const View3D = {
     // (e o offset de verdade em `camera3` via `setCamPanFrac(0,0)`) ao
     // entrar/sair de `_fotoCamMode`/`_orbCamMode`.
     this._camViewPanOffset = { x: 0, y: 0 };
-    this._fotoCamSavedPose = null; // [12/09/2026] pose livre de `this._camera` no instante de `_enterFotoCameraView` — restaurada em _exitFotoCameraView se "Sair da câmera" estiver configurado como "voltar ao ponto de vista original" (ver _fotoOrbExitViewMode)
+    this._fotoCamSavedPose = null; // [12/09/2026] pose livre de `this._camera` no instante de `_enterFotoCameraView` — restaurada em _exitFotoCameraView se "Sair da câmera" estiver configurado como "voltar ao ponto de vista original" (ver _cameraExitViewMode)
     // [12/09/2026 — ITEM A] FOV do personagem capturado no instante de
     // `_enterFotoCameraView`/`_enterCameraOrbView` (ANTES de aplicar o FOV
     // calibrado da câmera/foto) — pedido verbatim: "o FOV [...] do
@@ -1516,6 +2019,18 @@ const View3D = {
     // não há "o que escolher" na hotbar (a escolha em si acontece na janela
     // de busca de patrimônio, ver _addOrbWithTool), só mirar e clicar.
     { tool: 'orb', icon: '📍', label: 'Adicionar orb' },
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Dá para estender a 'Trena'
+    // (da grade do mapa 2D) e dar a possibilidade de ficar 3D nas duas
+    // extremidades de cada medida." Mesma ferramenta "📏 Trena (de medir)"
+    // do mapa 2D (mapview.js `_ptool==='medida'`), mas operando dentro do
+    // 3D via mira central (mesmo padrão desta hotbar) — ver `_trena3DClick`/
+    // comentário grande no topo de `trena3d.js` pra lógica completa
+    // (2 cliques normais medem 2 pontos de superfície; Ctrl no 2º clique
+    // estabelece uma referência vertical, e o clique seguinte sem Ctrl
+    // finaliza "no ar" acima do 1º ponto). As medidas ficam salvas no MESMO
+    // array `map.medidas2d` da Trena 2D (ganham `z1`/`z2` opcionais — 0 por
+    // padrão, retrocompatível com toda medida 2D já existente).
+    { tool: 'trena3d', icon: '📏', label: 'Trena 3D' },
   ],
 
   _renderHotbar() {
@@ -1592,13 +2107,1606 @@ const View3D = {
     this._buildFreeRotatePivot = null;
     this._buildLastFreeAngle = null;
     this._buildFreeRotateFinalAngle = null;
+    // [16/09/2026 UTC] NOVO — sair (ou trocar de) "📏 Trena 3D" cancela
+    // qualquer medida a meio caminho (1º ponto já marcado, ou já em "modo
+    // vertical" depois do Ctrl) — mesmo espírito do `_wallChainStart` acima.
+    this._trena3DPendingP1 = null;
+    this._trena3DVerticalAnchor = null;
+    this._trena3DClearPreview();
     this._renderHotbar();
     if (tool === 'objeto' || tool === 'item' || tool === 'camera') this._showRoulette(); else this._hideRoulette();
     // HUD "estilo jogo" da ferramenta "📍 Adicionar orb" — mostra/esconde e
     // recalcula os números ao entrar/sair da ferramenta (ver _refreshOrbHud).
     this._refreshOrbHud();
-    const nomes = { parede: 'Parede — clique no chão pra marcar o 1º ponto, de novo pro 2º (e segue encadeando); botão do meio, Enter ou clicar em 🧱 de novo conclui', porta: 'Porta — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', janela: 'Janela — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', objeto: 'Objeto — role o mouse pra escolher o tipo, clique pra colocar', item: 'Item — role o mouse pra escolher o patrimônio sem lugar, clique pra colocar', camera: 'Câmeras — role o mouse pra escolher qual câmera fixa, clique pra "assistir" por ela (mova o mouse pra olhar em volta, limitado; role pra zoom); clique em 📷 de novo pra sair', 'camera-novo': 'Câmera — clique no chão pra criar uma câmera nesse ponto; pode ir clicando pra colocar várias seguidas (mesma câmera/orb usada no mapa 2D)', 'orbfoto-novo': 'Orb de foto — clique no chão, escolha uma foto sem vínculo pra colocar ali; pode ir clicando pra colocar várias seguidas', remover: 'Remover — mire em item/câmera/objeto/parede/porta/janela e clique pra remover da cena', orb: 'Adicionar orb — mire num objeto e clique pra abrir a busca de patrimônio e associá-lo a ele', tijolo: 'Blocos de construção — clique pra colocar 1 tijolo em cima da superfície mirada; segure Ctrl + botão esquerdo pra ir colocando vários seguidos no mesmo nível', 'tijolo-pintar': '🎨 Pintar tijolos — mire num tijolo já colocado e clique pra aplicar a cor/textura atual do menu nele' };
+    const nomes = { parede: 'Parede — clique no chão pra marcar o 1º ponto, de novo pro 2º (e segue encadeando); botão do meio, Enter ou clicar em 🧱 de novo conclui', porta: 'Porta — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', janela: 'Janela — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', objeto: 'Objeto — role o mouse pra escolher o tipo, clique pra colocar', item: 'Item — role o mouse pra escolher o patrimônio sem lugar, clique pra colocar', camera: 'Câmeras — role o mouse pra escolher qual câmera fixa, clique pra "assistir" por ela (mova o mouse pra olhar em volta, limitado; role pra zoom); clique em 📷 de novo pra sair', 'orbfoto-novo': 'Orb de foto — clique no chão, escolha uma foto sem vínculo pra colocar ali; pode ir clicando pra colocar várias seguidas', remover: 'Remover — mire em item/câmera/objeto/parede/porta/janela e clique pra remover da cena', orb: 'Adicionar orb — mire num objeto e clique pra abrir a busca de patrimônio e associá-lo a ele', tijolo: 'Blocos de construção — clique pra colocar 1 tijolo em cima da superfície mirada; segure Ctrl + botão esquerdo pra ir colocando vários seguidos no mesmo nível', 'tijolo-pintar': '🎨 Pintar tijolos — mire num tijolo já colocado e clique pra aplicar a cor/textura atual do menu nele', trena3d: 'Trena 3D — clique em 2 pontos pra medir a distância; segure Ctrl no 2º clique pra medir "no ar" (estabelece uma referência vertical no 1º ponto — o clique seguinte, sem Ctrl, sobe/desce por ela)' };
     if (tool) Utils.toast(nomes[tool] || tool, { duration: 2600 });
+  },
+
+  // =====================================================================
+  // "📏 Trena 3D" — [16/09/2026 UTC] NOVO, pedido verbatim: "Dá para
+  // estender a 'Trena' (da grade do mapa 2D) e dar a possibilidade de
+  // ficar 3D nas duas extremidades de cada medida. Quando for no 2D, a
+  // trena se comporta restrita a duas dimensões. E, quando estiver no 3D,
+  // ela funciona com 3 dimensões. A medida (texto) [...] fica sendo
+  // impressa diretamente na tela (ficando 2D), mas como se estivesse no 3D
+  // (por ponto de referência [...])." — o nome técnico dessa técnica é
+  // "billboard"/rótulo ancorado por projeção mundo→tela (aqui via
+  // `camera.project()`, um <span> HTML posicionado a cada quadro, ver
+  // `_trena3DUpdateLabels`), MUITO mais barato que texto 3D de verdade
+  // (sprite/`TextGeometry`) e sempre legível (nunca "de perfil").
+  //
+  // "Ao segurar o ctrl o clique seguinte não finaliza a medida, mas
+  // estabelece uma referência perpendicular ao chão. Deste modo, é
+  // possível elevar o apontamento da câmera que o clica seguinte (sem o
+  // ctrl seguro, agora) vai ficar 'no ar'." — sem esse modo, um clique
+  // normal SEMPRE bate numa superfície de verdade (`raycastSurface` —
+  // chão/objeto/parede), nunca "no vazio". O modo vertical resolve isso:
+  // trava X/Z no valor do 1º ponto e deixa só a ALTURA (Y) livre, lida
+  // pelo ponto mais próximo entre a mira (um raio) e essa reta vertical
+  // imaginária — ver `_trena3DClick` abaixo pra matemática exata.
+  //
+  // Dados: reaproveita o MESMO array `map.medidas2d` da Trena 2D
+  // (mapview.js `_ptool==='medida'`) — cada medida ganha `z1`/`z2`
+  // opcionais (altura em metros de cada ponta acima do referencial 0;
+  // `undefined`/ausente == 0, retrocompatível com toda medida 2D já
+  // salva, que nunca teve — nem vai passar a ter — esses campos). Uma
+  // medida só é "3D de verdade" quando `z1`/`z2` != 0; o 2D (mapview.js)
+  // não lê nem desenha esses campos, então nenhuma medida existente muda
+  // de aparência lá.
+  // =====================================================================
+
+  /** Passo do snap de posição da Trena 3D (metros) — configurável em
+   *  "⚙️ Configurações 3D" → seção "📏 Trena 3D" (ver mapconfig.js). */
+  _trena3DSnapStep() {
+    const cfg = (typeof MapConfig !== 'undefined' && MapConfig._cache) ? MapConfig._cache : null;
+    const passo = cfg?.trena3DSnapMetros ?? (typeof MapConfig !== 'undefined' ? MapConfig.DEFAULTS?.trena3DSnapMetros : 0.1);
+    return Math.max(0.01, Number(passo) || 0.1);
+  },
+
+  /** [16/09/2026 UTC] NOVO — toggle liga/desliga do snap (a subseção ganhou
+   *  um "cabeçalho" liga/desliga + valor, igual ao "🧲 Snap de parede" do
+   *  mapa 2D — ver mapconfig.js). Com o snap desligado, `_trena3DSnap`
+   *  devolve o valor exato, sem arredondar. */
+  _trena3DSnapAtivo() {
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Outra subseção deve ser
+    // segurar o shift para desativar o snap." Segurar Shift (`this._keys`,
+    // igual o Ctrl real-time já usado em `_trena3DUpdatePreview`/
+    // `_trena3DAtualizarDestaqueSuprimido`) desliga o snap TEMPORARIAMENTE,
+    // não importa o valor configurado — solta o Shift e volta ao normal.
+    if (this._keys?.ShiftLeft || this._keys?.ShiftRight) return false;
+    const cfg = (typeof MapConfig !== 'undefined' && MapConfig._cache) ? MapConfig._cache : null;
+    const v = cfg?.trena3DSnapAtivo;
+    return v !== undefined ? v !== false : (typeof MapConfig !== 'undefined' ? MapConfig.DEFAULTS?.trena3DSnapAtivo !== false : true);
+  },
+
+  _trena3DSnap(v) {
+    if (!this._trena3DSnapAtivo()) return v;
+    const passo = this._trena3DSnapStep();
+    return Math.round(v / passo) * passo;
+  },
+
+  /** [16/09/2026 UTC] NOVO — lê de uma vez toda a configuração da seção
+   *  "📏 Trena 3D" de ⚙️ Configurações 3D (aparência do rótulo,
+   *  visibilidade/oclusão, espessura, cores e formato das pontas — ver
+   *  mapconfig.js). Mesmo padrão de fallback de `_trena3DSnapStep` acima
+   *  (cache → DEFAULTS → valor fixo), só que pra todos os campos de uma
+   *  vez, já que quase todo método de renderização da Trena 3D precisa de
+   *  vários deles ao mesmo tempo. */
+  _trena3DCfg() {
+    const cache = (typeof MapConfig !== 'undefined' && MapConfig._cache) ? MapConfig._cache : null;
+    const def = (typeof MapConfig !== 'undefined' && MapConfig.DEFAULTS) ? MapConfig.DEFAULTS : {};
+    const g = (k, fallback) => { const v = cache ? cache[k] : undefined; return v !== undefined ? v : (def[k] !== undefined ? def[k] : fallback); };
+    return {
+      labelEstilo: g('trena3DLabelEstilo', 'sobreLinha'),
+      visibilidade: g('trena3DVisibilidade', 'seVisivel'),
+      espessuraCm: Number(g('trena3DEspessuraCm', 2)) || 2,
+      corLinha: g('trena3DCorLinha', '#ffd166'),
+      corAncora: g('trena3DCorAncora', '#ff9f4d'),
+      corMira: g('trena3DCorMira', '#5ec8ff'),
+      ponta: g('trena3DPonta', 'esfera'),
+      suprimirDestaqueDuranteAncora: g('trena3DSuprimirDestaqueDuranteAncora', true) !== false,
+      // [16/09/2026 UTC] REMOVIDO — pedido verbatim: "Colapse as duas
+      // subseções [...] A opção da subseção 'Altura ao vivo' deixa de
+      // existir." `trena3DMostrarAlturaAoVivo` não é mais lido — os 2
+      // lugares que dependiam dela (`_trena3DP1HeightLine`/o caso "sem
+      // âncora nenhuma" de `_trena3DLiveHeightLine`) usam valores fixos
+      // agora, ver comentários em `_trena3DUpdatePreview`.
+      mostrarAlturaAoVivoAntesDoPonto: g('trena3DMostrarAlturaAoVivoAntesDoPonto', true) !== false,
+      // [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque como outra opção
+      // dentro de 'Altura ao vivo (Antes mesmo de definir o ponto)' para
+      // definir que a medida laranja aparece ou não já ao segurar o ctrl. Em
+      // vez de sempre deixar ativo." Cobre o caso "Ctrl segurado, âncora
+      // AINDA não commitada" (antes disso era sempre `true`, sem opção — ver
+      // `_trena3DUpdatePreview`, variável `alturaPermitidaPorConfig`).
+      mostrarAlturaAoVivoAoSegurarCtrl: g('trena3DMostrarAlturaAoVivoAoSegurarCtrl', true) !== false,
+      // [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque uma opção de
+      // continuar desenhando a linha laranja tracejada até o 1º ponto da
+      // medida (por padrão, ativada) [...] Uma subopção [...] infinita ou
+      // vai até o 1º ponto da medida (por padrão [...] 'vai até o 1º ponto'
+      // [...] ativa)." Ver `_trena3DUpdatePreview` (bloco de
+      // `_trena3DP1HeightLine`).
+      continuarLinhaAncoraAposPonto: g('trena3DContinuarLinhaAncoraAposPonto', true) !== false,
+      linhaAncoraAposPontoModo: g('trena3DLinhaAncoraAposPontoModo', 'ateOPonto'),
+      // [16/09/2026 UTC] NOVO — pedido verbatim: "Outra subopção é imprimir
+      // junto com a linha laranja tracejada infinita (ou até o 1º ponto, com
+      // isso, não sendo infinita) o texto laranja da medida (logo depois de
+      // definir o 1º ponto da medida)." Controla só o RÓTULO de texto
+      // (`_trena3DP1HeightLabelEl`) — a linha em si continua regida só por
+      // `continuarLinhaAncoraAposPonto`/`linhaAncoraAposPontoModo` acima. Ver
+      // `_trena3DUpdatePreview` (bloco de `_trena3DP1HeightLine`).
+      mostrarMedidaNaLinhaAncoraAposPonto: g('trena3DMostrarMedidaNaLinhaAncoraAposPonto', true) !== false,
+      // [16/09/2026 UTC] NOVO — pedido verbatim: "Semelhante a subseção
+      // 'Linha da âncora após o 1º ponto', mas agora nas duas linhas (a
+      // linha [...] que vai do 1º ponto âncora até o 1º ponto da medida e a
+      // [...] do 2º ponto âncora até o 2º ponto da medida). Deve ter uma
+      // subseção para definir se ficam impressas após a medida ser
+      // finalizada (por padrão, desativada). E uma subopção se desenha do
+      // chão até os pontos da medida ou se as duas vão ser infinitas." Ver
+      // `_trena3DRebuildLines` — como o X/Z de um ponto ancorado já É o
+      // X/Z da própria âncora (só a altura fica livre), não precisa guardar
+      // nada novo por medida: a linha vai de (x,0,z) até (x,y,z) de CADA
+      // ponto já salvo (`m.x1/z1/y1` e `m.x2/z2/y2`), igual ao raciocínio da
+      // linha viva em `_trena3DUpdatePreview`.
+      mostrarLinhasAncoraFinalizada: g('trena3DMostrarLinhasAncoraFinalizada', false) === true,
+      linhasAncoraFinalizadaModo: g('trena3DLinhasAncoraFinalizadaModo', 'ateOPonto'),
+      // [16/09/2026 UTC] NOVO — 'ctrl' (padrão, comportamento de sempre:
+      // segurar Ctrl ancora, soltar+clicar fixa "no ar"; sem usar Ctrl,
+      // medida normal de 2 cliques) | 'quatroCliques' (novo: Ctrl ignorado,
+      // toda medida sempre usa 4 cliques alternando âncora/ponto). Ver
+      // _trena3DClick/_trena3DUpdatePreview/_trena3DAtualizarDestaqueSuprimido.
+      modoAncora: g('trena3DModoAncora', 'ctrl'),
+      guiaGradeAtiva: g('trena3DGuiaGradeAtiva', true) !== false,
+      guiaGradeModoMedida: g('trena3DGuiaGradeModoMedida', 'esquerdaCima'),
+      gradeSnapLadrilhoAtiva: g('trena3DGradeSnapLadrilhoAtiva', true) !== false,
+      gradeSnapLadrilhoModo: g('trena3DGradeSnapLadrilhoModo', 'atual'),
+      gradeSnapEspessuraPx: Number(g('trena3DGradeSnapEspessuraPx', 3)) || 3,
+      gradeSnapDashCm: Number(g('trena3DGradeSnapDashCm', 1)) || 1,
+      gradeSnapGapCm: Number(g('trena3DGradeSnapGapCm', 2)) || 2,
+    };
+  },
+
+  /** '#rrggbb' → inteiro hex (0xrrggbb) pro THREE aceitar direto num
+   *  `color:` de material. Usado em todo lugar que lê uma das cores
+   *  configuráveis acima (`_trena3DCfg`). */
+  _trena3DHexToInt(hex, fallbackInt) {
+    if (typeof hex !== 'string') return fallbackInt;
+    const n = parseInt(hex.replace('#', ''), 16);
+    return Number.isFinite(n) ? n : fallbackInt;
+  },
+
+  /** [16/09/2026 UTC] NOVO — constrói uma "linha grossa" de verdade (não um
+   *  `THREE.Line`, que ignora `linewidth` na esmagadora maioria das
+   *  GPUs/navegadores — limitação conhecida do WebGL, não bug deste app):
+   *  um cilindro alinhado entre `p1`/`p2`, raio real em METROS (não
+   *  pixels), então a espessura configurada (`trena3DEspessuraCm`) fica
+   *  igual não importa o zoom/distância — pedido verbatim: "definir a
+   *  espessura da linha entre as extremidades". `depthTest:false` (mesmo
+   *  de sempre) — a visibilidade "atrás de paredes/objetos" é decidida à
+   *  parte, por raycast (`_trena3DAtualizarOclusao`), não pelo depth buffer
+   *  da GPU. */
+  _trena3DBuildFatLine(p1, p2, corInt, raioMetros) {
+    const THREE = window.THREE;
+    const dir = new THREE.Vector3().subVectors(p2, p1);
+    const len = dir.length();
+    if (len < 1e-5) return null;
+    const geo = new THREE.CylinderGeometry(raioMetros, raioMetros, len, 8, 1, false);
+    const mat = new THREE.MeshBasicMaterial({ color: corInt, depthTest: false, transparent: true, opacity: 0.95 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(p1).add(p2).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+    mesh.renderOrder = 999;
+    return mesh;
+  },
+
+  /** [16/09/2026 UTC] NOVO — pedido verbatim: "opções de pontas. Uma ponta
+   *  é a atual (uma esfera). Outra opção é uma seta. Outra opção é uma
+   *  traço perpendicular a medida feita." `dirParaFora` é o vetor unitário
+   *  apontando PRA FORA da medida a partir deste ponto (ex.: no ponto
+   *  `p1`, aponta de `p2` pra `p1` — "pra fora" do segmento) — usado só
+   *  pela 'seta' (define pra onde ela aponta); a 'esfera'/'traco' não
+   *  precisam de direção pra fora, só da direção da LINHA em si (pro
+   *  traço, calcular a perpendicular). `dirLinha` é sempre de p1→p2. */
+  _trena3DBuildEndpoint(kind, pos, dirLinha, dirParaFora, corInt, raioMetros) {
+    const THREE = window.THREE;
+    const mat = new THREE.MeshBasicMaterial({ color: corInt, depthTest: false, transparent: true, opacity: 0.95 });
+    let mesh;
+    if (kind === 'seta') {
+      const coneRaio = Math.max(raioMetros * 3.2, 0.045);
+      const coneAltura = coneRaio * 2.2;
+      const geo = new THREE.ConeGeometry(coneRaio, coneAltura, 10);
+      geo.translate(0, -coneAltura / 2, 0); // pivot no ápice (era no centro) — a ponta fica exatamente em `pos`
+      mesh = new THREE.Mesh(geo, mat);
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirParaFora);
+      mesh.position.copy(pos);
+    } else if (kind === 'traco') {
+      const cima = new THREE.Vector3(0, 1, 0);
+      let perp = new THREE.Vector3().crossVectors(dirLinha, cima);
+      if (perp.lengthSq() < 1e-6) perp = new THREE.Vector3().crossVectors(dirLinha, new THREE.Vector3(1, 0, 0));
+      perp.normalize();
+      const compr = Math.max(raioMetros * 7, 0.16);
+      const geo = new THREE.CylinderGeometry(Math.max(raioMetros * 0.8, 0.006), Math.max(raioMetros * 0.8, 0.006), compr, 6);
+      mesh = new THREE.Mesh(geo, mat);
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), perp);
+      mesh.position.copy(pos);
+    } else {
+      const r = Math.max(raioMetros * 1.7, 0.035);
+      const geo = new THREE.SphereGeometry(r, 8, 8);
+      mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(pos);
+    }
+    mesh.renderOrder = 999;
+    return mesh;
+  },
+
+  /** Clique principal da ferramenta "📏 Trena 3D" (hotbar, `_buildTool ===
+   *  'trena3d'`) — chamado pelo `onClick` do canvas (ver mais acima), SEMPRE
+   *  com a mira central (Pointer Lock), igual às outras ferramentas desta
+   *  hotbar. `ctrlHeld`: `e.ctrlKey` do clique que acabou de acontecer. */
+  _trena3DClick(ctrlHeld) {
+    if (!this._map || !this._engine || typeof Mapping === 'undefined') return;
+    // [16/09/2026 UTC] NOVO — guarda contra clique duplicado. Usuário
+    // relatou "parece imprimir duas medidas simultâneas" ao finalizar UMA
+    // medida nova (2 cliques). HIPÓTESE MAIS PROVÁVEL: o evento `click` do
+    // canvas disparando 2x seguidas pro MESMO clique físico — este mesmo
+    // arquivo já lida, em outro lugar (`canvas.requestPointerLock?.()
+    // ?.catch?.(...)`, mais acima), com quirks conhecidos de clique/
+    // Pointer Lock brigando entre si; um clique físico às vezes gera mais
+    // de um evento `click` no navegador perto de um lock/unlock de
+    // ponteiro (ou, num teclado/mouse específico, um "double-fire" de
+    // hardware). SEM esta guarda, a 2ª chamada (poucos milissegundos
+    // depois, mira praticamente igual) processava o estado JÁ avançado
+    // pela 1ª chamada como se fosse um clique novo de verdade — plantando
+    // um 2º "ponto pendente" fantasma que o PRÓXIMO clique do usuário
+    // (com outra intenção qualquer) acabava fechando sozinho como uma
+    // medida curta indesejada, dando a impressão de "duas medidas" por uma
+    // ação só. Nenhuma pessoa clica 2x de propósito em menos de ~150ms —
+    // qualquer chamada mais rápida que isso é tratada como o MESMO clique
+    // físico e ignorada (o clique de verdade seguinte funciona normal).
+    const agoraClique = performance.now();
+    if (this._trena3DLastClickAt != null && (agoraClique - this._trena3DLastClickAt) < 150) return;
+    this._trena3DLastClickAt = agoraClique;
+    // [16/09/2026 UTC] CORRIGIDO — bug encontrado nesta rodada (achado ao
+    // investigar o pedido do 4-cliques): 'modoQuatroCliques'/'cfgClick' eram
+    // usados mais abaixo nesta função (nos blocos 'if (ctrlHeld)'/'if
+    // (this._trena3DVerticalAnchor)') mas não estavam mais sendo declarados
+    // aqui — sumiram numa edição anterior (mesma classe de bug do
+    // 'modoAncora' que sumiu de '_trena3DCfg()', ver Rodada 85). Isso jogava
+    // um ReferenceError toda vez que se clicava segurando Ctrl (ou soltava
+    // pra fixar um ponto "no ar") — ou seja, a ferramenta "Trena 3D" com
+    // âncora (Ctrl OU "Sempre com 4 cliques") estava quebrada de verdade,
+    // não só o modo "Sempre com 4 cliques" como já reportado. Readicionado.
+    const cfgClick = this._trena3DCfg();
+    const modoQuatroCliques = cfgClick.modoAncora === 'quatroCliques';
+    // No modo "Sempre com 4 cliques", o Ctrl físico é ignorado por completo
+    // — todo clique sem âncora ainda ativa vira automaticamente um clique
+    // "com Ctrl" (marca âncora); todo clique COM âncora já ativa vira
+    // automaticamente um clique "sem Ctrl" (comita o ponto "no ar").
+    if (modoQuatroCliques) ctrlHeld = !this._trena3DVerticalAnchor;
+    const ray = this._engine.centerRay(this._camera);
+    // [16/09/2026 UTC] REESCRITO — pedido verbatim do usuário (mecânica de
+    // âncora generalizada pros 2 pontos, não só o 2º como na rodada
+    // anterior): "Tanto para o primeiro quanto para o segundo clique, se
+    // segurar o ctrl, o clique feito [...] deve fazer um ponto de
+    // ancoragem para estabelecer uma linha perpendicular ao 'chão' e poder
+    // selecionar (com snap) algum ponto nessa linha para poder clicar e
+    // fixar 'no ar'". Sequência confirmada pelo usuário (exemplo numerado):
+    // qualquer clique SEGURANDO Ctrl (não importa se é o 1º ou o 2º ponto
+    // da medida que está sendo escolhido agora) só MARCA/SOBRESCREVE a
+    // âncora — mira num ponto real do chão/objeto/parede, mesma
+    // `raycastSurface` de sempre, e nunca finaliza nada, por mais vezes
+    // que se repita. O clique seguinte SEM Ctrl (depois de pelo menos 1
+    // âncora marcada) é que COMITA o ponto (1º ou 2º, o que estiver
+    // faltando) — "no ar", restrito à reta vertical que passa pela âncora
+    // (X/Z travados no ponto ancorado, só a altura vem da mira atual, via
+    // `_trena3DClosestPointOnVerticalLine`, MESMA conta usada pela prévia
+    // ao vivo em `_trena3DUpdatePreview`). Sem âncora nenhuma ativa, um
+    // clique sem Ctrl continua se comportando exatamente como antes desta
+    // rodada: mira direto contra uma superfície de verdade.
+    if (ctrlHeld) {
+      const hit = this._engine.raycastSurface(ray.origin, ray.dir);
+      if (!hit) {
+        Utils.toast(modoQuatroCliques
+          ? 'Trena 3D: mire numa superfície pra marcar o ponto de ancoragem.'
+          : 'Trena 3D: segure Ctrl mirando numa superfície pra marcar a âncora.', { type: 'warn', duration: 1800 });
+        return;
+      }
+      this._trena3DVerticalAnchor = { x: this._trena3DSnap(hit.x), z: this._trena3DSnap(hit.z) };
+      const qual = this._trena3DPendingP1 ? '2º' : '1º';
+      Utils.toast(modoQuatroCliques
+        ? `Trena 3D: ponto de ancoragem do ${qual} ponto marcado — clique de novo pra fixar o ${qual} ponto da medida nesta linha "no ar".`
+        : `Trena 3D: âncora marcada — solte o Ctrl e clique pra fixar o ${qual} ponto nesta linha "no ar" (ou segure Ctrl de novo pra mover a âncora).`, { duration: 2800 });
+      return;
+    }
+    if (this._trena3DVerticalAnchor) {
+      // Âncora já marcada e este clique veio SEM Ctrl (modo "Ctrl") OU é o
+      // clique de consumo automático (modo "quatroCliques") — comita o
+      // ponto que estiver faltando "no ar", sobre a reta vertical da
+      // âncora, e consome/esquece a âncora (a PRÓXIMA âncora, se houver, é
+      // sempre marcada do zero — por um novo Ctrl-clique no modo "Ctrl", ou
+      // automaticamente no 3º clique da sequência no modo "quatroCliques").
+      const anchor = this._trena3DVerticalAnchor;
+      const p = this._trena3DClosestPointOnVerticalLine(ray, anchor.x, anchor.z);
+      this._trena3DVerticalAnchor = null;
+      if (!this._trena3DPendingP1) {
+        this._trena3DPendingP1 = p;
+        Utils.toast(modoQuatroCliques
+          ? 'Trena 3D: 1º ponto marcado "no ar" — clique pra marcar o ponto de ancoragem do 2º ponto.'
+          : 'Trena 3D: 1º ponto marcado "no ar" — clique no 2º (ou segure Ctrl pra ancorar de novo).', { duration: 2200 });
+        return;
+      }
+      this._trena3DFinalize(this._trena3DPendingP1, p);
+      return;
+    }
+    // Sem âncora ativa — só chega aqui no modo "Ctrl" (no modo
+    // "quatroCliques", `ctrlHeld` acima é sempre `true` quando não há
+    // âncora nenhuma, então este trecho nunca roda — nesse modo, mede-se
+    // SEMPRE por âncora, nunca clicando direto numa superfície). Modo
+    // "Ctrl", sem nunca ter usado Ctrl: comportamento de sempre, mira
+    // direto contra uma superfície de verdade (chão/objeto/parede).
+    if (!this._trena3DPendingP1) {
+      const hit = this._engine.raycastSurface(ray.origin, ray.dir);
+      if (!hit) { Utils.toast('Trena 3D: mire numa superfície pro 1º ponto (ou segure Ctrl pra medir "no ar").', { type: 'warn', duration: 1800 }); return; }
+      this._trena3DPendingP1 = { x: this._trena3DSnap(hit.x), y: this._trena3DSnap(hit.y), z: this._trena3DSnap(hit.z) };
+      Utils.toast('Trena 3D: 1º ponto marcado — clique no 2º (segure Ctrl pra medir "no ar").', { duration: 2200 });
+      return;
+    }
+    const hit2 = this._engine.raycastSurface(ray.origin, ray.dir);
+    if (!hit2) { Utils.toast('Trena 3D: mire numa superfície pro 2º ponto (ou segure Ctrl pra medir "no ar").', { type: 'warn', duration: 2200 }); return; }
+    const p2 = { x: this._trena3DSnap(hit2.x), y: this._trena3DSnap(hit2.y), z: this._trena3DSnap(hit2.z) };
+    this._trena3DFinalize(this._trena3DPendingP1, p2);
+  },
+
+  /** Ponto mais próximo entre o raio da mira (`ray.origin`/`ray.dir`) e a
+   *  reta vertical infinita que passa por `(ax, *, az)` — projeção do vetor
+   *  do ponto de partida do raio até a reta na direção horizontal do raio
+   *  (a componente Y do raio não entra nessa conta: só decide ONDE ao
+   *  longo do raio, em X/Z, ele passa mais perto da reta; a altura final
+   *  vem de aplicar esse mesmo `t` na equação do raio). Resultado sempre
+   *  travado em `[0, 6]` metros de altura — evita medidas "no ar" a uma
+   *  distância absurda se a mira estiver quase paralela à reta vertical
+   *  (caso degenerado em que a projeção fica numericamente instável). */
+  _trena3DClosestPointOnVerticalLine(ray, ax, az) {
+    const dx = ray.dir.x, dz = ray.dir.z;
+    const denom = dx * dx + dz * dz;
+    let t = 0;
+    if (denom > 1e-8) {
+      t = ((ax - ray.origin.x) * dx + (az - ray.origin.z) * dz) / denom;
+      t = Math.max(0, t);
+    }
+    const y = ray.origin.y + t * ray.dir.y;
+    return { x: this._trena3DSnap(ax), y: this._trena3DSnap(Math.min(6, Math.max(0, y))), z: this._trena3DSnap(az) };
+  },
+
+  /** Grava a medida finalizada em `map.medidas2d` (MESMO array/formato da
+   *  Trena 2D — ver `Mapping.addWall`-style `x1,y1,x2,y2` — só que `y` de
+   *  cada ponto (a ALTURA, eixo vertical de verdade em three.js) vira
+   *  `z1`/`z2`, e o `z` do ponto (a coordenada "profundidade" do mundo 3D)
+   *  vira o `y1`/`y2` de sempre — mesma convenção já usada em TODO o resto
+   *  do app pra converter entre o plano 2D (x,y) e o mundo 3D (x,y=altura,
+   *  z), ver `Engine3D._buildOneObjectMeshCore`/`obj.x`/`obj.y`). */
+  _trena3DFinalize(p1, p2) {
+    const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
+    if (dist < 0.02) { Utils.toast('Trena 3D: os 2 pontos ficaram quase no mesmo lugar — medida ignorada.', { type: 'warn', duration: 2200 }); this._trena3DPendingP1 = null; this._trena3DVerticalAnchor = null; return; }
+    if (!this._map.medidas2d) this._map.medidas2d = [];
+    this._map.medidas2d.push({
+      id: DB.uuid(),
+      x1: p1.x, y1: p1.z, z1: p1.y,
+      x2: p2.x, y2: p2.z, z2: p2.y,
+      modo: 'manual3d',
+      layerId: this._layerIdParaNovosItens ? this._layerIdParaNovosItens() : undefined,
+      criadoEm: DB.nowISO(),
+      nome: Mapping._nextObjectName(this._map, 'Trena'),
+    });
+    this._trena3DPendingP1 = null;
+    this._trena3DVerticalAnchor = null;
+    DB.saveMap(this._map);
+    this._trena3DRebuildLines();
+    Utils.toast(`Trena 3D: ${dist.toFixed(2)}m ✓`, { type: 'ok', duration: 2600 });
+  },
+
+  /** Grupo THREE dedicado às linhas/pontas da Trena 3D — separado do resto
+   *  da cena (`this._engine.scene`) só pra poder ser limpo/reconstruído
+   *  inteiro sem tocar em mais nada, mesmo padrão de outros grupos
+   *  auxiliares do motor (ver `_sunMesh`/`_moonMesh`, engine3d.js). */
+  _trena3DEnsureGroup() {
+    const THREE = window.THREE;
+    if (!THREE || !this._engine?.scene) return null;
+    if (!this._trena3DGroup) {
+      this._trena3DGroup = new THREE.Group();
+      this._trena3DGroup.name = 'trena3d';
+      this._engine.scene.add(this._trena3DGroup);
+    }
+    return this._trena3DGroup;
+  },
+
+  /** Descarta e recria TODAS as linhas 3D + rótulos DOM de todas as medidas
+   *  salvas (`map.medidas2d`) — chamado por `_rebuildScene()` (reabrir o
+   *  "Ver em 3D", trocar de andar/câmadas) e logo após salvar uma medida
+   *  nova/editada (`_trena3DFinalize`). Medidas "puramente 2D" (z1/z2
+   *  ausentes ou ambos 0) também ganham uma linha aqui — pedido do usuário
+   *  não distingue medida "nova" de "antiga", só pede que a Trena TODA
+   *  passe a existir no 3D.
+   *  [16/09/2026 UTC] CORRIGIDO — bug relatado: "as medidas 3D só aparecem
+   *  depois de uma segunda entrada no 3D. Entra, sai, entra de novo. Então,
+   *  as medidas aparecem." CAUSA RAIZ: `_rebuildScene()` chama
+   *  `this._engine.setScene(...)` e, IMEDIATAMENTE depois (mesmo bloco
+   *  síncrono), este método — mas `Engine3D.setScene` (engine3d.js) tem uma
+   *  guarda pra quando o Three.js AINDA está carregando (`if (!this._ready)
+   *  { this._pendingScene = mapData; return; }`, só na PRIMEIRÍSSIMA vez
+   *  que "Ver em 3D" é aberto numa aba — `_initThree()` é assíncrono e pode
+   *  não ter terminado ainda) — nesse caso `this._engine.scene` também
+   *  ainda não existe (só é criado dentro de `_initThree`), então
+   *  `_trena3DEnsureGroup()` (abaixo) falha e devolve `null` NA HORA, e as
+   *  medidas nunca são desenhadas. Quando `_initThree()` termina, ele
+   *  aplica sozinho o `_pendingScene` guardado (`this.setScene(pending)`),
+   *  mas ESSA chamada interna não sabe nada da Trena 3D — nunca re-chama
+   *  este método. Na 2ª entrada, `_ready` já está `true` desde a 1ª vez, daí
+   *  `setScene` roda direto (sem guardar em pending) e tudo funciona.
+   *  CORRIGIDO: quando este método falha por falta de `scene` ainda pronta,
+   *  marca `this._trena3DPendingRebuild = true` — `_loop()` (chamado todo
+   *  quadro) tenta de novo sozinho a cada quadro enquanto essa flag estiver
+   *  ligada, e para de tentar assim que conseguir (ver `_loop`). */
+  _trena3DRebuildLines() {
+    const THREE = window.THREE;
+    const grupo = this._trena3DEnsureGroup();
+    if (!THREE || !grupo || !this._map) { this._trena3DPendingRebuild = true; return; }
+    this._trena3DPendingRebuild = false;
+    while (grupo.children.length) {
+      const child = grupo.children.pop();
+      // [16/09/2026 UTC] NOVO — cada medida agora vira um SUBGRUPO (linha
+      // grossa + 2 pontas, ver `_trena3DCfg`/`_trena3DBuildFatLine`/
+      // `_trena3DBuildEndpoint` abaixo), não mais 1 `Line` + 2 esferas soltas
+      // direto em `grupo` — precisa descer 1 nível a mais pra liberar
+      // geometria/material de cada peça.
+      (child.children || []).forEach((neto) => { neto.geometry?.dispose?.(); neto.material?.dispose?.(); });
+      child.geometry?.dispose?.();
+      child.material?.dispose?.();
+    }
+    (this._trena3DLabelEls || []).forEach((el) => el.remove());
+    this._trena3DLabelEls = [];
+    // [16/09/2026 UTC] NOVO — 1 entrada por medida (id/objeto 3D/rótulo/
+    // ponto médio), usada por `_trena3DAtualizarOclusao` (visibilidade
+    // "só se estiver visível") e por `_trena3DPickAtRay`/
+    // `_trena3DRemoverMedida` (excluir a medida clicando nela no 3D).
+    this._trena3DEntries = [];
+    const cfg = this._trena3DCfg();
+    const corLinhaInt = this._trena3DHexToInt(cfg.corLinha, 0xffd166);
+    // cm → raio em metros: espessura configurada é o DIÂMETRO do "tubo" (o
+    // que a palavra "espessura de uma linha" normalmente quer dizer), então
+    // raio = (cm/100)/2.
+    const raioLinha = Math.max(0.001, (cfg.espessuraCm || 2) / 200);
+    const medidas = this._map.medidas2d || [];
+    medidas.forEach((m) => {
+      const p1 = new THREE.Vector3(m.x1, m.z1 || 0, m.y1);
+      const p2 = new THREE.Vector3(m.x2, m.z2 || 0, m.y2);
+      const subgrupo = new THREE.Group();
+      // `userData.medidaId` em TODA malha desta medida (subgrupo + cada
+      // filho) — pedido verbatim: "deve ser possível excluir a medida pelo
+      // 3D mesmo" — ver `_trena3DPickAtRay` (raycast direto contra
+      // `this._trena3DGroup`, sobe até achar este id no `userData`).
+      subgrupo.userData.medidaId = m.id;
+      const dirLinha = new THREE.Vector3().subVectors(p2, p1);
+      if (dirLinha.length() > 1e-5) {
+        const dirNorm = dirLinha.clone().normalize();
+        const fat = this._trena3DBuildFatLine(p1, p2, corLinhaInt, raioLinha);
+        if (fat) { fat.userData.medidaId = m.id; subgrupo.add(fat); }
+        const ponta1 = this._trena3DBuildEndpoint(cfg.ponta, p1, dirNorm, dirNorm.clone().negate(), corLinhaInt, raioLinha);
+        const ponta2 = this._trena3DBuildEndpoint(cfg.ponta, p2, dirNorm, dirNorm, corLinhaInt, raioLinha);
+        ponta1.userData.medidaId = m.id; ponta2.userData.medidaId = m.id;
+        subgrupo.add(ponta1); subgrupo.add(ponta2);
+      }
+      // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ter uma subseção para
+      // definir se ficam impressas após a medida ser finalizada (por padrão,
+      // desativada). E uma subopção se desenha do chão até os pontos da
+      // medida ou se as duas vão ser infinitas." Linhas tracejadas laranja,
+      // do chão (y=0) até CADA ponto da medida (`p1`/`p2`) — se um ponto foi
+      // fixado "no ar" via âncora, seu X/Z já É o X/Z da própria âncora,
+      // então essa linha reproduz exatamente a "linha da âncora" daquele
+      // ponto, agora persistida junto com a medida já finalizada.
+      if (cfg.mostrarLinhasAncoraFinalizada) {
+        const linhaInfinitaFinal = cfg.linhasAncoraFinalizadaModo === 'infinita';
+        [p1, p2].forEach((pt) => {
+          if (Math.abs(pt.y) <= 0.01) return; // ponto já no chão — linha seria só um pontinho
+          const baseF = new THREE.Vector3(pt.x, 0, pt.z);
+          const topoF = new THREE.Vector3(pt.x, linhaInfinitaFinal ? 6 : pt.y, pt.z);
+          const geoF = new THREE.BufferGeometry().setFromPoints([baseF, topoF]);
+          const matF = new THREE.LineDashedMaterial({ color: 0xff9f4d, dashSize: 0.12, gapSize: 0.08, depthTest: false, transparent: true, opacity: 0.85 });
+          const linhaF = new THREE.Line(geoF, matF);
+          linhaF.computeLineDistances();
+          linhaF.renderOrder = 999;
+          linhaF.userData.medidaId = m.id;
+          subgrupo.add(linhaF);
+        });
+      }
+      grupo.add(subgrupo);
+      const meio = p1.clone().add(p2).multiplyScalar(0.5);
+      const label = document.createElement('div');
+      label.className = 'v3d-trena3d-label';
+      // [16/09/2026 UTC] Estilo inline de propósito (em vez de css/style.css)
+      // — mesmo espírito de outros overlays HUD pontuais deste arquivo (ver
+      // `_addHistoricoDestaque`/HUD de FPS): evita mexer numa folha de
+      // estilo global só por causa de um rótulo pequeno e autocontido.
+      // `position:fixed` (não `absolute`) DE PROPÓSITO: `_trena3DUpdateLabels`
+      // calcula a posição a partir de `canvas.getBoundingClientRect()`
+      // (coordenadas relativas à JANELA) — `fixed` é o único jeito de usar
+      // essas coordenadas direto, sem depender de qual ancestral posicionado
+      // o `<div>` acabar tendo (evita todo bug de "rótulo deslocado" por
+      // causa de algum container intermediário com `position:relative`).
+      Object.assign(label.style, {
+        position: 'fixed', left: '0', top: '0', transform: 'translate(-50%,-50%)',
+        background: 'rgba(20,22,28,0.85)', color: cfg.corLinha || '#ffd166', font: '600 12px/1.2 system-ui, sans-serif',
+        padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: '5',
+      });
+      const dist = p1.distanceTo(p2);
+      label.textContent = `📏 ${dist.toFixed(2)}m`;
+      // [16/09/2026 UTC] NOVO — "Aparência da medida": 'sobreLinha' (padrão,
+      // pedido do usuário — "em cima do traço da medida e bem no meio",
+      // sem nenhum deslocamento do ponto médio de verdade) vs 'flutuante'
+      // (jeito de antes desta rodada — um pouco deslocado pra cima, "boiando").
+      const ancoraLabel = cfg.labelEstilo === 'flutuante' ? meio.clone().add(new THREE.Vector3(0, 0.18, 0)) : meio;
+      label.dataset.mx = String(ancoraLabel.x); label.dataset.my = String(ancoraLabel.y); label.dataset.mz = String(ancoraLabel.z);
+      document.body.appendChild(label);
+      this._trena3DLabelEls.push(label);
+      this._trena3DEntries.push({ id: m.id, obj3d: subgrupo, labelEl: label, midpoint: meio });
+    });
+  },
+
+  /** [16/09/2026 UTC] NOVO — pedido verbatim: "definir [...] se fica
+   *  aparecendo como já é atualmente (sempre imprimindo [...]) [...] ou
+   *  imprimir se estiver visível [...] Por exemplo, se tiver objetos 'na
+   *  frente' [...] então, a medida não aparece." Chamado todo quadro (ver
+   *  `_loop`, junto de `_trena3DUpdateLabels`) — esconde a malha 3D (linha
+   *  +pontas) e marca o rótulo correspondente como oculto (`dataset.oculto`,
+   *  lido por `_trena3DUpdateLabels` pra não desenhá-lo) sempre que
+   *  `Engine3D.isSegmentOccluded` (câmera → ponto médio da medida) achar
+   *  algo real bloqueando no meio do caminho. Com "Sempre aparecer"
+   *  configurado, garante que tudo fica visível (útil se o usuário troca a
+   *  opção enquanto algo já estava escondido). */
+  _trena3DAtualizarOclusao() {
+    const entries = this._trena3DEntries;
+    if (!entries || !entries.length || !this._engine) return;
+    const cfg = this._trena3DCfg();
+    if (cfg.visibilidade !== 'seVisivel' || typeof this._engine.isSegmentOccluded !== 'function') {
+      entries.forEach((e) => { e.obj3d.visible = true; if (e.labelEl) e.labelEl.dataset.oculto = ''; });
+      return;
+    }
+    const cam = this._camera;
+    const origem = { x: cam.x, y: cam.y, z: cam.z };
+    entries.forEach((e) => {
+      const bloqueado = this._engine.isSegmentOccluded(origem, { x: e.midpoint.x, y: e.midpoint.y, z: e.midpoint.z });
+      e.obj3d.visible = !bloqueado;
+      if (e.labelEl) e.labelEl.dataset.oculto = bloqueado ? '1' : '';
+    });
+  },
+
+  /** [16/09/2026 UTC] NOVO — pedido verbatim: "deixar de fazer o destaque
+   *  feito pelo raycaster [...] enquanto está ativa a linha perpendicular
+   *  [...] Por padrão ativa." Chamado todo quadro (`_loop`) — repassa pro
+   *  motor (`Engine3D.setHoverHighlightSuppressed`) se o destaque de mira
+   *  normal deve ficar desligado agora: só quando a ferramenta ativa é a
+   *  Trena 3D E existe uma referência vertical em jogo (âncora já commitada
+   *  OU Ctrl fisicamente segurado — mesmo par de condições de
+   *  `_trena3DUpdatePreview`) E a opção correspondente está ligada. */
+  _trena3DAtualizarDestaqueSuprimido() {
+    if (!this._engine?.setHoverHighlightSuppressed) return;
+    const cfg = this._trena3DCfg();
+    // [16/09/2026 UTC] NOVO — mesma generalização de `_trena3DUpdatePreview`
+    // pro modo "quatroCliques": sem âncora nenhuma ativa, o PRÓXIMO clique
+    // sempre vai ancorar (então já conta como "referência vertical em
+    // jogo" mesmo sem Ctrl nenhum envolvido); com âncora já commitada,
+    // conta de qualquer jeito, como sempre.
+    const modoQuatroCliques = cfg.modoAncora === 'quatroCliques';
+    const ctrlFisicoSegurado = modoQuatroCliques ? !this._trena3DVerticalAnchor : !!(this._keys?.ControlLeft || this._keys?.ControlRight);
+    const ancoraEmJogo = !!this._trena3DVerticalAnchor || ctrlFisicoSegurado;
+    const suprimir = this._buildTool === 'trena3d' && ancoraEmJogo && cfg.suprimirDestaqueDuranteAncora;
+    this._engine.setHoverHighlightSuppressed(suprimir);
+  },
+
+  /** [16/09/2026 UTC] NOVO — pedido verbatim: "deve ser possível excluir a
+   *  medida pelo 3D mesmo." Raycast direto contra as malhas de
+   *  `this._trena3DGroup` (a MESMA técnica de sempre, `THREE.Raycaster`,
+   *  mas restrita a este grupo — DELIBERADAMENTE fora do sistema genérico
+   *  de `pickables`/`hoverPick` do motor: registrar medidas lá exigiria uma
+   *  caixa/OBB por segmento, que o motor não modela pra retas arbitrárias
+   *  no espaço — mais simples e igualmente eficaz fazer um raycast dedicado
+   *  aqui, já que o grupo tem poucas dezenas de medidas no pior caso).
+   *  Sobe de filho em filho até achar `userData.medidaId` (a linha/pontas
+   *  o carregam direto; o subgrupo TAMBÉM, por segurança). */
+  _trena3DPickAtRay(ray) {
+    const THREE = window.THREE;
+    if (!THREE || !this._trena3DGroup || !this._trena3DGroup.children.length) return null;
+    if (!this._trena3DRaycaster) this._trena3DRaycaster = new THREE.Raycaster();
+    this._trena3DRaycaster.set(
+      new THREE.Vector3(ray.origin.x, ray.origin.y, ray.origin.z),
+      new THREE.Vector3(ray.dir.x, ray.dir.y, ray.dir.z).normalize(),
+    );
+    const hits = this._trena3DRaycaster.intersectObjects(this._trena3DGroup.children, true);
+    for (const h of hits) {
+      let o = h.object;
+      while (o && o.userData?.medidaId == null && o.parent) o = o.parent;
+      if (o?.userData?.medidaId != null) return { medidaId: o.userData.medidaId, t: h.distance };
+    }
+    return null;
+  },
+
+  /** Remove 1 medida de `map.medidas2d` pelo id — chamado por
+   *  `_removeWithTool`/`_openDeleteConfirmPopup` (fallback quando a mira
+   *  não pegou nada mais específico, ver lá) quando `_trena3DPickAtRay`
+   *  acha uma medida sob a mira. */
+  _trena3DRemoverMedida(id) {
+    if (!this._map?.medidas2d?.length) return false;
+    const antes = this._map.medidas2d.length;
+    this._map.medidas2d = this._map.medidas2d.filter((m) => m.id !== id);
+    if (this._map.medidas2d.length === antes) return false;
+    DB.saveMap(this._map);
+    this._trena3DRebuildLines();
+    Utils.toast('Medida removida 🗑️', { type: 'ok', duration: 1400 });
+    return true;
+  },
+
+  /** Chamado a cada quadro renderizado (ver `_loop`, logo depois de
+   *  `this._engine.render(renderCam)`) — reposiciona cada rótulo (o "texto
+   *  da medida", um `<div>` HTML comum, sempre 2D/na tela de verdade) na
+   *  projeção em tela do seu ponto médio 3D ("por ponto de referência",
+   *  técnica de billboard/HUD ancorado — ver comentário grande no topo
+   *  desta seção). Esconde o rótulo quando o ponto cai atrás da câmera
+   *  (`w <= 0` depois de `project()`) ou fora da tela. */
+  /** [16/09/2026 UTC] NOVO — pedido verbatim: "na mesma função que desenha a
+   *  linha laranja tracejada perpendicular ao chão, desenhe também o texto
+   *  da medida juntamente." Projeta e posiciona UM rótulo (`<div>` de
+   *  texto) na hora, sem esperar `_trena3DUpdateLabels` (chamada depois,
+   *  numa passada separada) — usado pelas 2 linhas laranjas tracejadas
+   *  perpendiculares ao chão desta função (`_trena3DP1HeightLine`/
+   *  `_trena3DLiveHeightLine`), logo depois de cada uma ser desenhada,
+   *  eliminando de vez a classe de bug já vista aqui antes (Rodada 83): um
+   *  rótulo cujo texto/posição são calculados numa função e só desenhados
+   *  numa PASSADA SEPARADA, mais tarde, corre o risco de ficar 1 quadro
+   *  "atrasado" em relação à própria linha — juntar os 2 no MESMO lugar
+   *  evita esse risco de vez, não só corrige a ordem de chamada. MESMA
+   *  conta de projeção mundo→tela de `_trena3DUpdateLabels` (só que
+   *  aplicada imediatamente, a UM elemento por vez, em vez de numa lista). */
+  _trena3DProjetarLabelImediato(el, wx, wy, wz) {
+    if (!el) return;
+    const THREE = window.THREE;
+    const camera = this._engine?.camera3;
+    const canvas = this._container?.querySelector('#v3d-canvas');
+    if (!THREE || !camera || !camera.isCamera || !canvas) { el.style.display = 'none'; return; }
+    const rect = canvas.getBoundingClientRect();
+    const v = new THREE.Vector3(wx, wy, wz);
+    v.project(camera);
+    if (v.z > 1 || v.z < -1) { el.style.display = 'none'; return; }
+    const sx = (v.x * 0.5 + 0.5) * rect.width;
+    const sy = (-v.y * 0.5 + 0.5) * rect.height;
+    el.style.display = '';
+    el.style.left = `${sx}px`;
+    el.style.top = `${sy}px`;
+  },
+
+  _trena3DUpdateLabels(camera) {
+    const els = this._trena3DLabelEls;
+    // [16/09/2026 UTC] NOVO — o rótulo de PRÉVIA ao vivo (`_trena3DUpdatePreview`)
+    // usa exatamente a mesma técnica de billboard (projeção mundo→tela) dos
+    // rótulos já finalizados — reaproveita este MESMO loop de projeção em
+    // vez de duplicar a conta em outro lugar, só juntando-o na lista por um
+    // quadro quando ele estiver visível (`display !== 'none'`).
+    const previewEl = this._trena3DPreviewLabelEl;
+    const previewVisivel = !!previewEl && previewEl.style.display !== 'none';
+    // [16/09/2026 UTC] REMOVIDO (Rodada 84) — os rótulos de altura do 1º
+    // ponto "no ar" (`_trena3DP1HeightLabelEl`) e de altura "ao vivo"
+    // (`_trena3DLiveHeightLabelEl`) NÃO são mais projetados aqui, numa
+    // passada separada e mais tardia: pedido verbatim do usuário, "na mesma
+    // função que desenha a linha laranja tracejada perpendicular ao chão,
+    // desenhe também o texto da medida juntamente" — os 2 agora são
+    // projetados na hora, dentro da própria `_trena3DUpdatePreview` (ver
+    // `_trena3DProjetarLabelImediato`, chamado logo depois de cada uma
+    // dessas 2 linhas ser desenhada/atualizada). Isso elimina de vez a
+    // classe de bug já vista aqui (Rodada 81/83): um rótulo calculado numa
+    // função e só desenhado numa passada separada corre o risco de ficar 1
+    // quadro atrasado em relação à própria linha.
+    // [16/09/2026 UTC] NOVO — idem, agora pros 2 rótulos de "guia de grade
+    // do mundo" (`_trena3DAtualizarGuiaGrade`), eixo X e eixo Z.
+    const gradeXEl = this._trena3DGuiaGradeXLabelEl;
+    const gradeXVisivel = !!gradeXEl && gradeXEl.style.display !== 'none';
+    const gradeZEl = this._trena3DGuiaGradeZLabelEl;
+    const gradeZVisivel = !!gradeZEl && gradeZEl.style.display !== 'none';
+    if ((!els || !els.length) && !previewVisivel && !gradeXVisivel && !gradeZVisivel) return;
+    if (!camera) return;
+    const THREE = window.THREE;
+    const canvas = this._container?.querySelector('#v3d-canvas');
+    if (!THREE || !canvas) return;
+    // Guarda defensiva NOVA — `camera.isCamera` (flag padrão de QUALQUER
+    // câmera THREE de verdade) confere que `camera` tem mesmo
+    // `matrixWorldInverse`/`projectionMatrix` antes de chamar `project()`
+    // (ver bug corrigido acima, `_loop`: um argumento errado — a pose crua,
+    // não uma câmera THREE — travava a tela inteira aqui dentro). Não devia
+    // mais acontecer depois da correção lá, mas sair calado em vez de
+    // travar tudo de novo é mais seguro que confiar cegamente no chamador.
+    if (!camera.isCamera) return;
+    const rect = canvas.getBoundingClientRect();
+    const v = new THREE.Vector3();
+    const todosOsRotulos = [...(els || []), ...(previewVisivel ? [previewEl] : []), ...(gradeXVisivel ? [gradeXEl] : []), ...(gradeZVisivel ? [gradeZEl] : [])];
+    todosOsRotulos.forEach((el) => {
+      // [16/09/2026 UTC] NOVO — "Visibilidade": rótulo de uma medida marcada
+      // como oculta por `_trena3DAtualizarOclusao` (algo bloqueando a visão
+      // até ela) nem chega a ser projetado — some junto com a linha/pontas.
+      if (el.dataset.oculto === '1') { el.style.display = 'none'; return; }
+      v.set(parseFloat(el.dataset.mx), parseFloat(el.dataset.my), parseFloat(el.dataset.mz));
+      v.project(camera);
+      if (v.z > 1 || v.z < -1) { el.style.display = 'none'; return; }
+      const sx = (v.x * 0.5 + 0.5) * rect.width;
+      const sy = (-v.y * 0.5 + 0.5) * rect.height;
+      el.style.display = '';
+      el.style.left = `${sx}px`;
+      el.style.top = `${sy}px`;
+    });
+  },
+
+  /** Grupo THREE dedicado à PRÉVIA ao vivo da Trena 3D (indicador de onde o
+   *  clique vai cair + linha guia tracejada) — separado de `_trena3DGroup`
+   *  (medidas JÁ finalizadas) de propósito: `_trena3DRebuildLines` descarta
+   *  e recria `_trena3DGroup` inteiro a cada medida nova/andar trocado, e
+   *  misturar os dois faria a prévia sumir/piscar toda vez que qualquer
+   *  medida é salva. Mesmo padrão de `_trena3DEnsureGroup` acima. */
+  _trena3DEnsurePreviewGroup() {
+    const THREE = window.THREE;
+    if (!THREE || !this._engine?.scene) return null;
+    if (!this._trena3DPreviewGroup) {
+      this._trena3DPreviewGroup = new THREE.Group();
+      this._trena3DPreviewGroup.name = 'trena3d-preview';
+      this._engine.scene.add(this._trena3DPreviewGroup);
+    }
+    return this._trena3DPreviewGroup;
+  },
+
+  /** [16/09/2026 UTC] NOVO — pedido verbatim do usuário, em 3 partes:
+   *  (1) "deve aparecer um indicativo de que se clicar ali onde o
+   *  raycaster está batendo é ali que vai ser inserida a medida" — esfera
+   *  pequena (`_trena3DHoverMesh`) sempre na superfície mirada, visível o
+   *  tempo todo com a ferramenta "📏 Trena 3D" ativa (mesmo antes do 1º
+   *  clique). (2) "linhas guia tracejadas devem ser apresentadas" — depois
+   *  do 1º ponto já marcado, uma `THREE.Line` tracejada (`LineDashedMaterial`)
+   *  do 1º ponto até a mira atual, com um rótulo HTML mostrando a distância
+   *  ao vivo (mesmo mecanismo de billboard de `_trena3DUpdateLabels`, só
+   *  que recalculado every frame em vez de só ao salvar). (3) "deve
+   *  aparecer uma linha guia entre a âncora inserida (quando se segura o
+   *  ctrl) e o cursor do mouse seguindo a linha perpendicular ao chão" —
+   *  quando `_trena3DVerticalAnchor` já foi estabelecido (Ctrl no 2º
+   *  clique), o alvo da prévia deixa de ser a superfície mirada direto e
+   *  passa a ser `_trena3DClosestPointOnVerticalLine` (MESMA conta usada
+   *  pra finalizar de verdade — ver `_trena3DClick` — garante que a prévia
+   *  sempre mostra EXATAMENTE onde a medida vai cair se clicar agora).
+   *  Chamado a cada quadro por `_loop`, incondicionalmente — a checagem de
+   *  "ferramenta ativa" é feita aqui dentro (esconde tudo e sai cedo se
+   *  `_buildTool !== 'trena3d'`), mesmo espírito de `_trena3DUpdateLabels`. */
+  /** [16/09/2026 UTC] NOVO — pedido verbatim: "Outra subseção é sobre
+   *  mostrar linhas tracejadas guias a partir do lado do ladrilho do mundo
+   *  (na verdade, dos múltiplos de 1m. Como o ladrilho do mundo está em
+   *  fase com 1m, então, acaba sendo isso mesmo). Por exemplo, aponta-se
+   *  para um ponto 0,3m à direita do ladrilho que está à esquerda (uma
+   *  linha tracejada guia deve ser impressa aí) e 0,4m à baixo do ladrilho
+   *  que está em cima (uma linha tracejada guia deve ser impressa aí
+   *  também). As medidas também devem aparecer (no meio e centralizadas).
+   *  Por padrão, fica ativada." Chamado a cada quadro por
+   *  `_trena3DUpdatePreview`, com o mesmo `alvo` (ponto que a mira/bolinha
+   *  está definindo agora, no chão OU "no ar") — desenha até 2 linhas
+   *  tracejadas curtas (eixo X e eixo Z), cada uma do `alvo` até o
+   *  "ladrilho" (múltiplo de 1m) mais próximo NAQUELE eixo, com um rótulo
+   *  HTML no meio (mesma técnica de billboard de `_trena3DPreviewLabelEl`).
+   *  Some sozinho (linha em si E rótulo) quando o `alvo` já está bem em
+   *  cima do múltiplo de 1m naquele eixo (distância ~0), pra não desenhar
+   *  uma linha de comprimento zero. */
+  _trena3DAtualizarGuiaGrade(alvo) {
+    const THREE = window.THREE;
+    const grupo = this._trena3DPreviewGroup;
+    const cfg = this._trena3DCfg();
+    const esconderTudo = () => {
+      if (this._trena3DGuiaGradeXLine) this._trena3DGuiaGradeXLine.visible = false;
+      if (this._trena3DGuiaGradeZLine) this._trena3DGuiaGradeZLine.visible = false;
+      if (this._trena3DGuiaGradeXLabelEl) this._trena3DGuiaGradeXLabelEl.style.display = 'none';
+      if (this._trena3DGuiaGradeZLabelEl) this._trena3DGuiaGradeZLabelEl.style.display = 'none';
+    };
+    if (!THREE || !grupo || !alvo || !cfg.guiaGradeAtiva) { esconderTudo(); return; }
+    const corGrade = 0xb7ff5e;
+    const corGradeCss = '#b7ff5e';
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "As linhas guias devem ser
+    // sólidas e um pouco mais espessas." Trocado de `THREE.Line`+
+    // `LineDashedMaterial` (tracejada, fina — `linewidth` é ignorado na
+    // maioria das GPUs, ver `_trena3DBuildFatLine`) pra um cilindro real
+    // (MESMA técnica das medidas já finalizadas), sólido e com espessura de
+    // verdade em metros, não pixels.
+    const construirLinha = (chave, p1, p2) => {
+      if (this[chave]) { grupo.remove(this[chave]); this[chave].geometry.dispose(); this[chave].material.dispose(); this[chave] = null; }
+      const mesh = this._trena3DBuildFatLine(p1, p2, corGrade, 0.012);
+      if (!mesh) return;
+      mesh.renderOrder = 997;
+      grupo.add(mesh);
+      this[chave] = mesh;
+    };
+    const construirLabel = (chave, texto, meio) => {
+      if (!this[chave]) {
+        const el = document.createElement('div');
+        el.className = 'v3d-trena3d-label v3d-trena3d-label--grade';
+        Object.assign(el.style, {
+          position: 'fixed', left: '0', top: '0', transform: 'translate(-50%,-50%)',
+          background: 'rgba(20,22,28,0.7)', color: corGradeCss, font: '600 11px/1.2 system-ui, sans-serif',
+          padding: '1px 5px', borderRadius: '4px', whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: '5',
+          border: `1px dashed ${corGradeCss}`,
+        });
+        document.body.appendChild(el);
+        this[chave] = el;
+      }
+      this[chave].textContent = texto;
+      this[chave].dataset.mx = String(meio.x);
+      this[chave].dataset.my = String(meio.y);
+      this[chave].dataset.mz = String(meio.z);
+      this[chave].style.display = '';
+    };
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Outra opção é como as
+    // medidas vão ser apresentadas no ladrilho, como é atualmente é uma
+    // opção. Outra é sempre partindo da esquerda numa medida e de cima para
+    // a outra medida (esta deve ser a padrão)." `maisPerto` (jeito
+    // ORIGINAL desta seção, rodada anterior): mede sempre até o múltiplo de
+    // 1m MAIS PRÓXIMO em cada eixo (pode ser o da esquerda OU o da
+    // direita/de cima OU o de baixo, o que estiver mais perto).
+    // `esquerdaCima` (NOVO padrão): mede SEMPRE a partir do lado esquerdo
+    // do ladrilho no eixo X e SEMPRE a partir de cima no eixo Z,
+    // independente de qual está mais perto — `Math.floor` em vez de
+    // `Math.round` nos 2 eixos (o "lado esquerdo"/"de cima" de um ladrilho
+    // de 1m é sempre o múltiplo de 1m mais BAIXO que a coordenada).
+    const modoMedida = cfg.guiaGradeModoMedida;
+    const gradeX = modoMedida === 'maisPerto' ? Math.round(alvo.x) : Math.floor(alvo.x);
+    const gradeZ = modoMedida === 'maisPerto' ? Math.round(alvo.z) : Math.floor(alvo.z);
+    const distX = Math.abs(alvo.x - gradeX);
+    const distZ = Math.abs(alvo.z - gradeZ);
+    if (distX > 0.005) {
+      const pA = new THREE.Vector3(alvo.x, alvo.y, alvo.z);
+      const pB = new THREE.Vector3(gradeX, alvo.y, alvo.z);
+      construirLinha('_trena3DGuiaGradeXLine', pA, pB);
+      construirLabel('_trena3DGuiaGradeXLabelEl', `↔ ${distX.toFixed(2)}m`, pA.clone().add(pB).multiplyScalar(0.5));
+    } else {
+      if (this._trena3DGuiaGradeXLine) this._trena3DGuiaGradeXLine.visible = false;
+      if (this._trena3DGuiaGradeXLabelEl) this._trena3DGuiaGradeXLabelEl.style.display = 'none';
+    }
+    if (distZ > 0.005) {
+      const pA = new THREE.Vector3(alvo.x, alvo.y, alvo.z);
+      const pB = new THREE.Vector3(alvo.x, alvo.y, gradeZ);
+      construirLinha('_trena3DGuiaGradeZLine', pA, pB);
+      construirLabel('_trena3DGuiaGradeZLabelEl', `↕ ${distZ.toFixed(2)}m`, pA.clone().add(pB).multiplyScalar(0.5));
+    } else {
+      if (this._trena3DGuiaGradeZLine) this._trena3DGuiaGradeZLine.visible = false;
+      if (this._trena3DGuiaGradeZLabelEl) this._trena3DGuiaGradeZLabelEl.style.display = 'none';
+    }
+  },
+
+  /** [16/09/2026 UTC] NOVO — pedido verbatim: "desenhar um gradeado dentro
+   *  do ladrilho de mundo que está sendo alvo no momento, conforme o snap
+   *  definido. Um gradeado feito com linha [pontilhadas]. Por padrão
+   *  ativado." Desenha as linhas de divisão INTERNAS da área alvo (ver
+   *  `cfg.gradeSnapLadrilhoModo` abaixo pra qual área exatamente),
+   *  espaçadas pelo passo de snap configurado (`_trena3DSnapStep()`) — ex.:
+   *  passo 0.1m → grade 10×10 por ladrilho de 1m. Se o passo já é >= 1m (ou
+   *  o snap está desligado), não há linha interna nenhuma pra desenhar (o
+   *  próprio ladrilho já é a menor unidade) — o método simplesmente esconde
+   *  tudo e sai. Uma única `THREE.LineSegments` (não `THREE.Line`) pra tudo
+   *  — `computeLineDistances()` reinicia a distância acumulada a CADA PAR
+   *  de vértices num `LineSegments` (ao contrário de um `THREE.Line`/tira
+   *  contínua, que acumula sem parar), então o tracejado/pontilhado fica
+   *  correto em cada linha mesmo com várias desenhadas de uma vez só (bem
+   *  mais barato que 1 mesh por linha). [16/09/2026 UTC] NOVO — pedido
+   *  verbatim: "deve ser pontilhado e não tracejado" — `dashSize` bem
+   *  pequeno (~espessura de um ponto) + `gapSize` bem maior (o vão entre
+   *  pontos), em vez do tracejado "meio a meio" de antes. */
+  _trena3DAtualizarGradeSnapLadrilho(alvo) {
+    const THREE = window.THREE;
+    const grupo = this._trena3DPreviewGroup;
+    const cfg = this._trena3DCfg();
+    if (!THREE || !grupo || !alvo || !cfg.gradeSnapLadrilhoAtiva) {
+      if (this._trena3DGradeSnapLines) this._trena3DGradeSnapLines.visible = false;
+      return;
+    }
+    const passo = this._trena3DSnapStep();
+    if (!(passo > 0) || passo >= 0.999) {
+      if (this._trena3DGradeSnapLines) this._trena3DGradeSnapLines.visible = false;
+      return;
+    }
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ter uma opção (sobre o
+    // gradeado) que o desenhe 'nos quatro ladrilhos do entorno', do 'jeito
+    // atual' ou 'metade de cada ladrilho do entorno'." As 3 áreas possíveis
+    // (todas centradas no VÉRTICE de grade mais próximo de `alvo`, exceto o
+    // "jeito atual", que usa o ladrilho que CONTÉM `alvo`, não o vértice):
+    // - 'atual' (padrão/jeito de sempre): só o ladrilho de 1m que contém
+    //   `alvo` — `Math.floor` de cada eixo até `+1`.
+    // - 'quatroLadrilhos': os 4 ladrilhos inteiros que se tocam no vértice
+    //   de grade mais próximo — área de 2m×2m (`vértice -1` até `vértice
+    //   +1` em cada eixo).
+    // - 'metadeEntorno': só a METADE de cada um dos 4 ladrilhos mais perto
+    //   do vértice — como cada ladrilho contribui só a metade mais próxima
+    //   do vértice, o resultado é um quadrado de 1m×1m CENTRADO no vértice
+    //   (em vez de com canto nele, como no modo 'atual').
+    const modo = cfg.gradeSnapLadrilhoModo;
+    let xMin, xMax, zMin, zMax;
+    if (modo === 'quatroLadrilhos' || modo === 'metadeEntorno') {
+      const vx = Math.round(alvo.x);
+      const vz = Math.round(alvo.z);
+      const meiaLargura = modo === 'quatroLadrilhos' ? 1 : 0.5;
+      xMin = vx - meiaLargura; xMax = vx + meiaLargura;
+      zMin = vz - meiaLargura; zMax = vz + meiaLargura;
+    } else {
+      xMin = Math.floor(alvo.x); xMax = xMin + 1;
+      zMin = Math.floor(alvo.z); zMax = zMin + 1;
+    }
+    const y = alvo.y;
+    // Gera as posições de grade (múltiplos de `passo` a partir da ORIGEM do
+    // mundo, não do início da área — importante pro modo 'metadeEntorno',
+    // cujo início (`vértice - 0.5`) pode não ser múltiplo de `passo`)
+    // estritamente DENTRO do intervalo `[min,max]` (bordas exclusas — já
+    // cobertas pela linha do próprio ladrilho/vizinhança, sem precisar
+    // repetir aqui).
+    const posicoesAlinhadas = (min, max) => {
+      const out = [];
+      const inicio = Math.ceil((min + 1e-6) / passo) * passo;
+      for (let v = inicio; v < max - 1e-6; v += passo) {
+        if (v > min + 1e-4) out.push(v);
+      }
+      return out;
+    };
+    const xs = posicoesAlinhadas(xMin, xMax);
+    const zs = posicoesAlinhadas(zMin, zMax);
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possível controlar
+    // a espessura das linhas guias do gradeado [...] O pontilhado do
+    // gradeado [...] deve ser [1,2]." Trocado de `THREE.LineSegments`+
+    // `LineDashedMaterial` (o "pontilhado" ali era só um truque de
+    // dash/gap numa linha fininha de verdade — `linewidth` é ignorado na
+    // esmagadora maioria das GPUs, mesmo motivo documentado em
+    // `_trena3DBuildFatLine`, então não dava pra controlar a ESPESSURA de
+    // verdade) por um `THREE.Points` — cada "ponto" do pontilhado agora É
+    // um ponto de verdade, com tamanho em pixels controlável de verdade
+    // (`cfg.gradeSnapEspessuraPx`, `sizeAttenuation:false` — tamanho
+    // constante na tela, não importa a distância da câmera). O "[1,2]"
+    // (proporção traço/vão do pontilhado) vira o espaçamento ENTRE pontos
+    // ao longo de cada linha: `cfg.gradeSnapDashCm + cfg.gradeSnapGapCm`
+    // (1cm+2cm = 1 ponto a cada 3cm, por padrão).
+    const espacamento = Math.max(0.005, (cfg.gradeSnapDashCm + cfg.gradeSnapGapCm) / 100);
+    const pontos = [];
+    const adicionarPontosNoSegmento = (ax, ay, az, bx, by, bz) => {
+      const dx = bx - ax, dy = by - ay, dz = bz - az;
+      const comprimento = Math.hypot(dx, dy, dz);
+      if (comprimento < 1e-6) return;
+      const passos = Math.max(1, Math.round(comprimento / espacamento));
+      for (let i = 0; i <= passos; i++) {
+        const t = i / passos;
+        pontos.push(ax + dx * t, ay + dy * t, az + dz * t);
+      }
+    };
+    xs.forEach((x) => adicionarPontosNoSegmento(x, y, zMin, x, y, zMax));
+    zs.forEach((z) => adicionarPontosNoSegmento(xMin, y, z, xMax, y, z));
+    if (!pontos.length) {
+      if (this._trena3DGradeSnapLines) this._trena3DGradeSnapLines.visible = false;
+      return;
+    }
+    const arr = new Float32Array(pontos);
+    const espessuraPx = Math.max(0.5, cfg.gradeSnapEspessuraPx);
+    if (!this._trena3DGradeSnapLines) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+      const mat = new THREE.PointsMaterial({ color: 0x7fd8ff, size: espessuraPx, sizeAttenuation: false, depthTest: false, transparent: true, opacity: 0.7 });
+      this._trena3DGradeSnapLines = new THREE.Points(geo, mat);
+      this._trena3DGradeSnapLines.renderOrder = 996;
+      grupo.add(this._trena3DGradeSnapLines);
+    } else {
+      this._trena3DGradeSnapLines.geometry.dispose();
+      this._trena3DGradeSnapLines.geometry = new THREE.BufferGeometry();
+      this._trena3DGradeSnapLines.geometry.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+      this._trena3DGradeSnapLines.material.size = espessuraPx;
+    }
+    this._trena3DGradeSnapLines.visible = true;
+  },
+
+  _trena3DUpdatePreview() {
+    const THREE = window.THREE;
+    const grupo = this._trena3DEnsurePreviewGroup();
+    const ativo = this._buildTool === 'trena3d';
+    if (!THREE || !grupo || !this._engine || !this._map || !ativo) {
+      if (grupo) grupo.visible = false;
+      if (this._trena3DPreviewLabelEl) this._trena3DPreviewLabelEl.style.display = 'none';
+      return;
+    }
+    grupo.visible = true;
+    const cfg = this._trena3DCfg();
+    const ray = this._engine.centerRay(this._camera);
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Ao segurar o ctrl, não só a
+    // bolinha muda de cor, mas também a linha tracejada infinita
+    // perpendicular ao chão deve ser desenhada" — ANTES desta rodada, a
+    // linha/marcador da âncora só apareciam DEPOIS de um clique com Ctrl
+    // (`_trena3DVerticalAnchor` já commitado). Agora, enquanto o Ctrl está
+    // FISICAMENTE segurado (`this._keys['ControlLeft'/'ControlRight']` —
+    // mesmo objeto que `onKeyDown`/`onKeyUp` já mantêm pra TODAS as teclas,
+    // ver `_bindDesktopControls`), mesmo sem ter clicado ainda, a mira
+    // mostra ao vivo ONDE a âncora cairia se você clicasse agora (segue o
+    // olhar livremente, ainda não travado em X/Z nenhum). Um clique de
+    // verdade com Ctrl "commita" isso em `_trena3DVerticalAnchor` (ver
+    // `_trena3DClick`) — a partir daí a linha para de seguir a mira livre e
+    // passa a ficar fixa naquele X/Z (só a ALTURA do indicador azul/laranja
+    // continua livre, restrita à própria reta).
+    // [16/09/2026 UTC] NOVO — pedido verbatim: modo "Sempre com 4 cliques"
+    // (`cfg.modoAncora === 'quatroCliques'`, ver Configurações 3D → "Como
+    // funciona a ancoragem"): o Ctrl físico deixa de ter qualquer efeito —
+    // a "prévia de âncora" (mostrar onde ela cairia antes mesmo de clicar)
+    // passa a aparecer sempre que NÃO houver âncora commitada ainda
+    // (`!this._trena3DVerticalAnchor`), já que o PRÓXIMO clique nesse modo
+    // SEMPRE ancora. Reaproveita a MESMA variável `ctrlFisicoSegurado` (só
+    // generalizada) em todo o resto desta função (cor da mira, altura ao
+    // vivo antes do ponto etc.) sem precisar duplicar nenhuma lógica.
+    const modoQuatroCliques = cfg.modoAncora === 'quatroCliques';
+    const ctrlFisicoSegurado = modoQuatroCliques ? !this._trena3DVerticalAnchor : !!(this._keys?.ControlLeft || this._keys?.ControlRight);
+    let alvo = null;
+    let ax = null, az = null; // X/Z da âncora (commitada OU só "prévia" com Ctrl segurado, ou sempre no modo "4 cliques") pra desenhar o marcador+linha
+    if (this._trena3DVerticalAnchor) {
+      // Âncora já commitada (1+ clique com Ctrl já feito) — "no ar",
+      // restrito à reta vertical que passa por ela. Mesma função usada por
+      // `_trena3DClick` pra finalizar de verdade.
+      ax = this._trena3DVerticalAnchor.x; az = this._trena3DVerticalAnchor.z;
+      alvo = this._trena3DClosestPointOnVerticalLine(ray, ax, az);
+    } else {
+      const hit = this._engine.raycastSurface(ray.origin, ray.dir);
+      if (hit) {
+        alvo = { x: this._trena3DSnap(hit.x), y: this._trena3DSnap(hit.y), z: this._trena3DSnap(hit.z) };
+        // Nenhuma âncora commitada ainda, mas Ctrl está segurado agora —
+        // mostra a referência "em prévia", seguindo a mira livremente (X/Z
+        // ainda não travados, só mostra onde ficaria SE clicasse já).
+        if (ctrlFisicoSegurado) { ax = alvo.x; az = alvo.z; }
+      }
+    }
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Outra subseção é sobre
+    // mostrar linhas tracejadas guias a partir do lado do ladrilho do mundo
+    // [...] dos múltiplos de 1m [...] As medidas também devem aparecer (no
+    // meio e centralizadas). Por padrão, fica ativada." Ver
+    // `_trena3DAtualizarGuiaGrade` abaixo — roda pro `alvo` de QUALQUER
+    // situação (no chão OU "no ar" via âncora), então a guia de grade
+    // funciona nos 2 casos.
+    this._trena3DAtualizarGuiaGrade(alvo);
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "desenhar um gradeado dentro
+    // do ladrilho de mundo que está sendo alvo no momento, conforme o snap
+    // definido [...] Por padrão ativado." Ver `_trena3DAtualizarGradeSnapLadrilho`.
+    this._trena3DAtualizarGradeSnapLadrilho(alvo);
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser exibida uma linha
+    // tracejada para servir de referência visual para poder marcar um
+    // ponto nela" — a reta vertical INTEIRA da âncora (do chão, y=0, até o
+    // teto do intervalo selecionável, y=6 — MESMO limite de
+    // `_trena3DClosestPointOnVerticalLine`), visível tanto com a âncora já
+    // commitada QUANTO em prévia (Ctrl segurado, ainda sem clicar — ver
+    // acima), cor laranja (`0xff9f4d`) pra não confundir com a linha azul
+    // "até o outro ponto da medida" logo abaixo. Um marcador fixo
+    // (`_trena3DAnchorGroundMesh`) no pé da reta completa a referência.
+    if (ax != null) {
+      if (!this._trena3DAnchorGroundMesh) {
+        const geo = new THREE.SphereGeometry(0.05, 10, 10);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xff9f4d, depthTest: false, transparent: true, opacity: 0.95 });
+        this._trena3DAnchorGroundMesh = new THREE.Mesh(geo, mat);
+        this._trena3DAnchorGroundMesh.renderOrder = 999;
+        grupo.add(this._trena3DAnchorGroundMesh);
+      }
+      this._trena3DAnchorGroundMesh.visible = true;
+      this._trena3DAnchorGroundMesh.position.set(ax, 0, az);
+      const baseV = new THREE.Vector3(ax, 0, az);
+      const topoV = new THREE.Vector3(ax, 6, az);
+      if (!this._trena3DAnchorLine) {
+        const geo = new THREE.BufferGeometry().setFromPoints([baseV, topoV]);
+        const mat = new THREE.LineDashedMaterial({ color: 0xff9f4d, dashSize: 0.12, gapSize: 0.08, depthTest: false, transparent: true, opacity: 0.85 });
+        this._trena3DAnchorLine = new THREE.Line(geo, mat);
+        this._trena3DAnchorLine.renderOrder = 999;
+        grupo.add(this._trena3DAnchorLine);
+      } else {
+        this._trena3DAnchorLine.geometry.dispose();
+        this._trena3DAnchorLine.geometry = new THREE.BufferGeometry().setFromPoints([baseV, topoV]);
+      }
+      this._trena3DAnchorLine.computeLineDistances(); // obrigatório pro tracejado (ver comentário igual mais abaixo)
+      this._trena3DAnchorLine.visible = true;
+    } else {
+      if (this._trena3DAnchorGroundMesh) this._trena3DAnchorGroundMesh.visible = false;
+      if (this._trena3DAnchorLine) this._trena3DAnchorLine.visible = false;
+    }
+    // Indicador ("aqui vai cair o clique") — esfera pequena na superfície
+    // mirada (ou no ponto "no ar" da reta vertical, em modo Ctrl).
+    if (!this._trena3DHoverMesh) {
+      const geo = new THREE.SphereGeometry(0.045, 10, 10);
+      const mat = new THREE.MeshBasicMaterial({ color: 0x5ec8ff, depthTest: false, transparent: true, opacity: 0.9 });
+      this._trena3DHoverMesh = new THREE.Mesh(geo, mat);
+      this._trena3DHoverMesh.renderOrder = 999;
+      grupo.add(this._trena3DHoverMesh);
+    }
+    this._trena3DHoverMesh.visible = !!alvo;
+    if (alvo) this._trena3DHoverMesh.position.set(alvo.x, alvo.y, alvo.z);
+    // [16/09/2026 UTC] REVISTO — pedido verbatim: "Ao segurar o ctrl já
+    // deve trocar a cor da bolinha [...] pra indicar visualmente que houve
+    // mudança de interpretação do app por causa do segurar do botão ctrl."
+    // Antes, só ficava laranja com a âncora já COMMITADA (depois de 1
+    // clique) — agora troca na hora, assim que o Ctrl é FISICAMENTE
+    // segurado (`ctrlFisicoSegurado`, calculado acima), mesmo antes de
+    // clicar — e continua laranja com a âncora commitada mesmo depois de
+    // soltar o Ctrl (até a medida ser finalizada/cancelada), já que nesse
+    // caso o próximo clique ainda vai comitar "no ar" independente do
+    // estado do Ctrl. Volta pro azul de sempre (`0x5ec8ff`) só quando
+    // NENHUM dos dois está ativo (comportamento "normal", mira direto numa
+    // superfície real). `setHex` direto no material (em vez de trocar o
+    // `Mesh` inteiro) é mais barato — chamado todo quadro.
+    this._trena3DHoverMesh.material.color.setHex((this._trena3DVerticalAnchor || ctrlFisicoSegurado) ? 0xff9f4d : 0x5ec8ff);
+    // Linha guia tracejada + rótulo de distância ao vivo — só depois do 1º
+    // ponto já estar marcado (antes disso não há "de onde" traçar).
+    if (this._trena3DPendingP1 && alvo) {
+      const p1v = new THREE.Vector3(this._trena3DPendingP1.x, this._trena3DPendingP1.y, this._trena3DPendingP1.z);
+      const p2v = new THREE.Vector3(alvo.x, alvo.y, alvo.z);
+      if (!this._trena3DGuideLine) {
+        const geo = new THREE.BufferGeometry().setFromPoints([p1v, p2v]);
+        const mat = new THREE.LineDashedMaterial({ color: 0x5ec8ff, dashSize: 0.12, gapSize: 0.08, depthTest: false, transparent: true, opacity: 0.9 });
+        this._trena3DGuideLine = new THREE.Line(geo, mat);
+        this._trena3DGuideLine.renderOrder = 999;
+        grupo.add(this._trena3DGuideLine);
+      } else {
+        this._trena3DGuideLine.geometry.dispose();
+        this._trena3DGuideLine.geometry = new THREE.BufferGeometry().setFromPoints([p1v, p2v]);
+      }
+      // `computeLineDistances()` é OBRIGATÓRIO pra `LineDashedMaterial`
+      // funcionar (é ele que preenche o atributo que decide onde cada
+      // traço/vão começa) — sem chamar de novo a cada geometria nova
+      // acima, a linha aparece sólida (sem tracejado nenhum).
+      this._trena3DGuideLine.computeLineDistances();
+      this._trena3DGuideLine.visible = true;
+      if (!this._trena3DPreviewLabelEl) {
+        const el = document.createElement('div');
+        el.className = 'v3d-trena3d-label v3d-trena3d-label--preview';
+        Object.assign(el.style, {
+          position: 'fixed', left: '0', top: '0', transform: 'translate(-50%,-50%)',
+          background: 'rgba(20,22,28,0.7)', color: '#5ec8ff', font: '600 12px/1.2 system-ui, sans-serif',
+          padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: '5',
+          border: '1px dashed #5ec8ff',
+        });
+        document.body.appendChild(el);
+        this._trena3DPreviewLabelEl = el;
+      }
+      const dist = p1v.distanceTo(p2v);
+      this._trena3DPreviewLabelEl.textContent = `📏 ${dist.toFixed(2)}m`;
+      const meio = p1v.clone().add(p2v).multiplyScalar(0.5);
+      this._trena3DPreviewLabelEl.dataset.mx = String(meio.x);
+      this._trena3DPreviewLabelEl.dataset.my = String(meio.y);
+      this._trena3DPreviewLabelEl.dataset.mz = String(meio.z);
+      this._trena3DPreviewLabelEl.style.display = '';
+    } else {
+      if (this._trena3DGuideLine) this._trena3DGuideLine.visible = false;
+      if (this._trena3DPreviewLabelEl) this._trena3DPreviewLabelEl.style.display = 'none';
+    }
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "a primeira guia tracejada
+    // deve continuar aparecendo e apresentar a medida do chão até o ponto
+    // 'no ar'" — depois que o 1º ponto é comitado "no ar" via âncora (y
+    // diferente de 0), a referência vertical usada pra colocá-lo lá NÃO
+    // deve sumir (a rodada anterior deixava — a âncora é consumida/`null`
+    // assim que o ponto é comitado em `_trena3DClick`, então o bloco
+    // acima, condicionado a `this._trena3DVerticalAnchor`, escondia tudo
+    // no quadro seguinte). Esta linha é INDEPENDENTE da âncora ativa
+    // agora: reconstruída a partir do próprio `_trena3DPendingP1` já
+    // salvo, do chão (y=0) até ele, com um rótulo mostrando essa altura —
+    // continua visível enquanto o 2º ponto ainda não foi escolhido, e some
+    // (junto com o resto da prévia) ao finalizar a medida ou trocar de
+    // ferramenta. Só aparece quando o 1º ponto está mesmo "no ar" (y > 0
+    // dentro de uma margem — um 1º ponto colocado do jeito normal, direto
+    // numa superfície, quase sempre já tem y=0 ali mesmo, então a linha
+    // seria só um pontinho sem utilidade nenhuma).
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque uma opção de
+    // continuar desenhando a linha laranja tracejada até o 1º ponto da
+    // medida (por padrão, ativada) [...] Uma subopção deve ter para definir
+    // se a linha laranja tracejada fica infinita ou vai até o 1º ponto da
+    // medida (por padrão, a opção do 'vai até o 1º ponto da medida' deve
+    // ficar ativa)." `cfg.continuarLinhaAncoraAposPonto` liga/desliga a
+    // linha inteira (era sempre ligada antes, via a extinta opção "Altura
+    // ao vivo" — ver comentário grande em `_trena3DCfg`); `cfg.
+    // linhaAncoraAposPontoModo` decide até onde ela vai: 'ateOPonto'
+    // (padrão — só até `p1.y`, comprimento real da medida) ou 'infinita'
+    // (até y=6, MESMO teto de `_trena3DAnchorLine`/
+    // `_trena3DClosestPointOnVerticalLine` — dá a impressão de "a mesma
+    // reta perpendicular de antes, só que sem sumir").
+    if (cfg.continuarLinhaAncoraAposPonto && this._trena3DPendingP1 && Math.abs(this._trena3DPendingP1.y) > 0.01) {
+      const p1 = this._trena3DPendingP1;
+      const linhaInfinita = cfg.linhaAncoraAposPontoModo === 'infinita';
+      const baseV = new THREE.Vector3(p1.x, 0, p1.z);
+      const topoV = new THREE.Vector3(p1.x, linhaInfinita ? 6 : p1.y, p1.z);
+      if (!this._trena3DP1HeightLine) {
+        const geo = new THREE.BufferGeometry().setFromPoints([baseV, topoV]);
+        const mat = new THREE.LineDashedMaterial({ color: 0xff9f4d, dashSize: 0.12, gapSize: 0.08, depthTest: false, transparent: true, opacity: 0.85 });
+        this._trena3DP1HeightLine = new THREE.Line(geo, mat);
+        this._trena3DP1HeightLine.renderOrder = 999;
+        grupo.add(this._trena3DP1HeightLine);
+      } else {
+        this._trena3DP1HeightLine.geometry.dispose();
+        this._trena3DP1HeightLine.geometry = new THREE.BufferGeometry().setFromPoints([baseV, topoV]);
+      }
+      this._trena3DP1HeightLine.computeLineDistances();
+      this._trena3DP1HeightLine.visible = true;
+      // [16/09/2026 UTC] NOVO — pedido verbatim: "Outra subopção é imprimir
+      // junto com a linha [...] o texto laranja da medida [...]." O texto
+      // agora é opcional (`cfg.mostrarMedidaNaLinhaAncoraAposPonto`) — a
+      // linha em si sempre aparece quando chega até aqui.
+      if (cfg.mostrarMedidaNaLinhaAncoraAposPonto) {
+        if (!this._trena3DP1HeightLabelEl) {
+          const el = document.createElement('div');
+          el.className = 'v3d-trena3d-label v3d-trena3d-label--preview';
+          Object.assign(el.style, {
+            position: 'fixed', left: '0', top: '0', transform: 'translate(-50%,-50%)',
+            background: 'rgba(20,22,28,0.7)', color: '#ff9f4d', font: '600 12px/1.2 system-ui, sans-serif',
+            padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: '5',
+            border: '1px dashed #ff9f4d',
+          });
+          document.body.appendChild(el);
+          this._trena3DP1HeightLabelEl = el;
+        }
+        this._trena3DP1HeightLabelEl.textContent = `⬍ ${p1.y.toFixed(2)}m`;
+        // [16/09/2026 UTC] NOVO — o rótulo fica sempre no meio do trecho REAL
+        // da medida (chão até `p1.y`), nunca no meio da linha "infinita"
+        // inteira (y=6) — senão, no modo 'infinita', o texto flutuaria longe
+        // do ponto medido de verdade, na metade do teto de 6m.
+        const meioAltura = new THREE.Vector3(p1.x, p1.y * 0.5, p1.z);
+        // [16/09/2026 UTC] NOVO — projeta o texto JUNTO, aqui mesmo, na MESMA
+        // função que acabou de desenhar a linha (`_trena3DP1HeightLine`, logo
+        // acima) — ver `_trena3DProjetarLabelImediato`.
+        this._trena3DProjetarLabelImediato(this._trena3DP1HeightLabelEl, meioAltura.x, meioAltura.y, meioAltura.z);
+      } else if (this._trena3DP1HeightLabelEl) {
+        this._trena3DP1HeightLabelEl.style.display = 'none';
+      }
+    } else {
+      if (this._trena3DP1HeightLine) this._trena3DP1HeightLine.visible = false;
+      if (this._trena3DP1HeightLabelEl) this._trena3DP1HeightLabelEl.style.display = 'none';
+    }
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "imprimir a distância em
+    // relação ao 'chão' próximo da bolinha que o cursor do mouse define
+    // 'no ar' ou não. Por padrão ativado. Atualmente, a medida da linha
+    // tracejada guia só aparece depois que se clicar e se estabelece um
+    // ponto da medida." DIFERENTE do bloco acima (que só existe depois do
+    // 1º ponto já ter sido COMITADO "no ar", e fica fixo nele): este aqui
+    // segue o `alvo` atual AO VIVO, ANTES de qualquer clique — a "bolinha"
+    // que o cursor define agora, seja pra escolher o 1º ponto OU o 2º.
+    // Element separado (`_trena3DLiveHeightLine`/`_trena3DLiveHeightLabelEl`)
+    // porque os dois podem estar visíveis AO MESMO TEMPO (ex.: 1º ponto já
+    // fixado "no ar" — linha acima fixa nele — enquanto se mira o 2º ponto
+    // também "no ar" — esta linha aqui, ao vivo, seguindo a mira).
+    // [16/09/2026 UTC] CORRIGIDO — bug relatado: "mesmo a opção [...]
+    // Altura ao vivo [...] estando marcada, a medida da altura [...] só
+    // aparece depois do clique. Deve aparecer antes mesmo de clicar [...]
+    // clicou segurando o ctrl, então, não só a linha tracejada infinita
+    // guia deve aparecer de imediato (como já está acontecendo), mas
+    // também a medida do chão até a bolinha 'no ar'." CAUSA: o limiar
+    // `Math.abs(alvo.y) > 0.01` (só pra evitar uma linha de comprimento
+    // zero num clique comum no chão) também escondia a medida bem no
+    // instante em que a âncora acabou de ser commitada/está em prévia — a
+    // MESMA referência vertical (`ax`/`az`/linha tracejada laranja) já
+    // aparece de imediato nesse momento (ver acima), então a medida de
+    // altura correspondente deve aparecer junto, mesmo que o valor comece
+    // em 0.00m (a câmera ainda não foi inclinada pra cima/baixo). Em modo
+    // "vertical" (`ctrlFisicoSegurado` OU âncora já commitada) o limiar é
+    // ignorado — só continua valendo pro caso normal (clique comum na
+    // superfície, sem âncora em jogo), pra não gerar uma linha "0.00m"
+    // inútil toda vez que se mira o chão sem nenhuma âncora envolvida.
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Ao clicar segurando o ctrl
+    // cria-se uma âncora no chão com uma bolinha laranja [...] mesmo
+    // enquanto não se fixe o outro ponto laranja com um clique, a medida
+    // entre os pontos laranjas deve aparecer [...] Se já não tem opção pra
+    // isso, deve ter [...] logo após a opção '📏 Trena 3D — Altura ao
+    // vivo', uma subseção de 'antes mesmo de definir o ponto'." Opção NOVA
+    // e DEDICADA (`mostrarAlturaAoVivoAntesDoPonto`) só pro caso exato
+    // descrito — âncora no chão JÁ commitada (`_trena3DVerticalAnchor`),
+    // mas o ponto "no ar" correspondente ainda NÃO foi fixado por um
+    // clique. [16/09/2026 UTC] REMOVIDO — pedido verbatim: "Colapse as duas
+    // subseções '📏 Trena 3D — Altura ao vivo' e '📏 Trena 3D — Antes mesmo
+    // de definir o ponto' [...] deixe a opção e a descrição textual de
+    // 'Antes mesmo de definir o ponto'. A opção da subseção 'Altura ao
+    // vivo' deixa de existir." A opção geral "Altura ao vivo" não existe
+    // mais como config — o caso que ela cobria (mira comum numa superfície
+    // elevada, sem âncora nenhuma em jogo) fica sempre ativo agora (era o
+    // padrão de qualquer forma).
+    const ancoraJaCommitada = !!this._trena3DVerticalAnchor;
+    const emModoVertical = ancoraJaCommitada || ctrlFisicoSegurado;
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque como outra opção
+    // [...] para definir que a medida laranja aparece ou não já ao segurar
+    // o ctrl. Em vez de sempre deixar ativo." Antes, o caso "Ctrl segurado
+    // mas âncora ainda NÃO commitada" caía direto no `true` fixo do último
+    // `else` — agora tem config dedicada (`cfg.mostrarAlturaAoVivoAoSegurarCtrl`).
+    // O caso normal (sem Ctrl, sem âncora nenhuma em jogo) continua sempre
+    // permitido — o limiar de altura mínima logo abaixo já filtra ele sozinho.
+    const alturaPermitidaPorConfig = ancoraJaCommitada
+      ? cfg.mostrarAlturaAoVivoAntesDoPonto
+      : (ctrlFisicoSegurado ? cfg.mostrarAlturaAoVivoAoSegurarCtrl : true);
+    if (alturaPermitidaPorConfig && alvo && (emModoVertical || Math.abs(alvo.y) > 0.01)) {
+      const baseV2 = new THREE.Vector3(alvo.x, 0, alvo.z);
+      const topoV2 = new THREE.Vector3(alvo.x, alvo.y, alvo.z);
+      if (!this._trena3DLiveHeightLine) {
+        const geo = new THREE.BufferGeometry().setFromPoints([baseV2, topoV2]);
+        const mat = new THREE.LineDashedMaterial({ color: 0xff9f4d, dashSize: 0.12, gapSize: 0.08, depthTest: false, transparent: true, opacity: 0.85 });
+        this._trena3DLiveHeightLine = new THREE.Line(geo, mat);
+        this._trena3DLiveHeightLine.renderOrder = 999;
+        grupo.add(this._trena3DLiveHeightLine);
+      } else {
+        this._trena3DLiveHeightLine.geometry.dispose();
+        this._trena3DLiveHeightLine.geometry = new THREE.BufferGeometry().setFromPoints([baseV2, topoV2]);
+      }
+      this._trena3DLiveHeightLine.computeLineDistances();
+      this._trena3DLiveHeightLine.visible = true;
+      if (!this._trena3DLiveHeightLabelEl) {
+        const el = document.createElement('div');
+        el.className = 'v3d-trena3d-label v3d-trena3d-label--preview';
+        Object.assign(el.style, {
+          position: 'fixed', left: '0', top: '0', transform: 'translate(-50%,-50%)',
+          background: 'rgba(20,22,28,0.7)', color: '#ff9f4d', font: '600 12px/1.2 system-ui, sans-serif',
+          padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: '5',
+          border: '1px dashed #ff9f4d',
+        });
+        document.body.appendChild(el);
+        this._trena3DLiveHeightLabelEl = el;
+      }
+      this._trena3DLiveHeightLabelEl.textContent = `⬍ ${alvo.y.toFixed(2)}m`;
+      const meioAltura2 = baseV2.clone().add(topoV2).multiplyScalar(0.5);
+      // [16/09/2026 UTC] NOVO — projeta o texto JUNTO, aqui mesmo, na MESMA
+      // função que acabou de desenhar a linha (`_trena3DLiveHeightLine`,
+      // logo acima) — ver `_trena3DProjetarLabelImediato`.
+      this._trena3DProjetarLabelImediato(this._trena3DLiveHeightLabelEl, meioAltura2.x, meioAltura2.y, meioAltura2.z);
+    } else {
+      if (this._trena3DLiveHeightLine) this._trena3DLiveHeightLine.visible = false;
+      if (this._trena3DLiveHeightLabelEl) this._trena3DLiveHeightLabelEl.style.display = 'none';
+    }
+  },
+
+  /** [16/09/2026 UTC] NOVO — pedido verbatim: "Faça uma janelinha com todas
+   *  as opções do 'Trena 3D' de modo que fique ícones para o que se pode
+   *  ativar/desativar [...] Será como um acesso rápido. Deve ser possível
+   *  mover a janelinha e ativá-la/desativá-la nas 'configurações 2D', na
+   *  seção 'Trena 3D'. Por padrão, ativado. O caminho até a janela deve
+   *  aparecer no título dela. Deve ser possível mover a janela clicando em
+   *  qualquer parte da sua área de impressão, exceto os botões. Deve ter um
+   *  botão de fechar 'X', também." Janelinha pequena, `position:fixed`
+   *  (mesmo motivo dos rótulos — anexada em `document.body`, não em
+   *  `this._container`), com um botão por opção booleana configurável da
+   *  "📏 Trena 3D" — cada botão já É o ícone (texto curto/emoji + `title`
+   *  com a descrição completa, texto só aparece se necessário) e reflete o
+   *  estado atual (classe `.on`/`.off`). Construída uma vez por sessão do
+   *  "Ver em 3D" (`mount()`) e sincronizada a cada mudança de config
+   *  (`_onMapConfigChange`) — cobre tanto cliques nela mesma quanto mudanças
+   *  feitas direto nas Configurações 3D. O "✕" só ESCONDE a janelinha
+   *  nesta sessão do 3D (`this._trena3DPainelRapidoFechadoManualmente`) —
+   *  não mexe na opção persistida "Mostrar janela de acesso rápido..." das
+   *  Configurações 2D; reabrir "Ver em 3D" a traz de volta. Posição do
+   *  arraste também é só-desta-sessão (não persiste entre aberturas — ver
+   *  DEFAULTS._trena3DPainelRapidoPos abaixo). */
+  _trena3DEnsurePainelRapido() {
+    if (typeof MapConfig === 'undefined') return;
+    // [16/09/2026 UTC] NOVO — `trena3DPainelRapidoAtivo` vive nas
+    // "Configurações 2D" (não faz parte do objeto retornado por
+    // `_trena3DCfg()`, que só cobre a seção "📏 Trena 3D" das
+    // Configurações 3D) — lido direto do cache do MapConfig.
+    const painelAtivoCfg = (MapConfig._cache?.trena3DPainelRapidoAtivo ?? MapConfig.DEFAULTS?.trena3DPainelRapidoAtivo) !== false;
+    const deveMostrar = painelAtivoCfg && !this._trena3DPainelRapidoFechadoManualmente;
+    if (!deveMostrar) {
+      if (this._trena3DPainelRapidoEl) this._trena3DPainelRapidoEl.style.display = 'none';
+      // [16/09/2026 UTC] NOVO — pedido verbatim: "desativando a janelinha ao
+      // clicar no seu botão de fechar, deve ter um botão para fazer ela
+      // aparecer de novo. Para não ter que ir nas 'configurações 3D' de novo
+      // só para habilitá-la." Botãozinho flutuante SÓ aparece quando a opção
+      // persistida está ligada MAS a janelinha foi fechada manualmente nesta
+      // sessão (`_trena3DPainelRapidoFechadoManualmente`) — se a opção em si
+      // estiver desligada nas Configurações 2D, nem esse botão aparece (aí
+      // sim só reabilitando lá).
+      this._trena3DMostrarBotaoReabrirPainelRapido(painelAtivoCfg && this._trena3DPainelRapidoFechadoManualmente);
+      return;
+    }
+    this._trena3DMostrarBotaoReabrirPainelRapido(false);
+    if (this._trena3DPainelRapidoEl) { this._trena3DPainelRapidoEl.style.display = ''; this._trena3DAtualizarPainelRapido(); return; }
+    const el = document.createElement('div');
+    el.className = 'v3d-trena3d-painel-rapido';
+    const posInicial = this._trena3DPainelRapidoPos || { top: 64, right: 12 };
+    Object.assign(el.style, {
+      position: 'fixed', top: `${posInicial.top}px`,
+      left: posInicial.left != null ? `${posInicial.left}px` : '',
+      right: posInicial.left != null ? '' : `${posInicial.right}px`,
+      zIndex: '20', background: 'rgba(20,22,28,0.92)', border: '1px solid rgba(255,255,255,0.12)',
+      borderRadius: '8px', padding: '4px 6px 6px', boxShadow: '0 4px 14px rgba(0,0,0,0.4)',
+      userSelect: 'none', cursor: 'move', maxWidth: '180px', fontFamily: 'system-ui, sans-serif',
+    });
+    el.innerHTML = `
+      <div class="v3d-trena3d-pr-titulo" style="font-size:10px; line-height:1.3; color:#9aa1ad; padding:2px 4px 4px; white-space:normal">Mapa → Planta baixa → Ver em 3D → 📏 Trena 3D</div>
+      <div style="display:flex; align-items:center; justify-content:flex-end; margin:-2px -2px 2px 0">
+        <button type="button" data-pr-fechar="1" title="Fechar esta janelinha (some só nesta sessão do 3D — reabra em Configurações 2D → Trena 3D, ou entrando de novo no 3D)" style="cursor:pointer; border:none; background:transparent; color:#9aa1ad; font-size:13px; line-height:1; padding:2px 4px">✕</button>
+      </div>
+      <div class="v3d-trena3d-pr-botoes" style="display:flex; flex-wrap:wrap; gap:4px; max-width:160px"></div>`;
+    document.body.appendChild(el);
+    this._trena3DPainelRapidoEl = el;
+    // Arrastar — clicar em QUALQUER parte da janelinha exceto botões (o "✕"
+    // e os ícones de opção, ambos elementos <button>) já move ela.
+    let arrastando = null;
+    el.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      const rect = el.getBoundingClientRect();
+      arrastando = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+      el.setPointerCapture(e.pointerId);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!arrastando) return;
+      const left = Math.max(0, Math.min(window.innerWidth - 40, e.clientX - arrastando.dx));
+      const top = Math.max(0, Math.min(window.innerHeight - 24, e.clientY - arrastando.dy));
+      el.style.left = `${left}px`; el.style.right = '';
+      el.style.top = `${top}px`;
+      this._trena3DPainelRapidoPos = { left, top };
+    });
+    const pararArraste = () => { arrastando = null; };
+    el.addEventListener('pointerup', pararArraste);
+    el.addEventListener('pointercancel', pararArraste);
+    el.querySelector('[data-pr-fechar]').addEventListener('click', () => {
+      this._trena3DPainelRapidoFechadoManualmente = true;
+      el.style.display = 'none';
+      this._trena3DMostrarBotaoReabrirPainelRapido(true);
+    });
+    this._trena3DAtualizarPainelRapido();
+  },
+
+  /** [16/09/2026 UTC] NOVO — botãozinho flutuante que aparece só depois de
+   *  fechar a janelinha de acesso rápido pelo "✕" dela (ver
+   *  `_trena3DEnsurePainelRapido` acima) — clicar nele reabre a janelinha na
+   *  hora, sem precisar abrir as Configurações 3D de novo só pra religar a
+   *  opção. Fica fixo num canto discreto (canto inferior direito), bem
+   *  pequeno — o mesmo espírito "pequeno simples e prático" da janelinha. */
+  _trena3DMostrarBotaoReabrirPainelRapido(mostrar) {
+    if (!mostrar) {
+      if (this._trena3DBotaoReabrirEl) this._trena3DBotaoReabrirEl.style.display = 'none';
+      return;
+    }
+    if (this._trena3DBotaoReabrirEl) { this._trena3DBotaoReabrirEl.style.display = ''; return; }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'v3d-trena3d-painel-rapido-reabrir';
+    btn.textContent = '📏';
+    btn.title = 'Reabrir a janelinha de acesso rápido da Trena 3D';
+    Object.assign(btn.style, {
+      position: 'fixed', bottom: '14px', right: '14px', zIndex: '20',
+      width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer',
+      border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(20,22,28,0.92)',
+      color: '#c7cbd4', fontSize: '15px', boxShadow: '0 4px 14px rgba(0,0,0,0.4)',
+    });
+    btn.addEventListener('click', () => {
+      this._trena3DPainelRapidoFechadoManualmente = false;
+      this._trena3DMostrarBotaoReabrirPainelRapido(false);
+      this._trena3DEnsurePainelRapido();
+    });
+    document.body.appendChild(btn);
+    this._trena3DBotaoReabrirEl = btn;
+  },
+
+  /** Lista de opções booleanas da "📏 Trena 3D" cobertas pela janelinha de
+   *  acesso rápido (ver `_trena3DEnsurePainelRapido` acima) — cada uma vira
+   *  1 botão/ícone. `campo` é a chave salva em MapConfig (sem o prefixo
+   *  `trena3D`), `icone` é o texto curto do botão (emoji quando existe um
+   *  óbvio, texto curto quando não) e `titulo` é a descrição completa
+   *  (tooltip, via `title` do `<button>` — "imprimir texto apenas se
+   *  necessário" ficou assim: o botão em si só tem o ícone, o texto some
+   *  no hover). */
+  _trena3DOpcoesPainelRapido() {
+    return [
+      { campo: 'SuprimirDestaqueDuranteAncora', icone: '🎯', titulo: 'Suprimir destaque de hover durante a ancoragem' },
+      { campo: 'MostrarAlturaAoVivoAoSegurarCtrl', icone: '⬍✋', titulo: 'Mostrar a medida já ao segurar o Ctrl, antes de marcar a âncora' },
+      { campo: 'MostrarAlturaAoVivoAntesDoPonto', icone: '⬍⚓', titulo: 'Mostrar a medida entre a âncora e a bolinha "no ar" antes de fixar o ponto' },
+      { campo: 'ContinuarLinhaAncoraAposPonto', icone: '┆1', titulo: 'Continuar a linha tracejada da âncora depois do 1º ponto ser definido' },
+      { campo: 'MostrarMedidaNaLinhaAncoraAposPonto', icone: '🔤┆', titulo: 'Mostrar o texto da medida junto com essa linha continuada' },
+      { campo: 'MostrarLinhasAncoraFinalizada', icone: '🏁┆', titulo: 'Manter as linhas da âncora depois da medida já finalizada' },
+      { campo: 'GuiaGradeAtiva', icone: '▦', titulo: 'Mostrar linhas guia até o ladrilho do mundo mais próximo' },
+      { campo: 'GradeSnapLadrilhoAtiva', icone: '⣿', titulo: 'Mostrar gradeado (pontilhado) dentro da área mirada' },
+    ];
+  },
+
+  /** Redesenha o conteúdo dos botões da janelinha (ver acima) a partir da
+   *  config atual — chamado ao criar a janelinha e a cada mudança de config
+   *  (`_onMapConfigChange`), pra refletir também mudanças feitas direto nas
+   *  Configurações 3D (não só clique nela mesma). */
+  _trena3DAtualizarPainelRapido() {
+    const el = this._trena3DPainelRapidoEl;
+    if (!el || el.style.display === 'none') return;
+    const cfg = this._trena3DCfg();
+    const wrap = el.querySelector('.v3d-trena3d-pr-botoes');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    // Botão extra, no topo da lista: alterna o modo de ancoragem ("Ctrl" vs
+    // "Sempre com 4 cliques") — não é booleano, mas cabe no mesmo espírito
+    // de "acesso rápido" e é a opção mais usada da seção "Como funciona a
+    // ancoragem".
+    const btnModo = document.createElement('button');
+    btnModo.type = 'button';
+    const quatro = cfg.modoAncora === 'quatroCliques';
+    btnModo.textContent = quatro ? '4×' : '🖱️';
+    btnModo.title = quatro
+      ? 'Modo de ancoragem: "Sempre com 4 cliques" — clique pra voltar ao modo "Segurando Ctrl"'
+      : 'Modo de ancoragem: "Segurando Ctrl" — clique pra mudar pro modo "Sempre com 4 cliques"';
+    Object.assign(btnModo.style, this._trena3DEstiloBotaoPainelRapido(true));
+    btnModo.addEventListener('click', () => { MapConfig.set({ trena3DModoAncora: quatro ? 'ctrl' : 'quatroCliques' }); });
+    wrap.appendChild(btnModo);
+    this._trena3DOpcoesPainelRapido().forEach((opt) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const ligado = !!cfg[opt.campo.charAt(0).toLowerCase() + opt.campo.slice(1)];
+      btn.textContent = opt.icone;
+      btn.title = `${opt.titulo} (${ligado ? 'ativado' : 'desativado'})`;
+      Object.assign(btn.style, this._trena3DEstiloBotaoPainelRapido(ligado));
+      btn.addEventListener('click', () => { MapConfig.set({ [`trena3D${opt.campo}`]: !ligado }); });
+      wrap.appendChild(btn);
+    });
+  },
+
+  /** Estilo inline compartilhado dos botões da janelinha — "on" (opção
+   *  ativa) fica destacado (fundo laranja), "off" fica apagado, ambos do
+   *  mesmo tamanho pequeno (28×24px) pra ficar "pequeno simples e
+   *  prático" mesmo com 9 botões. */
+  _trena3DEstiloBotaoPainelRapido(ligado) {
+    return {
+      cursor: 'pointer', border: '1px solid ' + (ligado ? '#ff9f4d' : 'rgba(255,255,255,0.15)'),
+      background: ligado ? 'rgba(255,159,77,0.25)' : 'rgba(255,255,255,0.06)',
+      color: ligado ? '#ffd8ae' : '#c7cbd4', borderRadius: '5px', minWidth: '28px', height: '24px',
+      fontSize: '12px', lineHeight: '1', padding: '0 3px',
+    };
+  },
+
+  /** [16/09/2026 UTC] NOVO — extraído do `onKeyDown` (Escape) pra poder ser
+   *  chamado de MAIS de um lugar. Pedido do usuário: "O esc não está
+   *  cancelando uma medida em curso. Apenas desliga o pointer lock. Ao
+   *  clicar de novo na tela [...] a medida que estava sendo feita não foi
+   *  'zerada'." Causa raiz suspeita: em pelo menos algumas situações o
+   *  `keydown` do Escape usado pra SAIR do Pointer Lock nativo do navegador
+   *  não chega (ou não chega a tempo/de forma confiável) até este
+   *  `window.addEventListener('keydown', ...)` — o navegador pode tratar
+   *  esse Escape como um gesto "reservado" pro próprio unlock, sem garantir
+   *  a entrega do evento à página (comportamento que varia entre
+   *  navegadores/versões, diferente de um Escape normal com o Pointer Lock
+   *  já destravado). Resultado: o cancelamento cadastrado APENAS no
+   *  `onKeyDown` roda quando o Escape "sobra" pra página, mas não quando o
+   *  navegador o consome inteiro pra si. CORRIGIDO com REFORÇO (mesmo
+   *  espírito do bloco em `onPointerLockChange` sobre `_pointerUnlockGraceUntil`,
+   *  que já lida com esse mesmo tipo de inconsistência entre navegadores):
+   *  além de continuar cancelando no `keydown` (cobre Escape com o Pointer
+   *  Lock JÁ destravado, ou navegadores que entregam o evento normalmente),
+   *  agora TAMBÉM cancela ao detectar que o Pointer Lock saiu do canvas por
+   *  QUALQUER motivo (`onPointerLockChange`) enquanto havia uma medida
+   *  pendente — cobre exatamente o caso relatado: destravar sem o
+   *  `keydown` da Trena 3D ter rodado. */
+  _trena3DCancelarMedidaEmAndamento() {
+    if (!this._trena3DPendingP1 && !this._trena3DVerticalAnchor) return;
+    this._trena3DPendingP1 = null;
+    this._trena3DVerticalAnchor = null;
+    this._trena3DClearPreview();
+    Utils.toast('Trena 3D: medida em andamento cancelada.', { duration: 1500 });
+  },
+
+  /** Chamado ao sair/trocar de "📏 Trena 3D" (ver acima) — some com a
+   *  prévia (indicador + linha tracejada + rótulo ao vivo) na hora, sem
+   *  esperar o próximo quadro (`_trena3DUpdatePreview` já esconderia
+   *  sozinho no quadro seguinte por `_buildTool !== 'trena3d'`, mas isso
+   *  deixaria 1 quadro "fantasma" com a prévia da ferramenta anterior
+   *  ainda visível — pouco, mas evitável de graça). */
+  _trena3DClearPreview() {
+    if (this._trena3DPreviewGroup) this._trena3DPreviewGroup.visible = false;
+    if (this._trena3DHoverMesh) this._trena3DHoverMesh.visible = false;
+    if (this._trena3DGuideLine) this._trena3DGuideLine.visible = false;
+    // [16/09/2026 UTC] NOVO — mesmo tratamento acima, agora pro marcador +
+    // linha tracejada laranja da âncora (`_trena3DUpdatePreview`).
+    if (this._trena3DAnchorGroundMesh) this._trena3DAnchorGroundMesh.visible = false;
+    if (this._trena3DAnchorLine) this._trena3DAnchorLine.visible = false;
+    if (this._trena3DPreviewLabelEl) this._trena3DPreviewLabelEl.style.display = 'none';
+    // [16/09/2026 UTC] NOVO — idem, linha+rótulo de altura do 1º ponto "no ar".
+    if (this._trena3DP1HeightLine) this._trena3DP1HeightLine.visible = false;
+    if (this._trena3DP1HeightLabelEl) this._trena3DP1HeightLabelEl.style.display = 'none';
+    // [16/09/2026 UTC] NOVO — idem, linha+rótulo de altura "ao vivo" (segue o
+    // ponto que o cursor está mirando agora, antes de qualquer clique).
+    if (this._trena3DLiveHeightLine) this._trena3DLiveHeightLine.visible = false;
+    if (this._trena3DLiveHeightLabelEl) this._trena3DLiveHeightLabelEl.style.display = 'none';
+    // [16/09/2026 UTC] NOVO — idem, as 2 linhas+rótulos de "guia de grade do
+    // mundo" (`_trena3DAtualizarGuiaGrade`).
+    if (this._trena3DGuiaGradeXLine) this._trena3DGuiaGradeXLine.visible = false;
+    if (this._trena3DGuiaGradeZLine) this._trena3DGuiaGradeZLine.visible = false;
+    if (this._trena3DGuiaGradeXLabelEl) this._trena3DGuiaGradeXLabelEl.style.display = 'none';
+    if (this._trena3DGuiaGradeZLabelEl) this._trena3DGuiaGradeZLabelEl.style.display = 'none';
+    // [16/09/2026 UTC] NOVO — idem, o "gradeado" interno do ladrilho mirado
+    // (`_trena3DAtualizarGradeSnapLadrilho`).
+    if (this._trena3DGradeSnapLines) this._trena3DGradeSnapLines.visible = false;
   },
 
   _cycleHotbarList(dir) {
@@ -2280,10 +4388,11 @@ const View3D = {
     // `'orbfoto-novo'` — agora com ícone 📷 e rótulo "Câmera" (pedido
     // original: "Fica o ícone de 'Câmeras', mas fica a janela de
     // propriedades do 'Orb de foto'"). `_placeWithBuildTool`'s ramo
-    // `'camera-novo'` foi deixado intocado (código morto/inalcançável por
-    // este painel agora — mesma decisão de escopo já registrada quando o
-    // botão "Câmeras" saiu da barra de Ferramentas do Mapa 2D: risco maior
-    // remover a fundo do que deixar inerte).
+    // `'camera-novo'` (código morto/inalcançável desde então) foi
+    // finalmente REMOVIDO em 15/09/2026 UTC — pedido verbatim: "Remova
+    // todas as referências de duplicidade [...] Não considere
+    // compatibilidade com código legado" — ver o antigo local do bloco
+    // `if (tool === 'camera-novo')`, mais abaixo.
     html += `<div class="v3d-objcat-row v3d-objcat-camera-row ${this._buildTool === 'orbfoto-novo' ? 'active' : ''}" id="v3d-objcat-neworbfoto">
       <span class="v3d-objcat-ic">📷</span>
       <span class="v3d-objcat-label">Câmera</span>
@@ -3045,8 +5154,13 @@ const View3D = {
         const elevacao = piv.baseY + (entry.key === 'luminaria' ? 3.0 : 0);
         const angulo = this._buildFreeRotateFinalAngle ?? this._buildLastFreeAngle ?? this._camera.yaw;
         const extra = { angulo, elevacao, layerId: this._layerIdParaNovosItens() };
-        if (entry.key === 'mesa') Object.assign(extra, { forma: 'retangulo', largura: 1.2, profundidade: 0.6, altura: 0.74, cor: '#8a92a3' });
-        else if (entry.key === 'coluna') Object.assign(extra, { forma: 'poligono', raio: 0.18, lados: 24, altura: 2.6, cor: '#9aa4b2' });
+        // [15/09/2026 UTC] REMOVIDO (mesa/coluna especiais) — pedido
+        // verbatim: "Agora não tem mais o gizmo integrado, é só um objeto
+        // comum tanto para o pilar quanto para a mesa." "Mesa"/"Pilar"
+        // (novo, substitui "Coluna") agora são objetos comuns de catálogo
+        // como qualquer outro — tamanho/forma vêm só de
+        // `OBJECT3D_PROFILES`/`_buildMesaMesh`/`_buildPilarMesh`
+        // (engine3d.js), nunca mais de campos hard-coded aqui.
         // Pedido do usuário: "Deve ser possível colocar um novo cubo no
         // cenário 3D pelo botão do rodapé, o botão objeto [...] não deve
         // abrir automaticamente o modo Modelador, deve continuar no modo
@@ -3055,7 +5169,7 @@ const View3D = {
         // `customMesh`/Modelador nenhum envolvido aqui (só entra se o
         // usuário abrir esse objeto no Modelador depois, por vontade
         // própria).
-        else if (entry.key === 'cubo') Object.assign(extra, { forma: 'retangulo', largura: 0.4, profundidade: 0.4, altura: 0.4, cor: '#8a92a3' });
+        if (entry.key === 'cubo') Object.assign(extra, { forma: 'retangulo', largura: 0.4, profundidade: 0.4, altura: 0.4, cor: '#8a92a3' });
         const objNovo = Mapping.addObject(this._map, piv.x, piv.z, entry.key, extra);
         await this._afterObjectAddedIncremental(objNovo);
         // Inserido: sai da fixação do Giro Livre (pedido do usuário,
@@ -3203,13 +5317,11 @@ const View3D = {
         px = resolved.x; pz = resolved.z; angulo = resolved.angulo;
       }
       const extra = { angulo, elevacao, layerId: this._layerIdParaNovosItens() };
-      if (entry.key === 'mesa') {
-        // 0.74m — MESMO valor de mapview.js _MESA_FORMA_DEF (pedido do
-        // usuário: "a altura da mesa padrão deve ser de 74 cm").
-        Object.assign(extra, { forma: 'retangulo', largura: 1.2, profundidade: 0.6, altura: 0.74, cor: '#8a92a3' });
-      } else if (entry.key === 'coluna') {
-        Object.assign(extra, { forma: 'poligono', raio: 0.18, lados: 24, altura: 2.6, cor: '#9aa4b2' });
-      } else if (entry.key === 'cubo') {
+      // [15/09/2026 UTC] REMOVIDO (mesa/coluna especiais) — mesmo motivo
+      // documentado acima (`_buildFreeRotateFinalAngle`/giro livre): "Mesa"
+      // e "Pilar" (novo, substitui "Coluna") viraram objetos comuns —
+      // tamanho/forma só de `OBJECT3D_PROFILES`/builders dedicados.
+      if (entry.key === 'cubo') {
         // Pedido do usuário (rodada 47): "Deve ser possível colocar um
         // novo cubo no cenário 3D pelo botão do rodapé, o botão objeto."
         Object.assign(extra, { forma: 'retangulo', largura: 0.4, profundidade: 0.4, altura: 0.4, cor: '#8a92a3' });
@@ -3352,44 +5464,23 @@ const View3D = {
       return;
     }
 
-    // [10/09/2026] NOVO — pedido verbatim: "dá para selecionar um objeto a
-    // ser inserido pelo menu do botão lateral direito '+'... Faça o que
-    // ficou pendente" (item 1-4 do redesenho de Camera Match, deixado
-    // explicitamente "NÃO IMPLEMENTADO" na rodada anterior — ver
-    // comentário grande logo acima de `_renderObjectCatalogPanel` e a
-    // entrada "📷 Câmeras" adicionada lá). Ferramenta dedicada
-    // `'camera-novo'` (DIFERENTE de `'camera'` acima, que só assiste uma
-    // câmera JÁ existente via roleta) — clique único no chão, mesmo
-    // espírito das ferramentas "📍 Adicionar orb"/"🗑️ Remover" (sem
-    // roleta própria, ver `_HOTBAR_SLOTS`/`_selectBuildTool`): cria uma
-    // câmera NOVA pelo MESMO caminho canônico que o mapa 2D usa
-    // (`Mapping.addCamera`, ver `mapview.js` `_mode === 'camera'`) — nenhum
-    // 2º jeito de criar câmera foi inventado aqui, só mais um PONTO DE
-    // ENTRADA pro mesmo `Mapping.addCamera`. Ângulo inicial = pra onde o
-    // jogador está olhando no momento do clique (mais útil que o padrão 0°
-    // fixo do 2D, já que aqui existe uma direção de câmera de verdade pra
-    // usar) — FOV/focal/sensor nascem dos MESMOS padrões Blender que
-    // `Mapping.addCamera` já aplica sozinho (50mm/sensor 36mm, ver
-    // `mapping.js`), sem precisar repetir esses valores aqui.
-    if (tool === 'camera-novo') {
-      const hit = this._engine.raycastFloor(ray.origin, ray.dir);
-      if (!hit) return;
-      Mapping.addCamera(this._map, hit.x, hit.z, { angulo: this._camera.yaw, piso: 0, layerId: this._layerIdParaNovosItens() });
-      await this._afterMapMutated();
-      Utils.toast('Câmera adicionada ✓ — mire nela para ver, editar ou "ver através" (Camera Match).', { type: 'ok' });
-      // [10/09/2026] CORRIGIDO — bug relatado: "só está sendo colada uma
-      // câmera e depois não funciona mais [...] deve ser possível ir
-      // colocando quantas câmeras quanto possível (a cada clique)." A
-      // versão anterior voltava pro modo Mirar (`this._buildTool = null`)
-      // depois de UMA câmera — pedido explícito do usuário agora é o
-      // OPOSTO: manter a ferramenta ativa entre cliques, MESMO
-      // comportamento contínuo que "Objeto"/"Item" já têm (eles nunca
-      // resetam `_buildTool` depois de colocar uma peça — ver o ramo `tool
-      // === 'objeto'` acima). Só re-renderiza a hotbar (o rótulo/estado
-      // continuam mostrando "Câmera" ativa) — nenhum reset de ferramenta.
-      this._renderHotbar();
-      return;
-    }
+    // [15/09/2026 UTC] REMOVIDO — ramo `tool === 'camera-novo'` (criava uma
+    // câmera nova via `Mapping.addCamera` a partir de um clique no chão,
+    // ferramenta dedicada `'camera-novo'`). Pedido verbatim: "Há
+    // resquícios no código para manter compatibilidade. Remova todas as
+    // referências de duplicidade [...] Não considere compatibilidade com
+    // código legado." CONFIRMADO 100% MORTO/inalcançável (grep em toda
+    // `js/`): a ÚNICA linha de HTML que setava `this._buildTool =
+    // 'camera-novo'` já tinha sido removida em 10/09/2026 (ver comentário
+    // grande em `_renderObjectCatalogPanel`, "DUPLICATA CORRIGIDA" — a
+    // linha "Câmera"/`'camera-novo'` foi trocada pela linha única
+    // `'orbfoto-novo'`); nenhum outro ponto do projeto seta `_buildTool`
+    // pra `'camera-novo'`. Câmeras de vigilância REAIS continuam podendo
+    // ser criadas normalmente pela hotbar (ver ramo `tool === 'camera'`
+    // acima, que ASSISTE uma câmera já existente, e os geradores
+    // automáticos de sala/`js/geradores-salas.js`) — só este ponto de
+    // entrada morto (clique único criando câmera nova a partir do "+") foi
+    // removido, não o sistema de câmeras em si.
 
     // [10/09/2026→11/09/2026] "orb de foto" na lista do "+", MESMO padrão
     // de colocação contínua da Câmera logo acima.
@@ -3535,7 +5626,7 @@ const View3D = {
     const cam = (this._map?.cameras || []).find((c) => c.id === cfg.camId);
     if (!cam) return this._camera;
     const ALTURA_CAMERA = 1.6; // mesmo valor de engine3d.js setScene
-    const baseY = (cam.piso || 0) * 2.8;
+    const baseY = (cam.piso || 0) * (this._map?.alturaPiso || 2.8);
     const yaw = (cam.angulo || 0) + Math.PI / 2 + cfg.pan;
     return { x: cam.x, y: baseY + ALTURA_CAMERA, z: cam.y, yaw, pitch: cfg.tilt };
   },
@@ -3569,9 +5660,12 @@ const View3D = {
    *  orientação; o FOV é tratado à parte, sempre restaurado — ver ITEM A/
    *  `_orbCamSavedFov`/`_fotoCamSavedFov`); `'originalView'` — volta pro
    *  ponto de vista que o personagem tinha ANTES de "Ver através desta
-   *  câmera". Usada por `_exitCameraOrbView` E por `_exitFotoCameraView`
-   *  (via `_fotoOrbExitViewMode()` logo abaixo, que agora só delega pra
-   *  esta). Leitura SÍNCRONA de `MapConfig._cache` (mesmo padrão já usado em
+   *  câmera". Usada DIRETO por `_exitCameraOrbView` E por
+   *  `_exitFotoCameraView` (o wrapper `_fotoOrbExitViewMode()`, que só
+   *  delegava pra esta função, foi removido em 15/09/2026 UTC — pedido
+   *  verbatim: "Remova todas as referências de duplicidade [...] Não
+   *  considere compatibilidade com código legado"). Leitura SÍNCRONA de
+   *  `MapConfig._cache` (mesmo padrão já usado em
    *  outros pontos do app — o cache já está preenchido desde `mount()`, que
    *  faz `await MapConfig.get()` antes de qualquer uma destas telas poder
    *  ser aberta). */
@@ -3579,22 +5673,16 @@ const View3D = {
     return (typeof MapConfig !== 'undefined' && MapConfig._cache && MapConfig._cache.cameraExitViewMode) || 'lockedView';
   },
 
-  /** [12/09/2026, FUNDIDA NESTA RODADA] Existia como função irmã com chave
-   *  PRÓPRIA (`fotoOrbExitViewMode`, 2 seções de UI independentes) numa
-   *  rodada anterior — o usuário pediu explicitamente pra fundir as 2
-   *  seções de "Configurações 3D" numa só (ver nota grande em
-   *  mapconfig.js DEFAULTS.cameraExitViewMode: investigação desta rodada
-   *  não encontrou, no código atual, nenhuma unificação real dos tipos de
-   *  objeto "Câmeras"/"orb de foto" — continuam 2 code-paths distintos —
-   *  mas a fusão da UI/config foi aplicada mesmo assim, por instrução
-   *  direta do usuário). Mantida como função separada (em vez de apagada e
-   *  `_exitFotoCameraView` chamar `_cameraExitViewMode()` direto) só pra não
-   *  precisar mexer no corpo de `_exitFotoCameraView` — delega 100% pra
-   *  `_cameraExitViewMode()`, mesmo valor, mesma chave única
-   *  `cameraExitViewMode`. */
-  _fotoOrbExitViewMode() {
-    return this._cameraExitViewMode();
-  },
+  // [15/09/2026 UTC] REMOVIDO — pedido verbatim: "Há resquícios no código
+  // para manter compatibilidade. Remova todas as referências de
+  // duplicidade (exceto comentários [...]). Não considere compatibilidade
+  // com código legado." `_fotoOrbExitViewMode()` existia só como um WRAPPER
+  // de 1 linha (`return this._cameraExitViewMode();`) — desde a fusão de
+  // 12/09/2026 (ver comentário grande de `_cameraExitViewMode` acima) as
+  // duas chaves de config já tinham virado uma só (`cameraExitViewMode`);
+  // esta função só sobrevivia "pra não precisar mexer" no único call site
+  // (`_exitFotoCameraView`, ver mais abaixo), que agora chama
+  // `_cameraExitViewMode()` direto.
 
   // [10/09/2026] REESCRITO — pedido verbatim: "ao dar zoom, não deve dar
   // uma mera ampliação da imagem. Deve sim preservar a perspectiva, mas
@@ -5167,11 +7255,14 @@ const View3D = {
     this._resetCamZoom(); // [10/09/2026] — ver comentário grande em _resetCamZoom
     const foto = (this._map?.fotos || []).find((f) => f.id === fotoIdSaindo);
     // [12/09/2026, CORRIGIDO em 12/09/2026] usava `_cameraExitViewMode()`
-    // (chave compartilhada com "Câmeras") por engano — corrigido pra ler a
-    // chave PRÓPRIA do "orb de foto" (ver `_fotoOrbExitViewMode()` acima).
-    const modo = this._fotoOrbExitViewMode();
+    // por engano quando ainda havia 2 chaves separadas — desde a fusão de
+    // 12/09/2026 é a MESMA chave única (`cameraExitViewMode`), e desde
+    // 15/09/2026 UTC chama direto (o wrapper `_fotoOrbExitViewMode()` foi
+    // removido — pedido verbatim: "Remova todas as referências de
+    // duplicidade [...] Não considere compatibilidade com código legado").
+    const modo = this._cameraExitViewMode();
     // [12/09/2026] item "a perspectiva que o personagem tinha [...] deve ser
-    // preservada" — 2 opções configuráveis (ver _fotoOrbExitViewMode acima):
+    // preservada" — 2 opções configuráveis (ver _cameraExitViewMode acima):
     // `'lockedView'` (padrão, MESMA ideia já aplicada ao orb de câmera) —
     // teleporta `this._camera` pra pose EXATA que estava sendo renderizada
     // (`_computeFotoCamPose()`) — antes desta rodada a saída simplesmente
@@ -5298,7 +7389,7 @@ const View3D = {
     const cfg = this._fotoCamMode;
     const foto = (this._map?.fotos || []).find((f) => f.id === cfg?.fotoId);
     if (!foto) return this._camera;
-    const baseY = (foto.piso || 0) * 2.8 + (foto.altura || 0);
+    const baseY = (foto.piso || 0) * (this._map?.alturaPiso || 2.8) + (foto.altura || 0);
     // [10/09/2026] CORRIGIDO — `_camViewPanOffset` NÃO É MAIS somado à
     // posição aqui (deslocar a posição real muda a perspectiva de
     // verdade — pedido explícito do usuário foi o oposto: "a perspectiva
@@ -5306,7 +7397,9 @@ const View3D = {
     // intocada; o pan agora é um deslocamento de "lente"/janela de
     // projeção aplicado à parte em `camera3` — ver `Engine3D.setCamPanFrac`
     // chamado em `_loop`, logo antes de `this._engine.render(renderCam)`.
-    return { x: foto.x, y: baseY, z: foto.y, yaw: Math.PI - (foto.dirAngulo || 0), pitch: foto.rotPerp || 0 };
+    // [15/09/2026 UTC] Sinal de dirAngulo invertido, mesma convencao (horario) usada nos
+    // demais pontos: 'Ver atraves desta camera' deve manter a mesma direcao do cone/seta.
+    return { x: foto.x, y: baseY, z: foto.y, yaw: Math.PI + (foto.dirAngulo || 0), pitch: foto.rotPerp || 0 };
   },
 
   /** FOV vertical (graus, mesma unidade de Engine3D.setFov/_CAM_VIEW_
@@ -6106,7 +8199,7 @@ const View3D = {
     // [11/09/2026] CORRIGIDO — MESMA correção/motivo de `_computeWatchCameraPose`
     // acima (ver comentário grande lá): `- Math.PI/2` virou `+ Math.PI/2`.
     const ALTURA_CAMERA = 1.6;
-    const baseY = (cam.piso || 0) * 2.8;
+    const baseY = (cam.piso || 0) * (this._map?.alturaPiso || 2.8);
     const pose = { x: cam.x, y: baseY + ALTURA_CAMERA, z: cam.y, yaw: (cam.angulo || 0) + Math.PI / 2, pitch: cam.pitch || 0 };
     this._orbCamLockedPose = pose;
     this._camera.x = pose.x; this._camera.y = pose.y; this._camera.z = pose.z;
@@ -6236,9 +8329,8 @@ const View3D = {
     // [12/09/2026, FUNDIDA NESTA RODADA] item "Sair da câmera": configurável
     // (ver `_cameraExitViewMode()` acima, seção única "Ver através desta
     // câmera" em Configurações 3D — chave `cameraExitViewMode`, também usada
-    // por `_exitFotoCameraView` via `_fotoOrbExitViewMode()`, que agora só
-    // delega pra esta mesma chave — ver nota grande em mapconfig.js
-    // DEFAULTS.cameraExitViewMode). `'lockedView'`
+    // DIRETO por `_exitFotoCameraView` desde 15/09/2026 UTC (ver nota grande
+    // em mapconfig.js DEFAULTS.cameraExitViewMode). `'lockedView'`
     // (padrão) é EXATAMENTE o comportamento acima (já implementado em
     // rodada anterior, sem mudança); `'originalView'` restaura
     // `_orbCamSavedPose` (a pose livre capturada em `_enterCameraOrbView`,
@@ -6922,6 +9014,18 @@ const View3D = {
         id: f.id, x: f.mapaX, y: f.mapaY, piso: f.mapaPiso || 0, nome: f.nome || '', layerId,
         dirAngulo: f.mapaDirAngulo || 0, altura: f.mapaAltura ?? 1.6, rotPerp: f.mapaRotPerp || 0,
         thumbDataUrl: f.thumbDataUrl, dataUrl: f.dataUrl,
+        // [15/09/2026 UTC] NOVO — pedido verbatim: "Ao acrescentar uma
+        // entrada no 'Histórico deste objeto' (no 'Ver em 3D') [...] a
+        // entrada desaparece [...] não está mais ali (mesmo não tendo sido
+        // excluída)." CAUSA RAIZ: esta projeção (mesma função-espelho de
+        // `mapview.js` `_refreshFotosNoMapa`, ver comentário grande lá)
+        // nunca copiava `historico` do registro real da AmbientePhoto —
+        // toda vez que "Ver em 3D" remonta a cena (inclusive reabrindo,
+        // como na 2ª visita do próprio bug relatado), o cartão da câmera
+        // lia este objeto achatado SEM histórico nenhum, mesmo com a
+        // entrada gravada de verdade no banco por `cards/foto-pin-card.js`
+        // (`DB.saveAmbientePhoto`). Adicionado aqui.
+        historico: f.historico || [],
       };
     });
     for (const c of curar) { const photo = await DB.getAmbientePhoto(c.id); if (photo) await DB.saveAmbientePhoto({ ...photo, mapaLayerId: c.layerId }); }
@@ -7035,7 +9139,16 @@ const View3D = {
     if (!this._map || !this._engine) return;
     const hit = this._engine.hoverPick(this._camera);
     if (!hit || hit.type === 'floor') {
-      Utils.toast('Mire em algo pra remover (item, câmera, objeto, parede, porta ou janela).', { type: 'warn' });
+      // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possível excluir
+      // a medida pelo 3D mesmo." `hoverPick` (genérico, item/câmera/objeto/
+      // parede/porta/janela) não sabe nada de medidas da Trena 3D — só
+      // tenta o raycast dedicado (`_trena3DPickAtRay`) como fallback quando
+      // a mira normal não achou nada mais específico (mesma mira/raio de
+      // sempre, `centerRay`).
+      const ray = this._engine.centerRay?.(this._camera);
+      const medidaHit = ray ? this._trena3DPickAtRay(ray) : null;
+      if (medidaHit && this._trena3DRemoverMedida(medidaHit.medidaId)) return;
+      Utils.toast('Mire em algo pra remover (item, câmera, objeto, parede, porta, janela ou medida da Trena 3D).', { type: 'warn' });
       return;
     }
     // A partir da rodada 52 a exclusão em si (animação + Mapping.remove*/
@@ -7064,7 +9177,16 @@ const View3D = {
     if (this._container.querySelector('.v3d-del-confirm')) return; // já tem um aberto — não empilha outro
     const hit = this._engine.hoverPick(this._camera);
     if (!hit || hit.type === 'floor') {
-      Utils.toast('Mire em algo pra excluir (item, câmera, objeto, parede, porta ou janela).', { type: 'warn' });
+      // [16/09/2026 UTC] NOVO — mesmo fallback de `_removeWithTool` acima:
+      // medida da Trena 3D não passa por `hoverPick` (raycast dedicado
+      // `_trena3DPickAtRay`) — aqui exclui DIRETO (sem popup de confirmação
+      // "estilo Blender"), já que a medida não tem a mesma animação/dado
+      // pesado que justifica confirmar antes (mesmo espírito de "excluir na
+      // hora" da ferramenta 🗑️ Remover, que também nunca confirma).
+      const ray = this._engine.centerRay?.(this._camera);
+      const medidaHit = ray ? this._trena3DPickAtRay(ray) : null;
+      if (medidaHit && this._trena3DRemoverMedida(medidaHit.medidaId)) return;
+      Utils.toast('Mire em algo pra excluir (item, câmera, objeto, parede, porta, janela ou medida da Trena 3D).', { type: 'warn' });
       return;
     }
     document.exitPointerLock?.();
@@ -7655,6 +9777,17 @@ const View3D = {
       if (e.code === 'Escape' && document.pointerLockElement) {
         this._pointerUnlockGraceUntil = performance.now() + 300;
       }
+      // [13/09/2026] NOVO — "MODO COMPUTADOR": ESC sai do computador acessado
+      // (pedido verbatim: "reaproveite ESC"). SEM `document.pointerLockElement`
+      // guardando aqui de propósito — diferente do resto do jogo, o modo
+      // computador roda de PROPÓSITO com o pointer lock DESLIGADO (cursor
+      // normal do sistema visível, ver `_acessarComputador3D`), então o guard
+      // de pointerLock de outros atalhos não se aplica a este.
+      if (e.code === 'Escape' && this._computadorAcessado) {
+        e.preventDefault();
+        this._sairDoComputador3D();
+        return;
+      }
       // Pedido do usuário (rodada 48, sobrevoo automático — ver
       // _startSceneFlythrough): "Em qualquer momento dessa apresentação do
       // cenário dá para apertar qualquer botão ou o mouse e o personagem é
@@ -7691,6 +9824,24 @@ const View3D = {
         }
       }
       this._keys[e.code] = true;
+      // [13/09/2026] NOVO — "carro dirigível": tecla "E" sai do carro
+      // quando `_carroControlado` está ativo. Escolhida por não conflitar
+      // com NENHUM atalho já mapeado nesta função (checado antes de
+      // escrever: WASD=andar, Shift=correr/gravidade, Espaço=pular/duplo-
+      // toque=gravidade, Ctrl=tijolo em cadeia, Esc=cancelar/sair de
+      // modos, 1-8=hotbar, Enter/Delete/Backspace/R/X = ferramentas de
+      // construção, setas=voar sem gravidade — nenhuma usa "E" hoje).
+      // Reaproveitada TAMBÉM pra entrar (ver `carro.model.js
+      // onModelClick`, que chama `_entrarNoCarro` no CLIQUE do mouse no
+      // carro, não em "E" — entrar é por clique, sair é por tecla,
+      // assimetria intencional: não dá pra "clicar" no próprio carro de
+      // dentro dele mirando o painel, e a maioria dos jogos usa uma tecla
+      // dedicada só pra SAIR de um veículo).
+      if (e.code === 'KeyE' && this._carroControlado && !e.repeat) {
+        e.preventDefault();
+        this._sairDoCarro();
+        return;
+      }
       // Atalhos numéricos da hotbar (1 Mirar, 2 Parede, 3 Porta, 4 Janela, 5
       // Objeto, 6 Item, 7 Câmeras, 8 Remover) — mesmo espírito de hotbar
       // numerada de jogo. Esc
@@ -7710,6 +9861,15 @@ const View3D = {
       // this._orbCamMode, mount()).
       if (e.code === 'Escape' && this._orbCamMode) { this._exitCameraOrbView(); return; }
       if (e.code === 'Escape' && this._wallChainStart) { this._wallChainStart = null; Utils.toast('Parede: cadeia cancelada.', { duration: 1500 }); return; }
+      // [16/09/2026 UTC] NOVO — pedido verbatim: "Ao pressionar esc no meio
+      // de uma medida, então, ela deve ser desfeita." Mesmo padrão da
+      // "cadeia de parede" logo acima — cancela o 1º ponto pendente e/ou a
+      // âncora ativa da "📏 Trena 3D" (não desfaz medidas JÁ finalizadas,
+      // só o que ainda está em andamento).
+      if (e.code === 'Escape' && (this._trena3DPendingP1 || this._trena3DVerticalAnchor)) {
+        this._trena3DCancelarMedidaEmAndamento();
+        return;
+      }
       // Enter conclui (pedido do usuário: "o enter pode servir para
       // concluir as coisas, inclusive a parede") — mesmo efeito do botão
       // do meio/re-clicar em 🧱 (ver handleMiddleClickAction/_selectBuildTool). Só a
@@ -7899,6 +10059,23 @@ const View3D = {
         // posição real atual.
         this._lockCursorX = e.clientX;
         this._lockCursorY = e.clientY;
+        // [15/09/2026 UTC] NOVO — pedido verbatim: "o apontamento atual da
+        // câmera deve ser preservado ao pressionar 'esc'. E, ao clicar de
+        // novo na tela para ativar o 'apontamento da câmera conforme o
+        // movimentar do mouse', o apontamento deve partir do que já está
+        // sendo mostrado na tela [...] não haverá um salto." A janela de
+        // carência de `_pointerUnlockGraceUntil` (ver comentário grande em
+        // `onKeyDown`/`onMouseMove` — hoje só ligada no ESC) cobre a
+        // METADE do problema (sair do lock); esta é a outra metade
+        // (ENTRAR de novo): `requestPointerLock()` também pode disparar um
+        // `mousemove` sintético com `movementX/Y` grande no exato instante
+        // em que o lock é concedido (o SO "recentraliza" o cursor de
+        // verdade na tela) — sem nenhuma carência aqui, esse primeiro
+        // evento sintético girava `this._camera.yaw/pitch` do nada,
+        // exatamente o "salto" relatado ao reativar o apontamento. MESMA
+        // janela de 300ms, MESMA flag — `onMouseMove` já checa isso antes
+        // de qualquer outra coisa, então nenhuma mudança lá foi necessária.
+        this._pointerUnlockGraceUntil = performance.now() + 300;
         // requestPointerLock() devolve uma Promise em navegadores modernos e
         // REJEITA (SecurityError) se chamada rápido demais depois de sair de
         // um pointer lock anterior (cooldown de proteção do próprio
@@ -7916,6 +10093,16 @@ const View3D = {
         // janela de busca de patrimônio pro objeto mirado (ver
         // _addOrbWithTool), em vez de colocar/remover algo na cena.
         this._addOrbWithTool();
+      } else if (this._buildTool === 'trena3d') {
+        // [16/09/2026 UTC] NOVO — pedido verbatim: "Dá para estender a
+        // 'Trena' (da grade do mapa 2D) e dar a possibilidade de ficar 3D
+        // nas duas extremidades de cada medida [...] Ao segurar o ctrl o
+        // clique seguinte não finaliza a medida, mas estabelece uma
+        // referência perpendicular ao chão [...] o clica seguinte (sem o
+        // ctrl seguro, agora) vai ficar 'no ar'." Ver `_trena3DClick`
+        // (lógica completa) — `e.ctrlKey` é o MESMO evento de clique do
+        // navegador (disponível mesmo com Pointer Lock ativo).
+        this._trena3DClick(!!e.ctrlKey);
       } else if (this._buildTool === 'tijolo') {
         // CORRIGIDO (08/09/2026, 38a rodada) — a colocação em si saiu
         // daqui e foi pro `mousedown` (ver `onMouseDownTijolo` abaixo) —
@@ -8148,16 +10335,59 @@ const View3D = {
       // do mouse servirá para excluir o tijolo." -- só age com a ferramenta
       // 🔘 Tijolo ativa (não com 🎨 Pintar, que já usa o clique esquerdo
       // pra outra coisa) e dentro do Pointer Lock (mesmo guard de sempre).
-      if (this._buildTool !== 'tijolo' || document.pointerLockElement !== canvas) return;
-      const ray = this._engine.centerRay(this._camera);
-      const hit = Tijolos.raycastTijolos(ray.origin, ray.dir, this._map.tijolos || []);
-      if (!hit) return;
-      Tijolos.remove(this._map, hit.id);
-      this._engine.rebuildTijolos?.(this._map);
-      DB.saveMap(this._map);
-      Utils.toast('Tijolo removido 🗑️', { type: 'ok', duration: 1200 });
+      if (this._buildTool === 'tijolo' && document.pointerLockElement === canvas) {
+        const ray = this._engine.centerRay(this._camera);
+        const hit = Tijolos.raycastTijolos(ray.origin, ray.dir, this._map.tijolos || []);
+        if (!hit) return;
+        Tijolos.remove(this._map, hit.id);
+        this._engine.rebuildTijolos?.(this._map);
+        DB.saveMap(this._map);
+        Utils.toast('Tijolo removido 🗑️', { type: 'ok', duration: 1200 });
+        return;
+      }
+      // [14/09/2026] NOVO — pedido verbatim: "implementar os outros eventos
+      // de mouse [...] oncontextmenu → clique com o botão direito." Fora da
+      // ferramenta 🔘 Tijolo (tratada acima) e sem nenhuma ferramenta de
+      // construção ativa, o botão direito agora também dispara
+      // onModelContextmenu/onInstanceContextmenu (ver
+      // js/objectassets.js `dispatchMouseEvent3D`) pro objeto mirado —
+      // MESMO raycaster de mira central do clique esquerdo comum
+      // (`_tryPick`), só que sem abrir nenhum cartão por padrão (o hook é
+      // inerte até o usuário descomentar algo em algum
+      // assets/modelos/<tipo>.model.js).
+      if (this._buildTool || document.pointerLockElement !== canvas) return;
+      // [13/09/2026] CORRIGIDO — pedido do usuário: "ao clicar em um objeto
+      // no cenário, agora, é como se tivesse pressionado ESC." Não foi
+      // possível reproduzir/confirmar ao vivo (sem navegador nesta sessão),
+      // mas este listener novo (`contextmenu`) e o de `dblclick` logo
+      // abaixo são os únicos candidatos plausíveis introduzidos nesta
+      // rodada — correção DEFENSIVA: `e.stopPropagation()` aqui garante que
+      // este evento nunca "vaza" pra nenhum outro listener de
+      // `contextmenu`/`click` porventura anexado mais acima (`document`/
+      // `window`) que pudesse interpretar o clique como um cancelamento; e
+      // o `try/catch` em volta de `_dispatchMouseHit3D` garante que uma
+      // eventual exceção dentro de um hook `onModelContextmenu`/
+      // `onInstanceContextmenu` de terceiros (ver assets/modelos|
+      // instancias/*.js) nunca escape e interrompa nenhum outro código
+      // deste mesmo handler ou de handlers seguintes.
+      e.stopPropagation();
+      try { this._dispatchMouseHit3D('Contextmenu'); } catch (err) { console.error('[View3D] onModelContextmenu/onInstanceContextmenu falhou:', err); }
     };
     canvas.addEventListener('contextmenu', onContextMenu);
+    // [14/09/2026] NOVO — "ondblclick → clique duplo." Mesmo espírito do
+    // botão direito acima: só dispara onModelDoubleClick/
+    // onInstanceDoubleClick (hook inerte por padrão) pro objeto mirado,
+    // sem nenhuma ferramenta de construção ativa.
+    const onDblClick = (e) => {
+      if (this._buildTool || document.pointerLockElement !== canvas) return;
+      // [13/09/2026] CORRIGIDO — mesma correção defensiva do `contextmenu`
+      // acima (ver comentário grande lá): isola este evento (stopPropagation)
+      // e blinda o despacho do hook com try/catch, pro clique duplo nunca
+      // poder interferir em nenhum outro listener/card já aberto.
+      e.stopPropagation();
+      try { this._dispatchMouseHit3D('DoubleClick'); } catch (err) { console.error('[View3D] onModelDoubleClick/onInstanceDoubleClick falhou:', err); }
+    };
+    canvas.addEventListener('dblclick', onDblClick);
 
     const onMouseMove = (e) => {
       // [11/09/2026] CORRIGIDO — pedido verbatim: "no 'Ver em 3D', ao
@@ -8560,7 +10790,13 @@ const View3D = {
       // depois. Este bloco fica só como REFORÇO pra qualquer outra forma de
       // destravar o Pointer Lock que não seja o ESC (perder o foco da
       // janela, outro código chamando `exitPointerLock`, etc.).
-      if (document.pointerLockElement !== canvas) this._pointerUnlockGraceUntil = performance.now() + 300;
+      if (document.pointerLockElement !== canvas) {
+        this._pointerUnlockGraceUntil = performance.now() + 300;
+        // [16/09/2026 UTC] REFORÇO — ver comentário grande em
+        // `_trena3DCancelarMedidaEmAndamento`: cobre o caso do Escape sair do
+        // Pointer Lock sem entregar o `keydown` correspondente a este canvas.
+        this._trena3DCancelarMedidaEmAndamento();
+      }
       // CORRIGIDO/UNIFICADO (03/09/2026) — bug relatado: "os botões do
       // Modelador acabaram ficando em cima dos botões do menu lateral
       // esquerdo." Uma 1ª tentativa aqui escondia um botão "+" separado
@@ -8802,13 +11038,68 @@ const View3D = {
    *  crosshair central (que nem existe nesses modos) — sem duplicar o
    *  cálculo do raio, `pickFromRay`/`hoverPick` já reaproveitam a MESMA
    *  técnica (`rayFromScreenPoint`) por baixo. */
+  /** [13/09/2026] NOVO — dado o retângulo CSS (`getBoundingClientRect()`) de
+   *  um elemento com `object-fit:contain` e o tamanho INTRÍNSECO do seu
+   *  conteúdo (`canvas.width`/`canvas.height`, a resolução real do buffer),
+   *  devolve o SUB-retângulo (dentro de `rect`) onde o conteúdo é de fato
+   *  desenhado — a mesma conta que o navegador faz pra `object-fit:contain`
+   *  (comparar proporções: caixa mais "larga" que o conteúdo sobra barra
+   *  nos LADOS, caixa mais "alta" sobra em CIMA/BAIXO). Quando `contain` é
+   *  `false`, devolve o `rect` inteiro sem alteração (caso "Esticar"/
+   *  "Automática" — comportamento idêntico a antes, ver `_pickAtClientPoint`
+   *  logo abaixo). Usada SÓ pro cálculo de NDC de picking — o CSS de
+   *  verdade que desenha o letterboxing é `_applyResolucaoCustom3D`, esta
+   *  função só REPLICA a matemática dele pra saber onde o mouse "realmente"
+   *  cai dentro da imagem. */
+  _computeContainRect(rect, intrinsicW, intrinsicH, contain) {
+    if (!contain || !intrinsicW || !intrinsicH || !rect.width || !rect.height) {
+      return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    }
+    const boxRatio = rect.width / rect.height;
+    const contentRatio = intrinsicW / intrinsicH;
+    if (boxRatio > contentRatio) {
+      // Caixa proporcionalmente mais larga que o conteúdo -> barras nos LADOS.
+      const w = rect.height * contentRatio;
+      const left = rect.left + (rect.width - w) / 2;
+      return { left, top: rect.top, width: w, height: rect.height };
+    }
+    // Caixa proporcionalmente mais alta (ou igual) -> barras em CIMA/BAIXO.
+    const h = rect.width / contentRatio;
+    const top = rect.top + (rect.height - h) / 2;
+    return { left: rect.left, top, width: rect.width, height: h };
+  },
+
   _pickAtClientPoint(clientX, clientY, canvasEl) {
     const canvas = canvasEl || this._container?.querySelector('#v3d-canvas');
     if (!canvas || !this._engine) return null;
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
-    const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
-    const ndcY = -(((clientY - rect.top) / rect.height) * 2 - 1);
+    // [13/09/2026] CORRIGIDO — bug relatado: com "Resolução de renderização"
+    // = "Personalizada…" + "Caber" (object-fit:contain, ver
+    // `_applyResolucaoCustom3D`), o destaque de mira/raycaster continuava se
+    // comportando como se fosse "Esticar" (ignorava as barras pretas). Causa
+    // raiz: este cálculo de NDC sempre tratou `rect` (a caixa CSS INTEIRA)
+    // como se fosse a imagem desenhada — verdade pra "Esticar" (o buffer
+    // realmente estica pra preencher `rect`), mas falso pra "Caber", onde o
+    // navegador desenha o conteúdo (proporção `canvas.width:canvas.height`)
+    // ENCAIXADO dentro de `rect`, deixando barra preta de um dos lados.
+    // Corrigido calculando o sub-retângulo real (`_computeContainRect`,
+    // mesma matemática do `object-fit:contain`) e usando ELE como base do
+    // NDC em vez de `rect` inteiro — clique/mira dentro da barra preta agora
+    // conta como "nada mirado" (mesmo resultado de mirar fora do canvas).
+    // Quando não é "Caber" (Automática/Esticar), `_computeContainRect`
+    // devolve o próprio `rect` sem alteração — zero mudança de comportamento
+    // nesses casos.
+    const custom = this._engine?._customRes;
+    const contain = !!(custom && custom.fit === 'caber');
+    const box = this._computeContainRect(rect, canvas.width, canvas.height, contain);
+    if (!box.width || !box.height) return null;
+    if (clientX < box.left || clientX > box.left + box.width
+      || clientY < box.top || clientY > box.top + box.height) {
+      return null;
+    }
+    const ndcX = ((clientX - box.left) / box.width) * 2 - 1;
+    const ndcY = -(((clientY - box.top) / box.height) * 2 - 1);
     this._engine.setHoverScreenPoint?.(ndcX, ndcY);
     const ray = this._engine.rayFromScreenPoint(ndcX, ndcY);
     if (!ray) return null;
@@ -8820,6 +11111,46 @@ const View3D = {
    *  acima), usa ESSE hit em vez de recalcular pela mira central — deixa o
    *  resto da função (o "o que fazer com o hit", cartões/scripts/etc.)
    *  100% compartilhado entre os 2 jeitos de mirar. */
+  /** [14/09/2026] NOVO — usado pelos listeners `dblclick`/`contextmenu`
+   *  (ver mount()) pra despachar `onModel<evento>`/`onInstance<evento>`
+   *  (ex.: `evento='DoubleClick'` -> onModelDoubleClick) pro objeto sob a
+   *  mira central — MESMO raycaster de `_tryPick`, mas SEM abrir nenhum
+   *  cartão/ficha (esses eventos são só hooks pra quem quiser customizar
+   *  em assets/modelos|instancias/, não têm comportamento padrão visível
+   *  como o clique esquerdo tem). NO-OP silencioso se não houver nada
+   *  mirado ou se nem instância nem modelo tiverem o hook implementado. */
+  _dispatchMouseHit3D(evento) {
+    // [13/09/2026] NOVO — guard defensivo (ver comentário grande em
+    // mount()/onContextMenu-onDblClick sobre o bug "clique parece ESC"):
+    // sem `this._engine`/`this._camera` prontos (ex.: chamada tardia numa
+    // janela de transição de tela) não há raio nenhum pra calcular — sai
+    // cedo em vez de deixar `centerRay`/`pickFromRay` estourar.
+    if (!this._engine || !this._camera) return;
+    const ray = this._engine.centerRay(this._camera);
+    const hit = this._engine.pickFromRay(ray.origin, ray.dir);
+    if (!hit || !hit.ref) return;
+    const _v3dCtx = { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map };
+    // [14/09/2026] NOVO — porta/janela (hit.type 'porta'/'janela') não têm
+    // `hit.ref.tipo` com esse valor literal (`tipo` ali é o TIPO DE
+    // CATÁLOGO da porta/janela, ex. 'lisa'/'correr_2folhas' — ver
+    // DOOR_TYPES3D/WINDOW_TYPES3D em engine3d.js), então caíam sempre em
+    // `_generic` — nunca tinham como ganhar um assets/modelos/porta.model.js
+    // ou assets/modelos/janela.model.js próprio. Corrigido igual à câmera/
+    // fotoPin acima: `chave` vem de `hit.type` pra esses dois casos.
+    const chave = hit.type === 'camera' ? 'camera' : hit.type === 'fotoPin' ? 'fotopin'
+      : hit.type === 'porta' ? 'porta' : hit.type === 'janela' ? 'janela' : (hit.ref.tipo || '_generic');
+    window.ObjectAssets?.dispatchMouseEvent3D(evento, chave, hit.ref, _v3dCtx);
+    // [14/09/2026] NOVO — pedido: expor `onDoubleClick` pro sistema de
+    // Componentes (EventTrigger), MESMO caminho que `_tryPick` já usa pro
+    // `onClick` — permite um Script (ex.: "Porta Automática") reagir a
+    // duplo clique sem precisar de um assets/modelos/*.model.js próprio.
+    if (evento === 'DoubleClick') {
+      const comps = window.Components?.ensureComponents?.(hit.ref) || [];
+      const temOnDbl = comps.some((c) => c.type === 'EventTrigger' && c.enabled !== false && (c.events || []).some((ev) => ev.event === 'onDoubleClick'));
+      if (temOnDbl) window.SceneEventBus?.emit?.('onDoubleClick', hit.ref, { pointer: null, camera: this._camera }, { map: this._map, view3d: this });
+    }
+  },
+
   _tryPick(hitOverride) {
     let hit = hitOverride;
     if (hit === undefined) {
@@ -8861,12 +11192,34 @@ const View3D = {
         return;
       }
     }
-    if (hit.type === 'camera') this._showCameraCard3D(hit.ref);
+    // [12/09/2026 REESCRITO] pedido verbatim: "reescrita completa dos
+    // cartões 3D hardcoded de câmera/foto para rotearem 100% pelo sistema
+    // genérico de componentes [...] todos os objetos [...] devem seguir a
+    // mesma organização." Este `if` fixo (`hit.type==='camera' ? ... :
+    // hit.type==='fotoPin' ? ...`) SUMIU — quem decide agora é
+    // `ObjectAssets.dispatchClick3D` (js/objectassets.js), lendo o arquivo
+    // de assets/modelos/camera.model.js / assets/modelos/fotopin.model.js
+    // (pré-carregados em `mount()`, ver `warmupModelsForMap`) — e, se o
+    // objeto específico tiver um assets/instancias/<nome>.instance.js
+    // próprio, ELE tem prioridade sobre o Modelo do tipo. `_showCameraCard3D`/
+    // `_showFotoPinCard3D` continuam existindo (o Modelo padrão delega pra
+    // elas, ver os arquivos acima) — só deixaram de ser chamadas
+    // DIRETAMENTE daqui. O `return false` de `dispatchClick3D` (nem
+    // instância nem modelo, nem sequer `_generic`, souberam o que fazer —
+    // só aconteceria numa corrida bem no 1º instante, antes do warmup
+    // terminar) cai num último fallback idêntico ao comportamento antigo,
+    // pra nunca deixar o clique sem reação nenhuma.
+    const _v3dCtx = { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map };
+    if (hit.type === 'camera') {
+      if (!window.ObjectAssets?.dispatchClick3D('camera', hit.ref, _v3dCtx)) this._showCameraCard3D(hit.ref);
+    }
     // NOVO (03/09/2026), pedido verbatim: "deve ser possível interagir com
     // o objeto da foto tirada" — ver o retângulo texturizado + pickable
     // 'fotoPin' criados em engine3d.js setScene (bloco "fotos vinculadas ao
     // mapa").
-    else if (hit.type === 'fotoPin') this._showFotoPinCard3D(hit.ref);
+    else if (hit.type === 'fotoPin') {
+      if (!window.ObjectAssets?.dispatchClick3D('fotopin', hit.ref, _v3dCtx)) this._showFotoPinCard3D(hit.ref);
+    }
     // Objeto associado a um ou mais patrimônios catalogados (obj.itemIds, ver
     // mapping.js/mapview.js) abre a(s) ficha(s) do(s) item(ns) de verdade —
     // mesmo atalho da câmera com foto associada — em vez do cartão genérico
@@ -8888,7 +11241,15 @@ const View3D = {
         else if (validIds.length === 1) this._showFlashcard3D({ id: validIds[0] });
         else this._showMultiFlashcard3D(validIds);
       });
-    } else if (hit.type === 'object') this._showObjectCard3D(hit.ref);
+    } else if (hit.type === 'object') {
+      // NOVO (12/09/2026) — mesmo raciocínio acima: câmera/fotoPin. `chave`
+      // é o `tipo` de catálogo do objeto (ex.: 'gabinete') — cai no
+      // Modelo `_generic` automaticamente se esse tipo não tiver o seu
+      // próprio assets/modelos/<tipo>.model.js (ver
+      // js/objectassets.js `dispatchClick3D`).
+      const chave = hit.ref.tipo || '_generic';
+      if (!window.ObjectAssets?.dispatchClick3D(chave, hit.ref, _v3dCtx)) this._showObjectCard3D(hit.ref);
+    }
     // CORRIGIDO (09/09/2026), bug relatado: "com o 'Mirar' selecionado,
     // aponto para o aglomerado de tijolos e clico [...] porém não abre a
     // opção de 'Modelar em 3D'. [...] o contorno pontilhado de destaque ao
@@ -8923,401 +11284,1195 @@ const View3D = {
    *  Blender já usado pra qualquer outro objeto/parede/item — ele mesmo
    *  mira de novo com `hoverPick`, então funciona igual clicando com a
    *  ferramenta 🗑️ Remover ou apertando DEL). */
+  /* [13/09/2026] REFATORADO — pedido verbatim: "faça algum jeito para
+   * poder configurá-las [as janelinhas de card], os estilos e textos [...]
+   * Em vez de ser injeções em innerHTML nos arquivos do projeto [...] faça
+   * uma pasta chamada 'cards/' e todos eles ficam ali." O conteúdo/estilo
+   * completo deste card agora mora em `cards/tijolo-aglomerado-card.js`
+   * (auto-registrado em `window.CardSystem`, ver comentário grande no topo
+   * de `js/cardsystem.js`) — este método virou um wrapper fino: só monta o
+   * `ctx` (mesmo formato de `ObjectAssets.buildCtx`) e manda o
+   * `CardSystem` montar o elemento dentro de `this._container`. NENHUMA
+   * mudança de comportamento visual/funcional — só de ONDE o código mora. */
   _showTijoloAglomeradoCard3D() {
     document.exitPointerLock?.();
-    const existing = this._container.querySelector('.flashcard3d-overlay');
-    if (existing) existing.remove();
-    const el = document.createElement('div');
-    el.className = 'flashcard3d-overlay';
-    el.innerHTML = `
-      <div style="text-align:center; font-weight:700; margin-bottom:8px">🧱 Aglomerado de tijolos</div>
-      <button class="btn secondary block sm" id="v3d-tj-modelar" title="Fundir os tijolos num objeto único e editar a malha 3D vértice a vértice, como no Blender">🔧 Modelar em 3D</button>
-      <button class="btn danger block sm" id="v3d-tj-excluir" title="Excluir o aglomerado inteiro">🗑️ Excluir</button>
-      <button class="btn block sm" id="v3d-fc-close" title="Fechar este cartão e voltar a andar">Fechar</button>
-    `;
-    this._container.appendChild(el);
-    el.querySelector('#v3d-fc-close').onclick = () => el.remove();
-    el.querySelector('#v3d-tj-modelar').onclick = () => { el.remove(); this._tijoloAglomeradoVirarObjeto(); };
-    el.querySelector('#v3d-tj-excluir').onclick = () => { el.remove(); this._openDeleteConfirmPopup(); };
+    const ctx = window.ObjectAssets?.buildCtx
+      ? window.ObjectAssets.buildCtx({ view3d: this, DB: window.DB, Utils: window.Utils, map: this._map })
+      : { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map };
+    window.CardSystem?.mount(this._container, 'tijolo-aglomerado', null, ctx);
   },
 
   // REMOVIDO (02/09/2026) — `_openModelerNoCentro` (handler de um botão "+"
   // NOVO que eu tinha criado por engano aqui). Ver comentário grande no HTML
   // de mount(), junto de onde o botão ficava, pra explicação completa.
 
-  /** Cartão simples ao mirar/selecionar uma câmera do mapa em 3D — mesma
-   *  ideia do atalho do modo observação do mapa 2D (mapview.js): se a câmera
-   *  tiver uma foto associada, abre a tela de Fotos (a foto pode ser de
-   *  OUTRO ambiente, escolhida pela galeria geral — por isso busca o
-   *  ambiente dono dela antes de abrir). */
+  /** [13/09/2026] REFATORADO — mesma extração documentada em
+   *  `_showTijoloAglomeradoCard3D` acima e no comentário grande no topo de
+   *  `js/cardsystem.js`. Conteúdo/estilo/wiring completo agora em
+   *  `cards/camera-card.js`. Continua `async` só por retrocompatibilidade
+   *  de assinatura com quem chama (nada aqui precisa mais de `await`). */
   async _showCameraCard3D(cam) {
     document.exitPointerLock?.();
-    const existing = this._container.querySelector('.flashcard3d-overlay');
-    if (existing) existing.remove();
-    const el = document.createElement('div');
-    el.className = 'flashcard3d-overlay';
-    el.innerHTML = `
-      <div style="text-align:center; font-weight:700; margin-bottom:8px">📷 Câmera</div>
-      <div class="detail-grid">
-        <div class="k">Direção</div><div class="v">${Math.round((cam.angulo || 0) * 180 / Math.PI)}°</div>
-        <div class="k">Campo de visão</div><div class="v">${Math.round((cam.fov || Math.PI / 3) * 180 / Math.PI)}°</div>
-      </div>
-      <button class="btn block sm" id="v3d-cam-vertravado" title="Travar a câmera do personagem na pose calibrada desta câmera, com a foto associada (se houver) sobreposta como guia — como 'ver através da câmera' no Blender. Continua dando pra selecionar/posicionar objetos normalmente; só o olhar em volta fica travado.">👁️ Ver através desta câmera (Camera Match)</button>
-      <button class="btn block sm" id="v3d-cam-foto" ${cam.fotoId ? '' : 'disabled'} title="${cam.fotoId ? 'Abrir a foto associada a esta câmera' : 'Esta câmera não tem foto associada'}">🖼️ ${cam.fotoId ? 'Abrir foto associada' : 'Sem foto associada'}</button>
-      <button type="button" class="btn secondary block sm" id="v3d-cam-props-toggle" style="margin-top:6px">⚙️ Propriedades da câmera</button>
-      <div id="v3d-cam-props" class="hidden"></div>
-      <button class="btn secondary block sm" id="v3d-fc-close" style="margin-top:6px" title="Fechar este cartão e voltar a andar">Fechar</button>
-    `;
-    this._container.appendChild(el);
-    el.querySelector('#v3d-fc-close').onclick = () => el.remove();
-    // [10/09/2026] NOVO — pedido verbatim: "No objeto câmera e no 'orb da
-    // foto' deve ser possível definir as propriedades da câmera tanto no 2D
-    // quanto no 3D. São as mesmas do Blender." Reaproveita o MESMO fieldset/
-    // wiring do painel 2D (window.MapView._camPropsFieldsetHtml/
-    // _wireCamPropsFieldset — mesmo padrão de acesso cross-módulo já usado
-    // neste arquivo, ver `window.MapView?._personagem2D` em mount()), pra
-    // nunca divergir do que o 2D lê/escreve nos MESMOS campos do objeto.
-    const propsToggle = el.querySelector('#v3d-cam-props-toggle');
-    const propsHost = el.querySelector('#v3d-cam-props');
-    propsToggle.onclick = () => {
-      if (propsHost.classList.contains('hidden') && !propsHost.dataset.built) {
-        propsHost.innerHTML = window.MapView?._camPropsFieldsetHtml?.('v3dcam', cam) || '';
-        // [11/09/2026] CORRIGIDO — mesmo ajuste de `_openCameraPanel`
-        // (mapview.js): `_wireCamPropsFieldset` passou a chamar `onSave` só
-        // com `props` (já contendo `fov` em radianos direto, sem
-        // "Proporção de tela"/`fovDeg` separados — painel reformulado,
-        // pedido verbatim "apague todas as propriedades [...] deixe apenas
-        // a resolução"). Este call site ainda esperava a assinatura antiga
-        // (`fovDeg` chegaria `undefined`, quebrando o FOV salvo com `NaN`).
-        window.MapView?._wireCamPropsFieldset?.(propsHost, 'v3dcam', cam, async (props) => {
-          Mapping.updateCamera(this._map, cam.id, props);
-          Object.assign(cam, props);
-          await this._afterMapMutated();
-          // Câmera calibrada mudou enquanto o próprio orb dela está sendo
-          // "vista através" agora — atualiza FOV renderizado na hora, sem
-          // precisar sair/entrar de novo. `setClipPlanes` (planos de corte)
-          // não depende mais de `camProps` (campos removidos do painel,
-          // mesma rodada) — chamado sem argumentos, cai nos padrões (ver
-          // `Engine3D.setClipPlanes`).
-          if (this._orbCamMode?.camId === cam.id) {
-            this._engine?.setFov?.(this._camOrbFovDeg(cam));
-            this._engine?.setClipPlanes?.();
-          }
-        });
-        propsHost.dataset.built = '1';
-      }
-      propsHost.classList.toggle('hidden');
-      // [12/09/2026] NOVO — ver comentário grande da classe
-      // ".v3d-camprops-toggle-active" em css/style.css: ancora visualmente
-      // o fieldset ao botão que o abre.
-      propsToggle.classList.toggle('v3d-camprops-toggle-active', !propsHost.classList.contains('hidden'));
-    };
-    // [10/09/2026] NOVO — ver comentário grande em _enterCameraOrbView.
-    el.querySelector('#v3d-cam-vertravado').onclick = () => {
-      el.remove();
-      this._enterCameraOrbView(cam.id);
-    };
-    el.querySelector('#v3d-cam-foto').onclick = async () => {
-      if (!cam.fotoId) return;
-      const photo = await DB.getAmbientePhoto(cam.fotoId);
-      if (!photo) { Utils.toast('A foto associada a esta câmera não foi encontrada (pode ter sido excluída).', { type: 'warn' }); return; }
-      const owningMap = photo.ambienteId === this._map.id ? this._map : (await DB.getMap(photo.ambienteId)) || this._map;
-      el.remove();
-      // Sem onExit: fechar a tela de Fotos só remove a sobreposição dela e
-      // volta a mostrar o 3D por trás, exatamente onde a pessoa estava —
-      // sem navegar pra longe (e sem perder a posição/orientação na cena).
-      await AmbientePhotos.open(owningMap, { startPhotoId: photo.id });
-    };
+    const ctx = window.ObjectAssets?.buildCtx
+      ? window.ObjectAssets.buildCtx({ view3d: this, DB: window.DB, Utils: window.Utils, map: this._map })
+      : { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map };
+    window.CardSystem?.mount(this._container, 'camera', cam, ctx);
   },
 
-  /** NOVO (03/09/2026) — cartão ao mirar/selecionar o retângulo 3D de uma
-   *  foto vinculada ao mapa (ver engine3d.js setScene, bloco "fotos
-   *  vinculadas ao mapa", pickable tipo 'fotoPin'). MESMO espírito de
-   *  `_showCameraCard3D` acima, só que aqui a foto SEMPRE existe (o
-   *  retângulo só é construído quando `foto.thumbDataUrl`/`dataUrl` estão
-   *  presentes) — sem estado "sem foto associada" pra tratar. `foto` aqui é
-   *  o registro já achatado de `mapview.js _refreshFotosNoMapa`
-   *  (`this._map.fotos`), com `id` == id da mapPhoto de verdade (js/db.js). */
+  /** [13/09/2026] REFATORADO — mesma extração documentada em
+   *  `_showTijoloAglomeradoCard3D`/`_showCameraCard3D` acima e no
+   *  comentário grande no topo de `js/cardsystem.js`. Conteúdo/estilo/
+   *  wiring completo agora em `cards/foto-pin-card.js`. */
   async _showFotoPinCard3D(foto) {
     document.exitPointerLock?.();
-    const existing = this._container.querySelector('.flashcard3d-overlay');
-    if (existing) existing.remove();
-    const el = document.createElement('div');
-    el.className = 'flashcard3d-overlay';
-    // [10/09/2026] RESTAURADO — botão "👁️ Ver através desta câmera" tinha se
-    // perdido nesta cópia de trabalho (ver comentário grande em
-    // this._fotoCamMode, mount()). NOVO (09/09/2026), pedido verbatim: "No
-    // 'Ver em 3D', deve ser possível clicar na câmera do orb de câmera e
-    // 'entrar nela'." — ver _enterFotoCameraView acima.
-    // [10/09/2026] NOVO — pedido verbatim: "deve ser possível ver uma
-    // miniatura da foto (assim como aparece nas propriedades só que no
-    // mapa 2D) e poder trocá-la." Reaproveita as MESMAS classes/lógica do
-    // painel 2D (`.map-fotopin-thumb-wrap`/`.map-fotopin-thumb`, ver
-    // mapview.js `_openFotoPinPopover`/`atualizarThumbOuBotaoAnexar`) — só
-    // a miniatura+trocar, sem duplicar o resto do painel 2D aqui.
-    el.innerHTML = `
-      <div style="text-align:center; font-weight:700; margin-bottom:8px">📷 Câmera</div>
-      <div class="map-fotopin-thumb-wrap" id="v3d-foto-thumb-wrap" title="Toque para trocar a foto">
-        <img id="v3d-foto-thumb" class="map-fotopin-thumb hidden" alt="">
-        <button type="button" class="btn secondary sm hidden" id="v3d-foto-anexar" title="Escolher uma imagem para esta câmera">📎 Anexar foto</button>
-        <input type="file" id="v3d-foto-anexar-file" accept="image/*" style="display:none">
-      </div>
-      <button class="btn block sm" id="v3d-foto-vercamera" title="Ver o cenário 3D pela perspectiva desta foto, com a foto sobreposta semitransparente (como 'ver através da câmera' no Blender)">👁️ Ver através desta câmera</button>
-      <button class="btn block sm" id="v3d-foto-abrir" style="margin-top:6px" title="Abrir esta foto em 'Mapa' → 'Fotos'">🖼️ Abrir foto</button>
-      <button type="button" class="btn secondary block sm" id="v3d-foto-props-toggle" style="margin-top:6px">⚙️ Propriedades da câmera</button>
-      <div id="v3d-foto-props" class="hidden"></div>
-      <button class="btn secondary block sm" id="v3d-fc-close" style="margin-top:6px" title="Fechar este cartão e voltar a andar">Fechar</button>
-    `;
-    this._container.appendChild(el);
-    el.querySelector('#v3d-fc-close').onclick = () => el.remove();
-    // Miniatura + trocar foto — MESMO padrão de mapview.js
-    // `atualizarThumbOuBotaoAnexar`/`#fotopin-anexar-file` (painel 2D):
-    // mostra a miniatura se já há imagem, senão o botão "📎 Anexar foto";
-    // escolher um arquivo novo reprocessa (mesmas 2 resoluções) e
-    // substitui `dataUrl`/`thumbDataUrl` do registro, sem mexer em mais
-    // nada (posição/rotação/nome/câmera/script continuam intactos).
-    const v3dAtualizarThumb = (photo) => {
-      const img = el.querySelector('#v3d-foto-thumb');
-      const btn = el.querySelector('#v3d-foto-anexar');
-      const temFoto = !!(photo && photo.dataUrl);
-      if (img) { img.classList.toggle('hidden', !temFoto); if (temFoto) img.src = photo.thumbDataUrl || photo.dataUrl || ''; }
-      if (btn) btn.classList.toggle('hidden', temFoto);
-      // [11/09/2026] NOVO — mesmo pedido já atendido em mapview.js
-      // (`_openCameraPanel`/`atualizarThumbOuBotaoAnexar`): "Ao carregar uma
-      // foto, a câmera deve assumir a resolução da foto" + "A resolução da
-      // imagem carregada [...] deve aparecer." `v3dPropsApi` só existe
-      // depois que o fieldset de propriedades é montado (1ª vez que
-      // "⚙️ Propriedades da câmera" é aberto, ver `propsToggle.onclick` logo
-      // abaixo) — se o usuário troca a foto ANTES de nunca ter aberto as
-      // propriedades, não tem widget nenhum pra atualizar ainda (tudo bem:
-      // ao abrir depois, o fieldset já nasce com `foto.camProps` no estado
-      // salvo mais recente, então não perde nada — só não teria a resolução
-      // adotada automaticamente até abrir uma vez as propriedades).
-      if (temFoto && v3dPropsApi?.setResolutionFromPhoto) {
-        const im = new Image();
-        im.onload = () => {
-          if (!el.isConnected) return; // cartão fechado enquanto a imagem carregava
-          v3dPropsApi.setResolutionFromPhoto(im.naturalWidth, im.naturalHeight);
-        };
-        im.src = photo.dataUrl;
+    const ctx = window.ObjectAssets?.buildCtx
+      ? window.ObjectAssets.buildCtx({ view3d: this, DB: window.DB, Utils: window.Utils, map: this._map })
+      : { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map };
+    window.CardSystem?.mount(this._container, 'foto-pin', foto, ctx);
+  },
+
+  /** NOVO (12/09/2026), pedido verbatim: "ele deve ter uma folha de
+   *  histórico [...] Tanto no 2D quanto no 3D deve ser possível
+   *  acrescentar informações [...] por objeto individual". Liga o botão
+   *  colapsável "📜 Histórico deste objeto" de um cartão 3D (câmera/objeto/
+   *  foto — mesmo botão em todos, só o `toggleId`/`hostId` mudam) ao HTML
+   *  compartilhado de `window.ObjectStandard` (js/objectstandard.js) — o
+   *  MESMO usado no painel 2D (`js/mapview.js`
+   *  `_historicoFieldsetHtml`/`_wireHistoricoFieldset`), pra nunca haver
+   *  dois jeitos de mostrar/editar a mesma lista. `hostId` é tanto o botão
+   *  quanto o `<div>` que ele expande — convenção: `${hostId}-toggle` é o
+   *  botão, `${hostId}` é o container (ver os dois `id`s vizinhos nos
+   *  `innerHTML` acima, em `_showCameraCard3D`/`_showObjectCard3D`/
+   *  `_showFotoPinCard3D`). Persiste com `DB.saveMap(this._map)` — mesma
+   *  função que o resto do 3D já usa pra qualquer mutação de objeto. */
+  _wireHistoricoCard(cardEl, hostId, entity) {
+    const toggle = cardEl.querySelector(`#${hostId}-toggle`);
+    const host = cardEl.querySelector(`#${hostId}`);
+    if (!toggle || !host || !window.ObjectStandard) return;
+    toggle.onclick = () => {
+      if (host.classList.contains('hidden') && !host.dataset.built) {
+        host.innerHTML = window.ObjectStandard.historicoHtml(entity, hostId);
+        window.ObjectStandard.wireHistoricoUi(host, entity, hostId, () => { DB.saveMap(this._map); });
+        host.dataset.built = '1';
       }
-    };
-    let v3dPropsApi = null;
-    DB.getAmbientePhoto(foto.id).then((photo) => v3dAtualizarThumb(photo));
-    el.querySelector('#v3d-foto-anexar').onclick = () => el.querySelector('#v3d-foto-anexar-file').click();
-    el.querySelector('#v3d-foto-thumb-wrap').addEventListener('click', (e) => {
-      if (e.target.closest('#v3d-foto-anexar')) return; // já tem handler próprio
-      el.querySelector('#v3d-foto-anexar-file').click();
-    });
-    el.querySelector('#v3d-foto-anexar-file').onchange = async (e) => {
-      const file = e.target.files?.[0];
-      e.target.value = '';
-      if (!file) return;
-      Utils.toast('Processando foto…');
-      try {
-        const dataUrl = await Utils.resizeImage(file, 2400, 0.85);
-        const thumbDataUrl = await Utils.resizeImage(file, 220, 0.75);
-        const photo = await DB.getAmbientePhoto(foto.id);
-        if (!photo) return;
-        await DB.saveAmbientePhoto({ ...photo, dataUrl, thumbDataUrl });
-        v3dAtualizarThumb({ ...photo, dataUrl, thumbDataUrl });
-        Utils.toast('Foto trocada ✓', { type: 'ok' });
-      } catch (err) {
-        console.error('Falha ao trocar a foto desta câmera:', err);
-        Utils.toast('Não foi possível processar esta foto: ' + (err?.message || err), { type: 'danger', duration: 5000 });
-      }
-    };
-    // [10/09/2026] NOVO — MESMO recurso/comentário grande de
-    // _showCameraCard3D acima ("Propriedades da câmera (Blender)"), aqui pro
-    // orb de FOTO — persistido em `mapaCamProps` (ver mapview.js
-    // _refreshFotosNoMapa/_openFotoPinPopover, mesmo campo).
-    const propsToggle = el.querySelector('#v3d-foto-props-toggle');
-    const propsHost = el.querySelector('#v3d-foto-props');
-    propsToggle.onclick = () => {
-      if (propsHost.classList.contains('hidden') && !propsHost.dataset.built) {
-        propsHost.innerHTML = window.MapView?._camPropsFieldsetHtml?.('v3dfoto', foto.camProps || {}) || '';
-        // [16/09/2026] CORRIGIDO — pedido verbatim: "Parece que acessar a
-        // resolução da câmera por 'clicar no objeto Câmera'->selecionar
-        // 'Propriedades da câmera', não é o mesmo que em 'Ver através
-        // desta câmera'->Propriedades->Câmera->'Propriedades da câmera'.
-        // Eles devem ser o mesmo, alterar em um deve alterar no outro
-        // [...] Por isso não está atualizando o retângulo amarelo quando
-        // se usa o caminho 'clicar no objeto Câmera'->selecionar
-        // 'Propriedades da câmera'." CAUSA RAIZ: os 2 caminhos editam o
-        // MESMO `foto.camProps`/`mapaCamProps` (mesma fonte de dados —
-        // nunca divergiam nos VALORES salvos), mas tinham 2 implementações
-        // de `onSave` TOTALMENTE separadas — esta aqui (cartão "📷 Câmera",
-        // aberto ao clicar direto no objeto) só persistia no banco, nunca
-        // chamava `engine.updateCameraFrustumGeometry` (o retângulo
-        // amarelo só reage a essa chamada explícita, ver comentário grande
-        // em `_activeCamPropsEditTarget`) — daí editar por aqui nunca
-        // atualizar o retângulo amarelo ao vivo, mesmo com o valor
-        // corretamente salvo. CORRIGIDO: espelha o MESMO padrão síncrono +
-        // persistência em segundo plano com debounce (300ms) já usado por
-        // `_activeCamPropsEditTarget` (ver comentário grande lá) — aplica
-        // `foto.camProps`/frustum imediatamente, e também `setFov`/
-        // `setClipPlanes` na hora se este MESMO orb de foto estiver sendo
-        // "visto através" neste exato momento (card e "Ver através desta
-        // câmera" podem coexistir — ver `_showFotoPinCard3D`, chamado
-        // independente de `_fotoCamMode`).
-        v3dPropsApi = window.MapView?._wireCamPropsFieldset?.(propsHost, 'v3dfoto', foto.camProps || {}, (props) => {
-          foto.camProps = props;
-          this._engine?.updateCameraFrustumGeometry?.(foto.id, props);
-          if (this._fotoCamMode?.fotoId === foto.id) {
-            const novoFovDeg = Math.max(1, Math.min(170, ((props.fov ?? Math.PI / 3) * 180) / Math.PI));
-            const fovMudou = Math.abs(novoFovDeg - this._fotoCamMode.calibFov) > 0.001;
-            this._fotoCamMode.calibFov = novoFovDeg;
-            if (fovMudou) { this._fotoCamMode.zoomFov = novoFovDeg; this._engine?.setFov?.(novoFovDeg); }
-            this._engine?.setClipPlanes?.(props.clipStartM ?? 0.1, props.clipEndM ?? 100);
-            this._updateFotoCamOverlayZoomScale?.();
-          }
-          if (this._v3dFotoPropsSaveTimer) clearTimeout(this._v3dFotoPropsSaveTimer);
-          this._v3dFotoPropsSaveTimer = setTimeout(() => {
-            this._v3dFotoPropsSaveTimer = null;
-            DB.getAmbientePhoto(foto.id).then((photoFull) => {
-              if (photoFull) return DB.saveAmbientePhoto({ ...photoFull, mapaCamProps: props });
-            }).catch((err) => console.error('[view3d] falha ao salvar camProps (cartão Câmera):', err));
-          }, 300);
-        });
-        // Se a foto já estava carregada ANTES de abrir as propriedades pela
-        // 1ª vez (caso comum: card aberto pra uma foto já existente), adota
-        // a resolução dela agora que o widget passou a existir — sem isso,
-        // só trocar/anexar uma foto DEPOIS de já ter aberto as propriedades
-        // chamaria `setResolutionFromPhoto` (ver `v3dAtualizarThumb`). Busca
-        // `dataUrl` de resolução PLENA de novo (não `thumbDataUrl`, já
-        // reduzido a 220px pela miniatura — daria a resolução errada aqui).
-        DB.getAmbientePhoto(foto.id).then((photoFull) => {
-          if (!photoFull?.dataUrl || !el.isConnected) return;
-          const im2 = new Image();
-          im2.onload = () => { if (el.isConnected) v3dPropsApi?.setResolutionFromPhoto(im2.naturalWidth, im2.naturalHeight); };
-          im2.src = photoFull.dataUrl;
-        });
-        propsHost.dataset.built = '1';
-      }
-      propsHost.classList.toggle('hidden');
-      // [12/09/2026] NOVO — ver comentário grande da classe
-      // ".v3d-camprops-toggle-active" em css/style.css: ancora visualmente
-      // o fieldset ao botão que o abre.
-      propsToggle.classList.toggle('v3d-camprops-toggle-active', !propsHost.classList.contains('hidden'));
-    };
-    el.querySelector('#v3d-foto-vercamera').onclick = () => {
-      el.remove();
-      this._enterFotoCameraView(foto.id);
-    };
-    el.querySelector('#v3d-foto-abrir').onclick = async () => {
-      const photo = await DB.getAmbientePhoto(foto.id);
-      if (!photo) { Utils.toast('Esta foto não foi encontrada (pode ter sido excluída).', { type: 'warn' }); return; }
-      const owningMap = photo.ambienteId === this._map.id ? this._map : (await DB.getMap(photo.ambienteId)) || this._map;
-      el.remove();
-      // Mesmo padrão de AmbientePhotos.open como SOBREPOSIÇÃO (sem onExit)
-      // já usado por _showCameraCard3D acima — fechar a tela de Fotos só
-      // revela o 3D de novo, exatamente onde a pessoa estava.
-      await AmbientePhotos.open(owningMap, { startPhotoId: photo.id });
+      host.classList.toggle('hidden');
     };
   },
 
   /** Cartão simples ao mirar/selecionar um objeto do mapa em 3D — só
    *  informativo (o objeto não tem "detalhes" pra ver, como um item). */
   _showObjectCard3D(obj) {
+    // [13/09/2026] CORRIGIDO — bug relatado: "ao clicar em um objeto no
+    // cenário, agora, é como se tivesse pressionado ESC" (Pointer Lock
+    // solto + mensagem 'Clique para interagir' aparecendo, SEM o cartão do
+    // objeto abrir). Causa suspeita: `document.exitPointerLock?.()` sempre
+    // foi a 1ª linha destas funções (padrão antigo, pra soltar o cursor
+    // antes de montar o cartão) — mas o HTML do cartão passou a incluir
+    // `window.ObjectStandard?.indicadorHtml(obj)` (13/09/2026, "indicador
+    // de histórico") e o botão condicional "🔧 Modelar em 3D" (14/09/2026,
+    // toggle "Modelar objetos") ANTES de `this._container.appendChild(el)`
+    // — qualquer exceção nesse trecho (ex.: `obj` inesperado/parcial vindo
+    // de um `hit.ref` já desatualizado) agora aborta a função DEPOIS do
+    // Pointer Lock já ter sido solto e ANTES do cartão aparecer na tela:
+    // exatamente o sintoma relatado (larga o cursor, não mostra nada). Não
+    // foi possível reproduzir/confirmar ao vivo (sem navegador nesta
+    // sessão) qual exceção específica dispara isso — correção DEFENSIVA e
+    // conservadora: todo o corpo (menos o `exitPointerLock` em si, que
+    // precisa rodar sempre) fica em try/catch; se algo estourar, loga no
+    // console e mostra um cartão MÍNIMO de fallback (só "Fechar"), em vez
+    // de deixar o usuário com o cursor solto e nenhum cartão na tela.
     document.exitPointerLock?.();
-    const existing = this._container.querySelector('.flashcard3d-overlay');
-    if (existing) existing.remove();
-    const el = document.createElement('div');
-    el.className = 'flashcard3d-overlay';
-    const isRetangulo = obj.forma === 'retangulo';
-    const isPoligono = obj.forma === 'poligono';
-    // Pedido do usuário (rodada 47): "aparece, como título, apenas que se
-    // trata de um polígono. Deve aparecer qual o objeto, por exemplo, se é
-    // uma mesa, uma luminária, armário, gabinete, etc." — a checagem de
-    // `forma` (retângulo/polígono) vinha ANTES do nome do catálogo, então
-    // qualquer objeto com `forma:'poligono'` (ex.: "coluna", que SEMPRE
-    // nasce com essa forma) mostrava só "Polígono (N lados)" mesmo tendo um
-    // `tipo` de catálogo de verdade com nome amigável disponível
-    // (Icons.labelForAnyKey). Agora o nome do catálogo tem prioridade — só
-    // cai pro rótulo genérico de forma quando NÃO há tipo de catálogo (obj
-    // "solto"/customizado, ex.: cubo do Modelador, que já nasce com
-    // `tipo:null` — ver Modeler3D.ensureCustomMesh).
-    const catalogLabel = window.Icons?.labelForAnyKey?.(obj.tipo);
-    const label = catalogLabel || (isRetangulo ? 'Retângulo/quadrado'
-      : isPoligono ? `Polígono (${Math.max(3, Math.round(obj.lados || 24))} lados)`
-      : (obj.tipo || 'Objeto'));
-    const emoji = catalogLabel ? '🏷️' : (isRetangulo ? '▭' : isPoligono ? '⬡' : '🧱');
-    el.innerHTML = `
-      <div style="text-align:center; font-weight:700; margin-bottom:8px">${emoji} ${Utils.escapeHtml(label)}</div>
-      <button class="btn secondary block sm" id="v3d-fc-modelar" title="Editar a malha 3D deste objeto vértice a vértice, como no Blender">🔧 Modelar em 3D</button>
-      <button class="btn block sm" id="v3d-fc-close" title="Fechar este cartão e voltar a andar">Fechar</button>
-    `;
-    this._container.appendChild(el);
-    el.querySelector('#v3d-fc-close').onclick = () => el.remove();
-    // "🔧 Modelar em 3D" (pedido do usuário, 28/08/2026) — MESMO botão do
-    // painel 2D (mapview.js #obj-modelar), só que aqui já dentro do 3D: não
-    // precisa do "combinado" `window.__modelerPendingObjectId` (a cena já
-    // está montada agora), entra direto no modelador pro MESMO objeto
-    // (`this._map.objects` — a referência viva, não a cópia `obj` recebida
-    // por parâmetro, que pode já estar desatualizada se este cartão ficou
-    // aberto por um tempo).
-    el.querySelector('#v3d-fc-modelar').onclick = () => {
-      el.remove();
-      const alvo = (this._map.objects || []).find((o) => o.id === obj.id) || obj;
-      if (!alvo.customMesh && window.Modeler3D?.ensureCustomMesh) {
-        window.Modeler3D.ensureCustomMesh(alvo);
-        Mapping.updateObject(this._map, alvo.id, { customMesh: alvo.customMesh, customMeshXform: alvo.customMeshXform, forma: alvo.forma, largura: alvo.largura, profundidade: alvo.profundidade, altura: alvo.altura });
-        DB.saveMap(this._map);
-      }
-      // [12/09/2026 — ITEM C] pedido verbatim: "ao entrar no Modelador,
-      // estando no modo 'Ver através desta câmera', a câmera não deve
-      // ficar orbital, mas sim deve permanecer na perspectiva da câmera
-      // que se selecionou". `_orbCamMode`/`_fotoCamMode` são os 2 estados
-      // de "Ver através desta câmera" (objeto "Câmeras"/orb de foto) — ver
-      // modeler-core.js `enter()` pro que `enterOrbital:false` faz.
-      window.Modeler3D?.enter(this, alvo, { enterOrbital: !(this._orbCamMode || this._fotoCamMode) });
-    };
+    try {
+      this._showObjectCard3DBody(obj);
+    } catch (err) {
+      console.error('[View3D] _showObjectCard3D falhou ao montar o cartão do objeto:', err);
+      const existing = this._container.querySelector('.flashcard3d-overlay');
+      if (existing) existing.remove();
+      const el = document.createElement('div');
+      el.className = 'flashcard3d-overlay';
+      el.innerHTML = `
+        <div style="text-align:center; font-weight:700; margin-bottom:8px">🧱 Objeto</div>
+        <button class="btn block sm" id="v3d-fc-close" style="margin-top:6px" title="Fechar este cartão e voltar a andar">Fechar</button>
+      `;
+      this._container.appendChild(el);
+      el.querySelector('#v3d-fc-close').onclick = () => el.remove();
+    }
   },
 
-  /** Cartão do "que restou" de uma associação com um patrimônio já EXCLUÍDO
-   *  do catálogo (pedido do usuário, 27/08/2026: "Se o patrimônio deixar de
-   *  existir... no 3D, ao clicar em um objeto que tinha ele como vinculado,
-   *  deve aparecer apenas o número do patrimônio e um botão para excluir a
-   *  informação de patrimônio 'restante'"). Chamado por _tryPick quando
-   *  NENHUM dos itens associados a este objeto (obj.itemIds) existe mais no
-   *  catálogo. Mostra só o NÚMERO guardado em cada entrada (ver
-   *  Mapping.addItemToObject `patrimonio`) — associações feitas ANTES desta
-   *  mudança não têm esse número salvo (mostra um aviso genérico nesse
-   *  caso) — com um botão por entrada pra apagar essa informação residual
-   *  (Mapping.removeItemFromObject, que não depende do item existir mais).
-   *  Uma LISTA, não um único item, porque um objeto pode ter mais de um
-   *  patrimônio associado (ver mapping.js). */
-  async _showOrphanPatrimonioCard3D(obj) {
+  /** Corpo de verdade de `_showObjectCard3D` acima — separado só pra poder
+   *  ficar dentro do try/catch de lá sem duplicar o `document.exitPointerLock`.
+   *
+   *  [13/09/2026] REFATORADO — mesma extração documentada em
+   *  `_showTijoloAglomeradoCard3D`/`_showCameraCard3D`/`_showFotoPinCard3D`
+   *  acima e no comentário grande no topo de `js/cardsystem.js`. TODA a
+   *  lógica de montar o título/emoji/lista de botões (incluindo o ponto de
+   *  extensão `onModelCardButtons`, ver `js/objectassets.js`) agora mora em
+   *  `cards/object-card.js` — aqui só monta o `ctx` e delega. */
+  _showObjectCard3DBody(obj) {
+    const ctx = window.ObjectAssets?.buildCtx
+      ? window.ObjectAssets.buildCtx({ view3d: this, DB: window.DB, Utils: window.Utils, map: this._map })
+      : { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map };
+    window.CardSystem?.mount(this._container, 'object', obj, ctx);
+  },
+
+  /** [13/09/2026] NOVO — pedido verbatim: "No 'Ver em 3D', deve ser possível
+   *  acessar a janela de propriedades do objeto e a lista dos seus scripts
+   *  com a possibilidade de editá-los ao vivo." Em vez de duplicar toda a UI
+   *  de componentes (lista de Scripts/Gatilhos + a "folha de código" com
+   *  CodeMirror — `_renderComponentsEditor`/`_renderScriptCodeEditor`,
+   *  `js/mapview.js`), reaproveita LITERALMENTE essas mesmas funções: elas
+   *  só dependem de `this._container` (onde o overlay tela-cheia é anexado,
+   *  `position:absolute; inset:0`) e dos 3 campos de estado que o próprio
+   *  `_openComponentsEditorFullscreen` já inicializa
+   *  (`_componentsEditorOverlay`/`_componentsEditorOnClose`/
+   *  `_componentsEditorCodeCompId`) — nenhum deles é específico do Mapa 2D.
+   *  `view3d` (este objeto) também tem `_container` (o mesmo elemento onde
+   *  o cartão do objeto e o canvas 3D vivem), então chamar o método do
+   *  PROTÓTIPO de `Map2DRenderer` com `this` = `view3d` (`.call(this, ...)`)
+   *  funciona sem tocar em nada do Mapa 2D nem duplicar lógica.
+   *
+   *  "Editar ao vivo": a EDIÇÃO DE VERDADE já acontece direto em
+   *  `alvo.components` (a mesma referência de `this._map.objects`, que
+   *  `_updateScriptLifecycle` já percorre a cada quadro — ver lá) — e
+   *  `_renderScriptCodeEditor` (js/mapview.js) já chama
+   *  `window.Components.invalidateInstance(comp)` a cada tecla digitada na
+   *  folha de código, o que força o próximo `Update()`/`Start()` daquele
+   *  Script a RECOMPILAR o texto novo (`Components._compileCode`, dentro de
+   *  um try/catch que já existia — erro de sintaxe vira um toast "⚠️ Erro no
+   *  script..." em vez de travar a cena, ver `_getOrCreateModule` em
+   *  js/components.js). Ou seja: nenhum mecanismo NOVO de recompilação foi
+   *  necessário aqui — só reaproveitar o que já existia, agora também
+   *  acessível de dentro do "Ver em 3D".
+   *
+   *  LIMITAÇÃO conhecida: como o editor reaproveitado é o MESMO painel
+   *  genérico do Mapa 2D (posição/rotação/andar/tipo ficam no painel de
+   *  propriedades "de verdade" do 2D, não neste editor de componentes), o
+   *  que fica editável aqui é a LISTA DE COMPONENTES (Scripts/Gatilhos) —
+   *  que é justamente a parte "com possibilidade de editá-los ao vivo" do
+   *  pedido. Pra mexer em posição/rotação/tipo, o caminho continua sendo o
+   *  Mapa 2D (o pedido menciona "propriedades do objeto e a lista dos seus
+   *  scripts" no mesmo fôlego, mas o valor de "ao vivo" está no script, que
+   *  reflete na cena rodando; reposicionar não tem esse "ao vivo" pra
+   *  demonstrar, já que moveria o objeto embaixo da própria câmera).
+   *  [15/09/2026 UTC] RENOMEADA — pedido verbatim: "ao apontar e clicar
+   *  com o mouse em um objeto, aparece a opção 'Propriedades e Scripts'.
+   *  Deve ser um botão para cada coisa, botão 'Propriedades' e botão
+   *  'Scripts'." Esta função só abria o editor de Scripts/Componentes
+   *  (ver limitação documentada acima) — o nome era enganoso ("e
+   *  Propriedades" não existia de verdade). Renomeada pra
+   *  `_openObjectScripts3D` (comportamento IDÊNTICO, só o nome mudou) —
+   *  `_openObjectProperties3D`, logo abaixo, é a peça NOVA que faltava
+   *  (Posição/Rotação/Escala/Dimensões, sem precisar do Modelador — ver
+   *  comentário grande lá). `cards/object-card.js` chama as duas
+   *  separadamente agora, cada uma com seu próprio botão. */
+  // [15/09/2026 UTC] ALTERADO — pedido verbatim: "a janela de opções que
+  // aparece deve ter pilha de janelas [...] clicando em uma opção, o botão
+  // de 'fechar' dela deve voltar para a janela anterior [...] Deve ser
+  // assim para todas as opções." Ganhou um 2º parâmetro opcional
+  // `onAfterClose`, repassado pra `_openComponentsEditorFullscreen` (que
+  // já sabia chamar isso ao fechar, ver `_closeComponentsEditorFullscreen`
+  // em mapview.js — só não era usado por este caminho antes) —
+  // `cards/object-card.js` passa uma função que reexibe o cartão de
+  // opções escondido (`display:none`, não mais removido por esta função —
+  // ver abaixo).
+  _openObjectScripts3D(entity, onAfterClose) {
+    if (!window.Map2DRenderer || !entity) return;
+    // As 4 funções abaixo (`_openComponentsEditorFullscreen`, chamada logo
+    // adiante, e as 3 outras que ELA chama internamente via `this.xxx` —
+    // `_closeComponentsEditorFullscreen`/`_renderComponentsEditor`/
+    // `_renderScriptCodeEditor`) só usam `this._container` e os campos de
+    // estado `_componentsEditor*` (nenhum DOM/dado específico do Mapa 2D) —
+    // copiadas UMA VEZ pra `view3d` (objeto singleton, não uma instância
+    // por tela) na primeira vez que este botão é usado, pra `this.xxx`
+    // resolver certinho quando o código dentro delas chama outra função da
+    // mesma família (eram inacessíveis antes por só existirem no protótipo
+    // de `Map2DRenderer`, uma classe diferente de `view3d`).
+    // [13/09/2026] CORRIGIDO — bug real encontrado: `_openComponentsEditorFullscreen`,
+    // `_closeComponentsEditorFullscreen`, `_renderComponentsEditor` e
+    // `_renderScriptCodeEditor` NÃO são métodos de `Map2DRenderer.prototype`
+    // (aquela classe só desenha o canvas 2D em si) — são propriedades do objeto
+    // literal `window.MapView` (js/mapview.js, `const MapView = {...}`, é ele
+    // quem controla o editor de componentes tela-cheia). A rodada anterior
+    // copiou de `Map2DRenderer.prototype`, que nunca teve essas funções —
+    // por isso `proto._openComponentsEditorFullscreen` vinha `undefined` e
+    // o clique estourava "not a function". Copiando de `window.MapView` agora
+    // (mesmo objeto que `_wireScriptFieldset`/`_componentsSummaryHtml` já usam).
+    if (!this._renderComponentsEditor) {
+      const src = window.MapView;
+      this._openComponentsEditorFullscreen = src._openComponentsEditorFullscreen;
+      this._closeComponentsEditorFullscreen = src._closeComponentsEditorFullscreen;
+      this._renderComponentsEditor = src._renderComponentsEditor;
+      this._renderScriptCodeEditor = src._renderScriptCodeEditor;
+      // Dependências indiretas usadas dentro dessas 4 funções (grep por
+      // `this._` dentro delas): `_componentsSummaryHtml` (usada por
+      // `_wireScriptFieldset`, que este fluxo não chama diretamente, mas
+      // `_renderComponentsEditor` monta os cabeçalhos de cada componente
+      // via `_componentsSummaryRowHtml`/afins) — copiadas por segurança
+      // pra `this._xxx` resolver igual dentro da cadeia toda.
+      this._componentsSummaryHtml = src._componentsSummaryHtml;
+      // [15/09/2026 UTC] NOVO — `_openComponentsEditorFullscreen` (copiada
+      // acima) agora chama `this._refreshComponentErrorFlags` (flag de erro
+      // do Script, ver js/components.js `_lastErrors`/`getScriptError`) —
+      // precisa estar copiada aqui pelo MESMO motivo das outras 4: sem
+      // isto, "Propriedades e Scripts" no "Ver em 3D" estouraria
+      // "this._refreshComponentErrorFlags is not a function" ao abrir.
+      this._refreshComponentErrorFlags = src._refreshComponentErrorFlags;
+    }
+    // [15/09/2026 UTC] REMOVIDO — antes fechava (`.remove()`) o cartão de
+    // clique por baixo do editor tela-cheia; agora quem controla isso é o
+    // CHAMADOR (`cards/object-card.js`, que esconde o cartão ANTES de
+    // chamar esta função e o reexibe via `onAfterClose`, ver comentário
+    // grande acima) — pilha de janelas em vez de fechar tudo.
+    const salvar = (patch) => {
+      Mapping.updateObject(this._map, entity.id, patch);
+      DB.saveMap(this._map);
+    };
+    this._openComponentsEditorFullscreen(entity, salvar, onAfterClose || null);
+  },
+
+  /** [15/09/2026 UTC] ALTERADO — pedido verbatim (rodada seguinte):
+   *  "Deve ser possível fazer as transformações com o que já tem
+   *  desenvolvido no app (botão lateral direito '+' -> 'Propriedades' ->
+   *  'Transformação'). Remova o modal de transformação que você colocou
+   *  em '📐 Propriedades'." Antes, este botão abria um modal PRÓPRIO
+   *  (`.modal-backdrop`) com os mesmos campos — o usuário quer usar em vez
+   *  disso a seção "Transformação" que já existe dentro do painel lateral
+   *  direito ("+" → aba "Propriedades" → seção "Transformação"), a mesma
+   *  seção que `ModelerUI.updateNPanel` (modeler-ui.js) preenche quando o
+   *  Modelador está ativo — mas essa função só entende edição de MALHA
+   *  (vértices/arestas/faces), não serve pra um objeto comum fora do
+   *  Modelador. Esta função agora só ABRE/FOCA a seção (painel lateral +
+   *  aba "Propriedades" + expande "Transformação") e delega o conteúdo pra
+   *  `_renderTransformacaoObjetoSimples` (abaixo, NOVA), que desenha os
+   *  MESMOS campos de nível de objeto que o modal tinha (Posição/Rotação/
+   *  Escala/Dimensões) só que dentro do corpo já existente
+   *  `#v3d-proppanel-transformacao-body`, com salvar-e-remontar idêntico a
+   *  antes. Quando o Modelador estiver ativo pro MESMO objeto, `updateNPanel`
+   *  volta a escrever por cima deste conteúdo normalmente (nenhuma mudança
+   *  lá) — os dois nunca disputam a mesma seção ao mesmo tempo, já que
+   *  este botão só existe fora do Modelador (cartão de clique de objeto,
+   *  "Modo Edição").
+   *
+   *  [15/09/2026 UTC] RENOMEADA — pedido verbatim (rodada seguinte): "No
+   *  'Ver em 3D', ao clicar em 'propriedades', deve aparecer a mesma
+   *  janela que nas propriedades do mapa 2D. Um novo botão 'transformação'
+   *  deve aparecer ali. Ao clicar nele, então, aparece a transformação."
+   *  O nome `_openObjectProperties3D` (chamado pelo botão "📐 Propriedades"
+   *  do cartão de clique, ver `cards/object-card.js`) passou a significar
+   *  OUTRA COISA (abrir o mesmo painel flutuante do Mapa 2D, ver função
+   *  NOVA logo abaixo) — esta função (o comportamento ANTIGO: abrir/focar
+   *  a seção "Transformação" do painel lateral direito) foi renomeada pra
+   *  `_openObjectTransformSidebar3D` e virou o destino do botão NOVO "🔄
+   *  Transformação" (ver `cards/object-panel-card.js`, dentro do painel
+   *  flutuante reaproveitado) — comportamento interno 100% idêntico, só
+   *  mudou QUEM chama e QUANDO. */
+  _openObjectTransformSidebar3D(entity) {
+    if (!entity) return;
+    const existing = this._container.querySelector('.flashcard3d-overlay');
+    if (existing) existing.remove();
+    if (this._container.querySelector('#v3d-objcat-panel')?.classList.contains('hidden')) {
+      this._toggleObjectCatalogPanel();
+    }
+    this._setV3dRightTab('propriedades');
+    const sec = this._container.querySelector('#v3d-proppanel-transformacao');
+    const head = this._container.querySelector('#v3d-proppanel-transformacao-head');
+    const chevron = head?.querySelector('.v3d-proppanel-chevron');
+    if (sec?.classList.contains('collapsed')) {
+      sec.classList.remove('collapsed');
+      if (chevron) chevron.innerHTML = '&#9662;';
+    }
+    this._renderTransformacaoObjetoSimples(entity);
+  },
+
+  /** [15/09/2026 UTC] NOVO — pedido verbatim: "No 'Ver em 3D', ao clicar em
+   *  'propriedades', deve aparecer a mesma janela que nas propriedades do
+   *  mapa 2D." Este é o NOVO destino do botão "📐 Propriedades" do cartão
+   *  de clique (era `_openObjectTransformSidebar3D`, ver comentário grande
+   *  dela acima) — em vez de abrir a seção "Transformação" do painel
+   *  lateral direito, abre de verdade o MESMO painel flutuante
+   *  (`.map2d-props-panel`, `js/mapview.js` `MapView._openObjectPanel` +
+   *  `cards/object-panel-card.js`) que aparece ao clicar num objeto no
+   *  Mapa 2D — mesmo HTML, mesmo CSS, mesmos campos (Nome/Classes/Posição/
+   *  Rotação/Andar/Material/Scripts/Histórico/etc.), reaproveitado 100%,
+   *  não uma cópia.
+   *
+   *  COMO FUNCIONA — `MapView` (js/mapview.js, `const MapView = {...}`) é
+   *  um objeto literal SINGLETON, igual `View3D` aqui — não uma classe com
+   *  instâncias, então "reusar" significa copiar as FUNÇÕES (não os
+   *  dados) pra `this` (o `View3D`) na 1ª vez que este botão é usado
+   *  (`_ensureObjectPanelInfraFromMapView`, logo abaixo) — MESMO padrão já
+   *  usado por `_openObjectScripts3D` (ver comentário grande dela, "copia
+   *  de `window.MapView` na 1ª vez") pra reaproveitar o editor de
+   *  Scripts/Componentes. Assim que copiadas, chamar `this._openObjectPanel(
+   *  entity, {modoVer3D:true})` funciona exatamente como no Mapa 2D — toda
+   *  chamada interna feita como `this.xxx(...)` dentro dessas funções
+   *  resolve certinho contra o `View3D`, já que agora `this.xxx` EXISTE lá
+   *  também (copiado).
+   *
+   *  `modoVer3D:true` é repassado até `cards/object-panel-card.js`
+   *  (`ObjectPanelCard.build`), que usa o flag só pra: (1) trocar "🔧
+   *  Modelar em 3D"/"🔄 Trocar tipo/forma" (ferramentas do Mapa 2D/gizmo,
+   *  sem equivalente aqui) pelo botão NOVO "🔄 Transformação" (pedido
+   *  explícito do usuário); (2) usar `ctx._renderer?._computeItemAssocIndex`
+   *  com fallback vazio (`View3D` não tem `_renderer` — isso é exclusivo
+   *  do canvas 2D).
+   *
+   *  LIMITAÇÃO CONHECIDA/HONESTA: nem toda função copiada foi auditada
+   *  campo a campo (o painel tem MUITOS botões — associar patrimônio,
+   *  grupo, histórico, scripts, cor por face...) — as mais arriscadas
+   *  ("🔗 Grupo" ligar/sair, que reabre o painel via
+   *  `ctx._openObjectPanel(obj)` sem `modoVer3D`, perdendo o botão
+   *  "Transformação" até fechar/reabrir de novo) foram identificadas e
+   *  aceitas como efeito colateral menor; qualquer botão cuja função ainda
+   *  não esteja copiada em `_ensureObjectPanelInfraFromMapView` só vai
+   *  logar um erro no console ao ser clicado (painel continua aberto,
+   *  resto dos campos continua funcionando) — sem navegador pra testar ao
+   *  vivo nesta sessão, não dava pra garantir 100% dos botões sem risco. */
+  _openObjectProperties3D(entity) {
+    if (!window.MapView || !entity) return;
+    const existing = this._container.querySelector('.flashcard3d-overlay');
+    if (existing) existing.remove();
+    this._ensureObjectPanelInfraFromMapView();
+    return this._openObjectPanel(entity, { modoVer3D: true });
+  },
+
+  /** Copia, 1x (`this._objectPanelInfraReady`), as funções de
+   *  `window.MapView` necessárias pro painel flutuante de propriedades de
+   *  objeto (`_openObjectPanel` e tudo que ELA chama internamente via
+   *  `this.xxx`) funcionarem quando `this` é o `View3D` — ver comentário
+   *  grande de `_openObjectProperties3D` acima pro motivo completo. Só
+   *  copia o que ainda não existe em `this` (`typeof this[nome] !==
+   *  'function'`) — nunca sobrescreve algo que `View3D` já tivesse
+   *  definido com o mesmo nome por outro motivo. */
+  // [15/09/2026 UTC] CORRIGIDO — pedido verbatim: "...deve ser aplicado em
+  // tempo real...". `_saveMap()` (já copiada acima) chama internamente
+  // `this._updateBbmItemCount()` sem guarda nenhuma; essa função NÃO estava
+  // na lista de cópia, então todo `salvarCampo`/persist do painel reaproveitado
+  // no 3D ia estourar `TypeError: this._updateBbmItemCount is not a function`
+  // assim que qualquer campo fosse editado. O corpo de `_updateBbmItemCount`
+  // já é seguro de chamar sem os elementos da bottombar do Mapa 2D (usa
+  // `root?.querySelector?.(...)` e retorna cedo se não achar), então só
+  // adicionar o nome na lista abaixo resolve.
+  // [15/09/2026 UTC] CORRIGIDO (2ª lacuna) — erro real reportado pelo usuário
+  // ao clicar em "Propriedades" no "Ver em 3D": "TypeError: this.
+  // _componentsSummaryHtml is not a function" (mapview.js:18678, dentro de
+  // `_scriptFieldsetHtml`, chamada por `_openObjectPanel`). CAUSA: essa
+  // dependência (e as outras do mesmo grupo — editor de Componentes tela
+  // cheia) já eram copiadas de `window.MapView`, mas só dentro do bloco lazy
+  // de `_openObjectScripts3D` (função do botão antigo "🧩 Scripts", ver
+  // acima), que só roda quando ESSE botão específico é clicado — o novo
+  // fluxo do painel completo (`_openObjectProperties3D` ->
+  // `_ensureObjectPanelInfraFromMapView`) nunca passava por ali, então
+  // `_componentsSummaryHtml` (chamada direto no HTML do fieldset de
+  // Componentes, sem passar pelo botão) ficava faltando. Adicionadas aqui as
+  // mesmas 6 dependências já usadas por `_openObjectScripts3D`
+  // (`_componentsSummaryHtml`, `_openComponentsEditorFullscreen`,
+  // `_closeComponentsEditorFullscreen`, `_renderComponentsEditor`,
+  // `_renderScriptCodeEditor`, `_refreshComponentErrorFlags`) — o botão
+  // "🧩 Editar componentes…" dentro do painel reaproveitado ("_wireScriptFieldset")
+  // também depende delas (chama `this._openComponentsEditorFullscreen`).
+  // [15/09/2026 UTC RODADA 65] CORRIGIDO (3ª lacuna, achada auditando
+  // `_closePanel` ANTES do usuário reportar — botão "✕" do painel chama
+  // `this._closeFotoPinWheel()` incondicionalmente, sem guarda nenhuma;
+  // corpo da função é seguro (só optional-chaining em estado próprio), só
+  // faltava copiar o nome.
+  _ensureObjectPanelInfraFromMapView() {
+    if (this._objectPanelInfraReady) return;
+    const src = window.MapView;
+    if (!src) return;
+    [
+      '_openObjectPanel', '_openPanel', '_hideOrRemovePanel', '_showPersistentPanel',
+      '_makePanelDraggable', '_bringPanelToFront', '_saveMap', '_closePanel',
+      '_scriptFieldsetHtml', '_wireScriptFieldset', '_trajetoFieldsetHtml',
+      '_wireTrajetoFieldset', '_historicoFieldsetHtml', '_wireHistoricoFieldset',
+      '_deleteObjectById', '_elLayerLocked', '_updateBbmItemCount',
+      '_componentsSummaryHtml', '_openComponentsEditorFullscreen',
+      '_closeComponentsEditorFullscreen', '_renderComponentsEditor',
+      '_renderScriptCodeEditor', '_refreshComponentErrorFlags',
+      '_closeFotoPinWheel', '_scriptErrorBannerText',
+      // [15/09/2026 UTC RODADA 65] `_TIPOS_ROBO_TRAJETO` (4ª lacuna, achada
+      // na mesma auditoria): NÃO é uma função, é um array de dados (lista de
+      // tipos de robô com trajeto — `_trajetoFieldsetHtml`/
+      // `_wireTrajetoFieldset` fazem `this._TIPOS_ROBO_TRAJETO.includes(...)`
+      // pra QUALQUER objeto, não só robôs). A condição `typeof src[nome] ===
+      // 'function'` abaixo NUNCA copiava isto (é um array), então
+      // `this._TIPOS_ROBO_TRAJETO` ficava `undefined` no `View3D` e
+      // `.includes` estourava "Cannot read properties of undefined" pra
+      // QUALQUER objeto aberto no painel reaproveitado — não só robôs, já
+      // que o fieldset é montado incondicionalmente (só decide se desenha
+      // algo, retornando `''`/undefined). Adicionado como um nome à parte,
+      // copiado por valor (mesma referência do array de `window.MapView`,
+      // só leitura em ambos os lados — nunca mutado por estes 2 métodos).
+      '_TIPOS_ROBO_TRAJETO',
+    ].forEach((nome) => {
+      if (typeof this[nome] === 'undefined' && typeof src[nome] !== 'undefined') this[nome] = src[nome];
+    });
+    this._objectPanelInfraReady = true;
+  },
+
+  /** [15/09/2026 UTC] ALTERADO — pedido verbatim (rodada seguinte): "No
+   *  'Ver em 3D', as transformações a se fazer deve usar a mesma utilizada
+   *  no Modelador, não uma nova (como foi feito na última rodada) [...] A
+   *  mesma presente em 'botão lateral direito (+)' -> 'Propriedades' ->
+   *  'Transformação', os mesmos botões, estilos, HTML. Não é restrito ao
+   *  modelador, se for, modularize para ser usado aqui também." Antes esta
+   *  função desenhava um formulário PRÓPRIO (`<input type=number>` cru) —
+   *  agora só delega pra `ModelerUI.buildStandaloneObjectTransformPanel`
+   *  (modeler-ui.js), que reaproveita de verdade os MESMOS widgets do
+   *  Modelador (`_buildGroup`/`_createNumField`, `.m3d-numfield` — mesmo
+   *  arraste-pra-mudar-valor, mesmo clique-pra-digitar, mesmo CSS) — ver
+   *  comentário grande lá pra causa raiz completa/por que não dava pra só
+   *  chamar `_buildObjectTransformPanel` (Modelador) sem adaptar: aquela
+   *  função exige uma malha REAL sendo editada na cena
+   *  (`state.group`/`state.meshObj`), que não existe fora de uma sessão do
+   *  Modelador. Cada campo agora persiste e reflete ao vivo por si só
+   *  (`_refreshObjectLiveTransform`, abaixo) — sem botão "Salvar"/sem
+   *  remontar a tela inteira a cada edição, mais parecido com a
+   *  responsividade do próprio Modelador. */
+  _renderTransformacaoObjetoSimples(entity) {
+    const body = this._container?.querySelector('#v3d-proppanel-transformacao-body');
+    if (!body || !entity || typeof ModelerUI === 'undefined') return;
+    body.innerHTML = '';
+    body.appendChild(ModelerUI.buildStandaloneObjectTransformPanel(this, entity));
+  },
+
+  /** [15/09/2026 UTC] REESCRITO — pedido verbatim: "[No painel de
+   *  Transformação do 'Ver em 3D'] deve ser aplicado em tempo real.
+   *  Atualmente não está sendo aplicado as alterações em tempo real (no
+   *  3D), tendo que sair do 3D e entrar de novo para ver as aplicações."
+   *  A versão anterior desta função só remendava X/Z/rotação numa ÚNICA
+   *  malha achada por `.find` (objetos com várias malhas soltas — Mesa/
+   *  Cadeira/Pilar/etc. — ficavam com o resto pra trás) e NUNCA tocava em
+   *  escala/Y (documentado como limitação conhecida na época). Agora
+   *  delega 100% pra `Engine3D.rebuildObjectIncremental` (NOVO, ver
+   *  comentário grande dele) — reconstrói de verdade as malhas deste
+   *  objeto (todas, qualquer tipo de builder) a partir dos valores JÁ
+   *  SALVOS em `obj`, cobrindo posição/Y/rotação X/Y/Z/escala de uma vez,
+   *  sem duplicar nenhuma fórmula de posicionamento aqui. */
+  _refreshObjectLiveTransform(obj) {
+    try {
+      this._engine?.rebuildObjectIncremental?.(obj);
+    } catch (err) {
+      console.warn('[View3D] _refreshObjectLiveTransform não conseguiu atualizar ao vivo (dado já foi salvo mesmo assim):', err);
+    }
+  },
+
+  // =====================================================================
+  // [13/09/2026] NOVO — "APLICATIVO" DE MONITORAMENTO DE ROBÔS
+  // Pedido verbatim do usuário: "Em cada computador, deve ser possível
+  // acessar um 'aplicativo' para ver os robôs de cada andar, ver o que eles
+  // estão vendo e acessar e ver o seu trajeto: ver o seu trajeto e o que já
+  // foi feito e o 'plano de viagem'." Aberto a partir do botão "💻 Abrir
+  // aplicativo: Monitoramento de Robôs" no cartão de um objeto "monitor"/
+  // "monitor2" (ver _showObjectCard3DBody acima) — a ideia sendo "abrir o
+  // aplicativo NAQUELE computador", por isso o botão só existe no cartão de
+  // um monitor/computador, não num menu solto qualquer.
+  //
+  // Reaproveita o MESMO padrão visual de overlay tela-cheia já usado por
+  // `_openComponentsEditorFullscreen` (js/mapview.js, ver ali) — mesmo
+  // `position:absolute; inset:0` sobre `this._container`, mesma classe
+  // `map2d-componentpanel-confinado` (dá o visual "painel confinado
+  // rolável" já usado ali) — em vez de inventar um sistema de modal novo.
+  // =====================================================================
+
+  /** [13/09/2026 REESCRITO] CORREÇÃO DE ARQUITETURA — pedido verbatim do
+   *  usuário rejeitando a versão anterior desta função: "como tudo deve ser
+   *  com os recursos do próprio app [...] Não podendo ficar em um estado de
+   *  'um script totalmente reescrito pelo usuário pode não ser
+   *  reconhecido'."
+   *
+   *  ANTES: esta função fazia uma extração de TEXTO por regex + `new
+   *  Function` sobre o código-fonte do componente Script do robô, tentando
+   *  "adivinhar" uma constante `WAYPOINTS`/`WAYPOINTS_VARREDURA` — best-
+   *  effort por natureza, e por isso mesmo FRÁGIL: qualquer script
+   *  reescrito pelo usuário num formato diferente (outro nome de variável,
+   *  outra estrutura) simplesmente não era reconhecido, mostrando "Trajeto
+   *  não disponível" mesmo com o robô se movendo normalmente.
+   *
+   *  AGORA: NENHUM parse de texto/regex/`new Function` sobre código de
+   *  script — o trajeto é lido DIRETO de `robo.propriedades.trajeto`, um
+   *  DADO ESTRUTURADO de primeira classe do próprio objeto (editável no
+   *  painel de propriedades 2D — ver mapview.js `_trajetoFieldsetHtml`/
+   *  `_wireTrajetoFieldset`), SEMPRE disponível e SEMPRE confiável — não
+   *  importa como o usuário escreveu/reescreveu o Script do robô, porque a
+   *  lista de pontos não mora mais dentro do texto dele. `robo` aqui é a
+   *  referência de verdade do objeto do mapa (a mesma que o painel 2D e o
+   *  Script leem/escrevem), então isto é uma leitura de campo comum, não um
+   *  mecanismo novo. Devolve `null` só quando não há nenhum ponto definido
+   *  ainda (objeto novo/trajeto vazio) — nesse caso o chamador mostra
+   *  "Trajeto ainda não definido" (ver uso abaixo), convite pra abrir o
+   *  painel de propriedades e cadastrar os pontos, em vez do antigo
+   *  "formato não reconhecido". */
+  // =====================================================================
+  // [13/09/2026] NOVO — "MODO COMPUTADOR" (acessar a tela do monitor como
+  // uma área de trabalho de verdade). Pedido verbatim do usuário, com 5
+  // partes — cada uma citada no comentário do método correspondente abaixo.
+  //
+  // ABORDAGEM ESCOLHIDA (documentada com honestidade, pedido explícito do
+  // usuário pra "escolher a abordagem mais viável e documentar"): a "área de
+  // trabalho" é um OVERLAY 2D sobre o canvas (mesmo padrão de
+  // `_openRoboMonitoringApp3D`/`_openObjectPropsAndScripts3D` — um `<div>`
+  // absoluto sobre `this._container`), NÃO uma textura projetada na malha
+  // 3D real do monitor. Motivo: a malha do monitor (ver
+  // `js/engine3d-profiles.js`, tipo `monitor`/`monitor2`) não expõe hoje um
+  // UV mapeado dedicado só pra "tela" (é uma caixa única com um material só,
+  // igual a cabine do elevador documentada em
+  // `_exemplo-script-elevador-cabine.txt`) — projetar uma `CanvasTexture`
+  // JUSTA na face da tela exigiria remapear UVs/criar uma sub-geometria só
+  // pra ela, sem poder testar visualmente ao vivo (risco alto de a textura
+  // sair esticada/no lugar errado). Um overlay 2D cheio de tela, por outro
+  // lado, já é o padrão usado por TODO o resto do projeto pra "telas"/
+  // "aplicativos" (ver o próprio app de monitoramento) e cumpre o pedido
+  // igualmente bem ("a renderização acontece ali no monitor" — do PONTO DE
+  // VISTA do jogador, que está olhando praticamente pra tela quando isso
+  // acontece, já que a câmera foi posicionada de frente a ela, ver
+  // `_acessarComputador3D`).
+  //
+  // "PERSONAGEM FICA EM FRENTE À TELA": o jogo é primeira pessoa — CONFIRMADO
+  // lendo o resto deste arquivo (a "câmera" É o jogador, `this._camera`
+  // x/y/z/yaw/pitch, ver topo do arquivo; não existe nenhum modelo de corpo
+  // em 3ª pessoa do próprio jogador em lugar nenhum do projeto, nem no carro
+  // — que também só reposiciona `this._camera`, ver `_updateCarroCamera`).
+  // Por isso a interpretação implementável aqui é: a CÂMERA do jogador se
+  // move/vira suavemente até ficar de frente pro monitor — é o equivalente
+  // disponível no motor a "o personagem fica de frente à tela", já que não
+  // há um corpo visível pra animar separadamente.
+  //
+  // "SAIR E DEIXAR RODANDO": ver LIMITAÇÃO HONESTA no comentário grande de
+  // `_sairDoComputador3D` mais abaixo — a sessão (app aberto + robô sendo
+  // visto) é PRESERVADA em `entity._sessaoComputador` e retomada ao
+  // reacessar o MESMO computador (implementado, ver
+  // `_openRoboMonitoringApp3D` acima), mas a tela real do monitor NÃO
+  // continua mostrando a mini-câmera do robô à distância depois que o
+  // jogador sai — só o ESTADO da sessão persiste, não a renderização visível
+  // de longe. Motivo: a única forma seria projetar essa textura AO VIVO na
+  // malha real do monitor (a abordagem de overlay 2D escolhida acima não
+  // aparece de fora do modo computador por definição), o que reabriria o
+  // mesmo risco de UV/geometria descrito acima, agora rodando em background
+  // pra TODOS os monitores do mapa a cada quadro (custo de desempenho real
+  // — um render extra de `_renderRoboEyeFrame` por monitor com sessão ativa,
+  // todo quadro) — simplificação aceita conscientemente em vez de arriscar
+  // uma extensão de motor sem poder testar ao vivo.
+  // =====================================================================
+
+  /** Desenha (uma única vez, cacheado em `this._computadorDesktopBgDataUrl`)
+   *  o fundo da "área de trabalho" do modo computador — pedido verbatim:
+   *  "a área de trabalho deve ter um fundo gerado por código". MESMA técnica
+   *  já usada no projeto pra texturas geradas em canvas 2D (chão lajotado/
+   *  mostrador do relógio de parede, ver `js/engine3d.js` — aqui não vira uma
+   *  `THREE.CanvasTexture` 3D porque a área de trabalho é UI 2D sobreposta,
+   *  não uma malha — só um canvas 2D comum virando `data:` URL de imagem de
+   *  fundo do overlay, mais barato e simples). Gradiente azul-escuro →
+   *  azul-petróleo com um padrão sutil de linhas diagonais por cima. */
+  _gerarFundoAreaTrabalho3D() {
+    if (this._computadorDesktopBgDataUrl) return this._computadorDesktopBgDataUrl;
+    const cv = document.createElement('canvas');
+    cv.width = 512; cv.height = 320;
+    const ctx = cv.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, cv.width, cv.height);
+    grad.addColorStop(0, '#0b1f33');
+    grad.addColorStop(1, '#123f45');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    // Padrão sutil: linhas diagonais finas, opacidade baixa — puramente
+    // decorativo, não deve competir visualmente com o ícone/janelas.
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 2;
+    for (let x = -cv.height; x < cv.width; x += 28) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + cv.height, cv.height);
+      ctx.stroke();
+    }
+    this._computadorDesktopBgDataUrl = cv.toDataURL('image/png');
+    return this._computadorDesktopBgDataUrl;
+  },
+
+  /** [13/09/2026] NOVO — pedido verbatim: "o aplicativo do pc deve ser
+   *  acessível como se estivesse usando a tela [...] o personagem tem uma
+   *  animação de ficar em frente à tela". Chamado por
+   *  `assets/modelos/monitor.model.js`/`monitor2.model.js` via
+   *  `onModelCardButtons` (botão "🖥️ Acessar este computador", substituindo
+   *  o antigo botão direto "💻 Abrir aplicativo..." — pedido verbatim: "não
+   *  deve ser 'Abrir aplicativo...', mas sim 'Acessar este computador'").
+   *
+   *  Calcula uma posição em frente ao monitor a partir de `entity.x/y/
+   *  angulo` (mesma convenção cos/sin documentada em
+   *  `_updateCarrosControlados` — "frente" do objeto é `(cos(angulo),
+   *  sin(angulo))`) — o jogador fica no lado OPOSTO ("- direção", como um
+   *  monitor de mesa que o personagem senta na frente de, olhando pra tela
+   *  que fica na direção que o monitor "aponta"), a `DIST_FRENTE_TELA`
+   *  metros, na mesma altura Y do monitor + um pequeno ajuste pra "altura
+   *  de quem está sentado". Anima a câmera suavemente até lá (não
+   *  instantâneo — ver `_tweenCameraTo`) e trava o controle normal
+   *  (`_computadorAcessado`, mesmo padrão de `_carroControlado`/
+   *  `_entrarNoCarro`). Mostra o cursor normal do mouse (pointer lock
+   *  DESLIGADO de propósito — interação de desktop 2D, não mira 3D) e monta
+   *  a área de trabalho (`_montarAreaDeTrabalho3D`). */
+  _acessarComputador3D(entity) {
+    if (!entity || this._computadorAcessado || this._carroControlado) return;
+    document.exitPointerLock?.();
+    const cam = this._camera;
+    this._posAntesDoComputador = { x: cam.x, y: cam.y, z: cam.z, yaw: cam.yaw, pitch: cam.pitch };
+    this._computadorAcessado = entity;
+
+    const DIST_FRENTE_TELA = 0.7; // metros do "rosto" do jogador até a tela
+    const ang = entity.angulo || 0;
+    const baseY = (entity.piso || 0) * (this._map?.alturaPiso || 2.8) + (entity.elevacao || 0);
+    // "Oposto" da direção que o monitor aponta (cos,sin) — o jogador fica do
+    // lado de onde a tela é visível, não atrás dela.
+    const px = (entity.x || 0) - Math.cos(ang) * DIST_FRENTE_TELA;
+    const pz = (entity.y || 0) - Math.sin(ang) * DIST_FRENTE_TELA;
+    const py = baseY + 1.15; // altura aproximada dos olhos de alguém sentado à mesa
+    // Yaw de câmera do Three.js (convenção `cameraForwardFlat`, diferente de
+    // `entity.angulo` — ver comentário grande de `_updateCarroCamera` pra a
+    // derivação completa citada) pra olhar NA DIREÇÃO do monitor a partir
+    // daqui: `yaw` tal que `(-sin(yaw),cos(yaw)) == (cos(ang),sin(ang))` →
+    // `yaw = ang - Math.PI/2` (mesma fórmula já usada por `_updateCarroCamera`
+    // logo abaixo dele no arquivo).
+    const yawAlvo = ang - Math.PI / 2;
+
+    this._tweenCameraTo({ x: px, y: py, z: pz, yaw: yawAlvo, pitch: 0 }, 550, () => {
+      this._montarAreaDeTrabalho3D(entity);
+    });
+    Utils.toast?.('🖥️ Acessando computador — ESC ou "🚪 Sair" pra sair', { duration: 2200 });
+  },
+
+  /** Tween simples (linear-ease-out) de `this._camera` de onde ela está até
+   *  `alvo` em `duracaoMs` — usado só pelo modo computador por ora, mas
+   *  escrito genérico o bastante pra reaproveitar em outro lugar no futuro.
+   *  Interpola yaw pelo caminho mais curto (evita girar "pelo lado errado"
+   *  quando a diferença angular passa de π). Chama `onDone` ao terminar
+   *  (ou imediatamente se `duracaoMs<=0`). Cancela um tween anterior em
+   *  andamento, se houver (evita 2 tweens de câmera brigando pelo mesmo
+   *  `this._camera` ao mesmo tempo). */
+  _tweenCameraTo(alvo, duracaoMs, onDone) {
+    if (this._computadorTweenRAF) cancelAnimationFrame(this._computadorTweenRAF);
+    const cam = this._camera;
+    const inicio = { x: cam.x, y: cam.y, z: cam.z, yaw: cam.yaw, pitch: cam.pitch };
+    let dyaw = alvo.yaw - inicio.yaw;
+    while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+    while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+    const t0 = performance.now();
+    const passo = () => {
+      const t = duracaoMs <= 0 ? 1 : Math.min(1, (performance.now() - t0) / duracaoMs);
+      const ease = 1 - Math.pow(1 - t, 3); // ease-out cúbico — suave, sem "solavanco" no fim
+      cam.x = inicio.x + (alvo.x - inicio.x) * ease;
+      cam.y = inicio.y + (alvo.y - inicio.y) * ease;
+      cam.z = inicio.z + (alvo.z - inicio.z) * ease;
+      cam.yaw = inicio.yaw + dyaw * ease;
+      cam.pitch = inicio.pitch + (alvo.pitch - inicio.pitch) * ease;
+      if (t < 1) {
+        this._computadorTweenRAF = requestAnimationFrame(passo);
+      } else {
+        this._computadorTweenRAF = null;
+        onDone?.();
+      }
+    };
+    this._computadorTweenRAF = requestAnimationFrame(passo);
+  },
+
+  /** Monta a "área de trabalho" do modo computador (overlay 2D) — pedido
+   *  verbatim: "Na área de trabalho do monitor deve ter um ícone de
+   *  aplicativo e dando dois cliques nele [...] o app abre em uma janela com
+   *  um botão de 'fechar'." Retoma a JANELA já aberta anteriormente se
+   *  `entity._sessaoComputador.appAberto` estava true (pedido: "retoma
+   *  exatamente de onde parou"). Cursor do mouse normal (não pointer-lock) —
+   *  o próprio navegador já mostra o cursor de sistema assim que
+   *  `document.exitPointerLock()` roda (chamado em `_acessarComputador3D`),
+   *  nenhum CSS extra necessário além de garantir que o overlay não
+   *  redireciona cliques de volta pro canvas 3D (`stopPropagation` nos
+   *  cliques da área de trabalho, ver abaixo). */
+  _montarAreaDeTrabalho3D(entity) {
+    if (!this._container || this._container.querySelector('.v3d-computador-overlay')) return;
+    const el = document.createElement('div');
+    el.className = 'v3d-computador-overlay';
+    el.style.cssText = `position:absolute; inset:0; z-index:90; background:#0b1f33 url("${this._gerarFundoAreaTrabalho3D()}"); background-size:cover; font-family:inherit; user-select:none;`;
+    // Impede que cliques na área de trabalho "vazem" pro canvas 3D por trás
+    // (ex.: disparar tiro/mira do jogo) — mesmo cuidado que outros overlays
+    // do projeto já tomam.
+    el.addEventListener('mousedown', (e) => e.stopPropagation());
+    el.addEventListener('click', (e) => e.stopPropagation());
+
+    el.innerHTML = `
+      <div class="v3d-computador-icone" id="v3d-computador-icone-app" title="Monitoramento de Robôs (dois cliques para abrir)" style="position:absolute; top:18px; left:18px; width:74px; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px; border-radius:8px;">
+        <div style="font-size:34px; line-height:1">🤖</div>
+        <div style="color:#fff; font-size:11px; text-align:center; text-shadow:0 1px 3px rgba(0,0,0,.8)">Monitoramento<br>de Robôs</div>
+      </div>
+      <button type="button" id="v3d-computador-sair" title="Sair do computador (ou aperte ESC)" style="position:absolute; bottom:16px; right:16px; z-index:2" class="btn secondary sm">🚪 Sair do computador</button>
+      <div id="v3d-computador-janela-slot"></div>
+    `;
+    this._container.appendChild(el);
+
+    // Realce simples de "selecionado" no ícone ao clicar 1x (feedback visual
+    // — sem isso, um duplo-clique não teria nenhuma resposta visual antes de
+    // a janela abrir).
+    const icone = el.querySelector('#v3d-computador-icone-app');
+    icone.addEventListener('mousedown', () => { icone.style.background = 'rgba(255,255,255,0.18)'; });
+    document.addEventListener('mouseup', () => { icone.style.background = ''; }, { once: false });
+
+    icone.addEventListener('dblclick', () => this._abrirJanelaMonitoramento3D(entity, el));
+    el.querySelector('#v3d-computador-sair').addEventListener('click', () => this._sairDoComputador3D());
+
+    // [13/09/2026] NOVO — "retoma de onde parou": se este MESMO computador já
+    // tinha o app aberto numa sessão anterior (`entity._sessaoComputador.
+    // appAberto`), reabre a janela automaticamente ao entrar de novo, em vez
+    // de mostrar a área de trabalho vazia.
+    if (entity._sessaoComputador?.appAberto) {
+      this._abrirJanelaMonitoramento3D(entity, el);
+    }
+  },
+
+  /** Abre a "janela" do app de monitoramento DENTRO da área de trabalho —
+   *  título "Monitoramento de Robôs" + conteúdo reaproveitado de
+   *  `_openRoboMonitoringApp3D` (agora com suporte a `opts.mount`, ver
+   *  acima) + botão "✕ Fechar" que fecha só a JANELA (volta pra área de
+   *  trabalho vazia, ainda em modo computador — NÃO sai do computador). */
+  _abrirJanelaMonitoramento3D(entity, desktopEl) {
+    if (desktopEl.querySelector('.v3d-computador-janela')) return; // já aberta
+    const janela = document.createElement('div');
+    janela.className = 'v3d-computador-janela';
+    janela.style.cssText = 'position:absolute; left:8%; top:10%; width:84%; height:78%; background:#12161c; border:1px solid #3a4250; border-radius:10px; box-shadow:0 12px 40px rgba(0,0,0,.5); display:flex; flex-direction:column; overflow:hidden;';
+    janela.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#1c222c; border-bottom:1px solid #3a4250; flex:0 0 auto">
+        <span style="font-weight:700; color:#fff">🤖 Monitoramento de Robôs</span>
+        <button type="button" id="v3d-computador-janela-fechar" class="btn secondary sm" title="Fecha só esta janela — o computador continua acessado">✕ Fechar</button>
+      </div>
+      <div id="v3d-computador-janela-corpo" style="flex:1 1 auto; min-height:0; position:relative;"></div>
+    `;
+    desktopEl.querySelector('#v3d-computador-janela-slot').appendChild(janela);
+    const corpo = janela.querySelector('#v3d-computador-janela-corpo');
+    entity._sessaoComputador = entity._sessaoComputador || { appAberto: true, roboId: null };
+    entity._sessaoComputador.appAberto = true;
+    this._openRoboMonitoringApp3D(entity, {
+      mount: corpo,
+      onClose: () => { /* fechado pelo próprio botão interno — sem uso extra aqui */ },
+    });
+    janela.querySelector('#v3d-computador-janela-fechar').addEventListener('click', () => {
+      corpo.querySelector('.v3d-robo-app-overlay')?._v3dFechar?.();
+      janela.remove();
+      if (entity._sessaoComputador) entity._sessaoComputador.appAberto = false;
+    });
+  },
+
+  /** [13/09/2026] NOVO — pedido verbatim: "deve ser possível sair do pc e
+   *  deixar o programa 'rodando' [...] fica sendo renderizado na tela do
+   *  monitor". Restaura a câmera do jogador pra pose de ANTES de acessar
+   *  (`_posAntesDoComputador`), libera `_computadorAcessado` (devolve
+   *  WASD/gravidade normais no próximo quadro) e remove o overlay da área
+   *  de trabalho do DOM.
+   *
+   *  LIMITAÇÃO HONESTA (documentada de propósito, ver o comentário grande no
+   *  topo desta seção pra a explicação completa): o que de fato "continua
+   *  rodando" ao sair é só o ESTADO da sessão (`entity._sessaoComputador` —
+   *  qual robô estava sendo visto), não uma renderização visível na malha
+   *  real do monitor à distância. Reacessar o MESMO computador retoma a
+   *  janela exatamente onde parou (implementado, ver
+   *  `_montarAreaDeTrabalho3D`/`_openRoboMonitoringApp3D`), mas de FORA do
+   *  modo computador o monitor no cenário 3D não mostra nenhuma prévia da
+   *  mini-câmera do robô — simplificação aceita conscientemente em vez de
+   *  arriscar estender a malha/UV do monitor sem poder testar ao vivo (ver
+   *  motivo completo no comentário grande do topo da seção). */
+  _sairDoComputador3D() {
+    const entity = this._computadorAcessado;
+    if (!entity) return;
+    this._computadorAcessado = null;
+    this._container.querySelector('.v3d-computador-overlay')?.remove();
+    const pose = this._posAntesDoComputador;
+    if (pose) {
+      const cam = this._camera;
+      cam.x = pose.x; cam.y = pose.y; cam.z = pose.z; cam.yaw = pose.yaw; cam.pitch = pose.pitch;
+    }
+    this._posAntesDoComputador = null;
+    Utils.toast?.('🚶 Fora do computador' + (entity._sessaoComputador?.appAberto ? ' — sessão mantida, reacesse pra continuar' : ''), { duration: 1800 });
+  },
+
+  // =====================================================================
+  // [13/09/2026] NOVO — TAREFA 2 do backlog: PAINEL INTERNO da cabine de
+  // elevador. Pedido verbatim: "Os elevadores devem ter painéis internos
+  // [...] Estando dentro do elevador, deve ser possível apertar os botões
+  // dos andares e ele vai indo nos andares. Deve ter o botão de parada
+  // (toggle) [...] um botão de 'fechar as portas' e um botão de 'abrir as
+  // portas'." Chamado por `assets/modelos/elevador-cabine.model.js
+  // onModelClick` quando o jogador clica na cabine ESTANDO DENTRO dela (ver
+  // `_jogadorDentroDaCabine` logo abaixo). Os campos que este painel edita
+  // (`andarDestino`/`estado`/`anguloAbertura`/`emergenciaParada`) são os
+  // MESMOS que `_exemplo-script-elevador-cabine.txt` já lê/escreve a cada
+  // quadro — o painel não introduz nenhum mecanismo de movimento novo, só
+  // ESCREVE nos mesmos campos que o Script (quando anexado) processa em
+  // `Update(dt)` (ver esse arquivo, atualizado nesta mesma rodada com o
+  // novo campo `emergenciaParada` e comentários sobre esta UI).
+  // =====================================================================
+
+  /** "Dentro" definido geometricamente, pedido verbatim: "distância XZ do
+   *  jogador ao centro da cabine menor que metade da largura/profundidade
+   *  dela, e altura Y dentro da faixa da cabine". Dimensões lidas do
+   *  perfil de catálogo (`js/engine3d-profiles.js`, OBJECT3D_PROFILES
+   *  `'elevador-cabine'`: w=2.0/d=2.0/h=2.2/y0=0) — hardcoded aqui como
+   *  fallback pro mesmo valor, já que o perfil não é facilmente importável
+   *  isolado deste arquivo sem uma referência circular; se o perfil mudar
+   *  de tamanho no catálogo um dia, atualize as constantes abaixo junto. */
+  _jogadorDentroDaCabine(entity) {
+    if (!entity || entity.tipo !== 'elevador-cabine') return false;
+    const LARGURA = 2.0, PROFUNDIDADE = 2.0, ALTURA = 2.2; // ver comentário acima
+    const cam = this._camera;
+    const dx = cam.x - (entity.x || 0);
+    const dz = cam.z - (entity.y || 0);
+    if (Math.abs(dx) >= LARGURA / 2 || Math.abs(dz) >= PROFUNDIDADE / 2) return false;
+    const baseY = (entity.piso || 0) * (this._map?.alturaPiso || 2.8) + (entity.elevacao || 0);
+    // Faixa vertical com uma folga de +-0.3m (pés/cabeça não exatamente na
+    // borda da caixa) — o jogador "está" na cabine dos pés até um pouco
+    // acima do teto dela.
+    return cam.y >= baseY - 0.3 && cam.y <= baseY + ALTURA + 0.3;
+  },
+
+  /** Monta e abre o painel de controle interno — overlay 2D, mesmo padrão
+   *  visual de `_showObjectCard3D`/demais cartões deste arquivo (não é
+   *  tela cheia, é um cartão flutuante — `flashcard3d-overlay`, CSS já
+   *  existente em style.css). */
+  _abrirPainelElevador3D(entity, ctx) {
     document.exitPointerLock?.();
     const existing = this._container.querySelector('.flashcard3d-overlay');
     if (existing) existing.remove();
-    const entries = obj.itemIds || [];
-    if (!entries.length) return;
+    const Mapping = window.Mapping;
+    const pisos = Mapping?.getPisos?.(this._map) || [];
+
     const el = document.createElement('div');
     el.className = 'flashcard3d-overlay';
-    const rowsHtml = entries.map((e) => `
-      <div class="v3d-orphan-row" style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid var(--border)">
-        <span style="font-family:monospace">${e.patrimonio ? Utils.escapeHtml(e.patrimonio) : '(número não registrado)'}</span>
-        <button type="button" class="btn danger sm v3d-orphan-del" data-id="${e.id}" title="Excluir esta informação de patrimônio (o item já não existe mais no catálogo)">🗑️ Excluir</button>
-      </div>`).join('');
-    el.innerHTML = `
-      <div style="text-align:center; font-weight:700; margin-bottom:4px">⚠️ Patrimônio excluído do catálogo</div>
-      <p style="font-size:12px; color:var(--text-dim); text-align:center; margin:0 0 8px">Este objeto ainda guarda o número de um ou mais patrimônios já excluídos do catálogo:</p>
-      <div>${rowsHtml}</div>
-      <button class="btn secondary block sm" id="v3d-fc-close" style="margin-top:10px" title="Fechar este cartão e voltar a andar">Fechar</button>
-    `;
+
+    const render = () => {
+      const fresh = (this._map.objects || []).find((o) => o.id === entity.id) || entity;
+      const emMovimento = fresh.estado === 'subindo' || fresh.estado === 'descendo';
+      const parada = !!fresh.emergenciaParada;
+      const botoesAndarHtml = pisos.map((p, i) => {
+        const atual = fresh.andarAtual === i;
+        const indoPraCa = fresh.andarDestino === i && emMovimento;
+        const estilo = atual ? 'background:#2f8f4e; color:#fff' : indoPraCa ? 'background:#e0a028; color:#111' : '';
+        return `<button type="button" class="btn secondary sm v3d-elev-andar" data-piso="${i}" style="${estilo}" ${atual ? 'title="Andar atual"' : ''} ${parada ? 'disabled' : ''}>${Utils.escapeHtml(p.nome || `Andar ${i + 1}`)}${atual ? ' ✓' : indoPraCa ? ' …' : ''}</button>`;
+      }).join('');
+      el.innerHTML = `
+        <div style="text-align:center; font-weight:700; margin-bottom:8px">🛗 Painel de Controle — Elevador</div>
+        <div style="text-align:center; font-family:monospace; opacity:.75; margin-bottom:8px">Andar atual: ${fresh.andarAtual ?? '—'}${emMovimento ? ` · indo pro andar ${fresh.andarDestino}` : ''}${parada ? ' · ⛔ PARADO (emergência)' : ''}</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:10px">${botoesAndarHtml}</div>
+        <button type="button" class="btn ${parada ? 'danger' : 'secondary'} block sm" id="v3d-elev-parada" style="margin-bottom:6px" title="Alterna o estado de parada de emergência — enquanto ativo, a cabine não se move mesmo com destino pendente">${parada ? '▶️ Retomar operação' : '⛔ Parada de emergência'}</button>
+        <div style="display:flex; gap:6px; margin-bottom:6px">
+          <button type="button" class="btn secondary sm" id="v3d-elev-abrir" style="flex:1" ${emMovimento ? 'disabled' : ''} title="Força as portas a abrir imediatamente">🚪⟵⟶ Abrir portas</button>
+          <button type="button" class="btn secondary sm" id="v3d-elev-fechar" style="flex:1" ${emMovimento ? 'disabled' : ''} title="Força as portas a fechar imediatamente">🚪⟶⟵ Fechar portas</button>
+        </div>
+        <button class="btn block sm" id="v3d-fc-close" style="margin-top:6px" title="Fechar este painel">Fechar</button>
+      `;
+      el.querySelector('#v3d-fc-close').onclick = () => el.remove();
+      el.querySelectorAll('.v3d-elev-andar').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const alvo = (this._map.objects || []).find((o) => o.id === entity.id);
+          if (!alvo || alvo.emergenciaParada) return;
+          const i = Number(btn.dataset.piso);
+          alvo.andarDestino = i;
+          // Mesma lógica de transição de estado que o Script usa ao ouvir
+          // `chamarElevador` (ver `_aoOuvirChamada` em
+          // _exemplo-script-elevador-cabine.txt) — reaproveitada aqui pro
+          // botão interno decidir subir/descer/já estar no andar.
+          if (alvo.estado === 'parado' || alvo.estado === undefined) {
+            alvo.estado = i > (alvo.andarAtual || 0) ? 'subindo' : (i < (alvo.andarAtual || 0) ? 'descendo' : 'portaAbrindo');
+          }
+          render();
+        });
+      });
+      el.querySelector('#v3d-elev-parada').addEventListener('click', () => {
+        const alvo = (this._map.objects || []).find((o) => o.id === entity.id);
+        if (!alvo) return;
+        alvo.emergenciaParada = !alvo.emergenciaParada;
+        render();
+      });
+      el.querySelector('#v3d-elev-abrir').addEventListener('click', () => {
+        const alvo = (this._map.objects || []).find((o) => o.id === entity.id);
+        if (!alvo || alvo.estado === 'subindo' || alvo.estado === 'descendo') return;
+        alvo.estado = 'portaAbrindo';
+        render();
+      });
+      el.querySelector('#v3d-elev-fechar').addEventListener('click', () => {
+        const alvo = (this._map.objects || []).find((o) => o.id === entity.id);
+        if (!alvo || alvo.estado === 'subindo' || alvo.estado === 'descendo') return;
+        alvo.estado = 'portaFechando';
+        render();
+      });
+    };
+    render();
     this._container.appendChild(el);
-    el.querySelector('#v3d-fc-close').onclick = () => el.remove();
-    el.querySelectorAll('.v3d-orphan-del').forEach((btn) => {
-      btn.onclick = async () => {
-        Mapping.removeItemFromObject(this._map, obj.id, btn.dataset.id);
-        await this._afterMapMutated();
-        el.remove();
-        const fresh = (this._map.objects || []).find((o) => o.id === obj.id);
-        if (fresh && fresh.itemIds && fresh.itemIds.length) this._showOrphanPatrimonioCard3D(fresh);
-        else Utils.toast('Informação de patrimônio removida ✓', { type: 'ok' });
-      };
+  },
+
+  lerTrajetoEstruturadoDoRobo(robo) {
+    const pts = robo?.propriedades?.trajeto;
+    if (!Array.isArray(pts) || !pts.length) return null;
+    const limpos = pts
+      .map((p) => (p && typeof p.x === 'number' && typeof p.y === 'number')
+        ? { x: p.x, y: p.y, esperaMs: typeof p.esperaMs === 'number' ? p.esperaMs : 0 }
+        : null)
+      .filter(Boolean);
+    return limpos.length ? limpos : null;
+  },
+
+  /** Acha o índice de progresso atual do robô, SE o script dele gravar esse
+   *  estado externamente. LIMITAÇÃO documentada (pedido do usuário —
+   *  "honestamente"): só funciona se o próprio Script do robô gravar
+   *  `obj.propriedades._trajetoIndiceAtual` a cada avanço de waypoint —
+   *  isto foi ADICIONADO nesta mesma rodada aos 4 scripts de exemplo
+   *  (`_exemplo-script-robo-trajeto.txt`/`-limpeza.txt`/`-copa.txt`/
+   *  `-recepcionista.txt`). Um robô com um script COLADO ANTES desta
+   *  atualização (ou copiado de uma versão antiga salva em outro lugar)
+   *  não tem esse campo — `null` é devolvido nesse caso, e a tela mostra
+   *  a lista de waypoints sem marcar nenhum como "atual"/"visitado". */
+  _progressoTrajetoRobo(robo) {
+    const idx = robo?.propriedades?._trajetoIndiceAtual;
+    return (typeof idx === 'number' && idx >= 0) ? idx : null;
+  },
+
+  /** Renderiza o em uma câmera THREE.js temporária posicionada NA visão do
+   *  robô ("ver o que ele está vendo") — reaproveita a MESMA infraestrutura
+   *  de câmera-em-render-target já usada pela Miniatura 3D/"MODO EYE" (ver
+   *  comentário grande no construtor de `js/engine3d.js`): em vez de criar
+   *  um 2º contexto WebGL (caro, e o projeto já documenta que só usa UM
+   *  contexto compartilhado — ver "MODO EYE"), reposiciona TEMPORARIAMENTE
+   *  a câmera principal (`this._engine.camera3`) do motor já em uso por
+   *  "Ver em 3D", pede um frame extra (`_presentFrame()`), copia o
+   *  resultado pro canvas pequeno do painel (`drawImage` do canvas WebGL
+   *  pro canvas 2D — cópia síncrona, funciona sem `preserveDrawingBuffer`
+   *  porque acontece no MESMO turn de JS que o render, antes do navegador
+   *  compor a tela) e IMEDIATAMENTE devolve a câmera pra pose original —
+   *  por isso não há nenhum "flash" visível pro usuário: o quadro
+   *  intermediário nunca chega a ser exibido, só lido de volta pra CPU.
+   *  Chamado periodicamente (ver `_openRoboMonitoringApp3D`, a cada
+   *  300ms — não todo frame, custo real de um render extra por chamada). */
+  _renderRoboEyeFrame(robo, canvasAlvo) {
+    const eng = this._engine;
+    if (!eng || !eng._ready || !eng.camera3 || !canvasAlvo) return false;
+    const cam = eng.camera3;
+    const posOrig = cam.position.clone();
+    const quatOrig = cam.quaternion.clone();
+    const fovOrig = cam.fov;
+    try {
+      const ang = robo.angulo || 0;
+      const olhoY = (robo.elevacao || 0) + 0.3; // ~30cm acima da base do robô, "altura dos olhos" dele
+      cam.position.set(robo.x || 0, olhoY, robo.y || 0);
+      cam.fov = 75;
+      cam.updateProjectionMatrix();
+      cam.lookAt(cam.position.x + Math.cos(ang), olhoY, cam.position.z + Math.sin(ang));
+      eng._presentFrame();
+      const ctx = canvasAlvo.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvasAlvo.width, canvasAlvo.height);
+        ctx.drawImage(eng.canvas, 0, 0, canvasAlvo.width, canvasAlvo.height);
+      }
+      return true;
+    } catch (err) {
+      console.error('[View3D] _renderRoboEyeFrame: falha ao renderizar a "câmera do robô" —', err);
+      return false;
+    } finally {
+      // Sempre devolve a câmera principal pra pose de navegação normal do
+      // usuário, MESMO se algo acima estourar — nunca deixa "Ver em 3D"
+      // travado olhando pelo robô por engano.
+      cam.position.copy(posOrig);
+      cam.quaternion.copy(quatOrig);
+      cam.fov = fovOrig;
+      cam.updateProjectionMatrix();
+    }
+  },
+
+  /** O "aplicativo" em si — lista de robôs agrupados por andar (a. do
+   *  pedido), painel de detalhes com trajeto/progresso (b./c.) e a
+   *  mini-câmera "o que ele está vendo" (d.). */
+  /** [13/09/2026] AJUSTADO — "MODO COMPUTADOR": passou a aceitar um 2º
+   *  parâmetro `opts.mount` opcional — quando presente, o "aplicativo" é
+   *  desenhado DENTRO desse elemento (a "janela" da área de trabalho do
+   *  modo computador, ver `_abrirJanelaMonitoramento3D` mais abaixo) em vez
+   *  de um overlay tela-cheia sobre `this._container`. SEM ISSO mudar o
+   *  comportamento de quem já chamava sem `opts` (nenhuma chamada restante
+   *  faz isso hoje — o botão do cartão do monitor agora abre sempre via
+   *  `_acessarComputador3D`/modo computador — mas o método continua
+   *  funcionando "solto" pra não quebrar nada que dependa dele). */
+  _openRoboMonitoringApp3D(monitorObj, opts) {
+    const mount = opts?.mount || null;
+    const raiz = mount || this._container;
+    if (!raiz || raiz.querySelector('.v3d-robo-app-overlay')) return;
+    if (!mount) document.exitPointerLock?.();
+    const TIPOS_ROBO = ['robo', 'robo-limpeza', 'robo-copa', 'robo-recepcionista'];
+    const robos = (this._map.objects || []).filter((o) => TIPOS_ROBO.includes(o.tipo));
+    const andarDoMonitor = Mapping.getAndarDaEntidade(monitorObj, this._map);
+    // Agrupa por andar (Mapping.getAndarDaEntidade devolve `null` quando o
+    // mapa não tem nenhum "Piso" plantado ainda — ver mapping.js — nesse
+    // caso todos os robôs caem num único grupo "Sem andar definido").
+    const porAndar = new Map();
+    for (const r of robos) {
+      const andar = Mapping.getAndarDaEntidade(r, this._map);
+      const chave = andar == null ? 'sem-andar' : String(andar);
+      if (!porAndar.has(chave)) porAndar.set(chave, []);
+      porAndar.get(chave).push(r);
+    }
+    const chaveDestaque = andarDoMonitor == null ? 'sem-andar' : String(andarDoMonitor);
+    const pisos = Mapping.getPisos(this._map);
+    const labelAndar = (chave) => {
+      if (chave === 'sem-andar') return 'Sem andar definido';
+      const i = Number(chave);
+      return pisos[i]?.nome || `Andar ${i + 1}`;
+    };
+
+    const overlay = document.createElement('div');
+    overlay.className = 'map2d-componentpanel-confinado v3d-robo-app-overlay';
+    // Windowed (dentro da "janela" do modo computador): mesma aparência,
+    // sem `z-index`/`inset:0` fixo travando o resto da área de trabalho —
+    // o próprio `mount` (corpo da janela) já cuida do tamanho/posição.
+    overlay.style.cssText = mount
+      ? 'position:relative; width:100%; height:100%; background:#0a0d11; overflow-y:auto; padding:14px; color:var(--text, #e8e8e8); font-size:13px; box-sizing:border-box;'
+      : 'position:absolute; inset:0; z-index:85; background:#0a0d11; overflow-y:auto; padding:14px; color:var(--text, #e8e8e8); font-size:13px;';
+
+    const grupoHtml = (chave, destaque) => {
+      const lista = porAndar.get(chave) || [];
+      const itensHtml = lista.map((r) => `
+        <div class="v3d-robo-item" data-robo-id="${r.id}" style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 10px; margin:4px 0; border:1px solid var(--border,#2a3038); border-radius:8px; cursor:pointer; background:rgba(255,255,255,0.03)">
+          <span>🤖 ${Utils.escapeHtml(window.Icons?.labelForAnyKey?.(r.tipo) || r.tipo)} <span style="opacity:.6; font-family:monospace; font-size:11px">#${Utils.escapeHtml(String(r.id).slice(-6))}</span></span>
+          <span style="opacity:.6">›</span>
+        </div>`).join('') || `<div style="opacity:.6; padding:6px 10px">Nenhum robô neste andar.</div>`;
+      return `
+        <details class="v3d-robo-grupo" data-andar="${chave}" ${destaque ? 'open' : ''} style="margin-bottom:10px; border:1px solid var(--border,#2a3038); border-radius:8px; padding:8px 10px">
+          <summary style="cursor:pointer; font-weight:700">${destaque ? '📍 ' : ''}${Utils.escapeHtml(labelAndar(chave))} (${lista.length})${destaque ? ' — este computador' : ''}</summary>
+          <div style="margin-top:6px">${itensHtml}</div>
+        </details>`;
+    };
+
+    const outrasChaves = [...porAndar.keys()].filter((k) => k !== chaveDestaque);
+    overlay.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px">
+        <div style="font-weight:800; font-size:16px">💻 Monitoramento de Robôs</div>
+        <button type="button" class="btn secondary sm" id="v3d-robo-app-fechar">✕ Fechar aplicativo</button>
+      </div>
+      <p style="opacity:.7; margin:0 0 10px">Robôs de ${Utils.escapeHtml(labelAndar(chaveDestaque))} (andar deste computador) aparecem expandidos por padrão. Clique num robô pra ver detalhes/trajeto.</p>
+      <div id="v3d-robo-grupos">
+        ${grupoHtml(chaveDestaque, true)}
+        ${outrasChaves.length ? `<button type="button" class="btn secondary sm block" id="v3d-robo-ver-todos" style="margin:6px 0">🏢 Ver todos os andares (${outrasChaves.length} outro(s))</button>` : ''}
+        <div id="v3d-robo-outros-andares" class="hidden">${outrasChaves.map((k) => grupoHtml(k, false)).join('')}</div>
+      </div>
+      <div id="v3d-robo-detalhe" style="margin-top:14px"></div>
+    `;
+    raiz.appendChild(overlay);
+    // Botão "✕ Fechar aplicativo" some na versão em janela — quem fecha a
+    // JANELA é o "✕ Fechar" do título dela (ver `_abrirJanelaMonitoramento3D`);
+    // manter os dois seria redundante e confuso dentro de uma janela pequena.
+    if (mount) overlay.querySelector('#v3d-robo-app-fechar').style.display = 'none';
+
+    let intervaloEye = null;
+    const pararEye = () => { if (intervaloEye) { clearInterval(intervaloEye); intervaloEye = null; } };
+
+    const fechar = () => {
+      pararEye();
+      overlay.remove();
+      opts?.onClose?.();
+    };
+    overlay.querySelector('#v3d-robo-app-fechar').onclick = fechar;
+    // Expõe `fechar`/`pararEye` pro chamador em modo janela poder fechar de
+    // fora (botão "✕ Fechar" do título da janela) sem duplicar a lógica de
+    // limpar o intervalo da mini-câmera.
+    overlay._v3dFechar = fechar;
+    overlay.querySelector('#v3d-robo-ver-todos')?.addEventListener('click', (ev) => {
+      overlay.querySelector('#v3d-robo-outros-andares').classList.remove('hidden');
+      ev.target.remove();
     });
+
+    const abrirDetalhe = (roboId) => {
+      pararEye();
+      const robo = (this._map.objects || []).find((o) => o.id === roboId);
+      const painel = overlay.querySelector('#v3d-robo-detalhe');
+      if (!robo) { painel.innerHTML = ''; return; }
+      // [13/09/2026] NOVO — "MODO COMPUTADOR": grava qual robô está sendo
+      // visto NA SESSÃO deste computador (`monitorObj._sessaoComputador`,
+      // campo EFÊMERO — em memória, não persistido no mapa salvo, ver
+      // documentação grande em `_acessarComputador3D`), pra que sair e
+      // reacessar o MESMO computador retome de onde parou (pedido verbatim:
+      // "se o jogador tornar a 'acessar' aquele mesmo computador depois, a
+      // área de trabalho retoma exatamente de onde parou").
+      if (monitorObj) monitorObj._sessaoComputador = { appAberto: true, roboId };
+
+      // [13/09/2026 REESCRITO] Lê o trajeto DIRETO do dado estruturado do
+      // objeto — ver comentário grande em `lerTrajetoEstruturadoDoRobo`
+      // acima. SEM parse de texto/regex/`new Function` nenhum sobre o
+      // Script do robô: funciona pra QUALQUER robô, mesmo com o Script
+      // totalmente reescrito pelo usuário, porque o trajeto não mora mais
+      // dentro do texto do script.
+      const waypoints = this.lerTrajetoEstruturadoDoRobo(robo);
+      const progresso = this._progressoTrajetoRobo(robo); // índice atual, ou null (ver limitação documentada acima)
+
+      const trajetoHtml = !waypoints
+        ? `<p style="opacity:.7">Trajeto ainda não definido <span style="font-size:11px">(abra o painel de propriedades deste robô no Mapa 2D → seção "🗺️ Trajeto do robô" → "➕ Adicionar ponto")</span>.</p>`
+        : `
+          <p style="margin:8px 0 4px; font-weight:600">🗺️ Trajeto / Plano de viagem${progresso != null ? ` — Ponto ${progresso + 1} de ${waypoints.length} (atual)` : ''}</p>
+          ${progresso == null ? `<p style="opacity:.6; font-size:11px; margin:0 0 6px">Progresso não disponível — este robô roda um script que ainda não grava <code>_trajetoIndiceAtual</code> (scripts colados antes desta atualização não têm esse campo).</p>` : ''}
+          <ol style="margin:4px 0 0; padding-left:20px">
+            ${waypoints.map((p, i) => {
+              const visitado = progresso != null && i < progresso;
+              const atual = progresso != null && i === progresso;
+              const estilo = atual ? 'font-weight:700; color:var(--accent,#5bb0ff)' : visitado ? 'opacity:.55; text-decoration:line-through' : '';
+              const marca = atual ? ' ← atual' : visitado ? ' ✓ já feito' : '';
+              const espera = p.esperaMs ? ` — espera ${(p.esperaMs / 1000).toFixed(1)}s` : '';
+              return `<li style="${estilo}">Ponto ${i + 1}: (${p.x.toFixed(1)}, ${p.y.toFixed(1)})${espera}${marca}</li>`;
+            }).join('')}
+          </ol>`;
+
+      painel.innerHTML = `
+        <div style="border-top:1px solid var(--border,#2a3038); padding-top:10px">
+          <div style="display:flex; justify-content:space-between; align-items:center">
+            <div style="font-weight:700">🤖 ${Utils.escapeHtml(window.Icons?.labelForAnyKey?.(robo.tipo) || robo.tipo)}</div>
+            <button type="button" class="btn secondary sm" id="v3d-robo-det-fechar">✕</button>
+          </div>
+          <div style="margin:8px 0; font-family:monospace; font-size:12px; opacity:.8">
+            Posição atual: x=${(robo.x || 0).toFixed(2)}, y=${(robo.y || 0).toFixed(2)}, elevação=${(robo.elevacao || 0).toFixed(2)}
+          </div>
+          ${trajetoHtml}
+          <p style="margin:12px 0 4px; font-weight:600">📷 O que ele está vendo</p>
+          <canvas id="v3d-robo-eye-canvas" width="320" height="180" style="width:100%; max-width:420px; aspect-ratio:16/9; background:#000; border-radius:6px; display:block"></canvas>
+          <p style="opacity:.55; font-size:11px; margin:4px 0 0">Câmera reaproveitada da cena 3D já em uso, atualizada a cada ~300ms (não em tempo real quadro-a-quadro, por custo de renderização).</p>
+        </div>
+      `;
+      painel.querySelector('#v3d-robo-det-fechar').onclick = () => {
+        pararEye();
+        painel.innerHTML = '';
+        if (monitorObj) monitorObj._sessaoComputador = { appAberto: true, roboId: null };
+      };
+      const canvasEye = painel.querySelector('#v3d-robo-eye-canvas');
+      const tick = () => {
+        const fresh = (this._map.objects || []).find((o) => o.id === roboId);
+        if (!fresh || !overlay.isConnected) { pararEye(); return; }
+        this._renderRoboEyeFrame(fresh, canvasEye);
+      };
+      tick();
+      intervaloEye = setInterval(tick, 300);
+    };
+
+    overlay.querySelectorAll('.v3d-robo-item').forEach((item) => {
+      item.addEventListener('click', () => abrirDetalhe(item.dataset.roboId));
+    });
+
+    // [13/09/2026] NOVO — "MODO COMPUTADOR": retoma a sessão anterior deste
+    // MESMO computador, se havia um robô sendo visto quando o app foi
+    // deixado "rodando" (ver `monitorObj._sessaoComputador` gravado acima).
+    if (monitorObj?._sessaoComputador?.roboId) {
+      abrirDetalhe(monitorObj._sessaoComputador.roboId);
+    }
+  },
+
+  /** [13/09/2026] REFATORADO — mesma extração documentada em
+   *  `_showTijoloAglomeradoCard3D`/`_showCameraCard3D`/`_showFotoPinCard3D`/
+   *  `_showObjectCard3DBody` acima e no comentário grande no topo de
+   *  `js/cardsystem.js`. Conteúdo/estilo/wiring completo agora em
+   *  `cards/orphan-patrimonio-card.js` — a checagem "sem entradas, não
+   *  mostra card nenhum" continua aqui (decisão de NÃO montar, não
+   *  conteúdo de card — ver comentário no topo do arquivo do card). */
+  async _showOrphanPatrimonioCard3D(obj) {
+    document.exitPointerLock?.();
+    const entries = obj.itemIds || [];
+    if (!entries.length) return;
+    const ctx = window.ObjectAssets?.buildCtx
+      ? window.ObjectAssets.buildCtx({ view3d: this, DB: window.DB, Utils: window.Utils, map: this._map })
+      : { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map };
+    window.CardSystem?.mount(this._container, 'orphan-patrimonio', obj, ctx);
   },
 
   async _showFlashcard3D(itemRef) {
@@ -9410,13 +12565,28 @@ const View3D = {
       // _surfaceHeightAt/STEP_MAX, e a física de pulo/queda em _update) em
       // cima de uma pilha de objetos mais alta que a própria parede, o que
       // fazia parecer uma "parede invisível infinita" vista de cima dela.
-      // Paredes vão do chão (y=0) até `w.height` (2.6m padrão — ver
-      // Mapping.addWall) — se os PÉS do jogador (`feetY`, passado por
-      // _update) já estão na altura do topo da parede OU mais alto, ele
-      // está literalmente por cima dela, e ESTA parede específica deixa de
-      // bloquear o caminho horizontal (as outras, mais altas que os pés
-      // ainda, continuam bloqueando normalmente).
-      if (feetY >= (w.height ?? 2.6) - 1e-4) continue;
+      //
+      // CORRIGIDO (13/09/2026), bug relatado: "andar em baixo de uma parede
+      // que levita acaba sendo um bloqueio invisível... da parte de baixo
+      // agora" — a conta acima esquecia a BASE vertical da parede: `w.piso`
+      // empilha a parede em `wallBase = piso*2.8` (prédio de vários andares
+      // — ver Mapping.addWall/engine3d.js `pisoY`), então a faixa vertical
+      // de verdade que a parede ocupa é `[wallBase, wallBase + w.height]`,
+      // NUNCA `[0, w.height]` como este teste comparava (`feetY` é sempre
+      // absoluto, ver `cam.y - EYE_HEIGHT`) — uma parede de um andar
+      // superior (piso>0, "levitando" bem acima do chão do andar de baixo)
+      // tinha sua base tratada como se fosse y=0, então bloqueava
+      // horizontalmente QUALQUER altura abaixo de `w.height`, inclusive o
+      // andar inteiro por baixo dela, onde deveria estar livre. Agora: só
+      // bloqueia se os pés estiverem ABAIXO do topo (`wallTop`, mesmo teste
+      // de "por cima dela" de antes, só que relativo à base certa) E a
+      // CABEÇA (aproximada por `feetY + EYE_HEIGHT`) já tiver alcançado a
+      // base da parede — abaixo disso o jogador está literalmente andando
+      // por baixo do vão livre e não deve colidir.
+      const wallBase = (w.piso || 0) * (this._map?.alturaPiso || 2.8);
+      const wallTop = wallBase + (w.height ?? 2.6);
+      if (feetY >= wallTop - 1e-4) continue; // por cima da parede
+      if (feetY + this.EYE_HEIGHT <= wallBase + 1e-4) continue; // por baixo do vão livre (parede levitando)
       const dx = w.x2 - w.x1, dz = w.y2 - w.y1;
       const len2 = dx * dx + dz * dz || 1;
       let t = ((x - w.x1) * dx + (z - w.y1) * dz) / len2;
@@ -9497,7 +12667,11 @@ const View3D = {
       // mesmo valor de antes (ver comentário grande em mapping.js), só que
       // pra escada calcula o degrau exato em que (x,z) cai, permitindo subir
       // andando normalmente (cada degrau bem menor que STEP_MAX, abaixo).
-      const top = Mapping.objectTopHeightAt(o, x, z);
+      // [13/09/2026] alturaPiso do mapa repassado pra escada não usar mais
+      // um valor fixo desconectado do pé-direito real (ver comentário grande
+      // em Mapping.objectTopHeightAt) — pra qualquer objeto que não seja
+      // 'escada' esse argumento extra é simplesmente ignorado.
+      const top = Mapping.objectTopHeightAt(o, x, z, this._map?.alturaPiso);
       if (top <= best) continue; // já achamos algo mais alto (ou igual) nesta mesma varredura
       if (top <= feetY + this.STEP_MAX + 1e-4) best = top; // alcançável andando (degrau) ou já vindo de cima dele
     }
@@ -9508,16 +12682,39 @@ const View3D = {
     if (!this._running) return;
     const delta = Math.min(0.05, (t - this._lastT) / 1000);
     this._lastT = t;
-    // Modelador 3D ativo (js/modeler/*.js) — pedido do usuário (28/08/2026):
-    // o loop do View3D (física/ghosts de construção/RENDER) fica todo em
-    // PAUSA enquanto o modelador está aberto — ele tem seu PRÓPRIO loop de
-    // render (mesma engine/scene/câmera, ver Modeler3D._renderLoop), rodando
-    // sozinho; sem este retorno antecipado os DOIS chamariam
-    // `this._engine.renderer.render(...)` no mesmo quadro (desperdiçando GPU
-    // à toa, mesmo sem quebrar nada visualmente) — mantém `requestAnimationFrame`
-    // encadeado (this._loopHandle) só pra retomar sozinho assim que o
-    // modelador for fechado, sem precisar reiniciar o loop de fora.
-    if (window.Modeler3D?.isActive?.()) { this._loopHandle = requestAnimationFrame((tt) => this._loop(tt)); return; }
+    // [13/09/2026] UNIFICAÇÃO DE LOOPS — pedido do usuário: "integrar loop de
+    // renderização geral com o loop de renderização próprio do Modelador,
+    // motor 3D compartilhado [...] para que não haja conflitos entre eles
+    // [...] Se já há em parte deve ser total." ANTES (pedido original de
+    // 28/08/2026, mantido só como registro histórico): o loop do View3D
+    // (física/ghosts de construção/RENDER) ficava todo em PAUSA enquanto o
+    // Modelador estava aberto (`Modeler3D`, js/modeler/*.js — mesma
+    // engine/scene/câmera), MAS continuava se reagendando sozinho
+    // (`this._loopHandle = requestAnimationFrame(...)`) só pra "estar vivo"
+    // e retomar quando o Modelador fechasse — isso criava DOIS
+    // `requestAnimationFrame` paralelos de verdade (este aqui, girando à
+    // toa; e `Modeler3D._renderLoop`, fazendo o trabalho de verdade),
+    // tecnicamente concorrendo pelo mesmo quadro do navegador pra mexer na
+    // MESMA instância de `Engine3D`/renderer WebGL — um "loop zumbi".
+    // CORRIGIDO: em vez de pular e só se reagendar, este loop AGORA chama
+    // diretamente o trabalho por-quadro do Modelador (`Modeler3D.driveFrame()`
+    // — internamente um no-op se a sessão ativa não for "dirigida de fora",
+    // ver comentário grande em `Modeler3D.enter()`/`driveFrame`, modeler-
+    // core.js) e SÓ DEPOIS se reagenda — exatamente como fazia antes, só que
+    // agora fazendo o trabalho de verdade em vez de girar à toa. Resultado:
+    // esta é a ÚNICA cadeia de `requestAnimationFrame` viva pra esta
+    // instância de `Engine3D`, em qualquer momento — nunca duas rodando de
+    // verdade ao mesmo tempo, nunca nenhuma (`Modeler3D` não cria mais o seu
+    // próprio `requestAnimationFrame` quando é o View3D real quem o abriu).
+    // Física/animações/HUD do View3D (abaixo) continuam INTENCIONALMENTE
+    // pulados enquanto o Modelador está ativo (mesmo comportamento de
+    // sempre) — só o "ficar girando à toa" foi substituído por trabalho de
+    // verdade.
+    if (window.Modeler3D?.isActive?.()) {
+      window.Modeler3D.driveFrame();
+      this._loopHandle = requestAnimationFrame((tt) => this._loop(tt));
+      return;
+    }
     // NOVO (07/09/2026), pedido verbatim: "scripts para os objetos como no
     // Unity... Útil para animações..." — avança as animações registradas via
     // Scripting.tween (ver js/scripting.js), a cada quadro, igual a física
@@ -9759,8 +12956,85 @@ const View3D = {
         if (this._fotoCamBackdropMesh) this._fotoCamBackdropMesh.visible = false;
         this._engine.clearFotoCamBackdropMask?.();
       }
+      // [16/09/2026 UTC] NOVO — as duas rodam ANTES do `render()` de
+      // verdade logo abaixo, porque cada uma decide algo que o `render()`
+      // depende pra desenhar certo neste mesmo quadro: `_trena3DAtualizarOclusao`
+      // liga/desliga `.visible` das medidas já finalizadas (config
+      // "Visibilidade" → "seVisivel"), e `_trena3DAtualizarDestaqueSuprimido`
+      // chama `this._engine.setHoverHighlightSuppressed(...)`, que o
+      // `render()` consulta pra pular (ou não) `_updateHoverHighlight`. Ambos
+      // os métodos saem cedo (sem custo) quando a ferramenta ativa não é
+      // 'trena3d', então é seguro chamar sempre, igual aos outros métodos
+      // `_trena3D*` já chamados aqui no loop.
+      this._trena3DAtualizarOclusao();
+      this._trena3DAtualizarDestaqueSuprimido();
+      // [16/09/2026 UTC] NOVO — ver comentário grande em `_trena3DRebuildLines`
+      // pra causa raiz completa: na PRIMEIRÍSSIMA vez que "Ver em 3D" é
+      // aberto numa aba (Three.js/`Engine3D` ainda terminando de inicializar
+      // de forma assíncrona), a 1ª tentativa de desenhar as medidas salvas
+      // falha cedo (a `scene` do motor ainda não existe) e marca
+      // `_trena3DPendingRebuild`. Tenta de novo AQUI, todo quadro, até
+      // conseguir (a própria `_trena3DRebuildLines` desliga a flag sozinha
+      // assim que tiver sucesso) — resolve sem precisar sair/entrar de novo
+      // no "Ver em 3D".
+      if (this._trena3DPendingRebuild) this._trena3DRebuildLines();
       this._engine.render(renderCam);
+      // [16/09/2026 UTC] NOVO — prévia ao vivo da "📏 Trena 3D" (indicador
+      // de onde o clique vai cair + linha guia tracejada + distância ao
+      // vivo, ver `_trena3DUpdatePreview`) — mesma cadência dos rótulos já
+      // finalizados logo abaixo (só quando este quadro está de fato sendo
+      // renderizado). O próprio método sai cedo (e esconde tudo) quando a
+      // ferramenta ativa não é 'trena3d', então é seguro chamar sempre.
+      // [16/09/2026 UTC] CORRIGIDO — bug relatado: "Só ao segurar o ctrl é
+      // que o texto da distância laranja fica aparecendo. Ao soltar o ctrl
+      // ou ao clicar (segurando ctrl) [...] o texto [...] desaparece."
+      // CAUSA RAIZ ENCONTRADA: esta chamada rodava DEPOIS de
+      // `_trena3DUpdateLabels(...)` (linha abaixo) — só que é
+      // `_trena3DUpdatePreview()` quem ATUALIZA `dataset.mx/my/mz`/
+      // `style.display` de cada rótulo (`_trena3DLiveHeightLabelEl` etc.)
+      // pra ESTE quadro; `_trena3DUpdateLabels` só LÊ esses valores pra
+      // projetar mundo→tela. Chamando `_trena3DUpdateLabels` ANTES,
+      // ele sempre projetava com os valores do quadro ANTERIOR (atraso de
+      // 1 quadro) — na prática, qualquer troca rápida de estado (segurar/
+      // soltar Ctrl, clicar) podia cair bem no meio dessa defasagem e
+      // "perder" um quadro do rótulo aparecendo/sumindo no lugar certo,
+      // dando a impressão de que ele não acompanha esses eventos direito.
+      // CORRIGIDO: `_trena3DUpdatePreview()` (que decide/atualiza tudo)
+      // agora roda ANTES de `_trena3DUpdateLabels()` (que só projeta),
+      // sempre no MESMO quadro — a mesma ordem lógica já usada em todo o
+      // resto do app (calcular estado primeiro, desenhar depois).
+      this._trena3DUpdatePreview();
+      // [16/09/2026 UTC] BUG CORRIGIDO (2ª vez — a 1ª correção, feita numa
+      // rodada anterior desta mesma sessão, não chegou a "pegar" no
+      // dispositivo por algum motivo não identificado com certeza — ver
+      // comentário grande acima pra causa raiz de verdade: `renderCam` é a
+      // POSE crua da câmera (objeto simples `{x,y,z,yaw,pitch,...}`), NUNCA
+      // uma `THREE.Camera` de verdade — `Vector3.project(camera)` exige
+      // `camera.matrixWorldInverse`/`camera.projectionMatrix`, que só
+      // existem numa câmera THREE real. `this._engine.camera3` é a câmera
+      // THREE de verdade, já atualizada com a pose deste quadro por
+      // `this._engine.render(renderCam)`, logo acima.
+      this._trena3DUpdateLabels(this._engine?.camera3);
       Perf.markFrameEnd();
+      // [13/09/2026] NOVO — pedido verbatim: "Entre eles [posição X/Y/Z e
+      // FPS], coloque a quantidade de objetos que está sendo renderizada
+      // naquele frame." Lido AQUI, logo depois de `this._engine.render(...)`
+      // ter chamado `renderer.render()` de verdade — `renderer.info.render`
+      // (base de `getRenderInfo()`, engine3d.js) é zerado/recalculado pelo
+      // three.js a cada `renderer.render()`, então reflete exatamente este
+      // quadro que acabou de ser desenhado. Mostra os DOIS números (pedido
+      // do usuário, "use seu julgamento... deixar isso claro e útil pro
+      // usuário diagnosticar performance"): a contagem "lógica" de objetos
+      // do catálogo (igual ao 2D, sempre a mesma não importa quanto está na
+      // tela) E os draw calls REAIS mandados pra GPU neste quadro — que é o
+      // número que realmente cai quando InstancedMesh agrupa objetos e
+      // frustum/distância culling descartam o que está fora de vista (ver
+      // `_rebuildInstancedPools`/`_updateDistanceCulling`, engine3d.js).
+      const objEl = this._container?.querySelector('#v3d-objcount');
+      if (objEl) {
+        const ri = this._engine.getRenderInfo?.();
+        objEl.textContent = ri ? `Objetos: ${ri.pickables} (${ri.drawCalls} draw calls)` : '';
+      }
       // O "fps" do HUD reflete o RENDER de verdade (respeitando o limite
       // configurado), não a frequência do requestAnimationFrame em si — senão
       // o número mostrado continuaria em ~60fps mesmo com um limite mais
@@ -9942,6 +13216,307 @@ const View3D = {
     (this._map.portas || []).forEach(tick);
     (this._map.janelas || []).forEach(tick);
     (this._map.walls || []).forEach(tick);
+    // [13/09/2026] NOVO — depois de TODOS os Update() acima já terem rodado
+    // (podem ter mudado obj.x/obj.y/obj.elevacao/obj.angulo), reflete esses
+    // valores nas malhas de verdade — ver comentário grande em
+    // `Engine3D._syncScriptedObjectTransforms` (js/engine3d.js) pro porquê
+    // disto ser necessário (objetos animados por Script são excluídos do
+    // pool de InstancedMesh bem ali, exatamente por causa disto).
+    this._engine?._syncScriptedObjectTransforms?.(this._map);
+    // [13/09/2026] NOVO — parte "viva" do modelo de câmera "PS1" (gira a
+    // cabeça/lente conforme `cam.anguloLente` + pisca o LED vermelho) — ver
+    // comentário grande em `Engine3D._updateCamerasLive` (js/engine3d.js).
+    // Mesmo lugar/ordem de sempre: depois do Update() dos scripts já ter
+    // rodado neste quadro (pode ter mudado `cam.anguloLente`).
+    this._engine?._updateCamerasLive?.(dt);
+    // [14/09/2026] NOVO — anima a folha de qualquer porta cujo
+    // `el.anguloAbertura` esteja sendo controlado por um Script (ver
+    // `Engine3D._updateDoorAnimations`/js/components.js) — mesmo lugar de
+    // sempre, DEPOIS do Update() dos scripts já ter rodado (pode ter mudado
+    // `el.anguloAbertura` neste quadro).
+    this._engine?._updateDoorAnimations?.(dt);
+    // [15/09/2026] NOVO — gira os ponteiros de todo relógio da cena
+    // conforme a hora ATUAL do mundo (`window.RelogioMundo`) — ver
+    // comentário grande em `Engine3D._updateRelogiosParede` (js/engine3d.js).
+    // Mesmo lugar/ordem de sempre (depois do Update() dos scripts).
+    this._engine?._updateRelogiosParede?.(dt);
+  },
+
+  /** [13/09/2026] NOVO — "carro dirigível" (pedido verbatim: "Faça um
+   *  carro, que é possível entrar nele e sair andando [...] considerando a
+   *  inércia de movimento"). Chamado por `assets/modelos/carro.model.js
+   *  onModelClick` quando o jogador clica num objeto `tipo:'carro'` e
+   *  NINGUÉM está dirigindo ainda (`ctx.view3d._carroControlado` nulo —
+   *  checado no próprio Modelo, ver lá, pra não abrir 2 carros ao mesmo
+   *  tempo). Guarda a pose COMPLETA do jogador (x/y/z/yaw/pitch de
+   *  `this._camera`) em `_posAntesDoCarro` pra restaurar exatamente ao
+   *  sair (`_sairDoCarro`), e liga `_carroControlado = entity` — a partir
+   *  daqui, `_update` (guard logo no topo) para de processar WASD/
+   *  gravidade do jogador e passa a chamar `_updateCarrosControlados`/
+   *  `_updateCarroCamera` todo quadro em vez disso. Garante `entity.
+   *  _velocidade` inicializado (0 = carro parado) — não reseta se o carro
+   *  já tinha velocidade de uma sessão de condução anterior (ex.: o
+   *  usuário saiu e entrou de novo rapidamente; comportamento mais
+   *  natural que "zerar" a velocidade toda vez). */
+  _entrarNoCarro(entity) {
+    if (!entity || this._carroControlado) return; // defensivo — o Modelo já checa antes de chamar, mas nunca custa checar de novo aqui (única porta de entrada real)
+    const cam = this._camera;
+    this._posAntesDoCarro = { x: cam.x, y: cam.y, z: cam.z, yaw: cam.yaw, pitch: cam.pitch };
+    this._carroControlado = entity;
+    if (entity._velocidade === undefined) entity._velocidade = 0;
+    if (entity.angulo === undefined) entity.angulo = 0;
+    Utils.toast?.('🚗 Dirigindo — W/S acelera/freia, A/D vira, "E" sai', { duration: 2200 });
+  },
+
+  /** [13/09/2026] NOVO — contraparte de `_entrarNoCarro` acima: chamada
+   *  pelo handler de teclado ("E", ver `_bindDesktopControls` onKeyDown)
+   *  enquanto `_carroControlado` está ativo. Zera `_carroControlado`
+   *  (devolvendo o controle normal — WASD/pointer-lock/gravidade — pro
+   *  jogador já no PRÓXIMO quadro, ver guard no topo de `_update`),
+   *  desliga o som do motor (`AudioFX.tocarSomMotorCarro(false, 0)`, senão
+   *  ficaria zumbindo pra sempre depois de sair) e reaparece o jogador A
+   *  PÉ ao lado do carro — pedido verbatim: "o jogador reaparece a pé do
+   *  lado do carro (offset lateral fixo, ex.: 2m à esquerda da posição
+   *  atual do carro)". "Esquerda do carro" calculado a partir do
+   *  `entity.angulo` ATUAL (pode ter girado desde que entrou) usando a
+   *  MESMA convenção cos/sin de `_updateCarrosControlados` abaixo (ver
+   *  comentário grande lá pra a prova/citações do resto do código que
+   *  fixam essa convenção): o vetor "direita" do carro em coordenadas de
+   *  mundo é `(cos(angulo+90°), sin(angulo+90°))` — "esquerda" é o
+   *  oposto, por isso o `-1` no raio abaixo. Mantém `entity._velocidade`
+   *  como estava (não zera o carro "abandonado" — ele fica parado ali,
+   *  pronto pra ser dirigido de novo mais tarde, com a física retomando
+   *  de onde ficou se o jogador voltar rápido, embora na prática ninguém
+   *  mais aplique aceleração nele enquanto ninguém dirige, então na
+   *  prática ele só continua com a MESMA velocidade guardada até alguém
+   *  entrar de novo — sem fricção nem física alguma rodando pra um carro
+   *  sem condutor, mesmo documentado como limitação abaixo). */
+  _sairDoCarro() {
+    const entity = this._carroControlado;
+    if (!entity) return;
+    this._carroControlado = null;
+    window.AudioFX?.tocarSomMotorCarro?.(false, 0);
+    const OFFSET_LATERAL = 2; // metros — pedido verbatim ("ex.: 2m à esquerda")
+    const angulo = entity.angulo || 0;
+    // "Direita" do carro em coordenadas de mundo, MESMA convenção
+    // cos/sin usada pra mover o carro (ver `_updateCarrosControlados`):
+    // ângulo+90° gira o vetor "frente" (cos,sin) 90° pro lado direito.
+    const dirX = Math.cos(angulo + Math.PI / 2), dirZ = Math.sin(angulo + Math.PI / 2);
+    const px = entity.x - dirX * OFFSET_LATERAL; // "- direita" = esquerda
+    const pz = entity.y - dirZ * OFFSET_LATERAL;
+    // Altura dos pés: usa a superfície real sob o ponto de saída (mesma
+    // função já usada pela física normal do jogador, `_surfaceHeightAt`)
+    // em vez de copiar a altura salva antes de entrar (que pode ter sido
+    // em cima de um degrau/objeto diferente de onde o carro está agora,
+    // já que o carro pode ter se movido bastante).
+    const surfaceY = this._surfaceHeightAt(px, pz, 0);
+    const cam = this._camera;
+    cam.x = px; cam.z = pz; cam.y = surfaceY + this.EYE_HEIGHT;
+    // Olhando na mesma direção que o carro está apontando (mais natural
+    // que restaurar o yaw de ANTES de entrar, que pode estar olhando pra
+    // "trás" do carro depois dele ter girado bastante dirigindo).
+    cam.yaw = angulo;
+    cam.pitch = this._posAntesDoCarro ? this._posAntesDoCarro.pitch : 0;
+    this._posAntesDoCarro = null;
+    this._grounded = true;
+    this._vel.y = 0;
+    Utils.toast?.('🚶 Fora do carro', { duration: 1400 });
+  },
+
+  /** [13/09/2026] NOVO — física de INÉRCIA do carro sendo dirigido, mesmo
+   *  padrão de "chamado todo quadro por `_update`" dos outros sistemas
+   *  deste arquivo (WASD normal, autopilot etc.) — só que só roda enquanto
+   *  `this._carroControlado` está setado (ver guard em `_update`, logo
+   *  acima na função). Lê `this._keys` (o MESMO objeto já preenchido pelo
+   *  handler de teclado de sempre, `onKeyDown`/`onKeyUp` em
+   *  `_bindDesktopControls`) reaproveitando W/S/A/D e as setas — as MESMAS
+   *  teclas do andar a pé, "MAS só quando _carroControlado estiver ativo"
+   *  (pedido verbatim) — o que já é garantido aqui, já que este método só
+   *  é chamado dentro do `if (this._carroControlado)` de `_update`.
+   *
+   *  FÓRMULAS EXATAS (documentadas aqui pra não precisar caçar no código):
+   *
+   *  1) Acelerar (W/ArrowUp): `entity._velocidade = Math.min(entity.
+   *     _velocidade + ACELERACAO*dt, VELOCIDADE_MAXIMA)` — ACELERACAO=4
+   *     m/s², VELOCIDADE_MAXIMA=20 m/s (72 km/h).
+   *
+   *  2) Frear/ré (S/ArrowDown): decai/inverte MAIS RÁPIDO que a fricção
+   *     natural (item 3) — `entity._velocidade = Math.max(entity.
+   *     _velocidade - FREADA*dt, -VELOCIDADE_MAXIMA_RE)` — FREADA=8 m/s²
+   *     (2x a aceleração — "decai mais rápido"), VELOCIDADE_MAXIMA_RE=8
+   *     m/s (marcha-ré mais lenta que a frente, "velocidade máxima
+   *     menor", pedido verbatim).
+   *
+   *  3) Nenhuma das duas pressionada (soltou o acelerador — CERNE do
+   *     pedido: "ao tirar o pé do acelerador, o carro não para do nada"):
+   *     fricção por decaimento EXPONENCIAL suave, não linear —
+   *     `entity._velocidade *= Math.pow(FRICCAO, dt)` — FRICCAO=0.4 (uma
+   *     base <1 elevada a `dt` decai suave e continuamente, mais devagar
+   *     em quadros mais curtos, sem "degrau" perceptível entre quadros de
+   *     durações diferentes — mesma técnica de decaimento exponencial já
+   *     usada alhures no projeto pra suavizações por quadro). Zera de vez
+   *     (`entity._velocidade = 0`) quando `Math.abs(velocidade) < 0.05`
+   *     pra não deixar um resíduo infinitesimal pra sempre (decaimento
+   *     exponencial nunca chega EXATAMENTE a zero sozinho).
+   *
+   *  4) Virar (A/D/ArrowLeft/ArrowRight): SÓ gira `entity.angulo` PROPORCIONAL
+   *     à velocidade atual — carro parado (`velocidade≈0`) NÃO gira no
+   *     lugar (pedido verbatim) — fórmula exata:
+   *       fatorVelocidade = Math.max(PISO_VIRA, Math.abs(velocidade) / VELOCIDADE_MAXIMA)
+   *       entity.angulo += VELOCIDADE_ANGULAR * dt * Math.sign(velocidade) * fatorVelocidade * (sinalDaTecla)
+   *     PISO_VIRA=0.15 (piso mínimo citado no pedido — "com um piso mínimo
+   *     pra não ficar impossível virar devagar" — sem ele, a quase-zero
+   *     velocidade a curva ficaria imperceptivelmente lenta) só entra em
+   *     jogo quando `Math.abs(velocidade)>=0.05` (senão o carro "parado"
+   *     giraria sozinho por causa só do piso, contradizendo o próprio
+   *     pedido de não girar parado) — VELOCIDADE_ANGULAR=1.6 rad/s (~92°/s
+   *     na curva mais fechada possível). `Math.sign(velocidade)` inverte o
+   *     sentido da curva na marcha-ré (virar "pra esquerda" indo de ré
+   *     esterça o carro pro lado oposto do que indo pra frente, igual um
+   *     carro de verdade fazendo baliza).
+   *
+   *  5) Posição (`entity.x`/`entity.y`, coordenadas do MAPA — não
+   *     confundir `entity.y` do mapa com a ALTURA 3D, que pra objetos do
+   *     chão é sempre 0/baseY): `entity.x += Math.cos(entity.angulo) *
+   *     velocidade * dt; entity.y += Math.sin(entity.angulo) * velocidade
+   *     * dt;` — CONVENÇÃO CONFIRMADA lendo o resto do projeto ANTES de
+   *     escrever isto (pedido explícito: "CONFIRME a convenção certa"):
+   *     `objAnguloToRotY(angulo) = -angulo` (engine3d-profiles.js) já
+   *     documenta que `obj.angulo` é o ângulo do PLANO 2D do mapa (não o
+   *     `yaw` de câmera do Three.js, outra convenção) — e todo lugar do
+   *     projeto que já converte esse MESMO ângulo pra um deslocamento X/Y
+   *     de mundo usa exatamente `cos()` pro eixo X e `sin()` pro eixo Y
+   *     (ver js/view3d.js, os cálculos de "ponto ao longo da mira travada"
+   *     em ~2 lugares: `px = piv.x + Math.cos(angulo)*dist`, `pz = piv.z +
+   *     Math.sin(angulo)*dist` — `pz` ali é o MESMO eixo que `entity.y` do
+   *     mapa, ver mapeamento `_camera.z = obj.y` documentado no topo deste
+   *     arquivo/`_camera` — mesma base usada por `mapping.js`/`mapview.js`
+   *     em outra dúzia de lugares para rotacionar bounding boxes). Usar
+   *     sin/cos TROCADOS (a convenção de yaw de câmera do Three.js,
+   *     diferente desta) inverteria os eixos e faria o carro andar de
+   *     lado em vez de na direção que aponta — por isso a checagem extra
+   *     aqui antes de escrever.
+   *
+   *  LIMITAÇÕES HONESTAS (pedido explícito pra documentar, NÃO tentar
+   *  resolver nesta rodada — risco alto sem poder testar ao vivo):
+   *    - SEM colisão do carro contra paredes/outros objetos — ele
+   *      atravessa tudo livremente. Colisão veicular de verdade (contra a
+   *      malha das paredes, como `_resolveCollision` já faz pro jogador a
+   *      pé) é uma pendência de física mais avançada, propositalmente
+   *      fora de escopo desta rodada.
+   *    - SEM suspensão nem inclinação visual em curva (o corpo do carro
+   *      não se inclina/balança) — puramente um retângulo rígido girando
+   *      no plano.
+   *    - Câmera de terceira pessoa (`_updateCarroCamera`) É SIMPLIFICADA:
+   *      recalculada do zero a cada quadro a partir de `entity.x/y/
+   *      angulo`, sem NENHUMA colisão contra paredes atrás do carro (pode
+   *      atravessar uma parede pra manter a distância fixa atrás do
+   *      carro, ao contrário da câmera em 1ª pessoa normal, que usa
+   *      `_resolveCollision`). */
+  _updateCarrosControlados(dt) {
+    const entity = this._carroControlado;
+    if (!entity) return;
+    const ACELERACAO = 4;         // m/s²
+    const VELOCIDADE_MAXIMA = 20; // m/s (~72 km/h)
+    const FREADA = 8;             // m/s² — 2x a aceleração, "decai mais rápido" (pedido verbatim)
+    const VELOCIDADE_MAXIMA_RE = 8; // m/s — marcha-ré mais lenta (pedido verbatim: "velocidade máxima menor")
+    const FRICCAO = 0.4;          // base do decaimento exponencial (Math.pow(FRICCAO, dt)) ao soltar o acelerador
+    const VELOCIDADE_ANGULAR = 1.6; // rad/s na curva mais fechada (velocidade == VELOCIDADE_MAXIMA)
+    const PISO_VIRA = 0.15;       // fração mínima de VELOCIDADE_ANGULAR aplicada mesmo em baixa velocidade (pedido verbatim: "piso mínimo pra não ficar impossível virar devagar")
+
+    const acelerar = this._keys.KeyW || this._keys.ArrowUp;
+    const frear = this._keys.KeyS || this._keys.ArrowDown;
+    let v = entity._velocidade || 0;
+    if (acelerar && !frear) {
+      v = Math.min(v + ACELERACAO * dt, VELOCIDADE_MAXIMA);
+    } else if (frear && !acelerar) {
+      v = Math.max(v - FREADA * dt, -VELOCIDADE_MAXIMA_RE);
+    } else {
+      // Nenhuma das duas (ou as duas juntas, empate proposital tratado
+      // como "soltou tudo") — fricção suave, CERNE do pedido ("ao tirar o
+      // pé do acelerador, o carro não para do nada").
+      v *= Math.pow(FRICCAO, dt);
+      if (Math.abs(v) < 0.05) v = 0;
+    }
+    entity._velocidade = v;
+
+    // Virar — só se o carro já tem alguma velocidade (pedido verbatim:
+    // "carro parado NÃO gira no lugar"); ver comentário grande acima do
+    // método pra fórmula completa/citações.
+    const virarEsquerda = this._keys.KeyA || this._keys.ArrowLeft;
+    const virarDireita = this._keys.KeyD || this._keys.ArrowRight;
+    if (Math.abs(v) >= 0.05 && (virarEsquerda !== virarDireita)) {
+      const fatorVelocidade = Math.max(PISO_VIRA, Math.abs(v) / VELOCIDADE_MAXIMA);
+      const sinalTecla = virarEsquerda ? -1 : 1;
+      entity.angulo = (entity.angulo || 0) + VELOCIDADE_ANGULAR * dt * Math.sign(v) * fatorVelocidade * sinalTecla;
+    }
+
+    // Posição — ver comentário grande acima do método pra a prova da
+    // convenção cos(X)/sin(Y) usada aqui.
+    const angulo = entity.angulo || 0;
+    entity.x = (entity.x || 0) + Math.cos(angulo) * v * dt;
+    entity.y = (entity.y || 0) + Math.sin(angulo) * v * dt;
+
+    // Som do motor (AudioFX.tocarSomMotorCarro, js/audio.js) — só "ligado"
+    // (oscilador de verdade tocando) quando `velocidade>0.1` (pedido
+    // verbatim: "enquanto _carroControlado ativo e velocidade>0.1") —
+    // abaixo disso, motor "desligado" (silêncio), mesmo o carro ainda
+    // tendo um resíduo de velocidade sub-limiar decaindo.
+    window.AudioFX?.tocarSomMotorCarro?.(Math.abs(v) > 0.1, v);
+  },
+
+  /** [13/09/2026] NOVO — câmera de TERCEIRA PESSOA simplificada enquanto
+   *  `_carroControlado` está ativo — pedido verbatim: "a forma MAIS
+   *  SIMPLES e segura: câmera em terceira pessoa simples, posicionada
+   *  atrás e um pouco acima do carro, olhando na direção dele —
+   *  recalculada a cada frame a partir de entity.x/entity.y/entity.angulo,
+   *  sem precisar reescrever o sistema de pointer-lock/FPS existente, só
+   *  'congelando' o controle normal do jogador enquanto _carroControlado
+   *  estiver setado". Reaproveita a MESMA `this._camera` (x/y/z/yaw/pitch)
+   *  que o pointer-lock/renderer de sempre já leem pra desenhar o quadro —
+   *  não precisa de nenhuma THREE.Camera nem lógica de render separada,
+   *  só reposiciona os mesmos 5 números todo quadro (mesmo truque já usado
+   *  por `_orbCamMode`/`_camMode`/`_fotoCamMode` acima, que também
+   *  "sequestram" `this._camera` temporariamente). SEM colisão de câmera
+   *  contra paredes atrás do carro — ver LIMITAÇÕES no comentário grande
+   *  de `_updateCarrosControlados`. */
+  _updateCarroCamera() {
+    const entity = this._carroControlado;
+    if (!entity) return;
+    const DIST_ATRAS = 6.5;  // metros atrás do carro
+    const ALTURA_ACIMA = 2.4; // metros acima do "chão" do carro
+    const ALTURA_MIRA = 1.1; // olha um pouco acima do centro do carro (não direto no chão)
+    const angulo = entity.angulo || 0;
+    // "Atrás" do carro em coordenadas de mundo: o oposto do vetor
+    // "frente" (cos,sin) usado pra mover o carro em
+    // `_updateCarrosControlados` — mesma convenção, só invertida (-1).
+    const dirX = Math.cos(angulo), dirZ = Math.sin(angulo);
+    const baseY = (entity.piso || 0) * (this._map?.alturaPiso || 2.8) + (entity.elevacao || 0);
+    const cam = this._camera;
+    cam.x = entity.x - dirX * DIST_ATRAS;
+    cam.z = entity.y - dirZ * DIST_ATRAS;
+    cam.y = baseY + ALTURA_ACIMA;
+    // Yaw da câmera de VISÃO (`Cam3DMath.cameraForwardFlat`, convenção
+    // DIFERENTE de `entity.angulo` do mapa) — derivado batendo as duas
+    // fórmulas: `cameraForwardFlat(yaw) = (-sin(yaw), cos(yaw))` (engine3d.js
+    // rotY) precisa ser igual ao vetor de movimento do carro usado em
+    // `_updateCarrosControlados`, `(cos(angulo), sin(angulo))` — resolvendo
+    // `-sin(yaw)=cos(angulo)` e `cos(yaw)=sin(angulo)` simultaneamente dá
+    // `yaw = angulo - 90°`. Sem essa conta batendo, a câmera olharia 90°
+    // torta em relação pra onde o carro realmente anda.
+    cam.yaw = angulo - Math.PI / 2;
+    // Pitch fixo, levemente pra baixo (olhando o carro de cima/atrás, não
+    // reto no horizonte) — calculado geometricamente a partir da diferença
+    // de altura/distância entre a câmera e o ponto mirado (o carro), não
+    // um valor "chutado", pra continuar coerente se `DIST_ATRAS`/
+    // `ALTURA_ACIMA` mudarem no futuro.
+    // `cameraForward`/`rotX` (engine3d.js Cam3DMath) definem `pitch`
+    // POSITIVO como "olhando pra BAIXO" (d.y = -sin(pitch)) — a câmera
+    // fica ACIMA do ponto mirado aqui, por isso `cam.y - alvo` (positivo)
+    // no numerador, não o contrário (senão a câmera olharia pro CÉU em
+    // vez do carro).
+    const alvoY = baseY + ALTURA_MIRA;
+    cam.pitch = Math.atan2(cam.y - alvoY, DIST_ATRAS);
   },
 
   /** NOVO (07/09/2026), pedido verbatim: "blocos de construção". Acha o
@@ -10471,6 +14046,35 @@ const View3D = {
     // TODO ScriptComponent ativo (ver _updateScriptLifecycle acima) —
     // roda TODO quadro, independente de proximidade/clique.
     this._updateScriptLifecycle(delta);
+    // [13/09/2026] NOVO — "carro dirigível": enquanto `_carroControlado`
+    // estiver ativo, o controle NORMAL do jogador (WASD/gravidade/pulo,
+    // todo o resto desta função abaixo) fica CONGELADO — mesmo espírito
+    // do guard `_orbCamMode` mais acima (`return` antecipado evita
+    // processamento/efeitos colaterais inúteis) — e em vez disso a física
+    // de inércia do carro + a câmera de terceira pessoa são atualizadas
+    // por `_updateCarrosControlados`/`_updateCarroCamera` (ver comentário
+    // grande no primeiro, pra fórmulas exatas de aceleração/fricção/
+    // virada, e LIMITAÇÕES honestas: sem colisão do carro contra paredes,
+    // sem suspensão/inclinação em curva, câmera sem colisão contra
+    // paredes atrás do carro). Colocado DEPOIS de `_updateScriptLifecycle`
+    // de propósito — scripts de outros objetos (portas automáticas,
+    // relógios, câmeras PS1 etc.) continuam rodando normalmente enquanto
+    // o jogador dirige, só o PRÓPRIO jogador para de responder a WASD.
+    if (this._carroControlado) {
+      this._updateCarrosControlados(delta);
+      this._updateCarroCamera();
+      return;
+    }
+    // [13/09/2026] NOVO — "MODO COMPUTADOR": mesmo espírito do guard do carro
+    // acima — enquanto `_computadorAcessado` está ativo, o controle normal do
+    // jogador (WASD/gravidade/pulo) fica CONGELADO; a câmera fica parada, fixa
+    // em frente ao monitor (posicionada uma única vez por `_acessarComputador3D`,
+    // sem precisar de um "_updateComputadorCamera" por quadro — diferente do
+    // carro, o monitor não se move). Scripts de outros objetos continuam
+    // rodando normalmente (`_updateScriptLifecycle` já rodou acima).
+    if (this._computadorAcessado) {
+      return;
+    }
     // NOVO (07/09/2026), pedido verbatim: "blocos de construção [...] Ao
     // segurar o ctrl, vai adicionando um após o outro no mesmo nível de
     // altura [...] Para continuar adicionando tijolos [...] o importante é

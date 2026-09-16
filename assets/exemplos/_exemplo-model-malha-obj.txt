@@ -1,0 +1,51 @@
+/* assets/modelos/_exemplo-model-malha-obj.txt
+ * [15/09/2026 UTC] NOVO — exemplo de uso do campo `malhaEstatica` (ver
+ * comentário grande em `ObjectAssets.registerModel`, js/objectassets.js, e
+ * no topo de js/objmeshsource.js). Pedido verbatim do usuário:
+ * "Atualmente os modelos 3D ficam em 'assets/modelos' com o nome
+ * padronizado '<nome-do-modelo>.model.js'. A malha de pontos como um
+ * arquivo '.obj'. Há algum jeito de apenas renomear o '.obj' para '.js',
+ * fazendo algum parser interno lê-lo de modo diferente para não
+ * considerá-lo como javaScript, mesmo sendo '.js'? A malha do objeto (o
+ * '.obj' dele) deve ficar em um arquivo separado e ser endereçado em
+ * '<nome-do-modelo>.model.js', mas deve continuar funcionando com o
+ * protocolo 'file:///'."
+ *
+ * ESTE ARQUIVO É SÓ UM EXEMPLO — extensão `.txt` de propósito (mesma
+ * convenção dos outros `_exemplo-*.txt` desta pasta): NÃO é carregado
+ * automaticamente pelo app. Pra usar de verdade:
+ *
+ *   1. Modele o objeto no seu programa de modelagem 3D e exporte como
+ *      `.obj` (Wavefront) — sem material embutido (`.mtl`), sem textura
+ *      (ver limitações no topo de js/objmeshsource.js).
+ *   2. Rode `node ferramentas/obj_para_malha_js.js caminho/do/seu.obj
+ *      <nome-do-tipo>` — gera `assets/modelos/<nome-do-tipo>.malha.js`
+ *      automaticamente (o "embrulho" em JS válido, sem precisar escrever
+ *      nada disso à mão).
+ *   3. Copie o miolo abaixo pra `assets/modelos/<nome-do-tipo>.model.js`
+ *      (o nome do arquivo TEM que bater com o `tipo` do objeto no
+ *      catálogo — mesma regra de sempre).
+ *
+ *   window.ObjectAssets.registerModel('<nome-do-tipo>', {
+ *     malhaEstatica: true, // dispara o carregamento de <nome-do-tipo>.malha.js
+ *     onModelClick(entity, ctx) {
+ *       ctx.view3d._showObjectCard3D(entity);
+ *     },
+ *   });
+ *
+ * `malhaEstatica: true` usa o MESMO nome do tipo pro arquivo de malha
+ * (`<nome-do-tipo>.malha.js`). Pra reaproveitar a mesma malha `.obj` em
+ * VÁRIOS tipos diferentes (ex. duas variantes de cadeira que só mudam de
+ * comportamento, não de geometria), passe uma string:
+ *
+ *   window.ObjectAssets.registerModel('cadeira-executiva', {
+ *     malhaEstatica: 'cadeira', // reaproveita assets/modelos/cadeira.malha.js
+ *   });
+ *
+ * SEM `malhaEstatica` (campo ausente/`false`) — comportamento IDÊNTICO a
+ * antes desta rodada: o tipo continua usando a geometria procedural de
+ * `OBJECT3D_PROFILES`/os builders dedicados de `engine3d.js` (caixa/cone/
+ * etc.), nada muda. Com `malhaEstatica` só a GEOMETRIA muda (vira a malha
+ * do `.obj`) — os hooks (`onModelClick`/`onModelSpawn`/etc.) e todo o
+ * resto do sistema de Modelo continuam funcionando exatamente igual.
+ */

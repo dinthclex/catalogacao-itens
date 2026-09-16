@@ -1,0 +1,98 @@
+/* assets/modelos/_exemplo-model-botoes-customizados.txt
+ * [15/09/2026] NOVO — exemplo de uso da API `onModelCardButtons(entity, ctx)`
+ * (documentação completa no comentário grande do topo de js/objectassets.js,
+ * procure por "BOTÕES DO 'CARD 3D' CONFIGURÁVEIS PELO MODELO"). Pedido
+ * verbatim do usuário: "Os botões que aparecem no card ao clicar nos
+ * objetos, devem ser configuráveis via script do modelo [...] não há um
+ * lugar para definir o que e quais botões aparecem nesse 'card 3D'. Deve
+ * ser possível defini-lo."
+ *
+ * ESTE ARQUIVO É SÓ UM EXEMPLO — extensão `.txt` de propósito (mesma
+ * convenção dos outros `_exemplo-*.txt` desta pasta, ex.
+ * `_exemplo-script-camera-vigilancia.txt`): NÃO é carregado automaticamente
+ * pelo app (só arquivos `<tipo>.model.js` são). Pra usar de verdade, copie
+ * o miolo (a chamada `registerModel`) pra `assets/modelos/<seu-tipo>.model.js`
+ * — o nome do arquivo TEM que bater com o `tipo` do objeto no catálogo.
+ *
+ * O QUE ESTE EXEMPLO FAZ, NAS DUAS FORMAS ACEITAS:
+ *
+ * 1) SÓ ACRESCENTAR um botão novo (forma mais simples — um ARRAY solto),
+ *    sem tirar nenhum botão padrão (histórico, propriedades/scripts,
+ *    modelar em 3D quando ligado continuam aparecendo do jeito de sempre):
+ *
+ *   onModelCardButtons(entity, ctx) {
+ *     return [
+ *       {
+ *         label: '🔔 Tocar campainha',
+ *         title: 'Toca a campainha deste objeto pro prédio inteiro',
+ *         onClick(entity, ctx) {
+ *           // `entity` é o objeto do mapa clicado; `ctx` é o mesmo pacote
+ *           // que onModelClick/onModelSpawn já recebem (ctx.view3d,
+ *           // ctx.DB, ctx.Utils, ctx.map, ctx.Components, ctx.SceneEventBus,
+ *           // ctx.RelogioMundo, etc. — ver `ObjectAssets.buildCtx`).
+ *           ctx.SceneEventBus?.emit?.('campainha', { objId: entity.id });
+ *           alert('Campainha tocada!');
+ *         },
+ *       },
+ *     ];
+ *   }
+ *
+ * 2) SUBSTITUIR um botão PADRÃO (forma `{ remover, adicionar }`) — exemplo
+ *    concreto citado pelo próprio usuário: trocar o botão padrão "💻 Abrir
+ *    aplicativo: Monitoramento de Robôs" (que hoje aparece sozinho pra
+ *    `tipo==='monitor'`/`'monitor2'`, decidido em `_showObjectCard3DBody`,
+ *    js/view3d.js) por um botão diferente, específico deste tipo:
+ *
+ *   onModelCardButtons(entity, ctx) {
+ *     return {
+ *       // ids dos botões PADRÃO a esconder — ver a lista completa (só 3
+ *       // ids existem hoje: 'modelar'/'props'/'robo-app') no comentário
+ *       // grande de js/objectassets.js.
+ *       remover: ['robo-app'],
+ *       adicionar: [
+ *         {
+ *           label: '🖥️ Abrir painel de manutenção',
+ *           title: 'Abre a tela de manutenção deste computador',
+ *           onClick(entity, ctx) {
+ *             // ex.: abrir um overlay próprio, no mesmo `ctx.view3d._container`
+ *             // que o resto dos cartões/painéis do 3D usa.
+ *             console.log('Painel de manutenção do monitor', entity.id);
+ *           },
+ *         },
+ *       ],
+ *     };
+ *   }
+ *
+ * NOTAS:
+ *   - Sem `onModelCardButtons` (a imensa maioria dos `.model.js`), o cartão
+ *     sai IDÊNTICO a antes desta API existir — nada quebra em nenhum
+ *     Modelo já escrito (RETROCOMPATÍVEL por construção).
+ *   - `remover` só aceita os 3 ids de botão PADRÃO acima — "📜 Histórico
+ *     deste objeto" e "Fechar" são estrutura fixa do cartão, não aparecem
+ *     nessa lista (não dá pra removê-los por esta API).
+ *   - Um erro dentro de `onModelCardButtons` ou de um `onClick` de botão
+ *     extra é capturado e logado no console — nunca derruba o cartão
+ *     inteiro (mesmo espírito defensivo do resto de `_showObjectCard3D`).
+ */
+window.ObjectAssets.registerModel('__exemplo_nao_usar_direto__', {
+  id: '__exemplo_nao_usar_direto__',
+  nome: 'Exemplo — botões customizados no card 3D',
+  propriedades: { interativo: true },
+  onModelClick(entity, ctx) {
+    ctx.view3d._showObjectCard3D(entity);
+  },
+  onModelCardButtons(entity, ctx) {
+    return {
+      remover: ['robo-app'],
+      adicionar: [
+        {
+          label: '🖥️ Abrir painel de manutenção',
+          title: 'Abre a tela de manutenção deste computador',
+          onClick(entity, ctx) {
+            console.log('Painel de manutenção do monitor', entity.id);
+          },
+        },
+      ],
+    };
+  },
+});

@@ -1,0 +1,57 @@
+/* assets/modelos/_exemplo-script-elevador-botao.txt
+ * NOVO (13/09/2026) — TAREFA 1 do backlog (painel de chamada do
+ * elevador). AVISO IMPORTANTE, leia antes de colar: o comportamento do
+ * botão de chamada JÁ FUNCIONA SOZINHO, sem precisar de nenhum Script —
+ * ver `assets/modelos/elevador-botao-chamada.model.js` (o `.model.js`
+ * já implementa `onModelClick` chamando `SceneEventBus.emitGlobal` e
+ * ouvindo `elevadorChegou` diretamente, igual `interruptor.model.js`
+ * faz pra luz). Este arquivo `.txt` existe só como REFERÊNCIA/exemplo de
+ * como o MESMO comportamento ficaria escrito como componente "Script"
+ * (caso o usuário queira customizar/duplicar o comportamento num objeto
+ * de tipo diferente, sem editar o `.model.js` fixo do catálogo — mesmo
+ * motivo de existirem os outros arquivos `_exemplo-script-*.txt`).
+ *
+ * COMO USAR (só se você QUISER a versão em Script, em vez do `.model.js`
+ * pronto): adicione um componente Script neste objeto, cole o código
+ * abaixo, e um Gatilho de Evento "Ao Clicar" (onClick) apontando o
+ * método pra `aoClicar`.
+ *
+ * MECANISMO: idêntico ao `.model.js` — usa o barramento GLOBAL de
+ * eventos novo (`SceneEventBus.emitGlobal`/`onGlobalEvent`, ver
+ * comentário grande em js/components.js e em
+ * _exemplo-script-elevador-cabine.txt) pra "conversar" com a(s) cabine(s),
+ * já que botão e cabine são objetos DIFERENTES do mapa.
+ *
+ * [13/09/2026] NOVO — TAREFA 2 do backlog (painel interno/parada de
+ * emergência): este botão EXTERNO continua igual — a novidade fica toda do
+ * lado da cabine (`_exemplo-script-elevador-cabine.txt`, campo
+ * `emergenciaParada` novo). Vale notar, honestamente: se a cabine que
+ * aceitaria esta chamada estiver com `emergenciaParada:true` no momento,
+ * `Update(dt)` dela simplesmente não processa a chamada (ela nem chega a
+ * mudar de estado, porque `_aoOuvirChamada` roda normalmente e grava
+ * `andarDestino`/`estado`, mas o `Update` congela ANTES de mover) — ou
+ * seja, o botão "acende" achando que foi atendido, mas a cabine só de fato
+ * se move quando a parada de emergência for desativada no painel interno.
+ * Nenhuma mudança de código foi necessária aqui pra isso — é consequência
+ * direta do guard já ficar plantado no topo do `Update` da cabine.
+ */
+
+function Start() {
+  if (obj.chamando === undefined) obj.chamando = false;
+  window.SceneEventBus?.onGlobalEvent?.('elevadorChegou', (dados) => {
+    const meuPiso = window.Mapping?.getAndarDaEntidade?.(obj, map) ?? 0;
+    if (dados?.piso !== meuPiso || !obj.chamando) return;
+    obj.chamando = false;
+  });
+}
+
+function Update() {
+  // Nada por quadro — este exemplo só reage a clique/evento global.
+}
+
+function aoClicar() {
+  if (obj.chamando) return; // já chamado, esperando a cabine
+  obj.chamando = true;
+  const piso = window.Mapping?.getAndarDaEntidade?.(obj, map) ?? 0;
+  window.SceneEventBus?.emitGlobal?.('chamarElevador', { piso, idBotao: obj.id });
+}
