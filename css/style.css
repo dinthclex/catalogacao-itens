@@ -3596,7 +3596,7 @@ datalist {}
 
 /* Pedido do usuário (superado pela regra abaixo, mantido só por
    compatibilidade com `Perf.setTopRightCorner`, hoje sem uso). */
-#perf-hud.perf-hud-topright { top: 8px !important; right: 8px !important; transform: none !important; }
+#perf-hud.perf-hud-topright { top: 8px !important; right: 8px !important; transform: none !important; width: fit-content !important; }
 /* Pedido do usuário: "O hud deve ficar no canto superior direito da área do
    canvas, não é do app, para não cobrir o botão de 'configurações do app'.
    E é nos 2 modos (Modelador e normal de navegação)." — `Perf.setCanvasAnchor`
@@ -3605,7 +3605,18 @@ datalist {}
    `position:fixed` inline padrão) faz o `top/right` valerem relativos ao
    canvas, não à janela toda. `!important` necessário pra vencer o
    `position/top/right/transform` que `Perf._buildHud` define inline. */
-#perf-hud.perf-hud-canvas { position: absolute !important; top: 8px !important; right: 8px !important; transform: none !important; }
+/* [16/09/2026 UTC] CORRIGIDO (RODADA 97) — pedido verbatim: "o hud [...] ao
+   ficar no canto da tela, fica com a sua largura esticada até o canto [...]
+   ao arrastá-lo, ele 'volta ao normal'." `width: fit-content !important`
+   adicionado nas 2 classes de "canto" (`perf-hud-topright`/
+   `perf-hud-canvas`) — reforço redundante do mesmo fix já aplicado inline
+   em `Perf._buildHud`/`_applyPos` (js/perf.js), garantindo que nenhuma
+   regra CSS com `!important` (nem `.view3d-wrap`/algum layout flex/grid do
+   container onde o HUD é reparentado) consiga forçar a largura total do
+   canto de volta, independente de qual dos 2 caminhos de ancoragem
+   (canto via `right`, ou posição livre via `left`, depois de arrastar)
+   estiver ativo. */
+#perf-hud.perf-hud-canvas { position: absolute !important; top: 8px !important; right: 8px !important; transform: none !important; width: fit-content !important; }
 .v3d-lockstate-hint {
   position: absolute; top: 0; left: 50%; transform: translateX(-50%);
   background: rgba(255,209,0,.92); color: #1a1a1a; font-size: 12px; font-weight: 600;
@@ -7045,6 +7056,140 @@ body.view-mapa .history-widget { display: none; }
   -webkit-user-select: text !important;
   -moz-user-select: text !important;
 }
+/* [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possível selecionar
+   texto das opções e descrições nas 'configurações 3D'. No cabeçalho deve
+   ter um botão que controla isso." Mesma técnica da regra `--2d` acima, só
+   que como um TOGGLE (classe ligada/desligada por JS via o botão do
+   cabeçalho, 'mc-toggle-selecionavel' em mapconfig.js) em vez de sempre
+   ativa — "Configurações 3D" continua com o comportamento padrão (texto
+   não selecionável, como o resto do "cromo" da interface) até o usuário
+   ativar. */
+.mapconfig-sheet--selecionavel, .mapconfig-sheet--selecionavel * {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+}
+/* [RODADA 131] CORRIGIDO -- pedido verbatim: "No botao 'Ativar selecao de
+   texto das opcoes/descricoes', mesmo estando desativado, esta sendo
+   possivel selecionar alguns textos." CAUSA: a regra generica de "cromo"
+   (topo deste arquivo) so aplica user-select:none a `label`/`select`/
+   `button`/etc -- um texto explicativo (.d) ou rotulo (.t/.lbl) que more
+   FORA de um <label> (ex.: dentro de um <div> solto, como a frase de
+   introducao da antiga "Espessura e cores", ou de varias outras
+   subsecoes) nunca herdava esse `none` e ficava selecionavel o tempo
+   todo, mesmo com o toggle desligado. CORRIGIDO: aplica user-select:none
+   direto em .d/.t/.lbl (onde quer que estejam) sempre que a folha NAO
+   estiver no modo selecionavel/2d -- a regra --selecionavel acima
+   continua vencendo (universal com !important) quando o toggle esta
+   ligado. */
+.mapconfig-sheet:not(.mapconfig-sheet--selecionavel):not(.mapconfig-sheet--2d) .d,
+.mapconfig-sheet:not(.mapconfig-sheet--selecionavel):not(.mapconfig-sheet--2d) .t,
+.mapconfig-sheet:not(.mapconfig-sheet--selecionavel):not(.mapconfig-sheet--2d) .lbl {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+}
+/* [RODADA 132] NOVO -- pedido verbatim: "A linha dos enables (a parte que
+   fica o icone e texto) deve ficar com cursor default. Atualmente esta com
+   cursor pointer." Desde a Rodada 131 o clique nessa linha inteira ja nao
+   alterna mais o enable (so a propria caixinha, ver mapconfig.js
+   '_trena3DAplicarRestricoesEnableETitles') -- o cursor de "clicavel"
+   (`.radio-opt`/`.field` tem `cursor:pointer` generico, usado pelo app
+   inteiro) ficava enganoso especificamente aqui. Escopado só à seção Trena
+   3D (não muda o cursor de nenhum outro `radio-opt`/`field` do app) --
+   `cursor:default` na linha inteira, `cursor:pointer` de volta só no
+   proprio input (checkbox/radio). */
+#mc-trena3d-secoes label.radio-opt,
+#mc-trena3d-secoes label.field {
+  cursor: default;
+}
+#mc-trena3d-secoes label.radio-opt input[type="checkbox"],
+#mc-trena3d-secoes label.radio-opt input[type="radio"] {
+  cursor: pointer;
+}
+/* [17/09/2026 UTC] NOVO -- pedido verbatim (item 6, RODADA 110): "no
+   cabecalho da secao 'Trena 3D', coloque um botao de controle de modo de
+   apresentacao das informacoes: a atual, com desenhos grandes, textos
+   explicativos enormes e muitos espacamentos; e a versao em arvore/lista
+   como uma estrutura de pastas, mas nao faltando em nada [...] (sem
+   desenhos grandes, textos explicativos enormes, nem grandes
+   espacamentos)." Classe ligada por JS (ver mapconfig.js
+   '_wireTrena3DModoArvore') no '.mapconfig-sheet' quando o modo arvore
+   esta ativo -- todos os seletores abaixo sao escopados a
+   '#mc-trena3d-secoes' (o wrapper que envolve só a secao "Trena 3D", ver
+   mapconfig.js) pra nao afetar NENHUMA outra secao da mesma folha de
+   Configuracoes 3D (ex. "Apresentacao"/"Porta e Janela"/"Objeto") nem nada
+   do contexto 2D. NADA de conteudo/campo/id e removido do DOM -- só
+   escondido visualmente (o MESMO HTML de sempre continua ali, então
+   reabrir uma secao no modo arvore mostra exatamente as mesmas opcoes de
+   sempre, "nao faltando em nada"). */
+.mapconfig-sheet--trena3d-arvore #mc-trena3d-secoes .mc-trena3d-preview-icon,
+.mapconfig-sheet--trena3d-arvore #mc-trena3d-secoes .d {
+  display: none !important;
+}
+.mapconfig-sheet--trena3d-arvore #mc-trena3d-secoes .mapconfig-section {
+  padding: 3px 10px !important;
+  margin-bottom: 2px !important;
+}
+.mapconfig-sheet--trena3d-arvore #mc-trena3d-secoes .mapconfig-section > h4 {
+  user-select: none;
+  font-size: 12.5px !important;
+  margin: 0 !important;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* [17/09/2026 UTC] REMOVIDO (RODADA 117) — pedido verbatim: "No modo
+   'árvore', as subseções não devem ser botões. Atualmente, as subseções
+   estão como botões. E devem ficar amostra as opções, pois, estando como
+   botões, ao clicar, algumas opções acabam ficando ocultadas." Antes, CADA
+   subseção (`.mapconfig-section`) virava uma "pasta" clicável que
+   escondia/mostrava todo o próprio conteúdo (regras `> h4::before`
+   ▸/▾ + `> *:not(h4){display:none}` + `.mc-arv-aberta > *{display:revert}`,
+   removidas aqui) — o usuário reportou isso como um bug (opções sumindo
+   sem querer ao clicar no título). Agora, no modo árvore, TODAS as
+   subseções mostram suas opções sempre (só o visual continua compacto —
+   fontes menores, sem `.d`/prévias grandes, ver regras ao redor). A ÚNICA
+   exceção pedida — "a única parte que deve ser um botão de aparece/não
+   aparece [é] na subseção 'Janela de acesso rápido', [...] a parte [...]
+   em que aparece os botões da janelinha" — vira um toggle PRÓPRIO, restrito
+   só àquele bloco (`#mc-trena3d-pr-chips-wrap`), não mais um mecanismo
+   genérico de toda subseção — ver `_wireTrena3DModoArvore` em
+   mapconfig.js. */
+/* [17/09/2026 UTC] NOVO (RODADA 117) — toggle "aparece/não aparece"
+   restrito à lista de botões da janelinha (chips com o ícone de cada botão
+   da "Trena 3D — Janela de acesso rápido"), única exceção pedida — ver
+   comentário grande acima. Fechado por padrão (`display:none`, sem a
+   classe `.mc-pr-chips-aberto`) só nesta lista específica, pra manter o
+   espírito compacto do modo árvore sem esconder NENHUMA outra opção.
+   Funciona nos 2 modos (padrão e árvore) — não depende de
+   `.mapconfig-sheet--trena3d-arvore`, por isso as regras ficam fora do
+   escopo `#mc-trena3d-secoes` acima. */
+#mc-trena3d-pr-chips-wrap {
+  display: none;
+}
+#mc-trena3d-pr-chips-wrap.mc-pr-chips-aberto {
+  display: block;
+}
+.mapconfig-sheet--trena3d-arvore #mc-trena3d-secoes h5.mc-subtitulo {
+  font-size: 10.5px !important;
+  margin: 4px 0 2px !important;
+  padding: 0 !important;
+}
+.mapconfig-sheet--trena3d-arvore #mc-trena3d-secoes .radio-opt,
+.mapconfig-sheet--trena3d-arvore #mc-trena3d-secoes label.field {
+  padding: 1px 0 !important;
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center;
+  gap: 5px;
+}
+.mapconfig-sheet--trena3d-arvore #mc-trena3d-secoes .t {
+  font-size: 11.5px !important;
+}
+.mapconfig-sheet--trena3d-arvore #mc-trena3d-secoes label.field .lbl {
+  font-size: 11px !important;
+}
 /* [15/09/2026 UTC] MUDADO -- pedido verbatim: "Nas configuracoes 2D e 3D,
    as secoes devem ter uma largura maior, se estender de ponta a ponta da
    janela de configuracoes. Deste modo, o que estiver 'dentro' fica como se
@@ -7064,6 +7209,28 @@ body.view-mapa .history-widget { display: none; }
   background: rgba(128, 128, 128, .06);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+}
+/* [16/09/2026 UTC] RODADA 99 -- pedido verbatim: "Coloque uma tira vertical
+   da ponta de cima do box de titulo de uma secao ate a parte extrema de
+   final da secao com 3px de largura para delimitar visualmente do lado
+   esquerdo." Tira decorativa unica (nao ha sistema de cor por secao/emoji
+   ja estabelecido em mapconfig.js -- o padrao aceito pelo usuario quando
+   isso falta), tom cinza-azulado discreto e consistente com o tema escuro,
+   do topo ao fim de CADA .mapconfig-section (a borda ja tem
+   margin:0 -16px, entao a tira acompanha a largura de ponta a ponta ja
+   existente da secao, so que na lateral esquerda).
+   [17/09/2026 UTC] ATUALIZADO (RODADA 117) -- pedido verbatim: "A cor da
+   tira da lateral esquerda deve ser de acordo com a secao [...] cada secao
+   tem a sua cor. A cor deve ser suave, nao muito brilhante ou
+   intensa/viva." O tom fixo abaixo virou só o FALLBACK (section sem <h4>
+   nenhum, caso nunca aconteça na pratica) -- o sistema de cor por
+   secao/grupo que faltava (citado no comentario acima) foi criado em
+   mapconfig.js '_aplicarCoresSecoes'/'_mapConfigCorSecao' (JS, nao CSS --
+   precisa do TEXTO do <h4> de cada secao pra decidir a cor, o que o CSS
+   sozinho nao consegue ler), chamado 1x ao abrir o modal (`open()`) e que
+   sobrescreve este border-left via `style.borderLeftColor` inline. */
+.mapconfig-section {
+  border-left: 3px solid rgba(120, 150, 200, 0.55);
 }
 /* [13/09/2026 UTC] NOVO — pedido verbatim: "Nas 'configurações 3D', na
    seção '🌗 Hora do dia', na 'Trilha de horas do dia' [...] Faça esta
@@ -7188,6 +7355,23 @@ body.view-mapa .history-widget { display: none; }
   border-radius: 8px;
   padding: 7px 10px;
 }
+/* [16/09/2026 UTC] NOVO — pedido verbatim: "Depois disso, a subseção [...]
+   deve se tornar um subtítulo de sua própria subseção." Antigas subseções
+   próprias (cada uma com seu <h4> em faixa clara, ver regra acima) que
+   viraram só um agrupamento DENTRO de uma subseção maior (ex. "📏 Trena 3D
+   — Linhas verticais ancoradas", que passou a reunir 3 grupos de opções
+   que antes eram 3 subseções separadas) usam este <h5> — mais discreto que
+   o <h4> (sem a faixa de fundo clara, que continua reservada para o
+   TÍTULO de verdade da subseção), mas ainda claramente um cabeçalho de
+   agrupamento, com uma linha de separação acima para distinguir de onde
+   termina o grupo anterior. */
+.mapconfig-section h5.mc-subtitulo {
+  margin: 16px 0 8px; padding-top: 12px;
+  border-top: 1px dashed rgba(255,255,255,.14);
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  color: rgba(255,255,255,.6);
+}
+.mapconfig-section h5.mc-subtitulo:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
 .mapconfig-scene-list { max-height: 240px; overflow-y: auto; }
 .mapconfig-scene-group { margin-bottom: 10px; }
 .mapconfig-scene-group-title { font-size: 11.5px; color: var(--text-dim); margin-bottom: 4px; }
@@ -7802,3 +7986,28 @@ body.classic-mode-active .bsp-shell-reset-btn { display: none; }
 }
 .settings-fullscreen-title { font-weight: 700; font-size: 14.5px; }
 .settings-fullscreen-body { flex: 1 1 auto; overflow: auto; }
+/* [16/09/2026 UTC] RODADA 104 — pedido verbatim: "A janelinha está com
+   algum transition ativado, pois ao redimensionar a transição para as
+   novas dimensões é lenta em transição. Elimine este transition (deve ser
+   alguma herança CSS)." INVESTIGADO — nenhuma regra deste arquivo tem um
+   seletor amplo o bastante (tipo `div{...}`/`button{...}`/`*{...}`) pra
+   alcançar `.v3d-trena3d-painel-rapido` ou seus filhos por herança/
+   cascata; o painel e seus botões são construídos 100% via `style` inline
+   em JS (view3d.js), sem nenhuma classe CSS deste arquivo aplicada a eles
+   além desta própria regra nova. Mesmo sem uma causa CSS concreta
+   encontrada (a inspeção não achou nenhuma regra `transition` que sequer
+   pudesse alcançar o painel), esta regra `!important` de alta
+   especificidade é adicionada como garantia definitiva — cobre CADA
+   filho (`*`) do painel, não só ele mesmo — sobrepondo qualquer herança
+   futura ou regra que venha a ser adicionada por engano. Se ainda houver
+   sensação de "lentidão" depois disso, não é uma transição CSS de
+   verdade — é o próprio navegador suavizando o redraw do `width`/`left`
+   sendo mudado a cada `pointermove` do handle de resize (ver
+   `_trena3DWireResizeHandle`, view3d.js) — não há nada a "desligar" nesse
+   caso, é o comportamento normal de renderização do navegador durante um
+   arrasto rápido, não uma animação configurável pelo app. */
+.v3d-trena3d-painel-rapido,
+.v3d-trena3d-painel-rapido * {
+  transition: none !important;
+  animation: none !important;
+}

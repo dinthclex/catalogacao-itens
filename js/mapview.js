@@ -21804,12 +21804,30 @@ const MapView = {
    *  botão "✅ Concluir" no CONTÊINER dela (não dentro da UI do vanishCam
    *  em si), exatamente como pedido. Idempotente — se já estiver aberta,
    *  não abre 2ª vez por cima. */
+  /** [17/09/2026] NOVO — pedido verbatim: "Faça um try{}catch(){} para as
+   *  situações: pasta 'vanishcam' não seja encontrada na raiz do projeto; ou
+   *  se a pasta 'vanishcam' estiver lá, porém vazia; ou se a pasta
+   *  'vanishcam' estiver lá, mas arquivos do vanishcam estão faltando. Caso
+   *  alguma dessas situações aconteça, então, exiba na tela em que deveria
+   *  aparecer o vanishCam um botão de voltar para a tela anterior, e um
+   *  aviso de que o vanishcam não foi encontrado e que pode ser baixado
+   *  pelo link do projeto". As 3 situações batem, na prática, com os
+   *  próprios pontos onde `vanishcam/js/embed-api.js` (que define
+   *  `vanishCamMount`) e o que ELE carrega dinamicamente (ver
+   *  `ensureLoaded()` em embed-api.js) já falham sozinhos: (1) pasta
+   *  inexistente/vazia → a tag `<script src="vanishcam/js/embed-api.js">`
+   *  de index.html dá 404 → `vanishCamMount` nunca é definida (checado
+   *  abaixo, ANTES de criar a tela); (2) pasta presente mas incompleta
+   *  (faltando `js/embed-root-template.js`, `css/style.css` ou algum dos
+   *  demais `js/*.js` da pasta) → `vanishCamMount()` já REJEITA a Promise
+   *  (erro de `<link>`/`<script>` que não carregou, ou a checagem explícita
+   *  de `__VANISHCAM_ROOT_HTML__`/`#vanishcamRoot` dentro de
+   *  `ensureLoaded()`) — só faltava capturar esse erro aqui e mostrar a
+   *  tela de aviso pedida, em vez de só um texto de status. Nenhuma
+   *  mudança em embed-api.js: os erros que ele já lançava são exatamente
+   *  os sinais usados aqui para decidir mostrar o aviso. */
   async _openVanishCamScreen(photoId) {
     if (document.getElementById('vanishcam-screen-overlay')) return;
-    if (typeof vanishCamMount !== 'function') {
-      Utils.toast?.('vanishCam não carregou (vanishcam/js/embed-api.js) — recarregue a página.', { type: 'danger' });
-      return;
-    }
     const el = document.createElement('div');
     el.id = 'vanishcam-screen-overlay';
     el.className = 'vanishcam-screen-overlay';
@@ -21830,6 +21848,21 @@ const MapView = {
       el.remove();
     };
     el.querySelector('#vanishcam-screen-cancelar').onclick = fechar;
+    // pasta 'vanishcam' não encontrada (ou vazia) na raiz do projeto — a
+    // tag <script src="vanishcam/js/embed-api.js"> de index.html deu 404 e
+    // `vanishCamMount` nunca chegou a existir. Mostra o aviso já aqui, sem
+    // sequer tentar montar (não há o que tentar).
+    try {
+      if (typeof vanishCamMount !== 'function') {
+        throw new Error("A pasta 'vanishcam' não foi encontrada na raiz do projeto (ou está vazia) — vanishcam/js/embed-api.js não carregou.");
+      }
+    } catch (e) {
+      console.warn('[vanishCam] indisponível:', e);
+      el.querySelector('.vanishcam-screen-topbar')?.remove();
+      container.innerHTML = this._vanishCamAvisoNaoEncontradoHTML(this._vanishCamClassificarErro(e));
+      container.querySelector('#vanishcam-aviso-voltar').onclick = fechar;
+      return;
+    }
     // "No contêiner dela (a janela) deve ter uma botão para concluir. Ao
     // clicar neste botão de confirmação, as informações da câmera são
     // guardadas e a janela fecha." — ATUALIZADO (09/09/2026), pedido
@@ -21914,9 +21947,93 @@ const MapView = {
       }
       if (statusEl) statusEl.textContent = '';
     } catch (e) {
+      // pasta 'vanishcam' presente mas incompleta (algum dos arquivos que
+      // ensureLoaded() carrega em sequência — css/style.css,
+      // js/embed-root-template.js, ou qualquer um dos demais js/*.js —
+      // faltando/corrompido) — mesmo aviso de "vanishCam não encontrado".
       console.warn('[vanishCam] falha ao montar:', e);
-      if (statusEl) statusEl.textContent = '⚠️ Falha ao carregar o vanishCam.';
+      el.querySelector('.vanishcam-screen-topbar')?.remove();
+      container.innerHTML = this._vanishCamAvisoNaoEncontradoHTML(this._vanishCamClassificarErro(e));
+      container.querySelector('#vanishcam-aviso-voltar').onclick = fechar;
     }
+  },
+
+  /** [17/09/2026] NOVO — pedido verbatim: "Uma caixa deve aparecer
+   *  exatamente o que faltou: a pasta, os arquivos, arquivos corrompidos e
+   *  a mensagem do try{}catch(){}." Classifica o `Error` capturado em
+   *  `_openVanishCamScreen` (tanto o lançado à mão pra pasta ausente/vazia,
+   *  quanto os que o próprio `vanishcam/js/embed-api.js#ensureLoaded()` já
+   *  lançava sozinho — ver os 2 pontos de `throw`/reject citados nos
+   *  comentários de `_openVanishCamScreen`) num resumo direto: qual das 3
+   *  situações foi (pasta ausente/vazia, arquivo faltando — com o nome do
+   *  arquivo exato, extraído da própria mensagem — ou arquivo presente mas
+   *  corrompido/inválido), além da mensagem crua do erro, pra exibir tudo
+   *  isso na caixa de detalhes do aviso. */
+  _vanishCamClassificarErro(e) {
+    const mensagem = (e && e.message) || String(e);
+    let situacao = 'Falha ao carregar o vanishCam.';
+    let arquivo = null;
+    let m;
+    if (/pasta 'vanishcam' não foi encontrada/.test(mensagem)) {
+      situacao = "Pasta faltando: a pasta 'vanishcam/' não existe na raiz do projeto (ou existe, mas está vazia).";
+    } else if ((m = mensagem.match(/falha ao carregar o (?:CSS|script) \(([^)]+)\)/))) {
+      arquivo = m[1];
+      situacao = `Arquivo faltando dentro da pasta 'vanishcam/': ${arquivo}`;
+    } else if (/não definiu __VANISHCAM_ROOT_HTML__/.test(mensagem)) {
+      arquivo = 'vanishcam/js/embed-root-template.js';
+      situacao = `Arquivo corrompido/inválido dentro da pasta 'vanishcam/': ${arquivo} (vazio ou sem o conteúdo esperado).`;
+    } else if (/markup de #vanishcamRoot inválido/.test(mensagem)) {
+      arquivo = 'vanishcam/js/embed-root-template.js';
+      situacao = `Arquivo corrompido/inválido dentro da pasta 'vanishcam/': ${arquivo} (conteúdo não reconhecido).`;
+    }
+    return { situacao, arquivo, mensagem };
+  },
+
+  /** Monta o HTML da tela de aviso "vanishCam não encontrado" (ver
+   *  `_openVanishCamScreen` acima, as 3 situações de pasta
+   *  ausente/vazia/incompleta) — botão de voltar para a tela anterior +
+   *  aviso com o caminho exato até o download (repo → "Releases" → a
+   *  release "Latest" → "Source code (zip)"), reproduzindo as cores reais
+   *  do GitHub para esses 2 elementos (conferidas contra a documentação do
+   *  Primer, design system do GitHub, 17/09/2026): o rótulo "Latest" usa o
+   *  verde de sucesso do GitHub, `#1a7f37`, tanto no TEXTO quanto na BORDA
+   *  (fundo transparente — pedido verbatim, 17/09/2026: "o texto ('Latest')
+   *  deve ser o verde a borda deve ser o mesmo verde [...] e o fundo do
+   *  botão deve ser transparente"), com `border-width` em
+   *  `var(--borderWidth-thin, .0625rem)` (mesma variável de espessura de
+   *  borda fina do Primer, com fallback pro valor fixo caso o app hospedeiro
+   *  não tenha essa variável definida) e cantos totalmente arredondados
+   *  (formato "pill"/estádio); o link "Source code (zip)" usa o azul de
+   *  link do GitHub, `#096bdf`. Link direto já com o caminho todo percorrido
+   *  (`/releases`) incluído, como pedido. Recebe `detalhe` (objeto de
+   *  `_vanishCamClassificarErro`) pra montar a caixa "o que faltou". */
+  _vanishCamAvisoNaoEncontradoHTML(detalhe) {
+    detalhe = detalhe || { situacao: 'Falha ao carregar o vanishCam.', arquivo: null, mensagem: '' };
+    return `
+      <div class="vanishcam-aviso-nao-encontrado" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;height:100%;padding:32px 24px;text-align:center;box-sizing:border-box;overflow:auto;">
+        <button type="button" id="vanishcam-aviso-voltar" class="btn secondary" title="Voltar para a tela anterior">← Voltar</button>
+        <div style="font-size:2.4em;line-height:1;">⚠️</div>
+        <div style="max-width:560px;font-size:1.05em;line-height:1.5;">
+          <strong>vanishCam não encontrado.</strong><br>
+          A pasta <code>vanishcam/</code> não foi encontrada na raiz do projeto, está vazia, ou está incompleta (faltam arquivos do vanishCam nela, ou algum deles está corrompido).
+        </div>
+        <div style="max-width:560px;width:100%;text-align:left;font-size:0.85em;line-height:1.5;background:rgba(127,127,127,0.12);border:1px solid rgba(127,127,127,0.3);border-radius:8px;padding:10px 14px;font-family:monospace;">
+          <div style="font-weight:600;font-family:inherit;margin-bottom:4px;">O que faltou:</div>
+          <div>${Utils.escapeHtml ? Utils.escapeHtml(detalhe.situacao) : detalhe.situacao}</div>
+          <div style="margin-top:6px;opacity:0.75;">Mensagem do try/catch: ${Utils.escapeHtml ? Utils.escapeHtml(detalhe.mensagem) : detalhe.mensagem}</div>
+        </div>
+        <div style="max-width:560px;font-size:0.95em;line-height:1.6;opacity:0.85;">
+          Você pode baixar o vanishCam pelo link do projeto
+          <a href="https://github.com/dinthclex/vanishCam" target="_blank" rel="noopener noreferrer">github.com/dinthclex/vanishCam</a>
+          → no canto direito da página, logo abaixo de "About", em "Releases" a que diz
+          <span style="display:inline-block;padding:2px 12px;border-radius:999px;background:transparent;border-style:solid;border-width:var(--borderWidth-thin, .0625rem);border-color:#1A7F37;color:#1A7F37;font-weight:600;font-size:0.9em;">Latest</span>
+          → <a href="https://github.com/dinthclex/vanishCam/releases" target="_blank" rel="noopener noreferrer" style="color:#096BDF;font-weight:600;">Source code (zip)</a>.
+        </div>
+        <div>
+          <a href="https://github.com/dinthclex/vanishCam/releases" target="_blank" rel="noopener noreferrer" class="btn sm" style="text-decoration:none;">📦 Abrir as Releases do vanishCam</a>
+        </div>
+      </div>
+    `;
   },
 
   /** Desenha o preview 3D em perspectiva do painel de propriedades da foto
@@ -22843,6 +22960,64 @@ const MapView = {
    *  dão `await` nisto — sem problema, o corpo síncrono até o 1º `await`
    *  roda na hora igual sempre rodou; só o preenchimento/tamanho final do
    *  painel chega 1 microtask depois. */
+  /** [RODADA 128] Chave-base de um tipo de objeto do catálogo (a chave sem o
+   *  sufixo numérico de variante, ex: 'monitor2' → 'monitor'). Usada como
+   *  proxy do "tipo" (não existe uma propriedade `categoria` própria em
+   *  `Icons.mapObjectCatalog()`) pra organizar a grade da ferramenta
+   *  "Objeto" — pedido do usuário verbatim: "se houver dois monitores,
+   *  coloque-os lado a lado. E por tipo também [...] Monitores, Gabinetes,
+   *  projetores, switches." Todas as variantes existentes no catálogo já
+   *  seguem esse padrão de nomenclatura (monitor/monitor2, gabinete/
+   *  gabinete2, teclado/teclado2, mouse/mouse2), então agrupar por
+   *  chave-base já resolve os dois pedidos ao mesmo tempo: mesma base = lado
+   *  a lado = mesmo grupo de "tipo". */
+  _baseTipoObjKey(key) { return String(key).replace(/\d+$/, ''); },
+
+  /** Reordena `catalogo` (saída de `Icons.mapObjectCatalog()`) conforme o
+   *  modo escolhido no dropdown "Organizar:" do painel da ferramenta
+   *  "Objeto" (ver `_openObjectPickerPanel`):
+   *   - 'alfabetica': ordem alfabética simples pelo label.
+   *   - 'livre': ordem manual salva em `ordemLivre` (array de keys, ver
+   *     `mapa2dObjPickerOrdemLivre`) — itens novos (ainda sem posição salva)
+   *     vão pro final, em ordem alfabética entre si.
+   *   - qualquer outro valor (inclui o padrão 'porTipo'): agrupa por
+   *     chave-base (`_baseTipoObjKey`), grupos em ordem alfabética pelo
+   *     label do item "principal" de cada grupo (o que tem a própria
+   *     chave-base, ex.: 'monitor' dentro do grupo 'monitor'), e dentro de
+   *     cada grupo por chave (garante 'monitor' antes de 'monitor2'). Só
+   *     reordena a SEQUÊNCIA — a grade continua sendo desenhada exatamente
+   *     como no modo 'alfabetica' (mesmos botões, mesmo grid, sem nenhum
+   *     rótulo/separador visual entre grupos — ver `_openObjectPickerPanel`,
+   *     removido na RODADA 129 por pedido explícito do usuário). */
+  _organizarCatalogoObjetos(catalogo, modo, ordemLivre) {
+    if (modo === 'alfabetica') {
+      return catalogo.slice().sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+    }
+    if (modo === 'livre') {
+      const idx = new Map((ordemLivre || []).map((k, i) => [k, i]));
+      return catalogo.slice().sort((a, b) => {
+        const ia = idx.has(a.key) ? idx.get(a.key) : Infinity;
+        const ib = idx.has(b.key) ? idx.get(b.key) : Infinity;
+        return ia !== ib ? ia - ib : a.label.localeCompare(b.label, 'pt-BR');
+      });
+    }
+    const groups = new Map();
+    catalogo.forEach((o) => {
+      const base = this._baseTipoObjKey(o.key);
+      if (!groups.has(base)) groups.set(base, []);
+      groups.get(base).push(o);
+    });
+    const groupList = [...groups.entries()].map(([base, itens]) => {
+      itens.sort((a, b) => a.key.localeCompare(b.key, 'pt-BR'));
+      const principal = itens.find((i) => i.key === base) || itens[0];
+      return { base, labelGrupo: principal.label, itens };
+    });
+    groupList.sort((a, b) => a.labelGrupo.localeCompare(b.labelGrupo, 'pt-BR'));
+    const out = [];
+    groupList.forEach((g) => { g.itens.forEach((it) => out.push(it)); });
+    return out;
+  },
+
   async _openObjectPickerPanel() {
     this._closeObjectPickerPanel();
     if (!this._container) return;
@@ -22853,7 +23028,16 @@ const MapView = {
     // sendo usada por `_pickObjectType` (modal "Trocar tipo" de um objeto
     // já colocado) e por `_openFormsPickerPanel` (ferramenta Formas) — só a
     // injeção delas NESTE painel específico foi removida.
-    const catalogo = window.Icons?.mapObjectCatalog?.() || [];
+    const catalogoBase = window.Icons?.mapObjectCatalog?.() || [];
+    // [RODADA 128] Modo de organização da grade + ordem "Livre" salva —
+    // pedido do usuário verbatim (dropdown "Organizar:" logo abaixo do
+    // título, com 3 opções, persistido pra carregar igual da próxima vez).
+    // Lidos ANTES de montar o HTML pra já abrir na ordem certa (sem
+    // "piscar" reordenando 1 frame depois).
+    let organizeMode = await DB.getSetting('mapa2dObjPickerOrganizeMode', 'porTipo');
+    if (!['alfabetica', 'porTipo', 'livre'].includes(organizeMode)) organizeMode = 'porTipo';
+    let ordemLivre = (await DB.getSetting('mapa2dObjPickerOrdemLivre', null)) || [];
+    if (!this._container) return; // painel fechado enquanto esperava os awaits acima
     const panel = document.createElement('div');
     // [15/09/2026 UTC] NOVO — classe extra `.map-obj-picker-panel-resizable`
     // (ver css/style.css) dá largura/altura FIXAS (em vez de "o que sobrar
@@ -22882,15 +23066,23 @@ const MapView = {
           <button type="button" class="icon-btn sm" id="map-obj-picker-modelos3d" title="🛠️ Acessar modelos — editar o modelo 3D (detalhado/low poly) de cada tipo de objeto padrão">🛠️</button>
           <button type="button" class="icon-btn sm" id="map-obj-picker-close" title="Fechar (o mesmo que apertar o botão Objetos de novo)">✕</button>
         </div>
-        <div class="map-obj-picker-grid">
-          ${catalogo.map((o) => `
-            <button type="button" class="map-obj-pick-item" data-key="${o.key}" title="${Utils.escapeHtml(o.label)}">
-              <span class="ic">${o.svg}</span>
-              <span class="t">${Utils.escapeHtml(o.label)}</span>
-            </button>`).join('')}
+        <!-- [RODADA 128] NOVO — dropdown "Organizar:", pedido do usuário
+             verbatim: "no topo da janela, em baixo da barra de título e
+             acima dos objetos representados, coloque um botão dropdown com
+             3 opções". Ver a função _organizarCatalogoObjetos acima pro
+             detalhamento de cada modo. -->
+        <div class="map-obj-picker-organize-row" style="padding:6px 10px 0 10px; display:flex; align-items:center; gap:6px">
+          <label for="map-obj-picker-organize" style="font-size:11px; color:var(--text-dim); white-space:nowrap">Organizar:</label>
+          <select id="map-obj-picker-organize" style="flex:1; font-size:12px">
+            <option value="alfabetica">Ordem alfabética</option>
+            <option value="porTipo">Por tipo</option>
+            <option value="livre">Livre (arraste para reordenar)</option>
+          </select>
         </div>
+        <div class="map-obj-picker-grid" id="map-obj-picker-grid"></div>
       </div>
     `;
+    panel.querySelector('#map-obj-picker-organize').value = organizeMode;
     this._container.querySelector('.map2d-wrap')?.appendChild(panel);
     this._objectPickerEl = panel;
 
@@ -22929,12 +23121,72 @@ const MapView = {
     panel.addEventListener('pointerdown', () => Utils.bringToFront(panel), true);
     panel.addEventListener('pointerup', () => Utils.bringToFront(panel), true); // [15/09/2026 UTC] "No clique e após soltar o botão esquerdo do mouse"
 
+    const grid = panel.querySelector('#map-obj-picker-grid');
     const marcarAtivo = () => {
-      panel.querySelectorAll('.map-obj-pick-item[data-key]').forEach((b) => {
+      grid.querySelectorAll('.map-obj-pick-item[data-key]').forEach((b) => {
         b.classList.toggle('active', b.dataset.key === this._objectStampType);
       });
     };
-    marcarAtivo();
+
+    const escolherTipo = (key) => {
+      if (this._formaDraft) this._finalizeFormaDraft();
+      this._objectStampType = key;
+      marcarAtivo();
+      this._updateToolCtx();
+    };
+
+    // [RODADA 128] "Livre" — arraste-para-reordenar reaproveitando a MESMA
+    // técnica FLIP já usada em "👁️ Ver lista simples"/"🗂️ Camadas" (ver
+    // js/flip.js `Flip.makeSortable`), pedido do usuário verbatim: "Ali é
+    // implementado um método de flipagem dos botões e pode ser usado nesta
+    // opção". SEM alça ⠿ (pedido explícito: "os objetos devem ter o aspecto
+    // visual que tem atualmente [...] apenas será possível mudá-los de
+    // posição") — aqui `itemSelector` é o PRÓPRIO botão do objeto (sem
+    // `handleSelector`), então o botão inteiro é arrastável, do jeito que já
+    // aparece hoje. `onClick` mantém o clique normal (escolher o tipo)
+    // funcionando quando não houve arraste de fato.
+    const objSortable = Flip.makeSortable(grid, {
+      itemSelector: '.map-obj-pick-item',
+      draggingClass: 'map-obj-pick-item-dragging',
+      axis: 'auto',
+      onDrop: (orderedEls) => {
+        ordemLivre = orderedEls.map((el) => el.dataset.key).filter(Boolean);
+        DB.setSetting('mapa2dObjPickerOrdemLivre', ordemLivre);
+      },
+      onClick: (el) => escolherTipo(el.dataset.key),
+    });
+
+    // [RODADA 129] SIMPLIFICADO — pedido do usuário verbatim: "quando
+    // selecionar a opção 'Por tipo', a disposição [...] deve ser igual a
+    // disposição [...] quando se está marcada a opção 'Ordem alfabética'
+    // [...] Não deve ficar com um traço vertical separando os tipos como
+    // está atualmente." O rótulo de grupo (`<div class="map-obj-pick-group-
+    // label">`, `grid-column:1/-1`) forçava uma quebra de linha cheia entre
+    // grupos, dando a impressão de um traço/separador visual — removido por
+    // completo. Agora "Por tipo" usa o MESMO `<button>` simples de sempre,
+    // só com a SEQUÊNCIA reordenada (agrupada por tipo) — mesmo grid/CSS,
+    // sem wrapper extra nenhum por grupo.
+    const renderGrid = () => {
+      const catalogo = this._organizarCatalogoObjetos(catalogoBase, organizeMode, ordemLivre);
+      grid.innerHTML = catalogo.map((o) => (
+        `<button type="button" class="map-obj-pick-item" data-key="${o.key}" title="${Utils.escapeHtml(o.label)}">
+              <span class="ic">${o.svg}</span>
+              <span class="t">${Utils.escapeHtml(o.label)}</span>
+            </button>`
+      )).join('');
+      grid.querySelectorAll('.map-obj-pick-item[data-key]').forEach((b) => {
+        if (organizeMode === 'livre') objSortable.attach(b);
+        else b.onclick = () => escolherTipo(b.dataset.key);
+      });
+      marcarAtivo();
+    };
+    renderGrid();
+
+    panel.querySelector('#map-obj-picker-organize').onchange = (e) => {
+      organizeMode = e.target.value;
+      DB.setSetting('mapa2dObjPickerOrganizeMode', organizeMode);
+      renderGrid();
+    };
 
     // [15/09/2026 UTC] CORRIGIDO (PARTE A, RODADA 49) — pedido verbatim: "Ao
     // fechar a janela de seleção de objetos, acaba por deselecionar a
@@ -22974,24 +23226,10 @@ const MapView = {
     // antigo (tela cheia via App.navigate) se o usuário ligar essa opção
     // nas configurações.
     panel.querySelector('#map-obj-picker-modelos3d').onclick = () => this._openAcessarModelos();
-    panel.querySelectorAll('.map-obj-pick-item[data-key]').forEach((b) => {
-      b.onclick = () => {
-        // "Mesa" é tratada à parte (pedido do usuário — vira desenhável, com
-        // alças/rotação, igual a forma retângulo), mas [15/09/2026 UTC]
-        // [15/09/2026 UTC] REMOVIDO — pedido verbatim: "Agora não tem
-        // mais o gizmo integrado, é só um objeto comum tanto para o pilar
-        // quanto para a mesa." Antes (RODADA 49), clicar em 'mesa'/'coluna'
-        // armava `_objectStampType` com `_MESA_FORMA_DEF`/`_PILAR_FORMA_DEF`
-        // (forma desenhável com gizmo de redimensionar). Agora 'mesa' e
-        // 'pilar' são objetos comuns do catálogo (like qualquer outro),
-        // dimensionados só por `OBJECT3D_PROFILES` — então caem direto no
-        // `else` genérico abaixo, sem tratamento especial nenhum.
-        if (this._formaDraft) this._finalizeFormaDraft();
-        this._objectStampType = b.dataset.key;
-        marcarAtivo();
-        this._updateToolCtx();
-      };
-    });
+    // [RODADA 128] O wiring de clique por item ("Mesa" incluída — objeto
+    // comum do catálogo como qualquer outro, sem gizmo, ver comentários
+    // antigos removidos aqui) agora mora dentro de `renderGrid()` acima
+    // (precisa rodar de novo a cada reordenação/troca de modo).
   },
 
   _closeObjectPickerPanel() {

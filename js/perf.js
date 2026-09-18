@@ -187,7 +187,29 @@ const Perf = {
     // empilhamento do app (ver `#bbm-unit-dropdown`, mapview.js), maior que
     // qualquer overlay de tela cheia existente (Configurações:950,
     // Organizar/Fotos:900, toasts:999).
+    // [16/09/2026 UTC] CORRIGIDO (RODADA 97) — pedido verbatim: "o hud [...]
+    // ao ficar no canto da tela, fica com a sua largura esticada até o
+    // canto e, ao clicar nele e arrastá-lo, ele 'volta ao normal'." Um
+    // `<div>` (bloco, `display` padrão) `position:fixed` ancorado só por
+    // `right` (sem `left`) DEVERIA, pela especificação de CSS, encolher
+    // pro tamanho do próprio conteúdo ("shrink-to-fit") mesmo sem
+    // `width` explícita — mas na prática, dependendo de qual elemento
+    // acaba sendo o "containing block" real dele no momento (por exemplo
+    // quando `_hudReparentFor`, logo abaixo, o move pra dentro de
+    // `.view3d-wrap`/outro container com seu próprio layout — grid/flex —
+    // que pode forçar um item a esticar via `align-self`/`justify-self`
+    // padrão 'stretch'), o comportamento shrink-to-fit nem sempre é
+    // garantido. `display:inline-block` + `width:fit-content` tornam a
+    // largura baseada no conteúdo EXPLÍCITA e redundante com qualquer
+    // comportamento herdado do container/algoritmo de `position`,
+    // funcionando igual tanto ancorado por `right` (canto, sem `left`)
+    // quanto por `left` (depois de arrastar, ver `_applyPos` abaixo) — a
+    // pista de "arrastar conserta" batia com isso: só depois do 1º
+    // arraste (`_applyPos`) o elemento passava a ter posição em `left`
+    // (não `right`), e nesse caminho de código, por acaso, a largura
+    // acabava ficando correta.
     el.style.cssText = 'position:fixed; right:8px; top:50%; transform:translateY(-50%); z-index:99999;'
+      + 'display:inline-block; width:fit-content; max-width:80vw;'
       + 'background:rgba(10,12,16,.82); border:1px solid #2a303a; border-radius:8px; padding:6px 9px;'
       + 'font-family:monospace; font-size:11px; color:#baffce; line-height:1.5; pointer-events:auto; min-width:118px; cursor:move; user-select:none; touch-action:none;';
     document.body.appendChild(el);
@@ -225,6 +247,16 @@ const Perf = {
     this._hudEl.style.top = `${clamped.top}px`;
     this._hudEl.style.left = `${clamped.left}px`;
     this._hudEl.style.transform = 'none';
+    // [16/09/2026 UTC] NOVO (RODADA 97) — reforço redundante do fix de
+    // largura em `_buildHud` (ver comentário grande lá) — reaplicado aqui
+    // TAMBÉM porque este é o único outro lugar do código que mexe no
+    // `style` do HUD depois da criação (ancoragem por `left`/`top`, usada
+    // tanto ao restaurar uma posição salva quanto a cada quadro de
+    // arraste). Garante que a largura baseada em conteúdo nunca dependa de
+    // qual dos 2 caminhos (canto via `right`, ou posição livre via `left`)
+    // está ativo no momento.
+    this._hudEl.style.display = 'inline-block';
+    this._hudEl.style.width = 'fit-content';
   },
 
   _clampToViewport(pos) {

@@ -1300,7 +1300,23 @@ const ModelerUI = {
     return (neg ? '-' : '') + out + (cfg.suffix || '');
   },
 
-  /** O widget em si — um campo numérico estilo Blender. Pedido do usuário,
+  /** [17/09/2026] APELIDO OFICIAL deste widget (pedido verbatim do
+   *  usuário): "botão triplo" ou "botão triplo da transformação dos
+   *  objetos" — usar este nome em conversas/rodadas futuras pra se referir
+   *  a ele sem precisar reexplicar (ver também a entrada correspondente em
+   *  progresso-sessao.md, seção de glossário). Caminho exato pra chegar
+   *  nele dentro do app: "Ver em 3D" → "Modo Edição" → apontar pra um
+   *  objeto → clicar → escolher "Modelar em 3D" (na janela que aparece) →
+   *  entra no modo Modelador → botão lateral direito "+" → "Propriedades"
+   *  → "Transformação" → qualquer campo numérico ali (ex.: o "X" da
+   *  "Posição", o 1º campo da seção) É um "botão triplo". Por que o nome:
+   *  visualmente são 3 "botões"/zonas dentro do MESMO retângulo — seta◄
+   *  (esquerda, decrementa 1 `cfg.step` por clique), o meio (`disp`,
+   *  clicar-e-ARRASTAR varia o valor continuamente — segurar o botão do
+   *  mouse e mover o cursor pra um lado ou pro outro, sem precisar soltar;
+   *  clicar sem arrastar entra em modo de edição por teclado), seta►
+   *  (direita, incrementa 1 `cfg.step` por clique). O widget em si — um
+   *  campo numérico estilo Blender. Pedido do usuário,
    *  bem detalhado (e ajustado numa rodada seguinte de correções):
    *  - Fora de foco: mostra rótulo (ex. "X:") à esquerda e valor formatado
    *    (`_formatNumField`) à direita, com "botões" seta SEMPRE VISÍVEIS

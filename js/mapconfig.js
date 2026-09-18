@@ -133,13 +133,171 @@ const MapConfig = {
     // (`_trena3DRebuildLines`/`_trena3DUpdatePreview`/`_trena3DEndpointMesh`)
     // pra como cada campo é lido/aplicado.
     trena3DSnapAtivo: true, // toggle do snap acima — "cabeçalho igual ao 'Snap de parede' do mapa 2D" (botão liga/desliga + campo de valor ao lado)
-    trena3DLabelEstilo: 'sobreLinha', // 'sobreLinha' (padrão, pedido do usuário) | 'flutuante' (o jeito de antes desta rodada)
+    // [16/09/2026 UTC] REESTRUTURADO — 2 valores possíveis agora:
+    // 'sobreLinha' (padrão, rotulado "Flutuante" na UI — projeta o meio 3D
+    // exato, sem deslocamento) e 'sobreLinhaMeio' (NOVO, rotulado "Em cima
+    // da linha e no meio" — centraliza o rótulo na MÉDIA dos 2 extremos já
+    // projetados na tela). O antigo valor 'flutuante' (deslocamento de
+    // +0,18m em Y antes de projetar) foi REMOVIDO — ver mapconfig.js
+    // (seção "Aparência da medida") e view3d.js '_trena3DRebuildLines'.
+    trena3DLabelEstilo: 'sobreLinhaMeio',
+    // [17/09/2026 UTC] NOVO (RODADA 119) — pedido verbatim: controlar a
+    // posição da caixa de texto ao longo de uma linha vertical (perpendicular
+    // ao chão) que passa pelo ponto médio ('mAB') da reta 3D a que o texto
+    // pertence — 0 = exatamente em 'mAB', positivo = acima, negativo =
+    // abaixo (metros no espaço de mundo). 1 campo por subseção que ganhou
+    // este controle novo (ver view3d.js '_trena3DDeslocarPontoY', usado nos
+    // 6 pontos de código onde cada rótulo é de fato posicionado).
+    trena3DLabelDeslocVerticalM: 0, // "Aparência da medida"
+    trena3DGuiaChaoLabelDeslocVerticalM: 0, // "Guia rente ao chão"
+    trena3DLinhaAncoraLabelDeslocVerticalM: 0, // "Linhas verticais ancoradas"
+    trena3DGuiaGradeLabelDeslocVerticalM: 0, // "Linhas guia da grade do mundo"
+    // [17/09/2026 UTC] NOVO (RODADA 119) — pedido verbatim, só pra "Linhas
+    // guia da grade do mundo": "deve ter um enable de aparecer a linha
+    // vertical (perpendicular ao chão) que é usada para deslocar o texto."
+    trena3DGuiaGradeLabelLinhaVertical: false,
+    // [17/09/2026 UTC] NOVO (RODADA 125) — pedido verbatim: "deve ter a
+    // opção de ser 'Em cima e no meio' ou 'Flutuante' em [...] 'Guia rente
+    // ao chão' e [...] 'Linhas guia da grade do mundo'." Mesmo conceito e
+    // mesmos valores ('sobreLinhaMeio'/'sobreLinha') já usados em
+    // 'trena3DLabelEstilo' (seção "Aparência da medida", RODADA 118/122) —
+    // padrão 'sobreLinha' (Flutuante) preserva o comportamento de sempre
+    // dessas 2 guias. Ver view3d.js '_trena3DRebuildLines' (blocos
+    // 'meioChaoFin'/'criarGuia') e o trecho AO VIVO correspondente
+    // ('_trena3DProjetarLabelImediato'/'construirLabel').
+    trena3DGuiaChaoLabelEstilo: 'sobreLinha',
+    trena3DGuiaGradeLabelEstilo: 'sobreLinha',
+    // [17/09/2026 UTC] NOVO (RODADA 127) — ver comentário grande junto de
+    // 'trena3DLabelVisivel' (DEFAULTS, subseção "Visibilidade") — mesmo
+    // conceito, aplicado à caixa de texto de cada uma destas 2 guias.
+    // Padrão 'true' preserva o comportamento de sempre.
+    trena3DGuiaChaoLabelVisivel: true,
+    trena3DGuiaGradeLabelVisivel: true,
+    // [RODADA 131] NOVO — mesmo conceito de 'trena3DLabelVisivel'/
+    // 'trena3DGuiaChaoLabelVisivel'/'trena3DGuiaGradeLabelVisivel', aplicado
+    // às 2 caixas de texto ("⬍ Xm") da subseção "Linhas verticais ancoradas".
+    trena3DLinhaAncoraLabelVisivel: true,
+    // [17/09/2026 UTC] NOVO (RODADA 125) — pedido verbatim: "deve ter uma
+    // opção para imprimir a esfera vermelha, mas com o nome de 'mostrar
+    // ponto médio da medida'. deve dar para escolher a cor da esfera. Por
+    // padrão, deve ser vermelha." Antes desta rodada a esfera do ponto
+    // médio (RODADA 120, ver '_trena3DRebuildLines', comentário
+    // "SphereGeometry"/"0xff2d2d") era sempre desenhada, cor fixa. Padrão
+    // 'true'/'#ff2d2d' preserva o comportamento/cor de sempre.
+    trena3DMostrarPontoMedio: true,
+    trena3DCorPontoMedio: '#ff2d2d',
     trena3DVisibilidade: 'seVisivel', // 'seVisivel' (padrão, pedido do usuário — oculta atrás de paredes/objetos) | 'sempre' (o jeito de antes desta rodada, sempre desenha)
-    trena3DEspessuraCm: 2, // espessura da linha entre as 2 pontas de uma medida JÁ finalizada, em centímetros (raio real de um "tubo" 3D — THREE.Line ignora `linewidth` na maioria das GPUs/navegadores, ver comentário grande em `_trena3DBuildFatLine`)
+    // [17/09/2026 UTC] NOVO (RODADA 121) — pedido verbatim: "Deve haver uma
+    // opção de imprimir as caixas de texto só as que estiverem próximas do
+    // personagem. Um raio deve poder ser estabelecido para isso." Colocado
+    // na subseção "Visibilidade" (já era sobre esconder/mostrar rótulos).
+    // Padrão desligado (nenhuma mudança de comportamento pra quem não
+    // mexer) — quando ligado, `trena3DLabelRaioM` (em metros) é o raio a
+    // partir da posição do jogador/câmera (`this._camera`, view3d.js) além
+    // do qual a caixa de texto da medida deixa de ser desenhada (a
+    // linha/pontas 3D continuam aparecendo normalmente — só a caixa de
+    // texto HTML é afetada, ver `_trena3DUpdateLabels`).
+    trena3DLabelRaioAtivo: false,
+    trena3DLabelRaioM: 15,
+    // [17/09/2026 UTC] NOVO (RODADA 127) — pedido verbatim: "Deve ser
+    // possível controlar se a caixa de texto com a medida vai aparecer ou
+    // não em '📏 Trena 3D — Visibilidade' (para a medida), '📏 Trena 3D —
+    // Guia rente ao chão' e '📏 Trena 3D — Linhas guia da grade do mundo'.
+    // Por padrão todas ativadas." Padrão 'true' preserva o comportamento de
+    // sempre (caixa de texto sempre aparecia). Ver view3d.js '_trena3DCfg'
+    // (campos 'labelVisivel'/'guiaChaoLabelVisivel'/'guiaGradeLabelVisivel')
+    // e os pontos onde cada label é criado/atualizado
+    // ('_trena3DRebuildLines' e os blocos AO VIVO correspondentes).
+    trena3DLabelVisivel: true,
+    // [17/09/2026 UTC] NOVO (RODADA 121) — pedido verbatim: "Coloque como
+    // mais uma opção a reorganização automática das caixas de texto para
+    // que elas não se sobreponham na tela. Atualmente isso é sempre feito,
+    // sem ser opcional. Por padrão, deve ficar desligado." Antes desta
+    // rodada, `_trena3DAfastarRotulosSobrepostos` (view3d.js) sempre rodava
+    // incondicionalmente dentro de `_trena3DUpdateLabels` — agora só roda
+    // quando este campo estiver `true` (padrão `false`, preserva o "sempre
+    // ligado" de antes só pra quem ligar explicitamente).
+    trena3DLabelReorganizarSobreposicao: false,
+    // [16/09/2026 UTC] ATUALIZADO — pedido verbatim: "Em '📏 Trena 3D —
+    // Espessura e cores', em 'Espessura de linha (cm)', o padrão deve ser
+    // 1." (era 2).
+    trena3DEspessuraCm: 1, // espessura da linha entre as 2 pontas de uma medida JÁ finalizada, em centímetros (raio real de um "tubo" 3D — THREE.Line ignora `linewidth` na maioria das GPUs/navegadores, ver comentário grande em `_trena3DBuildFatLine`)
     trena3DCorLinha: '#ffd166', // cor da linha/pontas de uma medida já FINALIZADA (mesma cor de sempre, agora configurável)
-    trena3DCorAncora: '#ff9f4d', // cor da âncora/linha vertical + indicador quando em "modo Ctrl" (prévia)
-    trena3DCorMira: '#5ec8ff', // cor do indicador/linha guia quando SEM âncora (mira normal contra uma superfície)
-    trena3DPonta: 'esfera', // 'esfera' (padrão, o jeito de sempre) | 'seta' | 'traco' — formato do marcador em cada extremidade de uma medida finalizada
+    // [RODADA 129] REMOVIDOS `trena3DCorAncora`/`trena3DCorMira` — campos
+    // vestigiais sem linha própria pra colorir (ver `js/view3d.js`,
+    // `_trena3DCfg()`, pro raciocínio completo da investigação/decisão).
+    trena3DPonta: 'esfera', // 'nenhuma' (RODADA 114, "sem pontas") | 'esfera' (padrão, o jeito de sempre) | 'seta' | 'setaDoisTracos' | 'traco' — formato do marcador em cada extremidade de uma medida finalizada
+    // [16/09/2026 UTC] NOVO (RODADA 91) — pedido verbatim: "na opção
+    // 'Esfera', deve ser possível definir o tamanho da esfera. E se a
+    // medida termina na ponta mais próxima da esfera, no centro da esfera
+    // ou na ponta mais afastada da esfera [...] Os valores atuais devem
+    // ser o padrão." `trena3DEsferaTerminoLinha`: investigado o código atual
+    // (view3d.js `_trena3DRebuildLines`) — a linha (cilindro) vai
+    // exatamente de p1 a p2, e a esfera fica CENTRADA nesses mesmos
+    // pontos, ou seja, o comportamento de sempre já é 'centro' (a linha
+    // passa pelo centro da esfera) — esse é o padrão mantido aqui.
+    // [RODADA 135] MUDANÇA -- pedido verbatim: "a opção 'Esfera' deve ter
+    // limites de '0,01' a 1. Em metros [...] Coloque as medidas em metros e
+    // coloque limites para que não vá além dos limites. Nem pelo clicar e
+    // arrastar, nem pelos botões." `trena3DEsferaTamanho` deixa de ser um
+    // MULTIPLICADOR da espessura da linha e passa a ser o RAIO da esfera em
+    // METROS, direto (mais fácil de prever o tamanho real, e evita que a
+    // esfera fique gigante/minúscula sem querer agora que a espessura da
+    // linha pode ir até 1000cm, RODADA 134). Novo padrão (0.02m = 2cm) é
+    // aproximadamente o tamanho visual de sempre (raio da linha padrão
+    // ~0.01m × multiplicador antigo 1.7 ≈ 0.017m, arredondado). Ver
+    // view3d.js `_trena3DCfg`/`_trena3DBuildEndpoint`/`_trena3DRebuildLines`
+    // (bloco `raioEsfera`) — os 3 lugares que liam este campo como
+    // multiplicador agora o leem como valor absoluto, sempre limitado a
+    // [0.01, 1] via `Utils.clamp` (clique nos botões OU arraste, os dois
+    // passam pelo mesmo `onCommit`/`Utils.clamp`, então nenhum dos dois
+    // caminhos escapa do limite).
+    trena3DEsferaTamanho: 0.02,
+    trena3DEsferaTerminoLinha: 'centro', // 'proxima' (linha para antes de tocar a esfera) | 'centro' (padrão, comportamento de sempre) | 'distante' (linha atravessa a esfera inteira)
+    // [16/09/2026 UTC] NOVO (RODADA 91) — pedido verbatim: "Na opção
+    // 'Seta', deve ser possível definir o tamanho da base do cone da seta
+    // e a altura do cone da seta individualmente. Os valores atuais devem
+    // ser o padrão." Ambos são MULTIPLICADORES (mesmo espírito da esfera
+    // acima) dos valores já fixos no código (view3d.js
+    // `_trena3DBuildEndpoint`: `coneRaio = raioMetros*3.2`, `coneAltura =
+    // coneRaio*2.2`) — valores atuais viram os novos padrões.
+    trena3DSetaConeRaio: 3.2, // multiplicador da espessura da linha -> raio da base do cone
+    trena3DSetaConeAltura: 2.2, // multiplicador do raio da base (já calculado acima) -> altura do cone
+    // [16/09/2026 UTC] NOVO (RODADA 91) — pedido verbatim: "deve ser
+    // possível definir outro tipo de seta (a seta com dois traços) [...]
+    // deve ser possível controlar a distância entre as pontas que ficam
+    // soltas (entre elas). E definir o comprimento gerado pela distância
+    // entre o ponto de encontro das duas linhas e a projeção delas na
+    // linha da medida." Tipo de ponta NOVO (`trena3DPonta === 'setaDoisTracos'`,
+    // sem precedente no código — valores abaixo são um padrão razoável
+    // escolhido agora, não uma preservação de comportamento existente).
+    // Geometria (ver view3d.js `_trena3DBuildEndpoint`): o "vértice" (onde
+    // as 2 linhas se encontram) fica exatamente na PONTA da medida
+    // (`pos`); as 2 linhas abrem pra trás (afastando-se da ponta, ao
+    // longo da própria linha da medida) até 2 pontas soltas, separadas
+    // entre si por `trena3DSetaDoisTracosAbertura` (cm) e recuadas
+    // `trena3DSetaDoisTracosComprimento` (cm) ao longo da linha.
+    trena3DSetaDoisTracosAbertura: 6, // cm — distância entre as 2 pontas soltas
+    trena3DSetaDoisTracosComprimento: 10, // cm — distância entre o vértice e a projeção das pontas soltas na linha da medida
+    // [16/09/2026 UTC] NOVO (RODADA 91) — pedido verbatim: "Na opção
+    // 'Traço perpendicular', deve ser possível definir o comprimento [...]
+    // e se ele fica centralizado, parte da ponta [...] para cima ou [...]
+    // para baixo. Além de como ele será renderizado [...] 'do jeito atual'
+    // ou [...] paralelos as linhas [...] perpendiculares ao chão [...] Por
+    // padrão, fica [este último] modo." `trena3DTracoPerpComprimento` é um
+    // MULTIPLICADOR da espessura da linha, igual ao `7` já fixo no código
+    // (view3d.js `_trena3DBuildEndpoint`: `compr = raioMetros*7`) —
+    // preserva o comportamento de sempre. `trena3DTracoPerpAlinhamento`:
+    // investigado o código atual — o cilindro do traço é centrado
+    // exatamente em `pos` (a ponta da medida), ou seja, o comportamento de
+    // sempre já é 'centralizado' — mantido como padrão.
+    // `trena3DTracoPerpModoRender`: padrão mudado a pedido EXPLÍCITO do
+    // usuário pra 'paraleloVertical' (NÃO é o comportamento de sempre,
+    // que era só 'atual' — o usuário pediu que o novo modo vire o padrão
+    // mesmo assim).
+    trena3DTracoPerpComprimento: 7,
+    trena3DTracoPerpAlinhamento: 'centralizado', // 'centralizado' (padrão) | 'paraCima' | 'paraBaixo'
+    trena3DTracoPerpModoRender: 'paraleloVertical', // 'atual' | 'paraleloVertical' (NOVO padrão, pedido explícito)
     // [16/09/2026 UTC] NOVO — pedido verbatim: "deixar de fazer o destaque
     // feito pelo raycaster (onde ele bate) enquanto está ativa a linha
     // perpendicular (consequência de ter segurado o ctrl antes). Por
@@ -172,11 +330,58 @@ const MapConfig = {
     // definir o 1º ponto da medida)." Ver view3d.js `_trena3DUpdatePreview`
     // (`_trena3DP1HeightLine`).
     trena3DMostrarMedidaNaLinhaAncoraAposPonto: true,
+    // [16/09/2026 UTC] NOVO (RODADA 94) — ver view3d.js '_trena3DUpdatePreview'.
+    trena3DMostrarGuiaChaoAoVivo: false,
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve haver outra opção:
+    // 'Mostrar guia depois que a medida foi finalizada'. Esta opção afeta
+    // todas as guias, pois todas elas (que já estão finalizadas) encaixam-se
+    // nesse critério." Generaliza a guia rente ao chão (só ao vivo, entre o
+    // 1º ponto e a mira atual) pra cada medida JÁ finalizada no mapa — ver
+    // view3d.js '_trena3DRebuildLines'.
+    trena3DGuiaChaoFinalizada: false,
+    // [16/09/2026 UTC] NOVO (RODADA 98) — cores separadas por "parte" da
+    // guia rente ao chão (linha vs texto/rótulo), ver view3d.js
+    // '_trena3DUpdatePreview' (bloco de '_trena3DGuiaChaoLine').
+    trena3DGuiaChaoCorLinha: '#7dff6e',
+    trena3DGuiaChaoCorTexto: '#d9ff8a',
+    // [17/09/2026 UTC] NOVO (RODADA 114) — espessura/estilo/dash + ponta
+    // (simplificada) da "Guia rente ao chão" — pedido verbatim: "além de
+    // poder controlar a cor, deve ser possível definir a espessura das
+    // linhas guia e se são sólida, tracejada ou pontilhada [...] deve ser
+    // possível escolher as pontas também." Padrão preserva a aparência de
+    // sempre (tracejada, sem ponta nenhuma).
+    trena3DGuiaChaoEspessuraCm: 1.2,
+    trena3DGuiaChaoEstiloLinha: 'tracejada', // 'solida' | 'tracejada' | 'pontilhada'
+    trena3DGuiaChaoDashCm: 12,
+    trena3DGuiaChaoGapCm: 8,
+    trena3DGuiaChaoPonta: 'nenhuma', // mesmos valores de `trena3DPonta` ('nenhuma'|'esfera'|'seta'|'setaDoisTracos'|'traco')
+    // [RODADA 131] NOVO — pedido verbatim: controlar em que altura (entre as
+    // 2 linhas verticais ancoradas, que são paralelas entre si) esta guia
+    // fica: 'renteChao' (y=0, padrão/comportamento de sempre), 'proximaChao'
+    // (na altura do extremo MAIS BAIXO da medida — extremidade comum ao
+    // ponto mais próximo do chão), 'afastadaChao' (na altura do extremo MAIS
+    // ALTO da medida) ou 'livre' (altura arbitrária, 'trena3DGuiaChaoAlturaLivreM',
+    // 0 = chão). Ver view3d.js '_trena3DGuiaChaoAlturaY'.
+    trena3DGuiaChaoModo: 'renteChao',
+    trena3DGuiaChaoAlturaLivreM: 0,
+    // [16/09/2026 UTC] NOVO (RODADA 98) — ver engine3d.js 'raycastSurfaceAmpliado'.
+    trena3DPermitirSuperficiesLaterais: false,
+    // [16/09/2026 UTC] NOVO (RODADA 101) — pedido verbatim: "Após
+    // estabelecer o 1º ponto da medida deve ser possível 'continuar
+    // naquele nível' (de y) [...]" Ver view3d.js '_trena3DUpdatePreview'
+    // ('modoContinuarNivel')/'_trena3DAtualizarGradeNivelInfinita'.
+    trena3DContinuarNoNivel: false,
     // [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque como outra opção
     // dentro de 'Altura ao vivo (Antes mesmo de definir o ponto)' para
     // definir que a medida laranja aparece ou não já ao segurar o ctrl. Em
     // vez de sempre deixar ativo." Ver view3d.js `_trena3DUpdatePreview`.
-    trena3DMostrarAlturaAoVivoAoSegurarCtrl: true,
+    // [16/09/2026 UTC] REMOVIDO — pedido verbatim: "Na subseção '📏 Trena 3D
+    // — Altura ao vivo (Antes mesmo de definir o ponto)' a opção 'Sempre
+    // desenhada enquanto a Trena 3D estiver ativa' deve ser removida do
+    // projeto." Campo `trena3DAlturaAoVivoSempreDesenhada` (RODADA 90),
+    // checkbox `mc-trena3d-altura-sempre` e a leitura correspondente em
+    // view3d.js (`_trena3DCfg`/`_trena3DUpdatePreview`) removidos por
+    // completo — não é só desligado por padrão, deixou de existir.
     // [16/09/2026 UTC] NOVO — pedido verbatim: "Semelhante a subseção
     // 'Linha da âncora após o 1º ponto', mas agora nas duas linhas [...]
     // Deve ter uma subseção para definir se ficam impressas após a medida
@@ -184,7 +389,39 @@ const MapConfig = {
     // chão até os pontos da medida ou se as duas vão ser infinitas." Ver
     // view3d.js `_trena3DRebuildLines`.
     trena3DMostrarLinhasAncoraFinalizada: false,
+    // [17/09/2026 UTC] NOVO (RODADA 114) — cor + espessura/estilo/dash da
+    // "Linhas verticais ancoradas" (compartilhados pelas 3 sub-opções:
+    // Altura ao vivo, Linha da âncora, Linhas finalizadas) — pedido
+    // verbatim: "Por padrão fica nas configurações que está (laranja
+    // tracejada e fina)." Padrão preserva EXATAMENTE a aparência de sempre.
+    trena3DLinhaAncoraCor: '#ff9f4d',
+    trena3DLinhaAncoraEspessuraCm: 1,
+    trena3DLinhaAncoraEstiloLinha: 'tracejada', // 'solida' | 'tracejada' | 'pontilhada'
+    trena3DLinhaAncoraDashCm: 12,
+    trena3DLinhaAncoraGapCm: 8,
+    // [RODADA 129] NOVO — cor/espessura/estilo/dash configuráveis do
+    // "ghost"/prévia da medida (a linha tracejada azul clara que liga o 1º
+    // ponto já fixado até a bolinha que segue o cursor, antes do 2º clique —
+    // `_trena3DGuideLine` em view3d.js). Mesmo padrão de campos já usado
+    // pela "Linha da âncora" acima (`_trena3DCamposEstiloLinha`/
+    // `_wireTrena3DEstiloLinha`). Padrão preserva EXATAMENTE a aparência de
+    // sempre (azul `#5ec8ff`, tracejada, traço/espaço iguais aos valores
+    // fixos que já estavam hardcoded — `dashSize:0.12`/`gapSize:0.08` em
+    // metros = 12cm/8cm).
+    trena3DGhostCor: '#ffd166', // [RODADA 131] pedido verbatim: mesma cor/espessura padrão da medida finalizada (trena3DCorLinha) — continua editável separadamente
+    trena3DGhostEspessuraCm: 1,
+    trena3DGhostEstiloLinha: 'tracejada', // 'solida' | 'tracejada' | 'pontilhada'
+    trena3DGhostDashCm: 12,
+    trena3DGhostGapCm: 8,
     trena3DLinhasAncoraFinalizadaModo: 'ateOPonto', // 'ateOPonto' (padrão) | 'infinita'
+    // [RODADA 131] NOVO — pedido verbatim: cor/tamanho configuráveis da
+    // "mira" (bolinha indicadora "aqui vai cair o clique", `_trena3DHoverMesh`
+    // em view3d.js) mostrada sempre que a ferramenta "📏 Trena 3D" está
+    // ativa. Padrões preservam EXATAMENTE a cor/tamanho fixos de sempre
+    // (azul `#5ec8ff`, raio 0,045m = tamanho '1') — só o estado ANCORADO
+    // (Ctrl/âncora, laranja `#ff9f4d`) continua fixo, sem campo próprio.
+    trena3DMiraCor: '#5ec8ff',
+    trena3DMiraTamanho: 1,
     // [16/09/2026 UTC] NOVO — pedido verbatim: "sobre segurar o ctrl, deve
     // ter uma subseção sobre como funciona esta funcionalidade [...] Opção
     // de ter que segurar o ctrl [...] Nesta opção, se o ctrl não for
@@ -210,6 +447,61 @@ const MapConfig = {
     // a outra medida (esta deve ser a padrão)." Ver view3d.js
     // `_trena3DAtualizarGuiaGrade`.
     trena3DGuiaGradeModoMedida: 'esquerdaCima',
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "coloque como outra opção
+    // para aparecer após finalizar a medida. Isto acabará afetando a todas
+    // as medidas no mapa." Generaliza a guia de grade (antes só ao vivo,
+    // durante a mira) pra cada ponto de CADA medida já finalizada no mapa —
+    // ver view3d.js `_trena3DRebuildLines` (usa a MESMA lógica de
+    // `_trena3DAtualizarGuiaGrade`, só que por ponto finalizado em vez do
+    // ponto mirado ao vivo). Padrão desativado (opção nova).
+    trena3DGuiaGradeFinalizada: false,
+    // [16/09/2026 UTC] NOVO (RODADA 104) — ver view3d.js '_trena3DAtualizarGuiaGrade'.
+    trena3DGuiaGradeAposPrimeiroPonto: false,
+    // [RODADA 139] "➰ Polilinha 3D" deixou de ser ferramenta separada (era
+    // uma cópia quase inteira da "📏 Trena 3D" com janelinha/seção de
+    // config próprias, das RODADAs 136-138 — tudo isso foi removido).
+    // Pedido verbatim: "Elimine a seção da polilinha 3D e os seus recursos
+    // [...] Apenas o ícone deve ser preservado [...] deve ter um botão
+    // 'Trena 3D' e um botão 'Polilinha 3D'. Ao clicar em um desativa o
+    // outro." Agora é só um MODO da própria "📏 Trena 3D" — este único
+    // campo decide o comportamento/rótulo/ícone do MESMO botão/seção de
+    // sempre (ver view3d.js `_trena3DClick`/`_renderHotbar`, e o segmented
+    // control "trena3d-modo" logo na seção "📏 Trena 3D" abaixo).
+    trena3DModo: 'trena', // 'trena' (padrão, 2 pontos) | 'poli' (N pontos, ENTER conclui)
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possível definir a
+    // cor das linhas guia. Atualmente elas são desenhadas com verde. E na
+    // preview está como azul. Deve ser azul para ambos, como padrão. Deve
+    // ser possível selecionar a cor do texto da medida que deve ter a mesma
+    // cor já selecionada, como padrão." CAUSA da inconsistência verde/azul:
+    // a cor de verdade (`_trena3DAtualizarGuiaGrade`/`_trena3DRebuildLines`,
+    // bloco 'guiaGradeFinalizada') era fixa no código (`0xb7ff5e`, verde),
+    // enquanto o preview estático dentro de Configurações 3D
+    // ('_trena3DDesenharPreviewGuiaGrade') já usava azul (`#5ec8ff`) sem
+    // nenhuma ligação com a cor de verdade — 2 valores fixos e diferentes,
+    // nunca configuráveis. Agora, mesmo padrão de campo separado por "parte"
+    // já usado em `trena3DGuiaChaoCorLinha`/`trena3DGuiaChaoCorTexto`
+    // (RODADA 98) — line e texto com cor PRÓPRIA, cada uma configurável,
+    // ambas com o MESMO azul como padrão (pedido verbatim: "Deve ser azul
+    // para ambos, como padrão" / "cor do texto [...] que deve ter a mesma
+    // cor já selecionada, como padrão" — os 2 defaults abaixo são
+    // literalmente o mesmo valor, `#5ec8ff`, o mesmo azul que já era usado
+    // no preview estático).
+    trena3DGuiaGradeCorLinha: '#5ec8ff',
+    trena3DGuiaGradeCorTexto: '#5ec8ff',
+    // [17/09/2026 UTC] NOVO (RODADA 114) — espessura/estilo/dash da "Guia de
+    // grade do mundo" — pedido verbatim: "além de poder controlar a cor,
+    // deve ser possível definir a espessura das linhas guia e se são
+    // sólida, tracejada ou pontilhada. o line dash deve ser possível
+    // controlar (quando aplicável)." Padrão 'solida' preserva a aparência
+    // de sempre (linha sólida, técnica de cilindro — ver
+    // `_trena3DBuildFatLine`); 2,4cm é o dobro do raio de 0,012m já usado
+    // pela versão "ao vivo" de sempre (o valor que prevalece agora que a
+    // espessura é 1 SÓ campo compartilhado por ao vivo/finalizada — antes
+    // eram 2 raios fixos e ligeiramente diferentes no código).
+    trena3DGuiaGradeEspessuraCm: 2.4,
+    trena3DGuiaGradeEstiloLinha: 'solida', // 'solida' | 'tracejada' | 'pontilhada'
+    trena3DGuiaGradeDashCm: 12,
+    trena3DGuiaGradeGapCm: 8,
     // [16/09/2026 UTC] NOVO — pedido verbatim: "desenhar um gradeado dentro
     // do ladrilho de mundo que está sendo alvo no momento, conforme o snap
     // definido [...] Por padrão ativado." Ver view3d.js
@@ -225,12 +517,23 @@ const MapConfig = {
     // padrão deve ser a metade do que é atualmente." Ver view3d.js
     // `_trena3DAtualizarGradeSnapLadrilho` (tamanho, em pixels, de cada
     // "pontinho" do gradeado — `THREE.PointsMaterial.size`).
-    trena3DGradeSnapEspessuraPx: 3,
+    // [16/09/2026 UTC] ATUALIZADO — pedido verbatim: "Em '📏 Trena 3D —
+    // Gradeado do ladrilho mirado', em 'Espessura', o padrão deve ser 1."
+    // (era 3).
+    trena3DGradeSnapEspessuraPx: 1,
     // [16/09/2026 UTC] NOVO — pedido verbatim: "O pontilhado do gradeado do
     // ladrilho do mundo deve ser [1,2]." — [traço, vão] em cm, decidindo o
     // espaçamento entre os "pontinhos" (`_trena3DAtualizarGradeSnapLadrilho`).
+    // [16/09/2026 UTC] ATUALIZADO — pedido verbatim: "em 'Vão', o padrão
+    // deve ser '1,5'." (era 2).
     trena3DGradeSnapDashCm: 1,
-    trena3DGradeSnapGapCm: 2,
+    trena3DGradeSnapGapCm: 1.5,
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "deve ser possível escolher a
+    // cor do gradeado (que, atualmente, é um azul. Esta deve ser a cor
+    // padrão...)." Hex igual ao que já estava fixo no código de
+    // `view3d.js` (`_trena3DAtualizarGradeSnapLadrilho`, `0x7fd8ff`) — só
+    // virou configurável, sem mudar a aparência padrão de quem já usava.
+    trena3DGradeSnapCor: '#7fd8ff',
     // Pedido do usuário (28/08/2026, rodada do Modelador 3D): "Não use
     // antialiasing" — padrão mudado de `true` pra `false` (desligado custa
     // menos GPU, e é o visual "cru" que o Blender também usa no viewport por
@@ -432,6 +735,24 @@ const MapConfig = {
     // visível — mesmo padrão "liga por padrão, `!== false`" dos outros 2
     // interruptores desta seção, logo acima.
     debugEnquadramentoCameraAtivo: true,
+    // [17/09/2026 UTC] NOVO (RODADA 123) — pedido verbatim: "imprima junto
+    // com o texto (para teste) as coordenadas x e y do canvas. Na esfera
+    // vermelha, ao lado dela, imprima as coordenadas x e y da tela também
+    // [...] deixe como opções na seção debug das configurações 3D."
+    // Diferente dos outros 3 interruptores desta seção (padrão LIGADO,
+    // `!== false`), este vem DESLIGADO por padrão (`=== true`, só liga se
+    // marcado explicitamente) — é uma ferramenta de diagnóstico bem de
+    // nicho (comparar a coordenada de tela calculada pro rótulo com a da
+    // esfera vermelha da Trena 3D), não algo que a maioria dos usuários
+    // precisa ver. Ver `_isDebugTrena3DCoordenadasAtivo()` (view3d.js).
+    debugTrena3DCoordenadasAtivo: false,
+    // [17/09/2026 UTC] NOVO (RODADA 125) — pedido verbatim: "Nas
+    // 'configurações 3D', na seção de debug, deve ter um botão que habilita
+    // aparecer/não aparecer o botão que liga/desliga o debug em algum lugar
+    // da tela." Controla a visibilidade do botão flutuante 🐞 (novo nesta
+    // rodada, ver view3d.js '_trena3DEnsureDebugBotaoTela') — padrão
+    // LIGADO (aparece).
+    debugBotaoTelaAtivo: true,
     // ---------- Seção "🌗 Hora do dia" (pedido do usuário, 03/09/2026):
     // "Coloque uma seção, nas 'configurações 3D', para fazer com que se
     // possa escolher entre manhã, dia, tarde e noite. E uma barra com vários
@@ -495,6 +816,38 @@ const MapConfig = {
     // 'Trena 3D'. Por padrão, ativado." Ver view3d.js
     // `_trena3DEnsurePainelRapido`.
     trena3DPainelRapidoAtivo: true,
+    // [16/09/2026 UTC] NOVO (RODADA 91) — pedido verbatim: "deve haver uma
+    // opção do modo como a janelinha vai aparecer [...] Este modo atual é
+    // uma delas. E o outro mais simples é o que estava antes." Padrão
+    // mantido em 'agrupado' (o modo mais recente/implementado na Rodada
+    // 90) — sem indicação clara no pedido de qual deveria ser o padrão.
+    // [RODADA 128] PADRÃO MUDADO — pedido do usuário verbatim: "a opção
+    // 'Simples, só contornos' deve ser a padrão." Era 'agrupado'.
+    trena3DPainelRapidoModo: 'simples', // 'agrupado' (com rótulo de texto por grupo) | 'simples' (padrão — só contornos, sem texto)
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Na subseção da janelinha,
+    // deve ser possível selecionar os botões e a ordem em que eles vão
+    // ficar na janela [...] tem um sistema de flipagem e reposicionamento
+    // que pode ser modularizado (caso ainda não seja) e reaproveitado para
+    // isso" (referência ao arraste-com-FLIP de "Ver lista simples" →
+    // "Partes de informação em cada linha", JÁ modularizado desde a rodada
+    // 28/08/2026 em js/flip.js `window.Flip.makeSortable` — reaproveitado
+    // aqui tal e qual, ver a subseção "Janela de acesso rápido" logo
+    // abaixo). `trena3DPainelRapidoOrdem`: lista de `campo` (mesmo valor de
+    // `_trena3DOpcoesPainelRapido`, ver view3d.js) na ordem escolhida pelo
+    // usuário — vazio (padrão) significa "usa a ordem original de código".
+    // `trena3DPainelRapidoOcultos`: lista de `campo` que o usuário
+    // desmarcou pra NÃO aparecer na janelinha — vazio (padrão) significa
+    // "todos aparecem", igual sempre foi antes desta opção existir. Ver
+    // view3d.js '_trena3DOpcoesPainelRapidoEfetivas'.
+    trena3DPainelRapidoOrdem: [],
+    trena3DPainelRapidoOcultos: [],
+    // [RODADA 130] Mesmo padrão de `trena3DPainelRapidoOrdem`/`...Ocultos`
+    // acima, agora pros GRUPOS de espessura/cor da janelinha (ver
+    // view3d.js '_trena3DGruposAjustesPainelRapido'/'_trena3DGruposAjustesEfetivos')
+    // — `chave` de cada grupo, não `campo` (namespace separado dos chips de
+    // botões, que usam `campo`).
+    trena3DPainelRapidoOrdemGrupos: [],
+    trena3DPainelRapidoGruposOcultos: [],
     // NOVO (03/09/2026) — "Configurações 2D": pedido do usuário, "nova
     // seção para escolher quais ferramentas continuam visíveis (apenas
     // como botão, fora da janela Ferramentas) mesmo durante o Modo
@@ -1191,6 +1544,29 @@ const MapConfig = {
    *  raycast) sem precisar reabrir a tela. */
   onChange(fn) { this._listeners.push(fn); },
 
+  /** [17/09/2026 UTC, RODADA 116] NOVO — mesmo padrão de `previewSet`
+   *  acima (ver comentário grande lá: "a aplicação do efeito deve ser
+   *  imediata [...] Simplesmente chamar `set()` a cada [passo] seria
+   *  caro/desnecessário"), só que genérico e sem exigir que quem chama
+   *  distinga "ainda arrastando" de "gesto terminado" — útil pro widget
+   *  "botão triplo" (`ModelerUI._createNumField`), cujo `onCommit` dispara
+   *  a cada passo do arraste/seta SEM avisar quando o gesto termina de
+   *  verdade. Aplica na hora via `previewSet` (efeito visual imediato,
+   *  gratuito) e agenda a persistência de verdade (`set()`, grava no
+   *  IndexedDB) pra depois de `delayMs` ms SEM nenhuma chamada nova
+   *  (debounce por `chave` — cada campo tem seu próprio timer, então
+   *  arrastar um campo não atrasa a gravação de outro que tenha terminado
+   *  antes) — na prática, grava 1x só quando o usuário para de mexer
+   *  naquele campo (solta o arraste, ou termina de clicar nas setas),
+   *  igual ao `previewSet`+`set()` manual de "Hora do dia", sem precisar
+   *  replicar a lógica de debounce em cada chamador. */
+  _debouncedPersist(chave, patch, delayMs = 400) {
+    this.previewSet(patch);
+    if (!this._debouncePersistTimers) this._debouncePersistTimers = {};
+    clearTimeout(this._debouncePersistTimers[chave]);
+    this._debouncePersistTimers[chave] = setTimeout(() => { this.set(patch); }, delayMs);
+  },
+
   // NOVO (03/09/2026) — seção "🌗 Hora do dia": formata um número de hora
   // fracionário (ex.: 13.5) como "13:30", pro label ao lado da trilha.
   _formatHora(h) {
@@ -1743,6 +2119,17 @@ const MapConfig = {
     // MESMA chave 1x no mount) — os dois lados ficam sincronizados porque
     // ambos leem/gravam a mesma chave do DB.
     const mapRotacaoSnapGraus = (opts.context === '2d') ? await DB.getSetting('mapa2dRotacaoSnapGraus', 15) : 15;
+    // [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possível selecionar
+    // texto das opções e descrições nas 'configurações 3D'. No cabeçalho
+    // deve ter um botão que controla isso." Diferente de "Configurações 2D"
+    // (RODADA anterior, 09/09/2026 — texto SEMPRE selecionável lá, sem
+    // opção nenhuma, ver `.mapconfig-sheet--2d` em css/style.css), aqui é um
+    // TOGGLE — padrão desativado (comportamento de sempre preservado) — com
+    // o estado lembrado entre aberturas do modal (chave própria "solta" no
+    // DB, mesmo padrão de `fotosMarcarAquiAcao`/`mapRotacaoSnapGraus`
+    // acima). Só se aplica ao contexto 3D — "Configurações 2D" já é sempre
+    // selecionável, incondicionalmente, então o botão nem aparece lá.
+    const mc3dTextoSelecionavel = (opts.context !== '2d') ? await DB.getSetting('mapconfig3DTextoSelecionavel', false) : false;
     const rdCustom = !this.RENDER_DISTANCE_PRESETS.includes(Number(cfg.renderDistance));
     const fpsCustom = Number(cfg.fpsLimite) > 0 && !this.FPS_LIMITE_PRESETS.includes(Number(cfg.fpsLimite));
     const modal = document.createElement('div');
@@ -1755,7 +2142,7 @@ const MapConfig = {
     // `user-select:none` do "cromo" da interface que hoje bloqueia a
     // seleção também aqui).
     modal.innerHTML = `
-      <div class="modal-sheet mapconfig-sheet${opts.context === '2d' ? ' mapconfig-sheet--2d' : ''}">
+      <div class="modal-sheet mapconfig-sheet${opts.context === '2d' ? ' mapconfig-sheet--2d' : ''}${mc3dTextoSelecionavel ? ' mapconfig-sheet--selecionavel' : ''}">
         <div class="handle"></div>
         <!-- NOVO (07/09/2026), pedido verbatim: "melhorar interação 3D para
              o celular [...] Deve ter um botão de 'fechar' nas
@@ -1772,7 +2159,24 @@ const MapConfig = {
              quem já rolou até lá continua com o de sempre também. -->
         <div style="position:sticky; top:-16px; z-index:1; background:var(--bg-elev); margin:-16px -16px 0; padding:16px 16px 8px; display:flex; align-items:center; justify-content:space-between; gap:8px">
           <h3 style="margin:0">⚙️ Configurações do mapa</h3>
-          <button type="button" class="icon-btn sm" id="mc-close-top" title="Fechar configurações" style="flex:none">✕</button>
+          <div style="display:flex; align-items:center; gap:6px; flex:none">
+            <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possível
+                 selecionar texto das opções e descrições nas 'configurações
+                 3D'. No cabeçalho deve ter um botão que controla isso." Só
+                 renderizado no contexto 3D (opts.context !== '2d') --
+                 "Configurações 2D" já é sempre selecionável, sem botão
+                 nenhum (ver comentário grande em 'mc3dTextoSelecionavel'
+                 acima). Ícone/estado refletem 'mc3dTextoSelecionavel' já
+                 lido do DB nesta abertura do modal. -->
+            ${opts.context !== '2d' ? `<button type="button" class="icon-btn sm" id="mc-toggle-selecionavel" title="${mc3dTextoSelecionavel ? 'Desativar seleção de texto das opções/descrições' : 'Ativar seleção de texto das opções/descrições'}" aria-pressed="${mc3dTextoSelecionavel ? 'true' : 'false'}" style="flex:none">
+              <!-- [RODADA 134] REMOVIDO -- pedido verbatim: "Retire o desenho
+                   do cursor de trás do cadeado." O ícone de cursor (SVG, Rodada
+                   132/133) e a letra 'T' (Rodada 131) que vieram antes dele
+                   foram removidos -- volta a ser só o emoji do cadeado
+                   sozinho (🔒/🔓), sem nenhum desenho atrás. -->
+              ${mc3dTextoSelecionavel ? '🔓' : '🔒'}` : ''}
+            <button type="button" class="icon-btn sm" id="mc-close-top" title="Fechar configurações" style="flex:none">✕</button>
+          </div>
         </div>
 
         <!-- [15/09/2026 UTC] MUDADO -- pedido verbatim: "Verifique se tudo
@@ -2826,6 +3230,29 @@ const MapConfig = {
             <input type="checkbox" id="mc-debug-enquadramento-camera" ${cfg.debugEnquadramentoCameraAtivo !== false ? 'checked' : ''}>
             <span><span class="t">Enquadramento de câmera</span><br><span class="d">O "retângulo amarelo" que representa os limites/enquadramento de uma câmera calibrada (📷 Câmeras/orbs de foto) — visível ao selecionar a câmera e em "Ver através desta câmera".</span></span>
           </label>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 123) — pedido verbatim: imprimir
+               (pra teste) as coordenadas x/y de tela calculadas, junto do
+               texto da medida e ao lado da esfera vermelha da Trena 3D,
+               como uma opção desta seção "Debug" (em vez de sempre ligado
+               no código). Ver DEFAULTS.debugTrena3DCoordenadasAtivo e
+               _isDebugTrena3DCoordenadasAtivo()/aplicarDebugCoords
+               (view3d.js, _trena3DUpdateLabels). -->
+          <label class="radio-opt" style="margin-top:8px">
+            <input type="checkbox" id="mc-debug-trena3d-coords" ${cfg.debugTrena3DCoordenadasAtivo === true ? 'checked' : ''}>
+            <span><span class="t">Coordenadas de tela da Trena 3D</span><br><span class="d">Ferramenta de diagnóstico: imprime as coordenadas x/y de tela calculadas junto do texto de cada medida, e um rótulo extra ao lado da esfera vermelha do ponto médio com as coordenadas dela — útil pra comparar se os dois batem. Desligado por padrão.</span></span>
+          </label>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 125) — pedido verbatim: "Nas
+               'configurações 3D', na seção de debug, deve ter um botão que
+               habilita aparecer/não aparecer o botão que liga/desliga o
+               debug em algum lugar da tela." Não existia nenhum botão
+               flutuante de debug na tela até esta rodada — criado um botão
+               🐞 fixo no canto (ver view3d.js '_trena3DEnsureDebugBotaoTela'),
+               que alterna 'debugModoAtivo' com 1 clique. Este novo campo só
+               controla se ele aparece ou não (padrão: aparece). -->
+          <label class="radio-opt" style="margin-top:8px">
+            <input type="checkbox" id="mc-debug-botao-tela" ${cfg.debugBotaoTelaAtivo !== false ? 'checked' : ''}>
+            <span><span class="t">Mostrar botão 🐞 flutuante na tela (liga/desliga o debug)</span><br><span class="d">Um pequeno botão fixo no canto da tela, dentro do visualizador 3D, que alterna "Ativar modo Debug" (acima) com 1 clique — sem precisar abrir as configurações. Ligado por padrão.</span></span>
+          </label>
         </div>
         <!-- Seção "🧱 Parede" (pedido do usuário, 24/08/2026) — snaps da
              ferramenta "🧱 Parede" da hotbar (view3d.js) e o estilo de
@@ -2907,9 +3334,125 @@ const MapConfig = {
              campo é lido/aplicado. Dividida em subseções (pedido verbatim
              do usuário, rodada seguinte à que criou o snap): Snap, Aparência
              da medida, Visibilidade, Espessura/cores e Pontas. -->
+        <!-- [17/09/2026 UTC] NOVO — pedido verbatim (item 6, RODADA 110):
+             "no cabeçalho da seção 'Trena 3D', coloque um botão de controle
+             de modo de apresentação das informações: a atual, com desenhos
+             grandes, textos explicativos enormes e muitos espaçamentos; e a
+             versão em árvore/lista como uma estrutura de pastas, mas não
+             faltando em nada [...] (sem desenhos grandes, textos
+             explicativos enormes, nem grandes espaçamentos)." Envolve TODA
+             a seção "📏 Trena 3D" (deste ponto até o fim dela, antes de
+             "🚪 Porta / Janela") num div id="mc-trena3d-secoes" só pra
+             servir de ESCOPO da troca de modo (querySelectorAll de dentro
+             dele, ver _wireTrena3DModoArvore mais abaixo) — sem isso, o
+             seletor genérico .mapconfig-section pegaria TAMBÉM seções não
+             relacionadas (ex. "🎬 Apresentação", "🚪 Porta / Janela",
+             "📦 Objeto", todo o contexto '2d'). Nenhum conteúdo/campo/id já
+             existente foi removido ou duplicado — o modo árvore reorganiza
+             visualmente (via CSS + _wireTrena3DModoArvore) o MESMO DOM já
+             renderizado, então nenhum recurso da Trena 3D "falta" no modo
+             árvore, exatamente como pedido. -->
+        <div id="mc-trena3d-secoes">
         <div class="mapconfig-section">
-          <h4>📏 Trena 3D<button type="button" id="mc-trena3d-sobre-btn" class="btn sm secondary" style="margin-left:10px; vertical-align:middle" title="Abre uma janela explicando em detalhes como usar a ferramenta Trena 3D (modos de ancoragem, snap, cliques).">📖 Sobre a Trena 3D</button></h4>
+          <h4>📏 Trena 3D<button type="button" id="mc-trena3d-sobre-btn" class="btn sm secondary" style="margin-left:10px; vertical-align:middle" title="Abre uma janela explicando em detalhes como usar a ferramenta Trena 3D (modos de ancoragem, snap, cliques).">📖 Sobre a Trena 3D</button><button type="button" id="mc-trena3d-modo-arvore" class="btn sm secondary" style="margin-left:6px; vertical-align:middle" title="Alterna entre o modo árvore/lista (atual — compacto, como uma estrutura de pastas — mesmas opções, sem nada faltando, só sem os desenhos/textos longos/espaçamentos grandes) e o modo explicativo (ilustrado, com prévias grandes e textos explicativos completos).">🌳 Modo árvore/lista</button></h4>
           <span class="d" style="display:block">Botão acima abre um documento explicando passo a passo como a ferramenta "📏 Trena 3D" funciona (dentro de "Ver em 3D") — inclusive os 2 modos de ancoragem configuráveis logo abaixo.</span>
+          <!-- [RODADA 139] Toggle "Trena 3D" / "Polilinha 3D" — pedido
+               verbatim: "Elimine a seção da polilinha 3D e os seus recursos
+               [...] Apenas o ícone deve ser preservado [...] deve ter um
+               botão 'Trena 3D' e um botão 'Polilinha 3D'. Deve ficar logo
+               abaixo do título da seção, acima do botão 'restaurar
+               padrões'. Ao clicar em um desativa o outro." A "Polilinha 3D"
+               não é mais uma ferramenta separada — é um MODO (campo
+               trena3DModo) da própria "Trena 3D": todo o resto desta
+               seção, o botão do rodapé do "Ver em 3D" e o cabeçalho desta
+               mesma seção trocam de nome/ícone conforme o modo escolhido
+               aqui (ver função _wireTrena3DModoToggle mais abaixo). -->
+          <div id="mc-trena3d-modo-toggle" class="lb-campos-row" style="margin:8px 0 10px; gap:6px">
+            <button type="button" id="mc-trena3d-modo-trena" class="btn sm ${(cfg.trena3DModo || 'trena') === 'trena' ? '' : 'secondary'}" title="Trena 3D — só troca o ícone e o nome exibido (para '📏 Trena 3D'); a ferramenta e todo o seu comportamento (2 pontos por medida, ancoragem, snap etc.) continuam exatamente os mesmos.">📏 Trena 3D</button>
+            <button type="button" id="mc-trena3d-modo-poli" class="btn sm ${cfg.trena3DModo === 'poli' ? '' : 'secondary'}" title="Polilinha 3D — só troca o ícone e o nome exibido (para '➰ Polilinha 3D'); a ferramenta e todo o seu comportamento continuam exatamente os mesmos da 'Trena 3D' (2 pontos por medida, ancoragem, snap etc.) — não há nenhuma diferença funcional entre os dois modos.">➰ Polilinha 3D</button>
+          </div>
+          <!-- [16/09/2026 UTC] NOVO (RODADA 92) — pedido verbatim: "Coloque
+               logo abaixo da do título da seção 'Trena 3D' [...] um botão de
+               restaurar padrões. Ao clicar [...] deve aparecer uma card
+               perguntando se deseja restaurar aos valores padrão [...] Se
+               confirmar [...] os valores padrão de todas as opções do
+               'Trena 3D' são restituídos." Não achamos nenhum padrão de
+               modal de confirmação já existente neste arquivo (buscado
+               "confirm(", "showConfirm" etc.) — usado window.confirm()
+               nativo mesmo, mais simples e suficiente aqui. -->
+          <button type="button" id="mc-trena3d-restaurar-padroes" class="btn sm secondary" style="margin-top:6px" title="Restaura TODAS as opções da Trena 3D (Snap, Aparência da medida, Visibilidade, Espessura/cores, Pontas, Destaque de mira, Altura ao vivo, Linha da âncora, Linhas verticais, Guia de grade, Janelinha, etc.) para os valores padrão de fábrica.">↺ Restaurar padrões da Trena 3D</button>
+        </div>
+        <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "A janelinha que aparece
+             com as opções da 'Trena 3D' deve ter um subseção com uma opção
+             para ativar mostrá-la ou não." Mesmo campo
+             'trena3DPainelRapidoAtivo' já configurável em "Configurações 2D
+             → 📏 Trena 3D" — espelhado AQUI TAMBÉM (nas Configurações 3D,
+             junto de todo o resto da Trena 3D) só por conveniência/
+             descoberta — os 2 checkboxes (o de lá e o daqui) sempre refletem
+             o mesmo valor. Ver view3d.js '_trena3DEnsurePainelRapido'. -->
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Janela de acesso rápido</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-painel-rapido-3d" ${cfg.trena3DPainelRapidoAtivo !== false ? 'checked' : ''}>
+            <span><span class="t">Mostrar janela de acesso rápido dentro do "Ver em 3D" (padrão: ativado)</span><br><span class="d">Uma janelinha pequena, arrastável, com ícones pra ligar/desligar rapidamente as principais opções abaixo sem precisar abrir esta folha de Configurações. Fechando ela pelo "✕", um botãozinho no canto inferior direito da tela deixa reabri-la sem precisar voltar aqui. (Mesma opção de "Configurações 2D → 📏 Trena 3D".)</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO (RODADA 91) — pedido verbatim: "deve
+               haver uma opção do modo como a janelinha vai aparecer. Este
+               modo atual é uma delas. E o outro mais simples é o que
+               estava antes (todos os botões agrupados [...] não precisa
+               imprimir texto, mas um contorno para identificar os botões
+               que pertencem a uma mesma subseção já basta)." Ver
+               view3d.js '_trena3DAtualizarPainelRapido'. -->
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-painel-rapido-modo" value="agrupado" ${cfg.trena3DPainelRapidoModo === 'agrupado' ? 'checked' : ''}>
+            <span><span class="t">Agrupado, com rótulo de texto</span><br><span class="d">Os botões ficam divididos em grupos por subseção, cada grupo com um contorno sutil e um pequeno rótulo de texto indicando de qual subseção ele vem.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-painel-rapido-modo" value="simples" ${cfg.trena3DPainelRapidoModo !== 'agrupado' ? 'checked' : ''}>
+            <span><span class="t">Simples, só contornos (padrão)</span><br><span class="d">O jeito de antes da Rodada 90: os botões continuam agrupados visualmente por um contorno sutil (sem o texto do rótulo), pra manter a janelinha o mais simples/compacta possível.</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Na subseção da
+               janelinha, deve ser possível selecionar os botões e a ordem em
+               que eles vão ficar na janela [...] no cabeçalho do app, no
+               botão 'Ver lista simples', onde diz 'Partes de informação em
+               cada linha (marque e arraste ⠿ para reordenar)', ali tem um
+               sistema de flipagem e reposicionamento que pode ser
+               modularizado (caso ainda não seja) e reaproveitado para isso."
+               Esse sistema JÁ estava modularizado desde 28/08/2026 em
+               js/flip.js ('window.Flip.makeSortable', extraído de
+               verlistasimples.js) — reaproveitado aqui tal e qual, MESMAS
+               classes CSS ('.lb-campo-chip'/'.lb-campos-row', ver
+               css/style.css) e mesmo padrão de chip (alça ⠿ + checkbox),
+               preenchido dinamicamente logo após este HTML ser inserido no
+               DOM (ver a função grande de listeners logo abaixo, bloco
+               "Janela de acesso rápido — chips"). -->
+          <!-- [17/09/2026 UTC] NOVO (RODADA 117) — pedido verbatim: "A
+               única parte que deve ser um botão de aparece/não aparece [é]
+               na subseção 'Janela de acesso rápido', mas apenas na parte
+               desta subseção em que aparece os botões da janelinha da
+               'Trena 3D'." Ver comentário grande em css/style.css
+               ('#mc-trena3d-pr-chips-wrap') e _wireTrena3DModoArvore
+               (wiring do botão) — único toggle "aparece/não aparece"
+               restante nesta seção; todo o resto (aqui e nas demais
+               subseções) sempre mostra as opções, sem precisar clicar em
+               nada. -->
+          <div style="margin-top:10px">
+            <button type="button" id="mc-trena3d-pr-chips-toggle" class="btn sm secondary" title="Mostra ou esconde a lista de botões da janelinha (ícone de cada botão, com a ordem em que aparecem) — a única parte desta subseção que fica escondida por padrão, pra não deixar a lista de opções comprida demais.">🐵 Mostrar botões da janelinha</button>
+            <div id="mc-trena3d-pr-chips-wrap" style="margin-top:8px">
+              <div style="font-size:11px; color:var(--text-dim); margin-bottom:6px">Marque quais botões aparecem na janelinha e arraste ⠿ para definir a ordem deles:</div>
+              <div id="mc-trena3d-pr-chips" class="lb-campos-row"></div>
+              <!-- [RODADA 130] pedido verbatim: "Reformula está parte também
+                   [...] em vez de ficar com está, faça ser exatamente como
+                   aparece na janelinha da 'Trena 3D', com os próprios
+                   botões, desenhos e estilos [...] incluindo a parte das
+                   cores também." Prévia visual FIEL (mesmo HTML/CSS gerado
+                   por view3d.js _trena3DHtmlGrupoAjuste, mesma função — sem
+                   duplicar estilos) do bloco Espessura/cores da janelinha,
+                   também arrastável/ocultável — ver o wiring logo abaixo. -->
+              <div style="font-size:11px; color:var(--text-dim); margin:12px 0 6px 0">Espessura/cor/texto da janelinha (mesmo visual e funcionamento de lá) — marque, ou clique e arraste (fora dos controles) para reordenar:</div>
+              <div id="mc-trena3d-pr-grupos" style="border-top:1px solid rgba(255,255,255,0.1); padding-top:6px; font-size:11px"></div>
+            </div>
+          </div>
         </div>
         <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "sobre segurar o ctrl,
              deve ter uma subseção sobre como funciona esta funcionalidade
@@ -2924,15 +3467,76 @@ const MapConfig = {
              físico é ignorado e a alternância ancora/ponto é 100% automática
              por estado, sempre exigindo exatamente 4 cliques por medida). -->
         <div class="mapconfig-section">
-          <h4>📏 Trena 3D — Como funciona a ancoragem (Ctrl)</h4>
+          <!-- [16/09/2026 UTC] RENOMEADO — pedido verbatim: "A subseção
+               '📏 Trena 3D — Como funciona a ancoragem (Ctrl)' deve ter o
+               nome trocado para '📏 Trena 3D — Modo de ancoragem (ctrl)'."
+               Só o título mudou, nenhum conteúdo interno foi alterado. -->
+          <h4>📏 Trena 3D — Modo de ancoragem (ctrl)</h4>
           <span class="d" style="display:block; margin-bottom:8px">A Trena 3D mede entre 2 pontos no espaço 3D. Um clique comum mira DIRETO numa superfície (chão/parede/objeto) pra definir cada ponto. Mas às vezes você quer um ponto "no ar" (ex.: o topo de uma parede, medido a partir do chão) — pra isso existe a <b>âncora</b>: um clique de ancoragem trava X/Z num ponto real do chão/superfície, e o PRÓXIMO clique fixa a altura (Y) livremente sobre essa reta vertical, mirando pra cima/baixo. Escolha abaixo como essa ancoragem é acionada:</span>
           <label class="radio-opt">
             <input type="radio" name="mc-trena3d-modo-ancora" value="ctrl" ${cfg.trena3DModoAncora !== 'quatroCliques' ? 'checked' : ''} title="Segurar Ctrl e clicar estabelece/move uma âncora (trava X/Z, libera só Y); soltar o Ctrl e clicar fixa o ponto 'no ar' sobre essa reta. Sem usar Ctrl nenhuma vez, uma medida sai com só 2 cliques normais (direto na superfície).">
-            <span><span class="t">Segurando Ctrl (padrão) — medida normal com 2 cliques</span><br><span class="d">Segure Ctrl e clique pra estabelecer (ou mover) um ponto de ancoragem no chão/superfície, fixando X e Z — solte o Ctrl e clique de novo pra fixar a 3ª dimensão (a altura, Y) nesta linha "no ar", livre pra mirar pra cima/baixo. Se você NUNCA segurar Ctrl durante a medição, ela é feita do jeito simples de sempre: só 2 cliques, cada um direto numa superfície real — o Ctrl é 100% opcional, só entra em jogo se você quiser um ponto "no ar".</span></span>
+            <span>${this._trena3DPreviewImgTag('modoAncora')}<span class="t">Segurando Ctrl (padrão) — medida normal com 2 cliques</span><br><span class="d">Segure Ctrl e clique pra estabelecer (ou mover) um ponto de ancoragem no chão/superfície, fixando X e Z — solte o Ctrl e clique de novo pra fixar a 3ª dimensão (a altura, Y) nesta linha "no ar", livre pra mirar pra cima/baixo. Se você NUNCA segurar Ctrl durante a medição, ela é feita do jeito simples de sempre: só 2 cliques, cada um direto numa superfície real — o Ctrl é 100% opcional, só entra em jogo se você quiser um ponto "no ar".</span></span>
           </label>
           <label class="radio-opt">
             <input type="radio" name="mc-trena3d-modo-ancora" value="quatroCliques" ${cfg.trena3DModoAncora === 'quatroCliques' ? 'checked' : ''} title="Toda medida sempre usa exatamente 4 cliques, alternando âncora/ponto para os dois pontos da medida — o Ctrl não tem nenhum efeito neste modo.">
-            <span><span class="t">Sempre com 4 cliques (independe do Ctrl)</span><br><span class="d">Toda medida passa a exigir SEMPRE 4 cliques, nesta ordem — segurar Ctrl ou não faz nenhuma diferença neste modo: <b>1º clique</b> estabelece o ponto de ancoragem do 1º ponto (trava X/Z, libera só a altura); <b>2º clique</b> fixa o 1º ponto da medida "no ar" sobre essa reta; <b>3º clique</b> estabelece o ponto de ancoragem do 2º ponto (trava X/Z de novo, num lugar novo); <b>4º clique</b> fixa o 2º ponto da medida e conclui.</span></span>
+            <span>${this._trena3DPreviewImgTag('modoAncora')}<span class="t">Sempre com 4 cliques (independe do Ctrl)</span><br><span class="d">Toda medida passa a exigir SEMPRE 4 cliques, nesta ordem — segurar Ctrl ou não faz nenhuma diferença neste modo: <b>1º clique</b> estabelece o ponto de ancoragem do 1º ponto (trava X/Z, libera só a altura); <b>2º clique</b> fixa o 1º ponto da medida "no ar" sobre essa reta; <b>3º clique</b> estabelece o ponto de ancoragem do 2º ponto (trava X/Z de novo, num lugar novo); <b>4º clique</b> fixa o 2º ponto da medida e conclui.</span></span>
+          </label>
+        </div>
+        <!-- [16/09/2026 UTC] NOVO (RODADA 98) — pedido verbatim: "Deve ser
+             possível colocar medidas apontando para lados (parede, porta
+             janela, objetos pela lateral). Atualmente, é só a parte de cima
+             dos objetos. Deve ter uma subseção para isso com uma opção para
+             que o raycaster atinja os lados e dê para começar/terminar
+             medidas nas laterais dos objetos." Ver engine3d.js
+             'Engine3D.raycastSurfaceAmpliado' (novo) e view3d.js
+             '_trena3DRaycastPrincipal' — a Trena 3D SEMPRE usou
+             'raycastSurface' (só topo de objeto/tijolo + chão; parede e
+             porta/janela nunca entravam, nenhuma face lateral nunca
+             contava) — esta opção troca pro raycast ampliado (qualquer
+             face, qualquer um desses tipos), sem mudar o comportamento de
+             quem não ligar. -->
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Medição em superfícies laterais</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-superficies-laterais" ${cfg.trena3DPermitirSuperficiesLaterais === true ? 'checked' : ''} title="Quando ativa, a mira da Trena 3D passa a considerar QUALQUER face atingida (parede, porta, janela, lateral de um objeto) pra iniciar/terminar um ponto da medida — não só o topo de objetos e o chão, como no comportamento padrão.">
+            <span>${this._trena3DPreviewImgTag('superficiesLaterais')}<span class="t">Permitir medir em paredes/laterais de objetos (padrão: desativado)</span><br><span class="d">Por padrão, a Trena 3D só consegue iniciar/terminar um ponto de medida mirando o CHÃO ou o TOPO de um objeto/tijolo (uma face virada pra cima) — paredes, portas, janelas e as laterais de objetos nunca contavam, mesmo mirando bem em cima delas. Ative esta opção para medir também encostando em qualquer uma dessas superfícies pelo lado (ex.: a largura de uma parede, a altura de uma porta pela lateral, a largura de um armário).</span></span>
+          </label>
+        </div>
+        <!-- [16/09/2026 UTC] NOVO (RODADA 101) — pedido verbatim: "Após
+             estabelecer o 1º ponto da medida deve ser possível 'continuar
+             naquele nível' (de y) de modo que é como se tivesse feito já o
+             2º ponto âncora na mesma altura de y, porém não fixo e estando
+             livre para movimentar o Z e X. Um gradeado infinito de 1mx1m
+             (em fase com o ladrilho do mundo) deve ser desenhado [...]" Ver
+             view3d.js '_trena3DUpdatePreview' ('modoContinuarNivel') e
+             '_trena3DAtualizarGradeNivelInfinita'. -->
+        <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Os mesmos ícones que
+             estão sendo usados na janelinha deve ser usados nas opções da
+             seção 'Trena 3D' (nas 'configurações 3D')." A partir daqui, toda
+             opção da seção "📏 Trena 3D" que também existe como botão na
+             janelinha de acesso rápido (ver view3d.js
+             '_trena3DOpcoesPainelRapido') ganha o MESMO ícone (emoji ou, no
+             único caso com ícone SVG — "Suprimir destaque durante a
+             ancoragem" — o mesmo SVG em miniatura) como prefixo do rótulo,
+             pra ficar visualmente óbvio que é a mesma opção nos 2 lugares. -->
+        <!-- [17/09/2026 UTC] MUDANÇA — pedido verbatim: "Não somente o SVG
+             que aparece na janela, mas também o contorno como se fosse
+             visualmente o próprio botão, para as opções que tem botão na
+             janelinha." As 12 opções acima ganharam SÓ o emoji/SVG cru como
+             prefixo (RODADA 109) — agora cada um desses 12 ícones fica
+             dentro de um pequeno span com o MESMO "contorno de botão"
+             (borda laranja + fundo laranja translúcido + cantos
+             arredondados) usado de verdade nos botões da janelinha (ver
+             _trena3DEstiloBotaoPainelRapido em view3d.js — aqui como um
+             estilo inline fixo, já que esta é uma prévia ilustrativa
+             estática, não um botão clicável de verdade) — fica visualmente
+             claro, de relance, que aquilo ali É um botão da janelinha, não
+             só um emoji qualquer decorando o texto. -->
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Continuar no nível do 1º ponto</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-continuar-nivel" ${cfg.trena3DContinuarNoNivel === true ? 'checked' : ''} title="Quando ativa, depois de fixar o 1º ponto de uma medida, a mira passa a ficar 'presa' na mesma altura (Y) desse ponto — livre em X/Z — em vez de precisar mirar outra superfície de verdade pro 2º ponto.">
+            <span>${this._trena3DPreviewImgTag('continuarNivel')}<span class="t"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 3px; margin-right:4px; border:1px solid #ff9f4d; background:rgba(255,159,77,0.25); border-radius:4px; vertical-align:-4px; box-sizing:border-box" title="Este ícone indica que esta opção pode estar presente na janela rápida da Trena 3D por meio de um botão com o mesmo ícone.">⇔▦</span> Continuar medindo no mesmo nível do 1º ponto (padrão: desativado)</span><br><span class="d">Depois de fixar o 1º ponto de uma medida, ative esta opção pra "continuar naquele nível": é como se um 2º ponto âncora já tivesse sido marcado na MESMA altura do 1º, mas sem travar X/Z — a mira fica livre nesse plano horizontal, só a altura (Y) fica presa. Um gradeado infinito de células 1×1m (na mesma fase do ladrilho do mundo) aparece nesse plano pra servir de referência visual, no lugar do gradeado que normalmente apareceria no chão. Útil pra medir distâncias horizontais numa altura específica (ex. o comprimento de uma parede a 1,5m do chão) sem precisar mirar uma superfície de verdade naquela altura. Não tem efeito nenhum se não houver um 1º ponto fixado ainda, ou se a âncora (Ctrl) já estiver sendo usada — a âncora sempre tem prioridade.</span></span>
           </label>
         </div>
         <div class="mapconfig-section">
@@ -2951,72 +3555,488 @@ const MapConfig = {
           <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap">
             <label class="radio-opt" style="flex:0 0 auto; margin:0">
               <input type="checkbox" id="mc-trena3d-snap-on" ${cfg.trena3DSnapAtivo !== false ? 'checked' : ''}>
-              <span><span class="t">🧲 Snap de posição</span></span>
+              <span>${this._trena3DPreviewImgTag('snap')}<span class="t">🧲 Snap de posição</span></span>
             </label>
             <label class="field" style="flex:0 0 auto; margin:0; min-width:120px">
               <span class="lbl">Valor (m)</span>
-              <input type="number" id="mc-trena3d-snap" min="0.01" max="2" step="0.01" value="${Utils.clamp(Number(cfg.trena3DSnapMetros) || 0.1, 0.01, 2)}" ${cfg.trena3DSnapAtivo === false ? 'disabled' : ''}>
+              <div id="mc-trena3d-snap" data-valor="${Utils.clamp(Number(cfg.trena3DSnapMetros) || 0.1, 0.01, 2)}"></div>
             </label>
           </div>
           <span class="d" style="display:block; margin-top:6px">Com o snap LIGADO, cada ponta clicada com a ferramenta "📏 Trena 3D" (dentro de "Ver em 3D") arredonda X/Y/Z pro múltiplo mais próximo do valor ao lado — evita medidas com casas decimais "quebradas" por causa de mira imprecisa. Desligado, usa a posição exata da mira/superfície, sem arredondar. Dica: segurando <b>Shift</b> durante a medição, o snap fica desligado temporariamente, mesmo com esta opção marcada — solte o Shift pra voltar a arredondar normalmente.</span>
         </div>
         <div class="mapconfig-section">
           <h4>📏 Trena 3D — Aparência da medida</h4>
+          <!-- [16/09/2026 UTC] REESTRUTURADO — pedido verbatim (resumo): a
+               opção padrão antiga ('value="sobreLinha"', projeta o meio 3D
+               exato, sem deslocamento — a caixa do rótulo já fica centrada
+               na projeção por causa do 'transform:translate(-50%,-50%)' no
+               CSS do próprio rótulo, ver '_trena3DRebuildLines'/
+               '_trena3DUpdateLabels') teve só o TEXTO renomeado pra
+               "Flutuante" (o COMPORTAMENTO continua o mesmo de sempre — o
+               VALOR do radio ('sobreLinha') também não mudou, só o rótulo
+               visível). A opção antiga "Flutuante (jeito antigo)"
+               ('value="flutuante"', deslocava +0,18m no eixo Y ANTES de
+               projetar) foi REMOVIDA por completo (radio + tratamento em
+               '_trena3DRebuildLines'). Em seu lugar entra uma opção NOVA,
+               'value="sobreLinhaMeio"': "o texto ocupa uma caixa [...] o
+               ponto médio desta caixa deve ser comum ao ponto médio da linha
+               3D formada pela medida [...] quando já estiver projetada na
+               tela" — ou seja, projeta os 2 EXTREMOS da medida
+               separadamente pra tela e centraliza o rótulo na MÉDIA
+               2D/tela dos 2 pontos projetados (não a projeção do meio 3D —
+               as duas contas diferem sob perspectiva, já que projeção não é
+               linear). Ver '_trena3DUpdateLabels' (branch por
+               'dataset.modoLabel'). -->
           <label class="radio-opt">
-            <input type="radio" name="mc-trena3d-label" value="sobreLinha" ${cfg.trena3DLabelEstilo !== 'flutuante' ? 'checked' : ''}>
-            <span><span class="t">Em cima da linha, no meio (padrão)</span><br><span class="d">O texto da distância fica centrado bem em cima do traço da medida, no meio dela.</span></span>
+            <input type="radio" name="mc-trena3d-label" value="sobreLinhaMeio" ${cfg.trena3DLabelEstilo === 'sobreLinhaMeio' ? 'checked' : ''}>
+            <span>${this._trena3DPreviewImgTag('labelSobreLinhaMeio')}<span class="t">Em cima da linha e no meio</span><br><span class="d">O centro da caixa do texto coincide com o ponto médio, NA TELA (já projetado), do traço da medida — calculado a partir dos 2 extremos já projetados, não do meio em 3D (que pode ficar visualmente deslocado da linha na tela, dependendo do ângulo da câmera).</span></span>
           </label>
           <label class="radio-opt">
-            <input type="radio" name="mc-trena3d-label" value="flutuante" ${cfg.trena3DLabelEstilo === 'flutuante' ? 'checked' : ''}>
-            <span><span class="t">Flutuante (jeito antigo)</span><br><span class="d">O texto fica um pouco acima do meio da linha, "flutuando" — era o único jeito antes desta opção existir.</span></span>
+            <input type="radio" name="mc-trena3d-label" value="sobreLinha" ${cfg.trena3DLabelEstilo !== 'sobreLinhaMeio' ? 'checked' : ''}>
+            <span>${this._trena3DPreviewImgTag('labelSobreLinha')}<span class="t">Flutuante</span><br><span class="d">O texto fica centrado no ponto médio da linha calculado em 3D, antes de projetar pra tela (padrão de sempre desta opção).</span></span>
           </label>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 119) — pedido verbatim: controlar
+               a posição da caixa de texto numa linha vertical que passa pelo
+               ponto médio da reta 3D da medida (0 = no meio, +/- acima/
+               abaixo). Ver '_trena3DCampoDeslocVerticalLabel'/
+               '_wireTrena3DDeslocVerticalLabel' (mapconfig.js) e
+               '_trena3DDeslocarPontoY' (view3d.js). -->
+          ${this._trena3DCampoDeslocVerticalLabel('mc-trena3d-label', cfg.trena3DLabelDeslocVerticalM)}
+          <!-- [RODADA 131] MOVIDO — pedido verbatim: o conteúdo da (antiga)
+               subseção "📏 Trena 3D — Espessura e cores" virou um subtítulo
+               coerente aqui dentro de "Aparência da medida" (a subseção
+               separada foi eliminada). Nenhum id/campo/comportamento
+               mudou — só o HTML ao redor. -->
+          <h5 class="mc-subtitulo">Espessura e cores</h5>
+          <!-- [RODADA 129] REMOVIDOS os campos "Cor da âncora/linha vertical
+               (Ctrl)"/"Cor da mira normal (sem âncora)" que ficavam aqui —
+               ver histórico grande, preservado em view3d.js '_trena3DCfg()'. -->
+          <div style="margin-bottom:8px">${this._trena3DPreviewImgTag('espessuraCores')}<span class="d" style="vertical-align:middle">Prévia com a cor configurável abaixo (linha finalizada).</span></div>
+          <label class="field">
+            <span class="lbl">Espessura da linha (cm)</span>
+            <div id="mc-trena3d-espessura" data-valor="${Utils.clamp(Number(cfg.trena3DEspessuraCm) || 1, 0.2, 15)}"></div>
+            <span class="d">Espessura (diâmetro real, em centímetros) do traço entre as 2 pontas de uma medida já finalizada.</span>
+          </label>
+          <label class="field" style="margin-top:8px"><span class="lbl">Cor da medida finalizada</span><input type="color" id="mc-trena3d-cor-linha" value="${cfg.trena3DCorLinha || '#ffd166'}"></label>
+          <span class="d" style="display:block; margin-top:6px">Cor usada na linha/pontas de uma medida já pronta.</span>
         </div>
         <div class="mapconfig-section">
           <h4>📏 Trena 3D — Visibilidade</h4>
           <label class="radio-opt">
             <input type="radio" name="mc-trena3d-vis" value="seVisivel" ${cfg.trena3DVisibilidade !== 'sempre' ? 'checked' : ''}>
-            <span><span class="t">Só se estiver visível (padrão)</span><br><span class="d">Se algo (uma parede, um objeto) estiver na frente da medida, bloqueando a visão dela a partir da câmera, ela some — igual a um objeto de verdade sendo tampado por outro.</span></span>
+            <span>${this._trena3DPreviewImgTag('visSeVisivel')}<span class="t">Só se estiver visível (padrão)</span><br><span class="d">Se algo (uma parede, um objeto) estiver na frente da medida, bloqueando a visão dela a partir da câmera, ela some — igual a um objeto de verdade sendo tampado por outro.</span></span>
           </label>
           <label class="radio-opt">
             <input type="radio" name="mc-trena3d-vis" value="sempre" ${cfg.trena3DVisibilidade === 'sempre' ? 'checked' : ''}>
-            <span><span class="t">Sempre aparecer</span><br><span class="d">A medida é sempre desenhada por cima de tudo, não importa a distância ou se há algo na frente dela (jeito antigo, antes desta opção existir).</span></span>
+            <span>${this._trena3DPreviewImgTag('visSempre')}<span class="t">Sempre aparecer</span><br><span class="d">A medida é sempre desenhada por cima de tudo, não importa a distância ou se há algo na frente dela (jeito antigo, antes desta opção existir).</span></span>
           </label>
-        </div>
-        <div class="mapconfig-section">
-          <h4>📏 Trena 3D — Espessura e cores</h4>
-          <label class="field">
-            <span class="lbl">Espessura da linha (cm)</span>
-            <input type="number" id="mc-trena3d-espessura" min="0.2" max="15" step="0.2" value="${Utils.clamp(Number(cfg.trena3DEspessuraCm) || 2, 0.2, 15)}">
-            <span class="d">Espessura (diâmetro real, em centímetros) do traço entre as 2 pontas de uma medida já finalizada.</span>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 121) — pedido verbatim: "Deve
+               haver uma opção de imprimir as caixas de texto só as que
+               estiverem próximas do personagem. Um raio deve poder ser
+               estabelecido para isso." Ver 'trena3DLabelRaioAtivo'/
+               'trena3DLabelRaioM' (DEFAULTS) e a checagem de distância em
+               'view3d.js' ('_trena3DUpdateLabels'). -->
+          <h5 class="mc-subtitulo">Só perto do personagem</h5>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-label-raio-ativo" ${cfg.trena3DLabelRaioAtivo ? 'checked' : ''}>
+            <span><span class="t">Só mostrar a caixa de texto quando estiver dentro de um raio do personagem</span><br><span class="d">Além do raio configurado abaixo, a caixa de texto da medida some (a linha/pontas 3D continuam aparecendo normalmente, só a caixa de texto é afetada).</span></span>
           </label>
-          <label class="field" style="margin-top:8px"><span class="lbl">Cor da medida finalizada</span><input type="color" id="mc-trena3d-cor-linha" value="${cfg.trena3DCorLinha || '#ffd166'}"></label>
-          <label class="field" style="margin-top:8px"><span class="lbl">Cor da âncora/linha vertical (Ctrl)</span><input type="color" id="mc-trena3d-cor-ancora" value="${cfg.trena3DCorAncora || '#ff9f4d'}"></label>
-          <label class="field" style="margin-top:8px"><span class="lbl">Cor da mira normal (sem âncora)</span><input type="color" id="mc-trena3d-cor-mira" value="${cfg.trena3DCorMira || '#5ec8ff'}"></label>
-          <span class="d" style="display:block; margin-top:6px">Cores usadas em todo o processo de medir: a linha/pontas de uma medida já pronta, a referência vertical enquanto se ancora "no ar" (segurando Ctrl), e o indicador de mira no modo normal.</span>
+          <label class="field" style="max-width:220px">
+            <span class="lbl">Raio (m)</span>
+            <div id="mc-trena3d-label-raio" data-valor="${Utils.clamp(Number(cfg.trena3DLabelRaioM) || 15, 0.5, 500)}"></div>
+          </label>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 121) — pedido verbatim: "Coloque
+               como mais uma opção a reorganização automática das caixas de
+               texto para que elas não se sobreponham na tela. Atualmente
+               isso é sempre feito, sem ser opcional. Por padrão, deve ficar
+               desligado." Ver 'trena3DLabelReorganizarSobreposicao'
+               (DEFAULTS) e '_trena3DAfastarRotulosSobrepostos' (view3d.js,
+               agora só chamada quando este campo estiver ligado). -->
+          <h5 class="mc-subtitulo">Reorganização automática</h5>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-label-reorganizar" ${cfg.trena3DLabelReorganizarSobreposicao ? 'checked' : ''}>
+            <span><span class="t">Afastar automaticamente caixas de texto que estejam se sobrepondo</span><br><span class="d">Quando várias medidas ficam próximas na tela, empurra as caixas de texto pra não ficarem uma em cima da outra. Desligado por padrão (jeito antigo desta opção não existir: cada caixa fica exatamente na sua posição ideal, mesmo que se sobreponha a outra).</span></span>
+          </label>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 125) — pedido verbatim: "deve ter
+               uma opção para imprimir a esfera vermelha, mas com o nome de
+               'mostrar ponto médio da medida'. deve dar para escolher a cor
+               da esfera. Por padrão, deve ser vermelha." Ver
+               'trena3DMostrarPontoMedio'/'trena3DCorPontoMedio' (DEFAULTS) e
+               '_trena3DRebuildLines' (view3d.js, bloco 'SphereGeometry'). -->
+          <h5 class="mc-subtitulo">Ponto médio da medida</h5>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap">
+            <label class="radio-opt" style="flex:0 0 auto; margin:0">
+              <input type="checkbox" id="mc-trena3d-ponto-medio-ativo" ${cfg.trena3DMostrarPontoMedio !== false ? 'checked' : ''}>
+              <span><span class="t">Mostrar ponto médio da medida</span></span>
+            </label>
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:70px">
+              <span class="lbl">Cor</span>
+              <input type="color" id="mc-trena3d-ponto-medio-cor" value="${cfg.trena3DCorPontoMedio || '#ff2d2d'}">
+            </label>
+          </div>
+          <span class="d" style="display:block; margin-top:6px">Desenha uma pequena esfera no ponto médio (em 3D) de cada medida da "📏 Trena 3D" — desligue pra não desenhar essa esfera.</span>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 127) — pedido verbatim: "Deve ser
+               possível controlar se a caixa de texto com a medida vai
+               aparecer ou não em [...] '📏 Trena 3D — Visibilidade' (para a
+               medida) [...]. Por padrão todas ativadas." Ver
+               'trena3DLabelVisivel' (DEFAULTS) e '_trena3DCfg'/
+               '_trena3DRebuildLines' (view3d.js). -->
+          <h5 class="mc-subtitulo">Caixa de texto</h5>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-label-visivel" ${cfg.trena3DLabelVisivel !== false ? 'checked' : ''}>
+            <span><span class="t">Mostrar caixa de texto com a medida</span><br><span class="d">Desligue para esconder a caixa de texto (o número da medida) — a linha, as pontas e a esfera do ponto médio continuam aparecendo normalmente.</span></span>
+          </label>
         </div>
         <div class="mapconfig-section">
           <h4>📏 Trena 3D — Pontas</h4>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 114) — pedido verbatim: "deve
+               haver uma opção 'sem pontas' (deve ser a primeira opção)." -->
           <label class="radio-opt">
-            <input type="radio" name="mc-trena3d-ponta" value="esfera" ${cfg.trena3DPonta !== 'seta' && cfg.trena3DPonta !== 'traco' ? 'checked' : ''}>
-            <span><span class="t">Esfera (padrão)</span><br><span class="d">Uma bolinha em cada extremidade da medida — o jeito de sempre.</span></span>
+            <input type="radio" name="mc-trena3d-ponta" value="nenhuma" ${cfg.trena3DPonta === 'nenhuma' ? 'checked' : ''}>
+            <span>${this._trena3DPreviewImgTag('pontaNenhuma')}<span class="t">Sem pontas</span><br><span class="d">Só a linha entre os 2 pontos da medida, sem nenhum marcador extra nas extremidades.</span></span>
           </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-ponta" value="esfera" ${cfg.trena3DPonta !== 'nenhuma' && cfg.trena3DPonta !== 'seta' && cfg.trena3DPonta !== 'setaDoisTracos' && cfg.trena3DPonta !== 'traco' ? 'checked' : ''}>
+            <span>${this._trena3DPreviewImgTag('pontaEsfera')}<span class="t">Esfera (padrão)</span><br><span class="d">Uma bolinha em cada extremidade da medida — o jeito de sempre.</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO (RODADA 91) — pedido verbatim: "deve ser
+               possível definir o tamanho da esfera. E se a medida termina
+               na ponta mais próxima da esfera, no centro da esfera ou na
+               ponta mais afastada." -->
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:6px 0 4px 26px">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:120px">
+              <span class="lbl">Tamanho da esfera (m)</span>
+              <div id="mc-trena3d-esfera-tamanho" data-valor="${Utils.clamp(Number(cfg.trena3DEsferaTamanho) || 0.02, 0.01, 1)}"></div>
+            </label>
+          </div>
+          <!-- [RODADA 135] MUDANÇA -- pedido verbatim: "Coloque as medidas em
+               metros e coloque limites para que não vá além dos limites."
+               Deixou de ser um multiplicador ("×") e virou um valor absoluto
+               em metros, limitado a 0,01–1 (ver DEFAULTS/montarBotaoTriplo
+               abaixo). -->
+          <span class="d" style="display:block; margin:0 0 8px 26px">Raio da esfera em metros (de 0,01 a 1) — valor absoluto, não depende mais da espessura da linha.</span>
+          <div style="margin:0 0 4px 26px">
+            <label class="radio-opt">
+              <input type="radio" name="mc-trena3d-esfera-termino" value="proxima" ${cfg.trena3DEsferaTerminoLinha === 'proxima' ? 'checked' : ''}>
+              <span><span class="t">Termina na ponta mais próxima da esfera</span><br><span class="d">A linha para pouco antes de tocar a esfera.</span></span>
+            </label>
+            <label class="radio-opt">
+              <input type="radio" name="mc-trena3d-esfera-termino" value="centro" ${cfg.trena3DEsferaTerminoLinha !== 'proxima' && cfg.trena3DEsferaTerminoLinha !== 'distante' ? 'checked' : ''}>
+              <span><span class="t">Termina no centro da esfera (padrão)</span><br><span class="d">A linha passa pelo centro da esfera — o jeito de sempre.</span></span>
+            </label>
+            <label class="radio-opt">
+              <input type="radio" name="mc-trena3d-esfera-termino" value="distante" ${cfg.trena3DEsferaTerminoLinha === 'distante' ? 'checked' : ''}>
+              <span><span class="t">Termina na ponta mais afastada da esfera</span><br><span class="d">A linha atravessa a esfera inteira, passando por dentro dela.</span></span>
+            </label>
+          </div>
           <label class="radio-opt">
             <input type="radio" name="mc-trena3d-ponta" value="seta" ${cfg.trena3DPonta === 'seta' ? 'checked' : ''}>
-            <span><span class="t">Seta</span><br><span class="d">Uma pequena seta em cada extremidade, apontando ao longo da linha da medida.</span></span>
+            <span>${this._trena3DPreviewImgTag('pontaSeta')}<span class="t">Seta</span><br><span class="d">Uma pequena seta em cada extremidade, apontando ao longo da linha da medida.</span></span>
           </label>
+          <!-- [16/09/2026 UTC] NOVO (RODADA 91) — pedido verbatim: "deve ser
+               possível definir o tamanho da base do cone da seta e a
+               altura do cone da seta individualmente." -->
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:6px 0 10px 26px">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:120px">
+              <span class="lbl">Raio da base do cone (×)</span>
+              <div id="mc-trena3d-seta-cone-raio" data-valor="${Utils.clamp(Number(cfg.trena3DSetaConeRaio) || 3.2, 0.5, 15)}"></div>
+            </label>
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:120px">
+              <span class="lbl">Altura do cone (×)</span>
+              <div id="mc-trena3d-seta-cone-altura" data-valor="${Utils.clamp(Number(cfg.trena3DSetaConeAltura) || 2.2, 0.5, 15)}"></div>
+            </label>
+          </div>
+          <!-- [16/09/2026 UTC] NOVO (RODADA 91) — pedido verbatim: "deve ser
+               possível definir outro tipo de seta (a seta com dois
+               traços) [...] controlar a distância entre as pontas que
+               ficam soltas [...] E definir o comprimento gerado pela
+               distância entre o ponto de encontro das duas linhas e a
+               projeção delas na linha da medida." -->
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-ponta" value="setaDoisTracos" ${cfg.trena3DPonta === 'setaDoisTracos' ? 'checked' : ''}>
+            <span>${this._trena3DPreviewImgTag('pontaSetaDoisTracos')}<span class="t">Seta com dois traços</span><br><span class="d">Uma seta "aberta" (sem preenchimento), tipo "&gt;", feita de 2 traços que se encontram na ponta da medida — estilo desenho técnico.</span></span>
+          </label>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:6px 0 4px 26px">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:130px">
+              <span class="lbl">Abertura (cm)</span>
+              <div id="mc-trena3d-seta2-abertura" data-valor="${Utils.clamp(Number(cfg.trena3DSetaDoisTracosAbertura) || 6, 0.5, 50)}"></div>
+            </label>
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:130px">
+              <span class="lbl">Comprimento (cm)</span>
+              <div id="mc-trena3d-seta2-comprimento" data-valor="${Utils.clamp(Number(cfg.trena3DSetaDoisTracosComprimento) || 10, 0.5, 100)}"></div>
+            </label>
+          </div>
+          <span class="d" style="display:block; margin:0 0 8px 26px">"Abertura" é a distância entre as 2 pontas soltas da seta; "Comprimento" é a distância entre o vértice (onde as 2 linhas se encontram, na ponta da medida) e a projeção das pontas soltas sobre a linha da medida.</span>
           <label class="radio-opt">
             <input type="radio" name="mc-trena3d-ponta" value="traco" ${cfg.trena3DPonta === 'traco' ? 'checked' : ''}>
-            <span><span class="t">Traço perpendicular</span><br><span class="d">Um tracinho cruzando a linha em cada extremidade, perpendicular à medida — estilo "régua de desenho técnico".</span></span>
+            <span>${this._trena3DPreviewImgTag('pontaTraco')}<span class="t">Traço perpendicular</span><br><span class="d">Um tracinho cruzando a linha em cada extremidade, perpendicular à medida — estilo "régua de desenho técnico".</span></span>
           </label>
+          <!-- [16/09/2026 UTC] NOVO (RODADA 91) — pedido verbatim: "deve ser
+               possível definir o comprimento do traço perpendicular [...]
+               e se ele fica centralizado, parte da ponta [...] para cima
+               ou [...] para baixo. Além de como ele será renderizado [...]
+               'do jeito atual' ou [...] paralelos as linhas [...]
+               perpendiculares ao chão [...] Por padrão, fica [este
+               último] modo." -->
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:6px 0 4px 26px">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:130px">
+              <span class="lbl">Comprimento (×)</span>
+              <!-- [17/09/2026 UTC] AMPLIADO (RODADA 120) — pedido verbatim:
+                   "ao variar o 'Comprimento', após o 20 não há mais
+                   alteração." O limite (max) era 20 — ampliado pra 60
+                   (mesma ordem de grandeza dos outros multiplicadores desta
+                   seção, ex. "Raio da base"/"Altura" do cone da seta vão até
+                   15) — ver também o max espelhado no wiring
+                   ('_montarBotaoTriplo', logo abaixo neste arquivo). -->
+              <div id="mc-trena3d-traco-comprimento" data-valor="${Utils.clamp(Number(cfg.trena3DTracoPerpComprimento) || 7, 1, 60)}"></div>
+            </label>
+          </div>
+          <div style="margin:0 0 4px 26px">
+            <label class="radio-opt">
+              <input type="radio" name="mc-trena3d-traco-alinhamento" value="centralizado" ${cfg.trena3DTracoPerpAlinhamento !== 'paraCima' && cfg.trena3DTracoPerpAlinhamento !== 'paraBaixo' ? 'checked' : ''}>
+              <span><span class="t">Centralizado na ponta (padrão)</span><br><span class="d">O traço fica centrado exatamente na ponta da medida — metade de cada lado.</span></span>
+            </label>
+            <label class="radio-opt">
+              <input type="radio" name="mc-trena3d-traco-alinhamento" value="paraCima" ${cfg.trena3DTracoPerpAlinhamento === 'paraCima' ? 'checked' : ''}>
+              <span><span class="t">Parte da ponta para cima</span><br><span class="d">O traço inteiro fica de um lado da ponta, no sentido "para cima".</span></span>
+            </label>
+            <label class="radio-opt">
+              <input type="radio" name="mc-trena3d-traco-alinhamento" value="paraBaixo" ${cfg.trena3DTracoPerpAlinhamento === 'paraBaixo' ? 'checked' : ''}>
+              <span><span class="t">Parte da ponta para baixo</span><br><span class="d">O traço inteiro fica do lado oposto da ponta, no sentido "para baixo".</span></span>
+            </label>
+          </div>
+          <!-- [RODADA 135] NOVO -- pedido verbatim: "logo após a subopção
+               'Parte da ponta para baixo', coloque um traço horizontal para
+               separar das duas opções que têm em baixo." Separa
+               visualmente o grupo "Comprimento/Alinhamento" (acima) do
+               grupo "Modo de exibição" (abaixo, as 2 opções "vista de
+               cima"/"Paralelo à linha vertical"). -->
+          <hr style="border:none; border-top:1px solid rgba(255,255,255,0.12); margin:8px 26px 8px 26px">
+          <!-- [16/09/2026 UTC] NOVO (RODADA 92) — pedido verbatim: "as
+               subopções 'do jeito atual' e 'Paralelo à linha vertical
+               perpendicular ao chão' devem ficar abaixo de um subtítulo
+               atrelado a opção 'Traço perpendicular' [...] para não ficar
+               misturado com as outras opções [comprimento/alinhamento]." -->
+          <span class="d" style="display:block; margin:6px 0 4px 26px; font-weight:600">Modo de exibição do Traço perpendicular à medida feita</span>
+          <div style="margin:0 0 4px 26px">
+            <label class="radio-opt">
+              <input type="radio" name="mc-trena3d-traco-modo-render" value="atual" ${cfg.trena3DTracoPerpModoRender === 'atual' ? 'checked' : ''}>
+              <span><span class="t">vista de cima (como é visto na Planta baixa)</span><br><span class="d">O traço fica perpendicular à linha da medida, no plano da tela.</span></span>
+            </label>
+            <label class="radio-opt">
+              <input type="radio" name="mc-trena3d-traco-modo-render" value="paraleloVertical" ${cfg.trena3DTracoPerpModoRender !== 'atual' ? 'checked' : ''}>
+              <span><span class="t">Paralelo à linha vertical perpendicular ao chão (padrão)</span><br><span class="d">O traço fica sempre paralelo à mesma linha laranja tracejada perpendicular ao chão usada durante a ancoragem — em vez de perpendicular à linha da medida.</span></span>
+            </label>
+          </div>
         </div>
         <div class="mapconfig-section">
           <h4>📏 Trena 3D — Destaque de mira durante a âncora</h4>
+          <!-- [16/09/2026 UTC] MUDANÇA (RODADA 92) — pedido verbatim: "o que
+               faz a opção 'Suprimir destaque de hover durante a
+               ancoragem'?" (o nome usado na janelinha de acesso rápido,
+               ver view3d.js '_trena3DOpcoesPainelRapido'). Adicionado
+               'title' no checkbox (tooltip ao passar o mouse) com a mesma
+               explicação do '.d' abaixo, já que o usuário achou o nome
+               confuso sozinho. -->
           <label class="radio-opt">
-            <input type="checkbox" id="mc-trena3d-suprimir-destaque" ${cfg.trena3DSuprimirDestaqueDuranteAncora !== false ? 'checked' : ''}>
-            <span><span class="t">Desativar o destaque do raycaster enquanto a linha perpendicular estiver ativa (padrão: ativado)</span><br><span class="d">Enquanto a referência vertical da âncora está sendo usada (Ctrl segurado, ou já marcada com um clique), o contorno de destaque normal (o que aparece sob a mira ao mirar chão/parede/objeto) fica desligado — nesse momento a mira está escolhendo uma ALTURA na reta, não selecionando algo de verdade.</span></span>
+            <input type="checkbox" id="mc-trena3d-suprimir-destaque" ${cfg.trena3DSuprimirDestaqueDuranteAncora !== false ? 'checked' : ''} title="Também chamada de 'Suprimir destaque de hover durante a ancoragem' na janelinha de acesso rápido. Enquanto você ancora um ponto (Ctrl segurado, ou âncora já marcada), a mira está escolhendo uma ALTURA na reta vertical, não um objeto — esta opção esconde o contorno de destaque de hover nesse momento, pra não confundir os dois.">
+            <span><span class="t"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 3px; margin-right:4px; border:1px solid #ff9f4d; background:rgba(255,159,77,0.25); border-radius:4px; vertical-align:-4px; box-sizing:border-box" title="Este ícone indica que esta opção pode estar presente na janela rápida da Trena 3D por meio de um botão com o mesmo ícone."><svg width="16" height="16" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="display:block"><polygon points="12,3 20,7 12,11 4,7" fill="#6b7280"/><polygon points="4,7 12,11 12,19 4,15" fill="#454b58"/><polygon points="20,7 12,11 12,19 20,15" fill="#565c6a"/><polyline points="12,3 20,7 20,15 12,19 4,15 4,7 12,3" fill="none" stroke="rgba(255,242,117,0.85)" stroke-width="1.3" stroke-dasharray="2.4,1.8"/></svg></span> Desativar o destaque do raycaster enquanto a linha perpendicular estiver ativa (padrão: ativado)</span><br><span class="d">Enquanto a referência vertical da âncora está sendo usada (Ctrl segurado, ou já marcada com um clique), o contorno de destaque normal (o que aparece sob a mira ao mirar chão/parede/objeto) fica desligado — nesse momento a mira está escolhendo uma ALTURA na reta, não selecionando algo de verdade. Na janelinha de acesso rápido, esta mesma opção aparece como "Suprimir destaque de hover durante a ancoragem".</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque um preview na
+               subseção '📏 Trena 3D — Destaque de mira durante a âncora',
+               indicando visualmente o que acontece." Preview 2D ilustrativo,
+               atualizado em '_trena3DDesenharPreviewDestaqueMira' abaixo,
+               reagindo ao checkbox acima. -->
+          <div style="margin:8px 0 4px; display:flex; justify-content:center">
+            <canvas id="mc-trena3d-destaque-preview" width="180" height="120" style="background:#1a1c22; border:1px solid var(--border); border-radius:6px; max-width:100%"></canvas>
+          </div>
+          <!-- [RODADA 131] NOVO — pedido verbatim: "deve ser possível definir a
+               cor da mira que aparece quando o botão 'Trena 3D' [...] está
+               ativo. E deve ser possível também definir o seu tamanho. As
+               alterações devem ser imediatas no cenário 3D. E o que está
+               configurado para esta mira, atualmente, deve ser o padrão." A
+               "mira" aqui é a bolinha indicadora ("aqui vai cair o clique",
+               '_trena3DHoverMesh' em view3d.js) — cor/tamanho aplicados no
+               estado NORMAL dela (mirando uma superfície, sem âncora); o
+               estado ancorado/Ctrl continua laranja fixo ('#ff9f4d',
+               indicador de estado, não faz parte deste pedido). Padrões
+               ('#5ec8ff'/tamanho '1') preservam EXATAMENTE a cor/tamanho de
+               sempre. Ver view3d.js '_trena3DCfg' ('miraCorInt'/
+               'miraTamanho') e o bloco '_trena3DHoverMesh' (aplicado TODO
+               quadro — cor via 'material.color.setHex', tamanho via
+               'scale.setScalar', então reflete o color-picker/slider ao
+               vivo, sem precisar recriar a esfera). -->
+          <h5 class="mc-subtitulo">Cor e tamanho da mira</h5>
+          <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:8px">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:70px">
+              <span class="lbl">Cor da mira</span>
+              <input type="color" id="mc-trena3d-mira-cor" value="${cfg.trena3DMiraCor || '#5ec8ff'}">
+            </label>
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:110px">
+              <span class="lbl">Tamanho (×)</span>
+              <div id="mc-trena3d-mira-tamanho" data-valor="${Utils.clamp(Number(cfg.trena3DMiraTamanho) || 1, 0.2, 5)}"></div>
+            </label>
+          </div>
+          <span class="d" style="display:block; margin-top:6px">Cor/tamanho da bolinha indicadora ("aqui vai cair o clique") sempre que a "📏 Trena 3D" está ativa mirando uma superfície comum (sem âncora/Ctrl) — o estado ancorado continua com a cor laranja de destaque de sempre.</span>
+        </div>
+        <!-- [16/09/2026 UTC] NOVO (RODADA 94) — pedido verbatim: "Coloque
+             outra subseção para imprimir além do texto indicando o
+             comprimento da medida que está sendo feita, desenhar uma medida
+             guia rente ao chão até a posição do cursor do mouse." Ver
+             view3d.js '_trena3DUpdatePreview' (bloco de
+             '_trena3DGuiaChaoLine') — desenha uma linha tracejada VERDE
+             (distinta do laranja das linhas de âncora/altura e do azul da
+             guia 3D direta entre os 2 pontos) no plano do chão (y=0), do 1º
+             ponto até a projeção XZ da mira atual, com o texto da distância
+             HORIZONTAL entre eles. -->
+        <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Guia rente ao chão</h4>
+          <!-- [16/09/2026 UTC] RENOMEADO — pedido verbatim: "a opção 'Mostrar
+               guia rente ao chão até o cursor (padrão: desativado)' deve
+               trocar de nome. O novo nome é 'Mostrar guia enquanto faz a
+               medida'." Só o texto do rótulo mudou — id/campo/comportamento
+               intocados. -->
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-guia-chao-ao-vivo" ${cfg.trena3DMostrarGuiaChaoAoVivo === true ? 'checked' : ''} title="Desenha uma linha tracejada no plano do chão (ignorando a altura), do 1º ponto da medida até a projeção da mira atual, com o texto da distância horizontal entre eles.">
+            <span>${this._trena3DPreviewImgTag('guiaChao')}<span class="t"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 3px; margin-right:4px; border:1px solid #ff9f4d; background:rgba(255,159,77,0.25); border-radius:4px; vertical-align:-4px; box-sizing:border-box" title="Este ícone indica que esta opção pode estar presente na janela rápida da Trena 3D por meio de um botão com o mesmo ícone.">⬌</span> Mostrar guia enquanto faz a medida (padrão: desativado)</span><br><span class="d">Enquanto o 1º ponto da medida já estiver marcado, desenha uma linha tracejada no plano do chão (y=0) ligando a projeção horizontal do 1º ponto até a projeção horizontal da mira atual — mostra a distância "andada no chão" entre os 2 pontos, mesmo que eles estejam em alturas diferentes. Complementa a linha guia 3D direta (azul) e as linhas verticais de altura (laranja) já existentes, sem substituí-las.</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Deve haver outra
+               opção: 'Mostrar guia depois que a medida foi finalizada'. Esta
+               opção afeta todas as guias, pois todas elas (que já estão
+               finalizadas) encaixam-se nesse critério." Generaliza a guia
+               (só ao vivo, opção acima) pra cada medida JÁ finalizada no
+               mapa — mesmo padrão de "Mostrar também nas medidas já
+               finalizadas" das outras subseções de guia. Ver view3d.js
+               '_trena3DRebuildLines'. -->
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-guia-chao-finalizada" ${cfg.trena3DGuiaChaoFinalizada === true ? 'checked' : ''} title="Desenha, para CADA medida já finalizada no mapa, a mesma linha tracejada no plano do chão entre a projeção horizontal dos 2 pontos, com a distância 'andada no chão'.">
+            <span>${this._trena3DPreviewImgTag('guiaChao')}<span class="t"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 3px; margin-right:4px; border:1px solid #ff9f4d; background:rgba(255,159,77,0.25); border-radius:4px; vertical-align:-4px; box-sizing:border-box" title="Este ícone indica que esta opção pode estar presente na janela rápida da Trena 3D por meio de um botão com o mesmo ícone.">🏁⬌</span> Mostrar guia depois que a medida foi finalizada (padrão: desativado)</span><br><span class="d">Além de aparecer ao vivo enquanto mede (opção acima), desenha a mesma guia (linha tracejada + distância horizontal) para CADA medida já feita no mapa, entre a projeção no chão do 1º e do 2º ponto — atualizada na hora ao ligar/desligar, sem precisar fazer uma medida nova.</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO (RODADA 98) — pedido verbatim: "Cada
+               parte ali deve ter a sua cor característica." Antes, a linha
+               E o texto/rótulo usavam a MESMA cor fixa (verde, #7dff6e) —
+               separado em 2 campos de cor independentes, cada "parte" desta
+               subseção com a própria cor configurável (mesmo padrão do
+               color-picker de trena3DGradeSnapCor, Rodada 91). Padrões
+               escolhidos: verde mais saturado pra linha (cor original,
+               preserva a aparência de quem já usava) e um verde-limão mais
+               claro pro texto/rótulo — as 2 continuam claramente "da mesma
+               família" (verde), mas distinguíveis entre si, e nenhuma das
+               2 conflita com o laranja (linhas de âncora/altura) ou o azul
+               (guia 3D direta) já usados nas outras partes da Trena 3D. -->
+          <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:8px">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:70px">
+              <span class="lbl">Cor da linha</span>
+              <input type="color" id="mc-trena3d-guia-chao-cor-linha" value="${cfg.trena3DGuiaChaoCorLinha || '#7dff6e'}">
+            </label>
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:70px">
+              <span class="lbl">Cor do texto</span>
+              <input type="color" id="mc-trena3d-guia-chao-cor-texto" value="${cfg.trena3DGuiaChaoCorTexto || '#d9ff8a'}">
+            </label>
+          </div>
+          <!-- [RODADA 131] NOVO — pedido verbatim: "Esta linha, na verdade, é a
+               distância entre as duas linhas âncoras [...] deve ser possível
+               definir se ela fica: 'rente ao chão'; mais próxima do chão
+               [...] com uma extremidade comum a extremidade da medida; mais
+               afastada do chão [...] com uma extremidade comum a extremidade
+               da medida; ou 'livre', podendo definir qualquer valor (0 é o
+               chão) [...] Por padrão, é 'rente ao chão'." Ver
+               view3d.js '_trena3DGuiaChaoAlturaY' (aplicado nos 2 blocos que
+               desenham esta guia — ao vivo e finalizada). -->
+          <span class="d" style="display:block; margin-top:10px; font-weight:600">Altura da guia (entre as 2 linhas âncoras)</span>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-guia-chao-modo" value="renteChao" ${cfg.trena3DGuiaChaoModo !== 'proximaChao' && cfg.trena3DGuiaChaoModo !== 'afastadaChao' && cfg.trena3DGuiaChaoModo !== 'livre' ? 'checked' : ''}>
+            <span><span class="t">Rente ao chão (padrão)</span><br><span class="d">A guia fica sempre na altura y=0 (o chão), não importa a altura real dos 2 pontos da medida — comportamento de sempre.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-guia-chao-modo" value="proximaChao" ${cfg.trena3DGuiaChaoModo === 'proximaChao' ? 'checked' : ''}>
+            <span><span class="t">Mais próxima do chão</span><br><span class="d">Paralela ao chão, na altura do extremo MAIS BAIXO da medida — uma extremidade da guia fica em comum com a extremidade mais baixa da própria medida.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-guia-chao-modo" value="afastadaChao" ${cfg.trena3DGuiaChaoModo === 'afastadaChao' ? 'checked' : ''}>
+            <span><span class="t">Mais afastada do chão</span><br><span class="d">Paralela ao chão, na altura do extremo MAIS ALTO da medida — uma extremidade da guia fica em comum com a extremidade mais alta da própria medida.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-guia-chao-modo" value="livre" ${cfg.trena3DGuiaChaoModo === 'livre' ? 'checked' : ''}>
+            <span><span class="t">Livre</span><br><span class="d">Qualquer altura, definida abaixo (0 = chão) — a guia desliza livremente ao longo das 2 linhas âncoras (que são paralelas entre si), sem precisar coincidir com nenhuma das 2 extremidades da medida.</span></span>
+          </label>
+          <label class="field" style="max-width:220px; margin-top:6px">
+            <span class="lbl">Altura no modo "Livre" (m)</span>
+            <div id="mc-trena3d-guia-chao-altura-livre" data-valor="${Utils.clamp(Number(cfg.trena3DGuiaChaoAlturaLivreM) || 0, -50, 50)}"></div>
+            <span class="d">Só usado quando o modo acima estiver em "Livre". 0 = rente ao chão.</span>
+          </label>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 114) — pedido verbatim: "além de
+               poder controlar a cor, deve ser possível definir a espessura
+               das linhas guia e se são sólida, tracejada ou pontilhada [...]
+               deve ser possível escolher as pontas também (como a explicação
+               toda já está na seção 'Pontas', então, aqui, deve ser algo bem
+               mais simples)." -->
+          <span class="d" style="display:block; margin-top:8px">Espessura/estilo da linha e pontas (compartilhados pelas 2 opções acima, ao vivo e finalizada):</span>
+          ${this._trena3DCamposEstiloLinha('mc-trena3d-guia-chao', 'trena3DGuiaChao', cfg, { espessuraPadrao: 1.2, estiloPadrao: 'tracejada', dashPadrao: 12, gapPadrao: 8, comPontas: true })}
+          <!-- [17/09/2026 UTC] NOVO (RODADA 119) — ver comentário grande na
+               subseção "Aparência da medida" (mesmo controle, mesmo
+               conceito, aplicado ao texto desta guia). -->
+          ${this._trena3DCampoDeslocVerticalLabel('mc-trena3d-guia-chao', cfg.trena3DGuiaChaoLabelDeslocVerticalM)}
+          <!-- [17/09/2026 UTC] NOVO (RODADA 125) — mesma escolha de estilo já
+               existente em "Aparência da medida" ('trena3DLabelEstilo'),
+               aplicada ao texto desta guia. Ver
+               'trena3DGuiaChaoLabelEstilo' (DEFAULTS) e
+               '_trena3DRebuildLines'/'_trena3DProjetarLabelImediato'
+               (view3d.js). -->
+          <span class="d" style="display:block; margin-top:8px; font-weight:600">Posição do texto</span>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-guia-chao-label" value="sobreLinhaMeio" ${cfg.trena3DGuiaChaoLabelEstilo === 'sobreLinhaMeio' ? 'checked' : ''}>
+            <span><span class="t">Em cima e no meio</span><br><span class="d">O centro da caixa do texto coincide com o ponto médio real (sem deslocamento vertical) desta guia.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-guia-chao-label" value="sobreLinha" ${cfg.trena3DGuiaChaoLabelEstilo !== 'sobreLinhaMeio' ? 'checked' : ''}>
+            <span><span class="t">Flutuante (padrão)</span><br><span class="d">O texto respeita o deslocamento vertical configurado acima.</span></span>
+          </label>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 127) — pedido verbatim: "Deve ser
+               possível controlar se a caixa de texto com a medida vai
+               aparecer ou não em [...] '📏 Trena 3D — Guia rente ao chão'
+               [...]. Por padrão todas ativadas." Ver
+               'trena3DGuiaChaoLabelVisivel' (DEFAULTS) e '_trena3DCfg'/
+               '_trena3DRebuildLines' (view3d.js). -->
+          <h5 class="mc-subtitulo">Caixa de texto</h5>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-guia-chao-label-visivel" ${cfg.trena3DGuiaChaoLabelVisivel !== false ? 'checked' : ''}>
+            <span><span class="t">Mostrar caixa de texto com a medida</span><br><span class="d">Desligue para esconder a caixa de texto desta guia — a linha e as pontas continuam aparecendo normalmente.</span></span>
           </label>
         </div>
+        <!-- [16/09/2026 UTC] REESTRUTURADO — pedido verbatim (lote de vários
+             itens sobre a Trena 3D):
+             "A subseção '📏 Trena 3D — Linha da âncora após o 1º ponto' deve
+             ficar logo acima da subseção '📏 Trena 3D — Linhas verticais das
+             medidas finalizadas'. Na subseção '📏 Trena 3D — Altura ao vivo
+             (Antes mesmo de definir o ponto)' a opção 'Sempre desenhada
+             enquanto a Trena 3D estiver ativa' deve ser removida do projeto.
+             As duas opções que restarem ali e o título (não vai ser mais uma
+             subseção, vai ser um subtítulo) devem ir para a subseção '📏
+             Trena 3D — Linhas verticais das medidas finalizadas'. A subseção
+             '📏 Trena 3D — Linha da âncora após o 1º ponto' deve se tornar um
+             subtítulo. E o subtítulo e suas opções devem ir para a subseção
+             '📏 Trena 3D — Linhas verticais das medidas finalizadas'. Depois
+             disso, a subseção '📏 Trena 3D — Linhas verticais das medidas
+             finalizada' deve se tornar um subtítulo de sua própria subseção.
+             E o novo título da subseção deve ser '📏 Trena 3D — Linhas
+             verticais ancoradas'."
+             As 3 antigas subseções ("Altura ao vivo (Antes mesmo de definir
+             o ponto)", "Linha da âncora após o 1º ponto" e "Linhas verticais
+             das medidas finalizadas") viraram uma ÚNICA subseção nova,
+             "Linhas verticais ancoradas" — cada uma delas agora é só um
+             <h5 class="mc-subtitulo"> dentro dela, na ordem pedida (Altura
+             ao vivo → Linha da âncora → Linhas verticais das medidas
+             finalizadas), sem nenhuma mudança nos IDs/campos/listeners/
+             resync de cada opção (só o HTML ao redor mudou). A opção "Sempre
+             desenhada enquanto a Trena 3D estiver ativa" (RODADA 90, campo
+             'trena3DAlturaAoVivoSempreDesenhada') foi removida por completo
+             do projeto (DEFAULTS acima, listener e
+             'trena3DResyncMapaCheckbox' abaixo, e a leitura/uso em
+             view3d.js '_trena3DCfg'/'_trena3DUpdatePreview') — não sobrou
+             nenhum jeito de ativá-la. -->
         <div class="mapconfig-section">
+          <h4>📏 Trena 3D — Linhas verticais ancoradas</h4>
           <!-- [16/09/2026 UTC] COLAPSADO — pedido verbatim: "Colapse as duas
                subseções '📏 Trena 3D — Altura ao vivo' e '📏 Trena 3D —
                Antes mesmo de definir o ponto', ficando '📏 Trena 3D —
@@ -3029,22 +4049,21 @@ const MapConfig = {
                ativo agora (ver view3d.js '_trena3DUpdatePreview', era o
                padrão de qualquer forma). Só sobra a opção "Antes mesmo de
                definir o ponto", com o cabeçalho combinado. -->
-          <h4>📏 Trena 3D — Altura ao vivo (Antes mesmo de definir o ponto)</h4>
+          <h5 class="mc-subtitulo">Altura ao vivo (Antes mesmo de definir o ponto)</h5>
           <label class="radio-opt">
             <input type="checkbox" id="mc-trena3d-altura-antes-ponto" ${cfg.trena3DMostrarAlturaAoVivoAntesDoPonto !== false ? 'checked' : ''}>
-            <span><span class="t">Mostrar a medida entre a âncora e a bolinha "no ar" antes de fixar o ponto (padrão: ativado)</span><br><span class="d">Depois de marcar a âncora no chão (clique segurando Ctrl), enquanto o outro ponto ainda não foi fixado com um clique, a distância entre os 2 já aparece do lado da bolinha que segue o cursor. Desligue pra só ver essa medida depois de fixar o ponto.</span></span>
+            <span>${this._trena3DPreviewImgTag('medidaAoVivoAncora')}<span class="t"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 3px; margin-right:4px; border:1px solid #ff9f4d; background:rgba(255,159,77,0.25); border-radius:4px; vertical-align:-4px; box-sizing:border-box" title="Este ícone indica que esta opção pode estar presente na janela rápida da Trena 3D por meio de um botão com o mesmo ícone.">⬍⚓</span> Mostrar a medida entre a âncora e a bolinha "no ar" antes de fixar o ponto (padrão: ativado)</span><br><span class="d">Depois de marcar a âncora no chão (clique segurando Ctrl), enquanto o outro ponto ainda não foi fixado com um clique, a distância entre os 2 já aparece do lado da bolinha que segue o cursor. Desligue pra só ver essa medida depois de fixar o ponto.</span></span>
           </label>
-          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque como outra
-               opcao dentro de 'Altura ao vivo (Antes mesmo de definir o
-               ponto)' para definir que a medida laranja aparece ou nao ja ao
-               segurar o ctrl. Em vez de sempre deixar ativo." Ver view3d.js
-               '_trena3DUpdatePreview' (variavel 'alturaPermitidaPorConfig'). -->
-          <label class="radio-opt">
-            <input type="checkbox" id="mc-trena3d-altura-ao-segurar-ctrl" ${cfg.trena3DMostrarAlturaAoVivoAoSegurarCtrl !== false ? 'checked' : ''} title="Enquanto o Ctrl está segurado (ou, no modo '4 cliques', antes de marcar a âncora), mesmo sem nenhuma âncora ainda commitada, mostra a medida do chão até a bolinha que segue a mira.">
-            <span><span class="t">Mostrar já ao segurar o Ctrl, antes mesmo de marcar a âncora (padrão: ativado)</span><br><span class="d">Enquanto o Ctrl está sendo segurado (ou, no modo "Sempre com 4 cliques", antes do próximo clique marcar a âncora), a medida do chão até a bolinha que segue a mira já aparece, mesmo sem nenhuma âncora ter sido marcada ainda. Desligue pra só ver essa medida depois de a âncora já estar marcada.</span></span>
-          </label>
-        </div>
-        <div class="mapconfig-section">
+          <!-- [RODADA 132] REMOVIDO — pedido verbatim: a opção "Mostrar já ao
+               segurar o Ctrl, antes mesmo de marcar a âncora" foi UNIDA à
+               opção acima ("Mostrar a medida entre a âncora e a bolinha 'no
+               ar' antes de fixar o ponto"), que passou a cobrir os 2 casos
+               (Ctrl segurado SEM âncora ainda commitada, E âncora já
+               commitada aguardando o 2º clique) — só ela permanece. Campo
+               'trena3DMostrarAlturaAoVivoAoSegurarCtrl' removido por
+               completo (DEFAULTS acima, HTML aqui, wiring/resync abaixo, e
+               a leitura em view3d.js '_trena3DCfg'/'_trena3DUpdatePreview',
+               variável 'alturaPermitidaPorConfig'). -->
           <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Coloque uma opção de
                continuar desenhando a linha laranja tracejada ate o 1o ponto
                da medida (por padrao, ativada), apos ela ser definida.
@@ -3058,31 +4077,46 @@ const MapConfig = {
                medida (por padrao, a opcao do 'vai ate o 1o ponto da
                medida' deve ficar ativa)." Ver view3d.js
                '_trena3DUpdatePreview' (bloco de '_trena3DP1HeightLine'). -->
-          <h4>📏 Trena 3D — Linha da âncora após o 1º ponto</h4>
+          <h5 class="mc-subtitulo">Linha da âncora após o 1º ponto</h5>
           <label class="radio-opt">
             <input type="checkbox" id="mc-trena3d-continuar-linha-ancora" ${cfg.trena3DContinuarLinhaAncoraAposPonto !== false ? 'checked' : ''} title="Depois que o 1º ponto da medida é fixado, a âncora (o clique com Ctrl) é 'consumida' e a linha laranja tracejada perpendicular ao chão desaparecia. Esta opção faz ela continuar sendo desenhada.">
-            <span><span class="t">Continuar desenhando a linha tracejada depois do 1º ponto ser definido (padrão: ativado)</span><br><span class="d">Sem esta opção, a linha laranja tracejada perpendicular ao chão só aparece entre marcar a âncora e fixar o 1º ponto da medida — depois disso ela some. Com esta opção ativada, ela continua sendo desenhada mesmo depois do 1º ponto já fixado.</span></span>
+            <span>${this._trena3DPreviewImgTag('linhaAncoraAteOPonto')}<span class="t"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 3px; margin-right:4px; border:1px solid #ff9f4d; background:rgba(255,159,77,0.25); border-radius:4px; vertical-align:-4px; box-sizing:border-box" title="Este ícone indica que esta opção pode estar presente na janela rápida da Trena 3D por meio de um botão com o mesmo ícone.">┆1</span> Continuar desenhando a linha tracejada depois do 1º ponto ser definido (padrão: ativado)</span><br><span class="d">Sem esta opção, a linha laranja tracejada perpendicular ao chão só aparece entre marcar a âncora e fixar o 1º ponto da medida — depois disso ela some. Com esta opção ativada, ela continua sendo desenhada mesmo depois do 1º ponto já fixado.</span></span>
           </label>
-          <label class="radio-opt">
+          <!-- [16/09/2026 UTC] CORRIGIDO — pedido verbatim: "os radio buttons
+               que tem ali deve ficar claro a qual opção eles pertencem. Do
+               jeito que está, atualmente, acaba ficando bagunçado." Antes,
+               os 2 radios ("Vai até o 1º ponto"/"Infinita") ficavam soltos
+               entre a checkbox de cima ("Continuar desenhando...") e a de
+               baixo ("Mostrar também o texto..."), sem nenhuma pista visual
+               de que são uma SUBOPÇÃO da checkbox de cima (o "comprimento"
+               da linha que ela ativa) — os 3 pareciam 3 opções soltas do
+               mesmo nível. Adicionado um rótulo pequeno "↳ Comprimento da
+               linha" + indentação (mesmo padrão de 'margin-left:26px' já
+               usado noutras subopções deste arquivo) pra agrupar
+               visualmente os 2 radios sob a checkbox que os ativa. -->
+          <div style="margin-left:26px; font-size:11px; color:var(--text-dim); margin-top:2px">↳ Comprimento da linha</div>
+          <label class="radio-opt" style="margin-left:26px">
             <input type="radio" name="mc-trena3d-linha-ancora-modo" value="ateOPonto" ${cfg.trena3DLinhaAncoraAposPontoModo !== 'infinita' ? 'checked' : ''} title="A linha vai só até a altura real do 1º ponto da medida — o comprimento dela já mostra a medida.">
-            <span><span class="t">Vai até o 1º ponto da medida (padrão)</span><br><span class="d">A linha para exatamente na altura do 1º ponto já fixado — o próprio comprimento dela representa a medida.</span></span>
+            <span>${this._trena3DPreviewImgTag('linhaAncoraAteOPonto')}<span class="t">Vai até o 1º ponto da medida (padrão)</span><br><span class="d">A linha para exatamente na altura do 1º ponto já fixado — o próprio comprimento dela representa a medida.</span></span>
           </label>
-          <label class="radio-opt">
-            <input type="radio" name="mc-trena3d-linha-ancora-modo" value="infinita" ${cfg.trena3DLinhaAncoraAposPontoModo === 'infinita' ? 'checked' : ''} title="A linha continua até o teto de 6m, como a referência vertical mostrada durante a ancoragem, em vez de parar na altura do 1º ponto.">
-            <span><span class="t">Infinita</span><br><span class="d">A linha continua até o teto de 6m (mesmo comprimento da referência mostrada durante a ancoragem), independente da altura real do 1º ponto.</span></span>
+          <label class="radio-opt" style="margin-left:26px">
+            <input type="radio" name="mc-trena3d-linha-ancora-modo" value="infinita" ${cfg.trena3DLinhaAncoraAposPontoModo === 'infinita' ? 'checked' : ''} title="A linha continua bem além da altura real (sem teto), como a referência vertical mostrada durante a ancoragem, em vez de parar na altura do 1º ponto.">
+            <span>${this._trena3DPreviewImgTag('linhaAncoraInfinita')}<span class="t">Infinita</span><br><span class="d">A linha continua bem além da altura real (sem teto — o antigo limite de 6m foi removido), mesmo comprimento da referência mostrada durante a ancoragem, independente da altura real do 1º ponto.</span></span>
           </label>
           <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Outra subopcao e
                imprimir junto com a linha laranja tracejada infinita (ou ate
                o 1o ponto, com isso, nao sendo infinita) o texto laranja da
                medida (logo depois de definir o 1o ponto da medida)." Ver
                view3d.js '_trena3DUpdatePreview' (bloco de
-               '_trena3DP1HeightLine'). -->
+               '_trena3DP1HeightLine'). Sem indentação de propósito — esta
+               checkbox não é subopção do "Comprimento da linha" acima, é
+               uma 3ª opção independente da mesma subseção (a linha e o
+               texto podem ser ligados/desligados sem depender um do
+               outro). -->
           <label class="radio-opt">
             <input type="checkbox" id="mc-trena3d-mostrar-medida-linha-ancora" ${cfg.trena3DMostrarMedidaNaLinhaAncoraAposPonto !== false ? 'checked' : ''} title="Além da linha em si, mostra o texto laranja com o valor da medida (⬍ Xm) junto dela, mesmo depois do 1º ponto já ter sido fixado.">
-            <span><span class="t">Mostrar também o texto da medida junto com essa linha (padrão: ativado)</span><br><span class="d">Com esta opção, o texto laranja da medida (⬍ Xm) continua aparecendo junto com a linha tracejada acima, mesmo depois do 1º ponto da medida já ter sido definido. Desligue para deixar só a linha, sem o texto.</span></span>
+            <span>${this._trena3DPreviewImgTag('linhaAncoraAteOPonto')}<span class="t"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 3px; margin-right:4px; border:1px solid #ff9f4d; background:rgba(255,159,77,0.25); border-radius:4px; vertical-align:-4px; box-sizing:border-box" title="Este ícone indica que esta opção pode estar presente na janela rápida da Trena 3D por meio de um botão com o mesmo ícone.">🔤┆</span> Mostrar também o texto da medida junto com essa linha (padrão: ativado)</span><br><span class="d">Com esta opção, o texto laranja da medida (⬍ Xm) continua aparecendo junto com a linha tracejada acima, mesmo depois do 1º ponto da medida já ter sido definido. Desligue para deixar só a linha, sem o texto.</span></span>
           </label>
-        </div>
-        <div class="mapconfig-section">
           <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Semelhante a
                subsecao 'Linha da ancora apos o 1o ponto', mas agora nas duas
                linhas (a linha [...] que vai do 1o ponto ancora ate o 1o
@@ -3091,22 +4125,210 @@ const MapConfig = {
                apos a medida ser finalizada (por padrao, desativada). E uma
                subopcao se desenha do chao ate os pontos da medida ou se as
                duas vao ser infinitas." Ver view3d.js '_trena3DRebuildLines'. -->
-          <h4>📏 Trena 3D — Linhas verticais das medidas finalizadas</h4>
+          <h5 class="mc-subtitulo">Linhas verticais das medidas finalizadas</h5>
+          <!-- [16/09/2026 UTC] RENOMEADO — pedido verbatim: "Troque o nome
+               da opção 'Mostrar depois da medida finalizada (padrão:
+               desativado)' (na subseção 'Trena 3D — Linhas verticais
+               ancoradas') por 'Manter as linhas da ancora depois da medida
+               ja finalizada' (assim fica igual ao title do botao de flag
+               equivalente na janelinha)." Só o rótulo mudou (já era esse o
+               'titulo' do botão 'MostrarLinhasAncoraFinalizada' na janelinha,
+               ver view3d.js '_trena3DOpcoesPainelRapido') — id/campo/
+               comportamento inalterados. -->
           <label class="radio-opt">
             <input type="checkbox" id="mc-trena3d-linhas-finalizada" ${cfg.trena3DMostrarLinhasAncoraFinalizada === true ? 'checked' : ''} title="Depois que uma medida com pontos 'no ar' (ancorados) é finalizada, mostra as 2 linhas tracejadas laranja (do chão até cada ponto) permanentemente junto com ela, não só durante a medição.">
-            <span><span class="t">Mostrar depois da medida finalizada (padrão: desativado)</span><br><span class="d">Para cada ponto da medida que tenha sido fixado "no ar" (com âncora), mostra uma linha tracejada do chão até ele, junto com a medida já pronta — não some mais depois de clicar o 2º ponto. Se um ponto da medida já está no chão (y=0), não há linha pra desenhar nele.</span></span>
+            <span>${this._trena3DPreviewImgTag('linhasFinalizadas')}<span class="t"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 3px; margin-right:4px; border:1px solid #ff9f4d; background:rgba(255,159,77,0.25); border-radius:4px; vertical-align:-4px; box-sizing:border-box" title="Este ícone indica que esta opção pode estar presente na janela rápida da Trena 3D por meio de um botão com o mesmo ícone.">🏁┆</span> Manter as linhas de âncora depois da medida já finalizada (padrão: desativado)</span><br><span class="d">Para cada ponto da medida que tenha sido fixado "no ar" (com âncora), mostra uma linha tracejada do chão até ele, junto com a medida já pronta — não some mais depois de clicar o 2º ponto. Se um ponto da medida já está no chão (y=0), não há linha pra desenhar nele.</span></span>
           </label>
           <label class="radio-opt">
             <input type="radio" name="mc-trena3d-linhas-finalizada-modo" value="ateOPonto" ${cfg.trena3DLinhasAncoraFinalizadaModo !== 'infinita' ? 'checked' : ''} title="Cada linha vai só até a altura real do ponto correspondente — o comprimento dela já mostra a altura daquele ponto.">
-            <span><span class="t">Vai até o ponto da medida (padrão)</span><br><span class="d">Cada linha para exatamente na altura do ponto correspondente.</span></span>
+            <span>${this._trena3DPreviewImgTag('linhaAncoraAteOPonto')}<span class="t">Vai até o ponto da medida (padrão)</span><br><span class="d">Cada linha para exatamente na altura do ponto correspondente.</span></span>
           </label>
           <label class="radio-opt">
-            <input type="radio" name="mc-trena3d-linhas-finalizada-modo" value="infinita" ${cfg.trena3DLinhasAncoraFinalizadaModo === 'infinita' ? 'checked' : ''} title="As 2 linhas continuam até o teto de 6m, como a referência vertical mostrada durante a ancoragem, em vez de parar na altura de cada ponto.">
-            <span><span class="t">Infinita</span><br><span class="d">As 2 linhas continuam até o teto de 6m, independente da altura real de cada ponto.</span></span>
+            <input type="radio" name="mc-trena3d-linhas-finalizada-modo" value="infinita" ${cfg.trena3DLinhasAncoraFinalizadaModo === 'infinita' ? 'checked' : ''} title="As 2 linhas continuam bem além da altura real (sem teto), independente da altura real de cada ponto.">
+            <span>${this._trena3DPreviewImgTag('linhaAncoraInfinita')}<span class="t">Infinita</span><br><span class="d">As 2 linhas continuam bem além da altura real (sem teto — o antigo limite de 6m foi removido), independente da altura real de cada ponto.</span></span>
+          </label>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 114) — pedido verbatim: "além de
+               poder controlar a cor, deve ser possível definir a espessura
+               das linhas guia e se são sólida, tracejada ou pontilhada [...]
+               Por padrão fica nas configurações que está (laranja tracejada
+               e fina)." Cor/espessura/estilo compartilhados pelas 3
+               sub-opções acima (Altura ao vivo, Linha da âncora, Linhas
+               finalizadas) — todas usam a MESMA referência visual (a
+               "linha da âncora" de sempre), então 1 conjunto de controles
+               só, não 3 repetidos. -->
+          <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:8px">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:70px">
+              <span class="lbl">Cor da linha</span>
+              <input type="color" id="mc-trena3d-linha-ancora-cor" value="${cfg.trena3DLinhaAncoraCor || '#ff9f4d'}">
+            </label>
+          </div>
+          <span class="d" style="display:block; margin-top:8px">Espessura/estilo da linha (compartilhados pelas 3 opções acima):</span>
+          ${this._trena3DCamposEstiloLinha('mc-trena3d-linha-ancora', 'trena3DLinhaAncora', cfg, { espessuraPadrao: 1, estiloPadrao: 'tracejada', dashPadrao: 12, gapPadrao: 8 })}
+          <!-- [17/09/2026 UTC] NOVO (RODADA 119) — ver comentário grande na
+               subseção "Aparência da medida" (mesmo controle, mesmo
+               conceito, aplicado ao texto "⬍ Xm" das 2 linhas AO VIVO desta
+               subseção — as linhas de âncora FINALIZADAS não têm rótulo de
+               texto próprio, só a linha em si, então não há o que deslocar
+               ali). -->
+          ${this._trena3DCampoDeslocVerticalLabel('mc-trena3d-linha-ancora', cfg.trena3DLinhaAncoraLabelDeslocVerticalM)}
+          <!-- [RODADA 131] NOVO — mesmo padrão das outras subseções de guia
+               ('trena3DLabelVisivel'/'trena3DGuiaChaoLabelVisivel'/
+               'trena3DGuiaGradeLabelVisivel'), aplicado às 2 caixas de texto
+               ("⬍ Xm") desta subseção (linha da âncora após o 1º ponto e
+               altura ao vivo antes do ponto) — a(s) linha(s) em si continuam
+               aparecendo normalmente, só a caixa de texto é afetada. -->
+          <h5 class="mc-subtitulo">Caixa de texto</h5>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-linha-ancora-label-visivel" ${cfg.trena3DLinhaAncoraLabelVisivel !== false ? 'checked' : ''}>
+            <span><span class="t">Mostrar caixa de texto com a medida</span><br><span class="d">Desligue para esconder a caixa de texto ("⬍ Xm") das linhas verticais ancoradas — a(s) linha(s) continuam aparecendo normalmente.</span></span>
           </label>
         </div>
         <div class="mapconfig-section">
-          <h4>📏 Trena 3D — Guia de grade do mundo</h4>
+          <!-- [RODADA 129] NOVO — pedido verbatim: "Há uma linha tracejada
+               azul claro que aparece quando se define o 1º ponto da medida,
+               é como se fosse um ghost ou prévia de como a medida vai ficar
+               [...] Deve ser possível selecionar a cor deste ghost também. E
+               se é tracejado, pontilhada, espessura e cor. O mesmo que já se
+               pode fazer em '📏 Trena 3D — Linhas verticais ancoradas'."
+               Mesmo padrão de campos (helper compartilhado
+               _trena3DCamposEstiloLinha/_wireTrena3DEstiloLinha) da
+               subseção acima. Ver _trena3DGuideLine em view3d.js (a função
+               que desenha esse ghost, ligada aqui via _trena3DCfg() —
+               cfg.ghostCorInt/cfg.ghostEstiloLinha). -->
+          <h4>📏 Trena 3D — Ghost/prévia da medida</h4>
+          <span class="d" style="display:block; margin-bottom:6px">A linha tracejada que liga o 1º ponto já fixado até a bolinha que segue o cursor, mostrando uma prévia de como a medida vai ficar antes do 2º clique.</span>
+          <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:8px">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:70px">
+              <span class="lbl">Cor da linha</span>
+              <input type="color" id="mc-trena3d-ghost-cor" value="${cfg.trena3DGhostCor || '#5ec8ff'}">
+            </label>
+          </div>
+          <span class="d" style="display:block; margin-top:8px">Espessura/estilo da linha:</span>
+          ${this._trena3DCamposEstiloLinha('mc-trena3d-ghost', 'trena3DGhost', cfg, { espessuraPadrao: 1, estiloPadrao: 'tracejada', dashPadrao: 12, gapPadrao: 8 })}
+        </div>
+        <div class="mapconfig-section">
+          <!-- [16/09/2026 UTC] INVESTIGADO (não corrigido com certeza) —
+               pedido verbatim (relatado 2x, números diferentes cada vez):
+               "ao copiar e colar este título, no final do texto quando cola
+               aparece alguns números ('0,5 2,1'), remova-os." Os números
+               batem com os valores atuais de "Espessura"/"Vão" desta mesma
+               seção ('#mc-trena3d-grade-snap-espessura' /
+               '#mc-trena3d-grade-snap-gap', ~35 linhas abaixo deste <h4>).
+               Inspecionado TODO o HTML entre este <h4> e aqueles 2 <input>:
+               não há nenhum nó de texto solto nem interpolação
+               (interpolação de template string) com esses números perto do título — os valores só
+               aparecem dentro do atributo 'value="..."' dos próprios
+               '<input type="number">', que não é texto selecionável (valor
+               de campo de formulário, não nó de texto do DOM). Ou seja, uma
+               seleção normal (arrastar ou triplo-clique) do título deste
+               '<h4>' NÃO deveria conseguir "pegar" esses números pela
+               estrutura do DOM sozinha. HIPÓTESE MAIS PROVÁVEL: o
+               comportamento é do NAVEGADOR/SO ao copiar, não desta página —
+               ex. um triplo-clique que se estende por engano até o próximo
+               elemento por causa de como listas de '<label>'/'<input>' sem
+               fronteira de bloco clara são tratadas por certos mecanismos de
+               seleção (ex. leitores de tela, extensões de clipboard, ou
+               "seleção inteligente" de alguns navegadores mobile que
+               arredonda a seleção para o próximo elemento de formulário
+               visível), OU a colagem está acontecendo num campo de texto
+               (ex. um <input> de busca) cujo próprio navegador anexa
+               "sugestões" ou autocomplete que por coincidência mostram
+               números da página. NENHUMA correção de código foi aplicada
+               aqui por falta de uma causa raiz concreta no HTML gerado —
+               ver 'Utils.clamp(...)' nos 2 campos abaixo, que são os únicos
+               lugares onde esses números existem nesta seção. Se o
+               problema persistir, o próximo passo seria reproduzir com
+               DevTools aberto (inspecionar a seleção real via
+               'window.getSelection()' no momento da cópia) para confirmar
+               se o range inclui os '<input>' — algo que não foi possível
+               fazer nesta sessão (sem navegador disponível). -->
+          <!-- [16/09/2026 UTC] REORDENADO — pedido verbatim: "A subseção
+               '📏 Trena 3D — Gradeado do ladrilho mirado' deve anteceder a
+               subseção '📏 Trena 3D — Guia de grade do mundo'." Esta
+               subseção inteira (antes vinha DEPOIS de "Linhas guia da grade
+               do mundo") foi movida pra cá — só a ORDEM mudou, nenhum
+               conteúdo interno foi alterado por causa disso. -->
+          <h4 style="margin-bottom:10px">📏 Trena 3D — Gradeado do ladrilho mirado</h4>
+          <!-- [16/09/2026 UTC] MITIGAÇÃO (RODADA 91) — pedido verbatim:
+               "Os números que estavam aparecendo no final do texto de
+               título eram os valores das opções mesmo sendo copiados
+               juntos." CONFIRMADO PELO USUÁRIO: não é bug de renderização
+               nem conteúdo fantasma — é comportamento normal de seleção de
+               texto do navegador quando o título e os campos numéricos
+               seguintes ficam muito próximos/sem separação clara no DOM, e
+               a seleção do usuário (drag/triplo-clique) se estende além do
+               '<h4>' até pegar o texto dos '<input>' mais abaixo. Sem
+               conserto de código necessário — mitigação de fácil aplicação
+               feita mesmo assim: 'margin-bottom' extra no '<h4>' (era só o
+               espaçamento padrão de '.mapconfig-section h4'), reduzindo a
+               proximidade visual/estrutural entre o título e o 1º controle
+               seguinte, o que deve reduzir a chance de uma seleção
+               acidental continuar além do título. -->
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "desenhar um
+               gradeado dentro do ladrilho de mundo que esta sendo alvo no
+               momento, conforme o snap definido. Um gradeado feito com
+               linha pontilhadas. Por padrao ativado." -- ver view3d.js
+               _trena3DAtualizarGradeSnapLadrilho. -->
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-grade-snap" ${cfg.trena3DGradeSnapLadrilhoAtiva !== false ? 'checked' : ''}>
+            <span>${this._trena3DPreviewImgTag('gradeSnapLadrilho')}<span class="t"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 3px; margin-right:4px; border:1px solid #ff9f4d; background:rgba(255,159,77,0.25); border-radius:4px; vertical-align:-4px; box-sizing:border-box" title="Este ícone indica que esta opção pode estar presente na janela rápida da Trena 3D por meio de um botão com o mesmo ícone.">⣿</span> Mostrar gradeado (pontilhado) dentro da área mirada, no espaçamento do snap (padrão: ativado)</span><br><span class="d">Enquanto mira com a "📏 Trena 3D", a área sob a mira (ver opção abaixo) ganha linhas pontilhadas internas, espaçadas conforme o valor do snap configurado acima (ex.: snap de 0,1m desenha um gradeado 10×10 por ladrilho de 1m) — ajuda a visualizar onde o snap vai cair antes de clicar. Se o snap estiver desligado ou o valor for 1m ou mais, não há linha interna pra desenhar (o próprio ladrilho já seria a menor unidade).</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "o preview deve ficar
+               logo abaixo da opção 'Mostrar gradeado (pontilhado)...'."
+               Movido pra cá (era logo depois de "Espessura"/"Vão"). -->
+          <div style="margin:8px 0 4px; display:flex; justify-content:center">
+            <canvas id="mc-trena3d-grade-snap-preview" width="180" height="180" style="background:#1a1c22; border:1px solid var(--border); border-radius:6px; max-width:100%"></canvas>
+          </div>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ter uma opcao
+               (sobre o gradeado) que o desenhe 'nos quatro ladrilhos do
+               entorno', do 'jeito atual' ou 'metade de cada ladrilho do
+               entorno'." -->
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-grade-snap-modo" value="atual" ${cfg.trena3DGradeSnapLadrilhoModo !== 'quatroLadrilhos' && cfg.trena3DGradeSnapLadrilhoModo !== 'metadeEntorno' ? 'checked' : ''}>
+            <span><span class="t">Só o ladrilho de 1m sob a mira (padrão)</span><br><span class="d">O gradeado cobre só o ladrilho de 1m×1m que contém o ponto mirado.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-grade-snap-modo" value="quatroLadrilhos" ${cfg.trena3DGradeSnapLadrilhoModo === 'quatroLadrilhos' ? 'checked' : ''}>
+            <span><span class="t">Nos 4 ladrilhos do entorno</span><br><span class="d">O gradeado cobre os 4 ladrilhos inteiros de 1m que se tocam no canto/vértice de grade mais próximo do ponto mirado — área de 2m×2m.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-grade-snap-modo" value="metadeEntorno" ${cfg.trena3DGradeSnapLadrilhoModo === 'metadeEntorno' ? 'checked' : ''}>
+            <span><span class="t">Metade de cada ladrilho do entorno</span><br><span class="d">O gradeado cobre só a metade mais próxima de cada um dos 4 ladrilhos do entorno — um quadrado de 1m×1m centrado no vértice de grade mais próximo, em vez de com o canto nele.</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possivel
+               controlar a espessura das linhas guias do gradeado [...] Por
+               padrao deve ser a metade do que e atualmente." e "O
+               pontilhado do gradeado [...] deve ser [1,2]." -->
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:110px">
+              <span class="lbl">Espessura (px)</span>
+              <div id="mc-trena3d-grade-snap-espessura" data-valor="${Utils.clamp(Number(cfg.trena3DGradeSnapEspessuraPx) || 1, 0.5, 10)}"></div>
+            </label>
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:90px">
+              <span class="lbl">Vão (cm)</span>
+              <div id="mc-trena3d-grade-snap-gap" data-valor="${Utils.clamp(Number(cfg.trena3DGradeSnapGapCm) || 1.5, 0.1, 50)}"></div>
+            </label>
+            <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "deve ser possível
+                 escolher a cor do gradeado (que, atualmente, é um azul.
+                 Esta deve ser a cor padrão...)." -->
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:70px">
+              <span class="lbl">Cor</span>
+              <input type="color" id="mc-trena3d-grade-snap-cor" value="${cfg.trena3DGradeSnapCor || '#7fd8ff'}">
+            </label>
+          </div>
+          <!-- [16/09/2026 UTC] REMOVIDO — pedido verbatim: "remova o 'Traço',
+               ficando apenas a 'Espessura' e o 'Vão'." O campo 'trena3DGradeSnapDashCm'
+               continua existindo em DEFAULTS/config (fixo no padrão de 1cm,
+               ver view3d.js '_trena3DAtualizarGradeSnapLadrilho') — só o
+               campo de UI pra ele foi removido daqui. -->
+          <span class="d" style="display:block; margin-top:6px">"Espessura" é o tamanho de cada pontinho do gradeado, em pixels na tela (padrão: 3px). "Vão" decide o espaçamento entre pontinhos ao longo de cada linha (padrão 2cm).</span>
+        </div>
+        <div class="mapconfig-section">
+          <!-- [16/09/2026 UTC] RENOMEADO — pedido verbatim: "A subseção
+               'Trena 3D — Guia de grade do mundo' deve trocar de nome para
+               'Trena 3D — Linhas guia da grade do mundo'." Só o título
+               mudou — nenhum id/campo/comportamento foi tocado aqui. -->
+          <h4>📏 Trena 3D — Linhas guia da grade do mundo</h4>
           <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "mostrar linhas
                tracejadas guias a partir do lado do ladrilho do mundo (na
                verdade, dos multiplos de 1m [...]). Por exemplo, aponta-se
@@ -3118,7 +4340,54 @@ const MapConfig = {
                ativada." -- ver view3d.js _trena3DAtualizarGuiaGrade. -->
           <label class="radio-opt">
             <input type="checkbox" id="mc-trena3d-guia-grade" ${cfg.trena3DGuiaGradeAtiva !== false ? 'checked' : ''}>
-            <span><span class="t">Mostrar linhas guia até o ladrilho do mundo mais próximo (padrão: ativado)</span><br><span class="d">Enquanto mira com a "📏 Trena 3D", 2 linhas curtas SÓLIDAS (uma no eixo X, outra no eixo Z) mostram a distância do ponto mirado até a linha de grade mais próxima (múltiplo de 1m — o mesmo espaçamento do ladrilho do chão), com a medida de cada uma centralizada no meio da linha. Some sozinha quando o ponto já está exatamente em cima da grade naquele eixo.</span></span>
+            <span>${this._trena3DPreviewImgTag('guiaGradeMundo')}<span class="t"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 3px; margin-right:4px; border:1px solid #ff9f4d; background:rgba(255,159,77,0.25); border-radius:4px; vertical-align:-4px; box-sizing:border-box" title="Este ícone indica que esta opção pode estar presente na janela rápida da Trena 3D por meio de um botão com o mesmo ícone.">▦</span> Mostrar linhas guia até o ladrilho do mundo mais próximo dentro da área mirada (padrão: ativado)</span><br><span class="d">Enquanto mira com a "📏 Trena 3D", 2 linhas curtas SÓLIDAS (uma no eixo X, outra no eixo Z) mostram a distância do ponto mirado até a linha de grade mais próxima (múltiplo de 1m — o mesmo espaçamento do ladrilho do chão), com a medida de cada uma centralizada no meio da linha. Some sozinha quando o ponto já está exatamente em cima da grade naquele eixo.</span></span>
+          </label>
+          <!-- [18/09/2026 UTC] REORDENADO (RODADA 136) — pedido verbatim: os
+               2 checkboxes abaixo ("Continuar mostrando depois do 1º
+               ponto..." e "Mostrar nas medidas já finalizadas") foram
+               movidos pra logo depois do checkbox acima ("Mostrar linhas
+               guia até o ladrilho..."), antes do preview de canvas e dos
+               radios de modo de medida — só a ORDEM mudou, nenhum
+               id/campo/comportamento foi tocado. -->
+          <!-- [16/09/2026 UTC] REORDENADO — pedido verbatim: "A opção
+               'Continuar mostrando depois do 1º ponto, enquanto mira o 2º
+               (padrão: desativado)' deve vir antes da opção que a
+               antecede." Trocada de posição com "Mostrar nas medidas já
+               finalizadas" logo abaixo — só a ORDEM mudou, nenhum
+               id/campo/comportamento foi tocado. -->
+          <!-- [16/09/2026 UTC] NOVO (RODADA 104) — pedido verbatim: "deve
+               haver outra opção para habilitar/desabilitar o desenho das
+               guias de grade, quando o 1º ponto já foi definido, continuar
+               mostrando elas (enquanto não se definiu o 2º ponto ainda)."
+               Cobre o caso INTERMEDIÁRIO — nem "antes de qualquer ponto"
+               (opção do topo desta subseção) nem "medida já finalizada"
+               (opção logo abaixo), e sim durante a mira do 2º ponto, com o
+               1º já fixado. Ver view3d.js '_trena3DAtualizarGuiaGrade'. -->
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-guia-grade-apos-1-ponto" ${cfg.trena3DGuiaGradeAposPrimeiroPonto === true ? 'checked' : ''}>
+            <span>${this._trena3DPreviewImgTag('guiaGradeMundo')}<span class="t">Continuar mostrando depois do 1º ponto, enquanto mira o 2º (padrão: desativado)</span><br><span class="d">Por padrão, assim que o 1º ponto de uma medida é fixado, esta guia (linhas + medida até a grade mais próxima) some — só volta a aparecer numa medida nova ou, se a opção abaixo estiver ativa, numa medida já finalizada. Ative esta opção para ela continuar aparecendo também enquanto você mira o 2º ponto (relativa à posição atual da mira, não mais ao 1º ponto já fixado) — útil pra quem quer a guia de grade em AMBOS os pontos da medida, não só antes do 1º.</span></span>
+          </label>
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "coloque como outra
+               opção para aparecer após finalizar a medida. Isto acabará
+               afetando a todas as medidas no mapa." Generaliza a guia acima
+               (só ao vivo, durante a mira) pra cada ponto de TODA medida já
+               finalizada no mapa — ver view3d.js '_trena3DRebuildLines'.
+               [16/09/2026 UTC] RENOMEADO — pedido verbatim: "A opção
+               'Mostrar também nas medidas já finalizadas (padrão:
+               desativado)' deve trocar de nome para 'Mostrar nas medidas já
+               finalizadas'. E as linhas guia devem ser rente a superfície
+               em que foi usada para fazer a ancoragem/medida (não 'no ar'
+               como está atualmente)." A grade do mundo (ladrilho) só existe
+               mesmo na altura y=0 — desenhar a guia na altura do PONTO (que
+               pode estar "no ar", elevado por uma âncora) não correspondia
+               a nenhuma grade real àquela altura. Corrigido em
+               view3d.js '_trena3DRebuildLines' — a guia agora é sempre
+               desenhada rente ao chão (y=0), na projeção X/Z do ponto (a
+               mesma X/Z da superfície onde a ancoragem/medida foi feita),
+               em vez de na altura Y do próprio ponto. -->
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-guia-grade-finalizada" ${cfg.trena3DGuiaGradeFinalizada === true ? 'checked' : ''}>
+            <span>${this._trena3DPreviewImgTag('guiaGradeMundo')}<span class="t"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 3px; margin-right:4px; border:1px solid #ff9f4d; background:rgba(255,159,77,0.25); border-radius:4px; vertical-align:-4px; box-sizing:border-box" title="Este ícone indica que esta opção pode estar presente na janela rápida da Trena 3D por meio de um botão com o mesmo ícone.">🏁▦</span> Mostrar nas medidas já finalizadas (padrão: desativado)</span><br><span class="d">Além de aparecer ao vivo enquanto mira (opção acima), desenha a mesma guia (linhas + medida até a grade mais próxima) para CADA PONTO de TODAS as medidas já feitas no mapa, rente ao chão na projeção de cada ponto — reage ao "jeito" escolhido acima (esquerda/cima OU lado mais próximo) e é atualizada na hora ao ligar/desligar, sem precisar fazer uma medida nova.</span></span>
           </label>
           <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "faça um preview de
                canvas para se ter noção do que se trata." Preview 2D
@@ -3141,61 +4410,67 @@ const MapConfig = {
             <input type="radio" name="mc-trena3d-guia-modo" value="maisPerto" ${cfg.trena3DGuiaGradeModoMedida === 'maisPerto' ? 'checked' : ''}>
             <span><span class="t">Sempre até o lado mais próximo (jeito antigo)</span><br><span class="d">Cada medida vai até o múltiplo de 1m mais perto do ponto mirado naquele eixo — pode ser o da esquerda OU o da direita/de cima OU o de baixo, o que estiver mais perto.</span></span>
           </label>
-        </div>
-        <div class="mapconfig-section">
-          <h4>📏 Trena 3D — Gradeado do ladrilho mirado</h4>
-          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "desenhar um
-               gradeado dentro do ladrilho de mundo que esta sendo alvo no
-               momento, conforme o snap definido. Um gradeado feito com
-               linha pontilhadas. Por padrao ativado." -- ver view3d.js
-               _trena3DAtualizarGradeSnapLadrilho. -->
-          <label class="radio-opt">
-            <input type="checkbox" id="mc-trena3d-grade-snap" ${cfg.trena3DGradeSnapLadrilhoAtiva !== false ? 'checked' : ''}>
-            <span><span class="t">Mostrar gradeado (pontilhado) dentro da área mirada, no espaçamento do snap (padrão: ativado)</span><br><span class="d">Enquanto mira com a "📏 Trena 3D", a área sob a mira (ver opção abaixo) ganha linhas pontilhadas internas, espaçadas conforme o valor do snap configurado acima (ex.: snap de 0,1m desenha um gradeado 10×10 por ladrilho de 1m) — ajuda a visualizar onde o snap vai cair antes de clicar. Se o snap estiver desligado ou o valor for 1m ou mais, não há linha interna pra desenhar (o próprio ladrilho já seria a menor unidade).</span></span>
-          </label>
-          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "o preview deve ficar
-               logo abaixo da opção 'Mostrar gradeado (pontilhado)...'."
-               Movido pra cá (era logo depois de "Espessura"/"Vão"). -->
-          <div style="margin:8px 0 4px; display:flex; justify-content:center">
-            <canvas id="mc-trena3d-grade-snap-preview" width="180" height="180" style="background:#1a1c22; border:1px solid var(--border); border-radius:6px; max-width:100%"></canvas>
-          </div>
-          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ter uma opcao
-               (sobre o gradeado) que o desenhe 'nos quatro ladrilhos do
-               entorno', do 'jeito atual' ou 'metade de cada ladrilho do
-               entorno'." -->
-          <label class="radio-opt">
-            <input type="radio" name="mc-trena3d-grade-snap-modo" value="atual" ${cfg.trena3DGradeSnapLadrilhoModo !== 'quatroLadrilhos' && cfg.trena3DGradeSnapLadrilhoModo !== 'metadeEntorno' ? 'checked' : ''}>
-            <span><span class="t">Jeito atual — só o ladrilho de 1m sob a mira (padrão)</span><br><span class="d">O gradeado cobre só o ladrilho de 1m×1m que contém o ponto mirado.</span></span>
-          </label>
-          <label class="radio-opt">
-            <input type="radio" name="mc-trena3d-grade-snap-modo" value="quatroLadrilhos" ${cfg.trena3DGradeSnapLadrilhoModo === 'quatroLadrilhos' ? 'checked' : ''}>
-            <span><span class="t">Nos 4 ladrilhos do entorno</span><br><span class="d">O gradeado cobre os 4 ladrilhos inteiros de 1m que se tocam no canto/vértice de grade mais próximo do ponto mirado — área de 2m×2m.</span></span>
-          </label>
-          <label class="radio-opt">
-            <input type="radio" name="mc-trena3d-grade-snap-modo" value="metadeEntorno" ${cfg.trena3DGradeSnapLadrilhoModo === 'metadeEntorno' ? 'checked' : ''}>
-            <span><span class="t">Metade de cada ladrilho do entorno</span><br><span class="d">O gradeado cobre só a metade mais próxima de cada um dos 4 ladrilhos do entorno — um quadrado de 1m×1m centrado no vértice de grade mais próximo, em vez de com o canto nele.</span></span>
-          </label>
-          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possivel
-               controlar a espessura das linhas guias do gradeado [...] Por
-               padrao deve ser a metade do que e atualmente." e "O
-               pontilhado do gradeado [...] deve ser [1,2]." -->
-          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px">
-            <label class="field" style="flex:0 0 auto; margin:0; min-width:110px">
-              <span class="lbl">Espessura (px)</span>
-              <input type="number" id="mc-trena3d-grade-snap-espessura" min="0.5" max="10" step="0.5" value="${Utils.clamp(Number(cfg.trena3DGradeSnapEspessuraPx) || 3, 0.5, 10)}">
+          <!-- [16/09/2026 UTC] NOVO — pedido verbatim: "Deve ser possível
+               definir a cor das linhas guia. Atualmente elas são desenhadas
+               com verde. E na preview está como azul. Deve ser azul para
+               ambos, como padrão. Deve ser possível selecionar a cor do
+               texto da medida que deve ter a mesma cor já selecionada, como
+               padrão." Mesmo padrão de 2 campos de cor independentes já
+               usado em "Guia rente ao chão" (RODADA 98) — ver
+               view3d.js '_trena3DAtualizarGuiaGrade'/'_trena3DRebuildLines'
+               (bloco 'guiaGradeFinalizada'), que antes desenhavam com uma
+               cor verde FIXA no código, agora lêem estes 2 campos. -->
+          <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:8px">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:70px">
+              <span class="lbl">Cor da linha</span>
+              <input type="color" id="mc-trena3d-guia-grade-cor-linha" value="${cfg.trena3DGuiaGradeCorLinha || '#5ec8ff'}">
             </label>
-            <label class="field" style="flex:0 0 auto; margin:0; min-width:90px">
-              <span class="lbl">Vão (cm)</span>
-              <input type="number" id="mc-trena3d-grade-snap-gap" min="0.1" max="50" step="0.1" value="${Utils.clamp(Number(cfg.trena3DGradeSnapGapCm) || 2, 0.1, 50)}">
+            <label class="field" style="flex:0 0 auto; margin:0; min-width:70px">
+              <span class="lbl">Cor do texto</span>
+              <input type="color" id="mc-trena3d-guia-grade-cor-texto" value="${cfg.trena3DGuiaGradeCorTexto || '#5ec8ff'}">
             </label>
           </div>
-          <!-- [16/09/2026 UTC] REMOVIDO — pedido verbatim: "remova o 'Traço',
-               ficando apenas a 'Espessura' e o 'Vão'." O campo 'trena3DGradeSnapDashCm'
-               continua existindo em DEFAULTS/config (fixo no padrão de 1cm,
-               ver view3d.js '_trena3DAtualizarGradeSnapLadrilho') — só o
-               campo de UI pra ele foi removido daqui. -->
-          <span class="d" style="display:block; margin-top:6px">"Espessura" é o tamanho de cada pontinho do gradeado, em pixels na tela (padrão: 3px). "Vão" decide o espaçamento entre pontinhos ao longo de cada linha (padrão 2cm).</span>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 114) — pedido verbatim: "além de
+               poder controlar a cor, deve ser possível definir a espessura
+               das linhas guia e se são sólida, tracejada ou pontilhada. o
+               line dash deve ser possível controlar (quando aplicável)." -->
+          <span class="d" style="display:block; margin-top:8px">Espessura/estilo da linha (compartilhados por todas as opções acima, ao vivo e finalizada):</span>
+          ${this._trena3DCamposEstiloLinha('mc-trena3d-guia-grade', 'trena3DGuiaGrade', cfg, { espessuraPadrao: 2.4, estiloPadrao: 'solida', dashPadrao: 12, gapPadrao: 8 })}
+          <!-- [17/09/2026 UTC] NOVO (RODADA 119) — ver comentário grande na
+               subseção "Aparência da medida" (mesmo controle, mesmo
+               conceito). ÚNICA das 4 subseções que ganhou também o enable
+               da linha vertical de apoio (opts.comLinhaVertical) — pedido
+               verbatim: "para esta opção, deve ter um enable de aparecer a
+               linha vertical (perpendicular ao chão) que é usada para
+               deslocar o texto. Para melhor identificar visualmente." -->
+          ${this._trena3DCampoDeslocVerticalLabel('mc-trena3d-guia-grade', cfg.trena3DGuiaGradeLabelDeslocVerticalM, { comLinhaVertical: true, linhaVerticalAtiva: cfg.trena3DGuiaGradeLabelLinhaVertical === true })}
+          <!-- [17/09/2026 UTC] NOVO (RODADA 125) — mesma escolha de estilo já
+               existente em "Aparência da medida" ('trena3DLabelEstilo'),
+               aplicada ao texto desta guia. Ver
+               'trena3DGuiaGradeLabelEstilo' (DEFAULTS) e
+               '_trena3DRebuildLines'/'construirLabel' (view3d.js). -->
+          <span class="d" style="display:block; margin-top:8px; font-weight:600">Posição do texto</span>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-guia-grade-label" value="sobreLinhaMeio" ${cfg.trena3DGuiaGradeLabelEstilo === 'sobreLinhaMeio' ? 'checked' : ''}>
+            <span><span class="t">Em cima e no meio</span><br><span class="d">O centro da caixa do texto coincide com o ponto médio real (sem deslocamento vertical) desta guia.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-trena3d-guia-grade-label" value="sobreLinha" ${cfg.trena3DGuiaGradeLabelEstilo !== 'sobreLinhaMeio' ? 'checked' : ''}>
+            <span><span class="t">Flutuante (padrão)</span><br><span class="d">O texto respeita o deslocamento vertical configurado acima.</span></span>
+          </label>
+          <!-- [17/09/2026 UTC] NOVO (RODADA 127) — pedido verbatim: "Deve ser
+               possível controlar se a caixa de texto com a medida vai
+               aparecer ou não em [...] '📏 Trena 3D — Linhas guia da grade do
+               mundo'. Por padrão todas ativadas." Ver
+               'trena3DGuiaGradeLabelVisivel' (DEFAULTS) e '_trena3DCfg'/
+               '_trena3DRebuildLines' (view3d.js). -->
+          <h5 class="mc-subtitulo">Caixa de texto</h5>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-trena3d-guia-grade-label-visivel" ${cfg.trena3DGuiaGradeLabelVisivel !== false ? 'checked' : ''}>
+            <span><span class="t">Mostrar caixa de texto com a medida</span><br><span class="d">Desligue para esconder a caixa de texto desta guia — a linha e as pontas continuam aparecendo normalmente.</span></span>
+          </label>
         </div>
+        </div><!-- fecha #mc-trena3d-secoes (ver comentário grande no início da seção "📏 Trena 3D") -->
         <!-- Seção "🚪 Porta / Janela" (pedido do usuário, 25/08/2026) —
              encaixe no centro do quadrado do chão ao posicionar "no ar"
              (longe de parede). Ver DEFAULTS acima pro significado de cada
@@ -3309,6 +4584,157 @@ const MapConfig = {
       </div>`;
     document.body.appendChild(modal);
 
+    // [16/09/2026 UTC] RODADA 99 -- pedido verbatim (item 1b): "Logo abaixo
+    // do titulo 'Configuracoes do mapa' [...] coloque botoes de atalho para
+    // quando clicar neles ir direto para a posicao no scroll daquela
+    // secao." Construido DINAMICAMENTE a partir do DOM ja renderizado (em
+    // vez de listar manualmente cada secao no HTML estatico) -- assim
+    // reflete automaticamente SO as secoes de verdade presentes no contexto
+    // atual (2D ou 3D usam o MESMO template com blocos condicionais
+    // `opts.context === '2d'/'3d'`, ver comentarios mais acima), sempre na
+    // ordem real em que aparecem, sem risco de a lista de atalhos ficar
+    // desatualizada se uma secao for adicionada/removida/reordenada no
+    // futuro.
+    // [16/09/2026 UTC] RODADA 100 -- REDESENHADO -- pedido verbatim: "deixe
+    // apenas o botao da secao com um botao de seta atrelado dropdown para
+    // mostrar as subsecoes [...] Para nao ficar abarrotado de botoes." A
+    // Rodada 99 criava 1 botao pra CADA `.mapconfig-section` -- em telas
+    // com dezenas de subsecoes (ex toda a familia "📏 Trena 3D — ...") isso
+    // enchia a barra. Agora as secoes sao AGRUPADAS pelo texto antes de
+    // " — " no h4 (ex "📏 Trena 3D — Snap" e "📏 Trena 3D — Pontas" caem no
+    // MESMO grupo "📏 Trena 3D"; uma secao cujo h4 nao tem " — " nenhum,
+    // ex "🌗 Hora do dia", forma um grupo sozinha). Cada GRUPO vira 1 unico
+    // botao na barra: se o grupo tiver so 1 secao, o botao inteiro so faz
+    // scroll direto (sem seta). Se tiver 2+ secoes (uma "principal" sem
+    // sufixo, tipo "📏 Trena 3D", seguida de N "subsecoes" com sufixo), o
+    // botao ganha uma setinha "▾" anexada: clicar no CORPO do botao rola
+    // pra 1a secao do grupo (a principal); clicar na seta abre um dropdown
+    // listando cada subsecao (rotulo = só o texto depois de " — "), cada
+    // uma rolando pra sua propria secao.
+    const _mcTocSecoes = Array.from(modal.querySelectorAll('.mapconfig-section'));
+    if (_mcTocSecoes.length) {
+      const _mcTituloTexto = (sec) => {
+        const h4 = sec.querySelector('h4');
+        if (!h4) return null;
+        const clone = h4.cloneNode(true);
+        clone.querySelectorAll('button, svg').forEach((el) => el.remove());
+        return clone.textContent.trim() || null;
+      };
+      // [16/09/2026 UTC] RODADA 100 -- pedido verbatim: "A rolagem deve ser
+      // até o título da seção ou subseção ficar do topo visível [...] (não
+      // até o corpo abaixo do título [...] como é atualmente)." CAUSA: a
+      // Rodada 99 usava `sec.scrollIntoView({block:'start'})` na SECAO
+      // INTEIRA -- alinha o topo da propria `.mapconfig-section` (que
+      // inclui uma margem/padding antes do `<h4>`) com o topo do viewport
+      // de scroll, mas o cabecalho STICKY do modal (`position:sticky`, ver
+      // topo de `open()`) fica por CIMA daquele mesmo topo, cobrindo
+      // fisicamente o `<h4>` -- o titulo ficava ESCONDIDO atras do
+      // cabecalho fixo, dando a impressao de "rolou demais, foi pro corpo".
+      // CORRIGIDO -- calcula manualmente o `scrollTop` alvo do `.modal-sheet`
+      // (o elemento com scroll de verdade) a partir da posicao REAL do
+      // proprio `<h4>` na tela (`getBoundingClientRect`), subtraindo a
+      // altura do cabecalho sticky (medida ao vivo, nao um numero fixo) --
+      // funciona não importa a altura do cabecalho ou de containers
+      // aninhados com overflow, sem depender do comportamento
+      // (inconsistente entre navegadores) do `scrollIntoView` com sticky
+      // headers.
+      // [16/09/2026 UTC] RODADA 101 -- AJUSTADO -- pedido verbatim: "deve
+      // 'bater' e parar no topo da caixa (div.mapconfig-section) [...] So o
+      // titulo da janela [...] fique acima [...] Devem ficar colados um
+      // acima do outro." A Rodada 100 alinhava o `<h4>` (titulo) ao topo, e
+      // ainda subtraia 8px extras de folga -- sobrava um gap visivel entre
+      // o cabecalho fixo (a caixa de titulo "⚙️ Configuracoes do mapa") e o
+      // topo de verdade da `.mapconfig-section` alvo (a propria `h4` fica
+      // com `margin:0` mas a SECAO tem padding ANTES dela, entao alinhar o
+      // h4 deixa aquele padding "vazando" acima como gap). CORRIGIDO --
+      // agora mede o topo da PROPRIA `.mapconfig-section` (nao do `<h4>`
+      // interno) e remove a folga de 8px -- o topo da secao encosta
+      // diretamente na base do cabecalho fixo, sem gap nenhum, como pedido.
+      const _mcScrollParaTitulo = (sec) => {
+        const sheetEl = modal.querySelector('.modal-sheet');
+        const cabecalhoSticky = modal.querySelector('.mapconfig-sheet > div');
+        if (!sec || !sheetEl) return;
+        const alturaSticky = cabecalhoSticky?.getBoundingClientRect().height || 0;
+        const sheetRect = sheetEl.getBoundingClientRect();
+        const secRect = sec.getBoundingClientRect();
+        const delta = secRect.top - sheetRect.top;
+        const alvo = sheetEl.scrollTop + delta - alturaSticky;
+        sheetEl.scrollTo({ top: Math.max(0, alvo), behavior: 'smooth' });
+      };
+      // Agrupa as seções por "título principal" (texto antes de " — ").
+      const _mcGrupos = [];
+      _mcTocSecoes.forEach((sec, i) => {
+        const titulo = _mcTituloTexto(sec);
+        if (!titulo) return;
+        if (!sec.id) sec.id = `mc-toc-secao-${i}`;
+        const partes = titulo.split(' — ');
+        const principal = partes[0].trim();
+        const sufixo = partes.length > 1 ? partes.slice(1).join(' — ').trim() : null;
+        let grupo = _mcGrupos[_mcGrupos.length - 1];
+        if (!grupo || grupo.principal !== principal) {
+          grupo = { principal, itens: [] };
+          _mcGrupos.push(grupo);
+        }
+        grupo.itens.push({ sec, sufixo, tituloCompleto: titulo });
+      });
+      const _mcTocNav = document.createElement('div');
+      _mcTocNav.className = 'mapconfig-toc';
+      _mcTocNav.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; margin:0 0 14px; position:relative;';
+      // Fecha qualquer dropdown aberto ao clicar fora da barra de atalhos.
+      const _mcFecharDropdowns = () => { _mcTocNav.querySelectorAll('.mapconfig-toc-dropdown').forEach((d) => { d.style.display = 'none'; }); };
+      document.addEventListener('mousedown', (e) => { if (!_mcTocNav.contains(e.target)) _mcFecharDropdowns(); });
+      _mcGrupos.forEach((grupo) => {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:relative; display:inline-flex;';
+        const btnPrincipal = document.createElement('button');
+        btnPrincipal.type = 'button';
+        btnPrincipal.className = 'btn sm secondary';
+        btnPrincipal.textContent = grupo.principal;
+        btnPrincipal.style.cssText = `font-size:11px; padding:4px 8px; white-space:nowrap;${grupo.itens.length > 1 ? ' border-top-right-radius:0; border-bottom-right-radius:0;' : ''}`;
+        btnPrincipal.addEventListener('click', () => { _mcFecharDropdowns(); _mcScrollParaTitulo(grupo.itens[0].sec); });
+        wrap.appendChild(btnPrincipal);
+        if (grupo.itens.length > 1) {
+          const btnSeta = document.createElement('button');
+          btnSeta.type = 'button';
+          btnSeta.className = 'btn sm secondary';
+          btnSeta.textContent = '▾';
+          btnSeta.title = `Ver subseções de "${grupo.principal}"`;
+          btnSeta.style.cssText = 'font-size:11px; padding:4px 6px; border-left:1px solid rgba(255,255,255,0.15); border-top-left-radius:0; border-bottom-left-radius:0;';
+          const dropdown = document.createElement('div');
+          dropdown.className = 'mapconfig-toc-dropdown';
+          // [16/09/2026 UTC] RODADA 101 -- pedido verbatim: "O dropdown do
+          // botao de atalho deve ter scroll caso precise." Ja havia
+          // `overflow-y:auto` desde a Rodada 100, mas com `max-height` mais
+          // apertado (260px) -- aumentado pra 340px (mais espaço antes de
+          // precisar rolar, ainda cabendo confortavelmente dentro da altura
+          // tipica do modal) e documentado explicitamente que a intencao E
+          // ter scroll interno pra familias de subsecoes longas (ex "📏
+          // Trena 3D", com muitas subsecoes) em vez de estourar a tela.
+          dropdown.style.cssText = 'display:none; position:absolute; top:100%; left:0; margin-top:4px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,0.4); z-index:5; min-width:180px; max-height:340px; overflow-y:auto; padding:4px;';
+          grupo.itens.forEach((item) => {
+            const opt = document.createElement('button');
+            opt.type = 'button';
+            opt.className = 'btn sm secondary';
+            opt.style.cssText = 'display:block; width:100%; text-align:left; font-size:11px; padding:6px 8px; margin:1px 0; white-space:nowrap; background:transparent; border:none;';
+            opt.textContent = item.sufixo || item.tituloCompleto;
+            opt.addEventListener('click', () => { dropdown.style.display = 'none'; _mcScrollParaTitulo(item.sec); });
+            dropdown.appendChild(opt);
+          });
+          btnSeta.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const aberto = dropdown.style.display !== 'none';
+            _mcFecharDropdowns();
+            dropdown.style.display = aberto ? 'none' : 'block';
+          });
+          wrap.appendChild(btnSeta);
+          wrap.appendChild(dropdown);
+        }
+        _mcTocNav.appendChild(wrap);
+      });
+      const _mcCabecalho = modal.querySelector('.mapconfig-sheet > div');
+      _mcCabecalho?.after(_mcTocNav);
+    }
+
     // [13/09/2026 UTC] Limpa o loop de animação do globo (requestAnimationFrame)
     // e o intervalo de refresh do relógio real/mundo ao fechar o painel —
     // sem isso o RAF do globo continuaria rodando pra sempre em segundo
@@ -3319,13 +4745,50 @@ const MapConfig = {
     // globo (que anima suavemente até o ângulo alvo, ver `setHora`) e a
     // trilha davam a impressão de ficar "pulando" em saltos grandes, em
     // vez de acompanhar o relógio em tempo real.
+    // [16/09/2026 UTC] RODADA 99 -- CORRIGIDO bug verbatim: "ao clicar em
+    // 'Seguir relogio do mundo', depois de uns 2s, ele se deseleciona
+    // sozinho." CAUSA RAIZ: este intervalo lia `cfg.horaDoDiaManual` -- mas
+    // `cfg` eh uma CONST capturada 1 UNICA VEZ no momento em que o modal foi
+    // aberto (topo de `open()`), nunca atualizada depois. Clicar no botao
+    // "Seguir relogio do mundo" chama `onCommit('mundo')` -> `this.set(...)`,
+    // que grava em `this._cache` (o estado de VERDADE, sempre atual) mas
+    // NAO muda a variavel local `cfg` -- ela continua congelada no valor de
+    // quando o modal abriu (tipicamente `null`, "automatico"). A cada
+    // 1000ms este intervalo chamava `horaWidgetApi.setHora(cfg.horaDoDiaManual)`
+    // com esse valor CONGELADO, e `setHora` reexecuta `syncUI(valor)`, que
+    // reescreve o texto/estado "(ativo)" dos botoes "Seguir relogio do
+    // mundo"/"Seguir relogio do aparelho" a partir do valor recebido --
+    // ou seja, o proprio refresh periodico desfazia visualmente a escolha
+    // do usuario a cada segundo, sempre voltando pro estado de quando o
+    // modal foi aberto (percebido como "se desseleciona sozinho" no
+    // primeiro tick seguinte ao clique, ~1-2s depois). CORRIGIDO -- passa a
+    // ler `this._cache.horaDoDiaManual` (o valor ATUAL de verdade, mantido
+    // em dia por `set()`/`previewSet()`) em vez da `cfg` congelada.
     const _globoRefreshInterval = setInterval(() => {
-      if (cfg.horaDoDiaManual == null || cfg.horaDoDiaManual === 'mundo') horaWidgetApi?.setHora(cfg.horaDoDiaManual);
+      const horaAtual = this._cache?.horaDoDiaManual;
+      if (horaAtual == null || horaAtual === 'mundo') horaWidgetApi?.setHora(horaAtual);
     }, 1000);
-    const close = () => { opts.onClose?.(); clearInterval(_globoRefreshInterval); horaWidgetApi?.destroy(); modal.remove(); };
+    const close = () => { opts.onClose?.(); clearInterval(_globoRefreshInterval); horaWidgetApi?.destroy(); this._trena3DResyncCleanup?.(); this._trena3DResyncCleanup = null; modal.remove(); };
     modal.querySelector('#mc-close').onclick = close;
     modal.querySelector('#mc-close-top').onclick = close; // NOVO (07/09/2026) — ✕ do cabeçalho fixo, ver comentário na criação do HTML
     modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
+    // [16/09/2026 UTC] NOVO — botão do cabeçalho que liga/desliga a seleção
+    // de texto das opções/descrições em "Configurações 3D" (ver criação do
+    // HTML acima, 'mc3dTextoSelecionavel'/'.mapconfig-sheet--selecionavel'
+    // em css/style.css). Persistido numa chave própria "solta" no DB (mesmo
+    // padrão de 'fotosMarcarAquiAcao'), lida de novo a cada abertura do
+    // modal — não precisa re-renderizar o modal inteiro pra refletir a
+    // mudança, só alterna a classe no elemento já na tela e atualiza
+    // ícone/título/'aria-pressed' do próprio botão.
+    modal.querySelector('#mc-toggle-selecionavel')?.addEventListener('click', async (e) => {
+      const sheetEl = modal.querySelector('.mapconfig-sheet');
+      const ativo = !sheetEl.classList.contains('mapconfig-sheet--selecionavel');
+      sheetEl.classList.toggle('mapconfig-sheet--selecionavel', ativo);
+      e.currentTarget.textContent = ativo ? '🔓' : '🔒';
+      e.currentTarget.title = ativo ? 'Desativar seleção de texto das opções/descrições' : 'Ativar seleção de texto das opções/descrições';
+      e.currentTarget.setAttribute('aria-pressed', ativo ? 'true' : 'false');
+      await DB.setSetting('mapconfig3DTextoSelecionavel', ativo);
+    });
 
     modal.querySelector('#mc-dup-itens-colar').onchange = async (e) => { await this.set({ duplicarItensAoColar: e.target.checked }); };
     // [15/09/2026 UTC] NOVO — seção "🗺️ Mapa 2D" (ver HTML acima).
@@ -3333,7 +4796,181 @@ const MapConfig = {
     modal.querySelector('#mc-miniatura3d')?.addEventListener('change', async (e) => { await this.set({ miniatura3DAtiva: e.target.checked }); });
     // NOVO (07/09/2026) — ver DEFAULTS.miniatura3DFecharAoSairMapa acima.
     modal.querySelector('#mc-miniatura3d-fechar-ao-sair')?.addEventListener('change', async (e) => { await this.set({ miniatura3DFecharAoSairMapa: e.target.checked }); });
-    modal.querySelector('#mc-trena3d-painel-rapido')?.addEventListener('change', async (e) => { await this.set({ trena3DPainelRapidoAtivo: e.target.checked }); });
+    // [16/09/2026 UTC] NOVO — os 2 checkboxes (Configurações 2D e 3D) leem/
+    // escrevem o MESMO campo `trena3DPainelRapidoAtivo` — cada um, ao mudar,
+    // sincroniza o outro na hora (sem precisar fechar/reabrir a folha).
+    const mc2dPainelRapido = modal.querySelector('#mc-trena3d-painel-rapido');
+    const mc3dPainelRapido = modal.querySelector('#mc-trena3d-painel-rapido-3d');
+    mc2dPainelRapido?.addEventListener('change', async (e) => {
+      if (mc3dPainelRapido) mc3dPainelRapido.checked = e.target.checked;
+      await this.set({ trena3DPainelRapidoAtivo: e.target.checked });
+    });
+    mc3dPainelRapido?.addEventListener('change', async (e) => {
+      if (mc2dPainelRapido) mc2dPainelRapido.checked = e.target.checked;
+      await this.set({ trena3DPainelRapidoAtivo: e.target.checked });
+    });
+    // [16/09/2026 UTC] NOVO (RODADA 91) — modo de exibição da janelinha
+    // ('agrupado' com rótulo de texto | 'simples' só com contornos). Ver
+    // DEFAULTS/view3d.js '_trena3DAtualizarPainelRapido'.
+    modal.querySelectorAll('input[name="mc-trena3d-painel-rapido-modo"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DPainelRapidoModo: e.target.value }); });
+    });
+    // [16/09/2026 UTC] NOVO — "Janela de acesso rápido" — chips. Pedido
+    // verbatim: "deve ser possível selecionar os botões e a ordem em que
+    // eles vão ficar na janela [...] reaproveitado" o sistema de FLIP já
+    // modularizado em js/flip.js (mesmo usado por "Ver lista simples" →
+    // "Partes de informação em cada linha"). `window.View3D` já é acessado
+    // direto por este arquivo noutros lugares (ver comentários grandes de
+    // preview 3D acima) — usado aqui só pra ler a lista "de código" das
+    // opções da janelinha (`_trena3DOpcoesPainelRapido`), sem duplicá-la.
+    (() => {
+      const prChipsBox = modal.querySelector('#mc-trena3d-pr-chips');
+      if (!prChipsBox || !window.View3D) return;
+      const opcoesTodas = window.View3D._trena3DOpcoesPainelRapido();
+      const porCampo = new Map(opcoesTodas.map((o) => [o.campo, o]));
+      const construirListaOrdenada = () => {
+        const ordemSalva = (this._cache.trena3DPainelRapidoOrdem && this._cache.trena3DPainelRapidoOrdem.length)
+          ? this._cache.trena3DPainelRapidoOrdem
+          : opcoesTodas.map((o) => o.campo);
+        const restantes = new Map(porCampo);
+        const lista = [];
+        ordemSalva.forEach((campo) => {
+          const o = restantes.get(campo);
+          if (o) { lista.push(o); restantes.delete(campo); }
+        });
+        // Opções novas, sem posição salva ainda — entram no final, na
+        // mesma ordem relativa que já tinham na lista de código (mesmo
+        // raciocínio de `_trena3DOpcoesPainelRapidoEfetivas`, view3d.js).
+        opcoesTodas.forEach((o) => { if (restantes.has(o.campo)) lista.push(o); });
+        return lista;
+      };
+      const commitPrOrdem = async () => {
+        const ordemDom = [...prChipsBox.children].map((c) => c.dataset.campo);
+        await this.set({ trena3DPainelRapidoOrdem: ordemDom });
+      };
+      const prSortable = Flip.makeSortable(prChipsBox, {
+        itemSelector: '.lb-campo-chip',
+        ignoreSelector: '.mc-trena3d-pr-chk',
+        draggingClass: 'lb-campo-chip-dragging',
+        axis: 'auto',
+        onDrop: () => commitPrOrdem(),
+      });
+      const renderPrChips = () => {
+        const ocultosAtuais = new Set(this._cache.trena3DPainelRapidoOcultos || []);
+        prChipsBox.innerHTML = construirListaOrdenada().map((o) => {
+          const iconeHtml = o.svgIcone || Utils.escapeHtml(o.icone || '');
+          const tituloResumo = (o.titulo || '').split(' (')[0];
+          return `
+          <div class="lb-campo-chip" data-campo="${Utils.escapeHtml(o.campo)}" title="${Utils.escapeHtml(o.titulo)} — arraste ⠿ para reordenar">
+            <span class="lb-campo-chip-handle">⠿</span>
+            <label class="lb-campo-chip-label">
+              <input type="checkbox" class="mc-trena3d-pr-chk" ${ocultosAtuais.has(o.campo) ? '' : 'checked'}>
+              <span style="display:inline-flex; align-items:center; gap:4px">${iconeHtml} ${Utils.escapeHtml(tituloResumo)}</span>
+            </label>
+          </div>`;
+        }).join('');
+        prChipsBox.querySelectorAll('.lb-campo-chip').forEach((chip) => {
+          const campo = chip.dataset.campo;
+          chip.querySelector('.mc-trena3d-pr-chk').onchange = async (e) => {
+            const ocultos = new Set(this._cache.trena3DPainelRapidoOcultos || []);
+            if (e.target.checked) ocultos.delete(campo); else ocultos.add(campo);
+            await this.set({ trena3DPainelRapidoOcultos: [...ocultos] });
+          };
+          prSortable.attach(chip);
+        });
+      };
+      renderPrChips();
+    })();
+    // [RODADA 130] Editor visual dos GRUPOS de espessura/cor da janelinha —
+    // mesma técnica do bloco de chips acima (Flip.makeSortable + checkbox de
+    // visibilidade), mas cada "chip" aqui é o PRÓPRIO HTML real do grupo
+    // (`View3D._trena3DHtmlGrupoAjuste`) — mesmos color pickers e "botão
+    // triplo" que aparecem na janelinha, ligados de verdade (mudar a cor
+    // aqui já aplica no cenário 3D, igual mudar na janelinha ou no resto
+    // desta subseção). `idPrefixo` diferente (`'mc-trena3d-pr-grupo-'`) evita
+    // colidir com os `id`s da janelinha real, que pode estar aberta ao mesmo
+    // tempo (Ver em 3D + Configurações 3D simultâneos).
+    (() => {
+      const gruposBox = modal.querySelector('#mc-trena3d-pr-grupos');
+      if (!gruposBox || !window.View3D) return;
+      const idPrefixo = 'mc-trena3d-pr-grupo-';
+      const todosGrupos = window.View3D._trena3DGruposAjustesPainelRapido();
+      const porChave = new Map(todosGrupos.map((g) => [g.chave, g]));
+      const construirListaOrdenada = () => {
+        const ordemSalva = (this._cache.trena3DPainelRapidoOrdemGrupos && this._cache.trena3DPainelRapidoOrdemGrupos.length)
+          ? this._cache.trena3DPainelRapidoOrdemGrupos
+          : todosGrupos.map((g) => g.chave);
+        const restantes = new Map(porChave);
+        const lista = [];
+        ordemSalva.forEach((chave) => {
+          const g = restantes.get(chave);
+          if (g) { lista.push(g); restantes.delete(chave); }
+        });
+        todosGrupos.forEach((g) => { if (restantes.has(g.chave)) lista.push(g); });
+        return lista;
+      };
+      const commitOrdemGrupos = async () => {
+        const ordemDom = [...gruposBox.children].map((c) => c.dataset.grupoChave);
+        await this.set({ trena3DPainelRapidoOrdemGrupos: ordemDom });
+      };
+      // [RODADA 133/134] CORRIGIDO -- ignora só os controles que precisam do
+      // próprio clique (cor, campo numérico "botão triplo" `.m3d-numfield`,
+      // botão de texto) -- o resto da linha (rótulo + espaço vazio) inicia
+      // o arraste normalmente, em vez de só o pequeno "⠿".
+      const gruposSortable = Flip.makeSortable(gruposBox, {
+        itemSelector: '.mc-trena3d-pr-grupo-item',
+        ignoreSelector: '.mc-trena3d-pr-grupo-chk, input[type="color"], .m3d-numfield, .m3d-numfield *, .v3d-pr-aj-texto-btn',
+        draggingClass: 'lb-campo-chip-dragging',
+        axis: 'auto',
+        onDrop: () => commitOrdemGrupos(),
+      });
+      const renderGrupos = () => {
+        const ocultosAtuais = new Set(this._cache.trena3DPainelRapidoGruposOcultos || []);
+        gruposBox.innerHTML = construirListaOrdenada().map((g) => `
+          <div class="mc-trena3d-pr-grupo-item" data-grupo-chave="${g.chave}" style="display:flex; align-items:center; gap:6px; margin:4px 0; padding:4px 6px; border:1px solid rgba(255,255,255,0.08); border-radius:6px; background:rgba(255,255,255,0.03)">
+            <span class="lb-campo-chip-handle" title="Arraste ⠿ para reordenar" style="cursor:grab; flex:0 0 auto">⠿</span>
+            <label style="display:flex; align-items:center; gap:4px; flex:0 0 auto" title="Mostrar/esconder este grupo na janelinha">
+              <input type="checkbox" class="mc-trena3d-pr-grupo-chk" ${ocultosAtuais.has(g.chave) ? '' : 'checked'}>
+            </label>
+            <div style="flex:1 1 auto; min-width:0">${window.View3D._trena3DHtmlGrupoAjuste(g, idPrefixo)}</div>
+          </div>`).join('');
+        gruposBox.querySelectorAll('.mc-trena3d-pr-grupo-item').forEach((item) => {
+          const chave = item.dataset.grupoChave;
+          item.querySelector('.mc-trena3d-pr-grupo-chk').onchange = async (e) => {
+            const ocultos = new Set(this._cache.trena3DPainelRapidoGruposOcultos || []);
+            if (e.target.checked) ocultos.delete(chave); else ocultos.add(chave);
+            await this.set({ trena3DPainelRapidoGruposOcultos: [...ocultos] });
+          };
+          gruposSortable.attach(item);
+        });
+        // Liga os controles reais (espessura/cor) de cada grupo — mesmo
+        // wiring da janelinha, reaproveitado tal e qual.
+        window.View3D._trena3DWireAjustesPainelRapido(gruposBox, construirListaOrdenada(), idPrefixo);
+        window.View3D._trena3DResyncAjustesPainelRapido(gruposBox, construirListaOrdenada(), idPrefixo);
+      };
+      renderGrupos();
+      // [RODADA 134] NOVO -- pedido verbatim: "ao mudar os valores nos
+      // botões da janelinha da 'Trena 3D', os valores na subseção da
+      // janelinha deve mudar de forma recíproca e imediatamente." O sentido
+      // "modal -> janelinha real" já funcionava (a janelinha real escuta
+      // `MapConfig.onChange` e resincroniza sozinha, ver view3d.js
+      // `_onMapConfigChange`/`_trena3DAtualizarPainelRapido`) -- faltava o
+      // sentido inverso: esta lista (dentro do modal) nunca escutava
+      // `MapConfig.onChange`, só resincronizava no instante em que o modal
+      // abria. Corrigido: resincroniza os valores (espessura/cor/texto) de
+      // cada grupo aqui também, toda vez que a config mudar por fora
+      // (inclusive pelos botões da janelinha real) enquanto o modal
+      // estiver aberto. Não refaz a ORDEM/visibilidade (isso só muda por
+      // arraste/checkbox dentro deste próprio editor, não pela janelinha),
+      // só os valores dos controles já desenhados — mais barato e evita
+      // interromper um arraste em andamento.
+      const gruposOnExternalChange = () => {
+        if (!gruposBox.isConnected) return;
+        window.View3D._trena3DResyncAjustesPainelRapido(gruposBox, construirListaOrdenada(), idPrefixo);
+      };
+      MapConfig.onChange(gruposOnExternalChange);
+      this._trena3DPrGruposOnChangeCleanup = () => MapConfig.offChange(gruposOnExternalChange);
+    })();
     // BUG CORRIGIDO (05/09/2026), pedido verbatim — teste do usuário:
     // "desabilitei o Retículo métrico e desabilitei a Trena, depois,
     // habilitei a Trena e o Retículo métrico apareceu junto." Causa raiz:
@@ -3878,6 +5515,10 @@ const MapConfig = {
     modal.querySelector('#mc-debug-prolongamento')?.addEventListener('change', async (e) => { await this.set({ debugProlongamentoAtivo: e.target.checked }); });
     modal.querySelector('#mc-debug-alvo-orbital')?.addEventListener('change', async (e) => { await this.set({ modeladorMostrarAlvoOrbital: e.target.checked }); });
     modal.querySelector('#mc-debug-enquadramento-camera')?.addEventListener('change', async (e) => { await this.set({ debugEnquadramentoCameraAtivo: e.target.checked }); });
+    // [17/09/2026 UTC] NOVO (RODADA 123) — ver DEFAULTS.debugTrena3DCoordenadasAtivo.
+    modal.querySelector('#mc-debug-trena3d-coords')?.addEventListener('change', async (e) => { await this.set({ debugTrena3DCoordenadasAtivo: e.target.checked }); });
+    // [17/09/2026 UTC] NOVO (RODADA 125) — ver DEFAULTS.debugBotaoTelaAtivo.
+    modal.querySelector('#mc-debug-botao-tela')?.addEventListener('change', async (e) => { await this.set({ debugBotaoTelaAtivo: e.target.checked }); });
     // Pedido do usuário (03/09/2026) — ver DEFAULTS.bussola3DAtiva/seção "🧭
     // Bússola 3D" acima.
     modal.querySelector('#mc-bussola3d')?.addEventListener('change', async (e) => { await this.set({ bussola3DAtiva: e.target.checked }); });
@@ -4031,6 +5672,28 @@ const MapConfig = {
     // ---------- Seção "📏 Trena 3D" — botão "Sobre" (documentação) e modo de
     // ancoragem (Ctrl x 4 cliques), ver HTML acima. ----------
     modal.querySelector('#mc-trena3d-sobre-btn')?.addEventListener('click', () => this._abrirDocTrena3D());
+    // [16/09/2026 UTC] NOVO (RODADA 92) — botão "↺ Restaurar padrões da
+    // Trena 3D": reseta TODO campo cuja chave comece com "trena3D" (Snap,
+    // Aparência, Visibilidade, Espessura/cores, Pontas, Destaque de mira,
+    // Altura ao vivo, Linha da âncora, Linhas verticais, Guia de grade,
+    // Janelinha, etc.) para `MapConfig.DEFAULTS`, num único `this.set(...)`
+    // (dispara `_listeners` uma vez só — inclusive `_onMapConfigChange` do
+    // view3d.js, que reconstrói a cena 3D/rebuilda linhas/atualiza a
+    // janelinha). Depois fecha e reabre esta mesma folha de Configurações
+    // 3D pra recarregar TODOS os inputs (número, rádio, checkbox) com os
+    // valores restaurados — mais simples e confiável do que reescrever cada
+    // um dos ~40 campos manualmente aqui (a chamada usa window.confirm()).
+    modal.querySelector('#mc-trena3d-restaurar-padroes')?.addEventListener('click', async () => {
+      const ok = window.confirm('Restaurar todas as opções da Trena 3D (Snap, Aparência da medida, Visibilidade, Espessura/cores, Pontas, Destaque de mira, Altura ao vivo, Linha da âncora, Linhas verticais, Guia de grade, Janelinha) para os valores padrão de fábrica?');
+      if (!ok) return;
+      const patch = {};
+      for (const chave of Object.keys(MapConfig.DEFAULTS || {})) {
+        if (chave.startsWith('trena3D')) patch[chave] = MapConfig.DEFAULTS[chave];
+      }
+      await this.set(patch);
+      close();
+      this.open(map, opts);
+    });
     modal.querySelectorAll('input[name="mc-trena3d-modo-ancora"]').forEach((el) => {
       el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DModoAncora: e.target.value }); });
     });
@@ -4038,61 +5701,211 @@ const MapConfig = {
     // ---------- Seção "📏 Trena 3D" — snap (toggle + valor), aparência,
     // visibilidade, espessura/cores e pontas (5 subseções, ver HTML acima). ----------
     modal.querySelector('#mc-trena3d-snap-on')?.addEventListener('change', async (e) => {
-      const campo = modal.querySelector('#mc-trena3d-snap');
-      if (campo) campo.disabled = !e.target.checked;
       await this.set({ trena3DSnapAtivo: e.target.checked });
+      // [16/09/2026 UTC] NOVO — o preview de "Gradeado do ladrilho mirado"
+      // (seção separada, mais abaixo) usa este mesmo snap pra decidir
+      // quantas células desenhar — precisa redesenhar ao mudar aqui também.
+      this._trena3DDesenharPreviewGradeSnap(modal);
     });
-    modal.querySelector('#mc-trena3d-snap')?.addEventListener('change', async (e) => {
-      const v = Utils.clamp(Number(e.target.value) || 0.1, 0.01, 2);
-      e.target.value = v;
-      await this.set({ trena3DSnapMetros: v });
+    // [17/09/2026 UTC] ATUALIZADO (RODADA 118) — "botão triplo" (ver
+    // `_montarBotaoTriplo`); o antigo `<input type="number">` (com o
+    // `campo.disabled` do toggle acima) virou um `<div>` — o widget não tem
+    // um "disabled" próprio, então o toggle desligado só interrompe o EFEITO
+    // (via `trena3DSnapAtivo`), não trava mais o arrastar do botão em si.
+    this._montarBotaoTriplo(modal, 'mc-trena3d-snap', {
+      step: 0.01, minDecimals: 2, min: 0.01, max: 2, chave: 'mc-trena3d-snap',
+      aoCommit: (v) => ({ trena3DSnapMetros: v || 0.1 }),
+      aposCommit: () => this._trena3DDesenharPreviewGradeSnap(modal),
     });
     modal.querySelectorAll('input[name="mc-trena3d-label"]').forEach((el) => {
       el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DLabelEstilo: e.target.value }); });
     });
+    // [17/09/2026 UTC] NOVO (RODADA 119) — controle de posição vertical do
+    // texto (ver `_trena3DCampoDeslocVerticalLabel`/`_wireTrena3DDeslocVerticalLabel`).
+    this._wireTrena3DDeslocVerticalLabel(modal, 'mc-trena3d-label', 'trena3DLabelDeslocVerticalM');
     modal.querySelectorAll('input[name="mc-trena3d-vis"]').forEach((el) => {
       el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DVisibilidade: e.target.value }); });
     });
-    modal.querySelector('#mc-trena3d-espessura')?.addEventListener('change', async (e) => {
-      const v = Utils.clamp(Number(e.target.value) || 2, 0.2, 15);
-      e.target.value = v;
-      await this.set({ trena3DEspessuraCm: v });
+    // [17/09/2026 UTC] NOVO (RODADA 121) — raio de proximidade do
+    // personagem + reorganização automática opcional (ver DEFAULTS e
+    // comentário grande no HTML desta subseção, acima).
+    modal.querySelector('#mc-trena3d-label-raio-ativo')?.addEventListener('change', async (e) => {
+      await this.set({ trena3DLabelRaioAtivo: e.target.checked });
+    });
+    this._montarBotaoTriplo(modal, 'mc-trena3d-label-raio', {
+      step: 0.5, minDecimals: 1, min: 0.5, max: 500, chave: 'mc-trena3d-label-raio',
+      aoCommit: (v) => ({ trena3DLabelRaioM: v || 15 }),
+    });
+    modal.querySelector('#mc-trena3d-label-reorganizar')?.addEventListener('change', async (e) => {
+      await this.set({ trena3DLabelReorganizarSobreposicao: e.target.checked });
+    });
+    // [17/09/2026 UTC] NOVO (RODADA 125) — checkbox/cor do "ponto médio da
+    // medida" (ver DEFAULTS e comentário grande no HTML desta subseção).
+    modal.querySelector('#mc-trena3d-ponto-medio-ativo')?.addEventListener('change', async (e) => {
+      await this.set({ trena3DMostrarPontoMedio: e.target.checked });
+    });
+    modal.querySelector('#mc-trena3d-ponto-medio-cor')?.addEventListener('input', async (e) => {
+      await this.set({ trena3DCorPontoMedio: e.target.value });
+    });
+    // [17/09/2026 UTC] NOVO (RODADA 127) — mostrar/ocultar caixa de texto da
+    // medida principal (ver DEFAULTS 'trena3DLabelVisivel').
+    modal.querySelector('#mc-trena3d-label-visivel')?.addEventListener('change', async (e) => {
+      await this.set({ trena3DLabelVisivel: e.target.checked });
+    });
+    this._montarBotaoTriplo(modal, 'mc-trena3d-espessura', {
+      step: 0.2, minDecimals: 1, min: 0.1, max: 1000, chave: 'mc-trena3d-espessura',
+      aoCommit: (v) => ({ trena3DEspessuraCm: v || 2 }),
     });
     modal.querySelector('#mc-trena3d-cor-linha')?.addEventListener('input', async (e) => { await this.set({ trena3DCorLinha: e.target.value }); });
-    modal.querySelector('#mc-trena3d-cor-ancora')?.addEventListener('input', async (e) => { await this.set({ trena3DCorAncora: e.target.value }); });
-    modal.querySelector('#mc-trena3d-cor-mira')?.addEventListener('input', async (e) => { await this.set({ trena3DCorMira: e.target.value }); });
     modal.querySelectorAll('input[name="mc-trena3d-ponta"]').forEach((el) => {
       el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DPonta: e.target.value }); });
     });
-    modal.querySelector('#mc-trena3d-suprimir-destaque')?.addEventListener('change', async (e) => { await this.set({ trena3DSuprimirDestaqueDuranteAncora: e.target.checked }); });
+    // [16/09/2026 UTC] NOVO (RODADA 91) — sub-opções de cada tipo de ponta
+    // (esfera/seta/seta com 2 traços/traço perpendicular). Ver DEFAULTS e
+    // view3d.js '_trena3DBuildEndpoint'/'_trena3DRebuildLines'.
+    this._montarBotaoTriplo(modal, 'mc-trena3d-esfera-tamanho', {
+      step: 0.01, minDecimals: 2, min: 0.01, max: 1, chave: 'mc-trena3d-esfera-tamanho',
+      aoCommit: (v) => ({ trena3DEsferaTamanho: Utils.clamp(v || 0.02, 0.01, 1) }),
+    });
+    modal.querySelectorAll('input[name="mc-trena3d-esfera-termino"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DEsferaTerminoLinha: e.target.value }); });
+    });
+    this._montarBotaoTriplo(modal, 'mc-trena3d-seta-cone-raio', {
+      step: 0.1, minDecimals: 1, min: 0.5, max: 15, chave: 'mc-trena3d-seta-cone-raio',
+      aoCommit: (v) => ({ trena3DSetaConeRaio: v || 3.2 }),
+    });
+    this._montarBotaoTriplo(modal, 'mc-trena3d-seta-cone-altura', {
+      step: 0.1, minDecimals: 1, min: 0.5, max: 15, chave: 'mc-trena3d-seta-cone-altura',
+      aoCommit: (v) => ({ trena3DSetaConeAltura: v || 2.2 }),
+    });
+    this._montarBotaoTriplo(modal, 'mc-trena3d-seta2-abertura', {
+      step: 0.5, minDecimals: 1, min: 0.5, max: 50, chave: 'mc-trena3d-seta2-abertura',
+      aoCommit: (v) => ({ trena3DSetaDoisTracosAbertura: v || 6 }),
+    });
+    this._montarBotaoTriplo(modal, 'mc-trena3d-seta2-comprimento', {
+      step: 0.5, minDecimals: 1, min: 0.5, max: 100, chave: 'mc-trena3d-seta2-comprimento',
+      aoCommit: (v) => ({ trena3DSetaDoisTracosComprimento: v || 10 }),
+    });
+    this._montarBotaoTriplo(modal, 'mc-trena3d-traco-comprimento', {
+      step: 0.5, minDecimals: 1, min: 1, max: 60, chave: 'mc-trena3d-traco-comprimento',
+      aoCommit: (v) => ({ trena3DTracoPerpComprimento: v || 7 }),
+    });
+    modal.querySelectorAll('input[name="mc-trena3d-traco-alinhamento"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DTracoPerpAlinhamento: e.target.value }); });
+    });
+    modal.querySelectorAll('input[name="mc-trena3d-traco-modo-render"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DTracoPerpModoRender: e.target.value }); });
+    });
+    modal.querySelector('#mc-trena3d-suprimir-destaque')?.addEventListener('change', async (e) => {
+      await this.set({ trena3DSuprimirDestaqueDuranteAncora: e.target.checked });
+      this._trena3DDesenharPreviewDestaqueMira(modal);
+    });
+    // [RODADA 131] NOVO — cor/tamanho da mira (ver DEFAULTS/HTML acima e
+    // view3d.js '_trena3DCfg'/bloco '_trena3DHoverMesh').
+    modal.querySelector('#mc-trena3d-mira-cor')?.addEventListener('input', async (e) => { await this.set({ trena3DMiraCor: e.target.value }); });
+    this._montarBotaoTriplo(modal, 'mc-trena3d-mira-tamanho', {
+      step: 0.1, minDecimals: 1, min: 0.2, max: 5, chave: 'mc-trena3d-mira-tamanho',
+      aoCommit: (v) => ({ trena3DMiraTamanho: v || 1 }),
+    });
     modal.querySelector('#mc-trena3d-continuar-linha-ancora')?.addEventListener('change', async (e) => { await this.set({ trena3DContinuarLinhaAncoraAposPonto: e.target.checked }); });
     modal.querySelectorAll('input[name="mc-trena3d-linha-ancora-modo"]').forEach((el) => {
       el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DLinhaAncoraAposPontoModo: e.target.value }); });
     });
     modal.querySelector('#mc-trena3d-mostrar-medida-linha-ancora')?.addEventListener('change', async (e) => { await this.set({ trena3DMostrarMedidaNaLinhaAncoraAposPonto: e.target.checked }); });
+    modal.querySelector('#mc-trena3d-guia-chao-ao-vivo')?.addEventListener('change', async (e) => { await this.set({ trena3DMostrarGuiaChaoAoVivo: e.target.checked }); });
+    modal.querySelector('#mc-trena3d-guia-chao-finalizada')?.addEventListener('change', async (e) => { await this.set({ trena3DGuiaChaoFinalizada: e.target.checked }); });
+    // [RODADA 130] `input` (não `change`) para aplicar a cor em tempo real
+    // enquanto o usuário arrasta/ajusta no seletor nativo do navegador.
+    modal.querySelector('#mc-trena3d-guia-chao-cor-linha')?.addEventListener('input', async (e) => { await this.set({ trena3DGuiaChaoCorLinha: e.target.value }); });
+    modal.querySelector('#mc-trena3d-guia-chao-cor-texto')?.addEventListener('input', async (e) => { await this.set({ trena3DGuiaChaoCorTexto: e.target.value }); });
+    // [RODADA 131] NOVO — modo de altura da "Guia rente ao chão" (ver
+    // DEFAULTS/HTML acima e view3d.js '_trena3DGuiaChaoAlturaY').
+    modal.querySelectorAll('input[name="mc-trena3d-guia-chao-modo"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DGuiaChaoModo: e.target.value }); });
+    });
+    this._montarBotaoTriplo(modal, 'mc-trena3d-guia-chao-altura-livre', {
+      step: 0.1, minDecimals: 1, min: -50, max: 50, chave: 'mc-trena3d-guia-chao-altura-livre',
+      aoCommit: (v) => ({ trena3DGuiaChaoAlturaLivreM: v || 0 }),
+    });
+    // [17/09/2026 UTC] NOVO (RODADA 114) — espessura/estilo/dash + pontas
+    // simplificadas da "Guia rente ao chão" (ver `_wireTrena3DEstiloLinha`).
+    this._wireTrena3DEstiloLinha(modal, 'mc-trena3d-guia-chao', 'trena3DGuiaChao', { espessuraPadrao: 1.2, dashPadrao: 12, gapPadrao: 8, comPontas: true });
+    this._wireTrena3DDeslocVerticalLabel(modal, 'mc-trena3d-guia-chao', 'trena3DGuiaChaoLabelDeslocVerticalM');
+    // [17/09/2026 UTC] NOVO (RODADA 125) — "Em cima e no meio"/"Flutuante".
+    modal.querySelectorAll('input[name="mc-trena3d-guia-chao-label"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DGuiaChaoLabelEstilo: e.target.value }); });
+    });
+    // [17/09/2026 UTC] NOVO (RODADA 127) — mostrar/ocultar caixa de texto da
+    // "Guia rente ao chão" (ver DEFAULTS 'trena3DGuiaChaoLabelVisivel').
+    modal.querySelector('#mc-trena3d-guia-chao-label-visivel')?.addEventListener('change', async (e) => {
+      await this.set({ trena3DGuiaChaoLabelVisivel: e.target.checked });
+    });
+    modal.querySelector('#mc-trena3d-superficies-laterais')?.addEventListener('change', async (e) => { await this.set({ trena3DPermitirSuperficiesLaterais: e.target.checked }); });
+    modal.querySelector('#mc-trena3d-continuar-nivel')?.addEventListener('change', async (e) => { await this.set({ trena3DContinuarNoNivel: e.target.checked }); });
     modal.querySelector('#mc-trena3d-altura-antes-ponto')?.addEventListener('change', async (e) => { await this.set({ trena3DMostrarAlturaAoVivoAntesDoPonto: e.target.checked }); });
-    modal.querySelector('#mc-trena3d-altura-ao-segurar-ctrl')?.addEventListener('change', async (e) => { await this.set({ trena3DMostrarAlturaAoVivoAoSegurarCtrl: e.target.checked }); });
     modal.querySelector('#mc-trena3d-linhas-finalizada')?.addEventListener('change', async (e) => { await this.set({ trena3DMostrarLinhasAncoraFinalizada: e.target.checked }); });
     modal.querySelectorAll('input[name="mc-trena3d-linhas-finalizada-modo"]').forEach((el) => {
       el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DLinhasAncoraFinalizadaModo: e.target.value }); });
+    });
+    // [17/09/2026 UTC] NOVO (RODADA 114) — cor + espessura/estilo/dash da
+    // "Linhas verticais ancoradas" (compartilhados pelas 3 sub-opções:
+    // Altura ao vivo, Linha da âncora, Linhas finalizadas).
+    // [RODADA 130] `input` (não `change`) para aplicar em tempo real.
+    modal.querySelector('#mc-trena3d-linha-ancora-cor')?.addEventListener('input', async (e) => { await this.set({ trena3DLinhaAncoraCor: e.target.value }); });
+    this._wireTrena3DEstiloLinha(modal, 'mc-trena3d-linha-ancora', 'trena3DLinhaAncora', { espessuraPadrao: 1, dashPadrao: 12, gapPadrao: 8 });
+    // [RODADA 129] NOVO — "📏 Trena 3D — Ghost/prévia da medida".
+    // [RODADA 130] `input` (não `change`) para aplicar em tempo real.
+    modal.querySelector('#mc-trena3d-ghost-cor')?.addEventListener('input', async (e) => { await this.set({ trena3DGhostCor: e.target.value }); });
+    this._wireTrena3DEstiloLinha(modal, 'mc-trena3d-ghost', 'trena3DGhost', { espessuraPadrao: 1, dashPadrao: 12, gapPadrao: 8 });
+    this._wireTrena3DDeslocVerticalLabel(modal, 'mc-trena3d-linha-ancora', 'trena3DLinhaAncoraLabelDeslocVerticalM');
+    // [RODADA 131] NOVO — "Caixa de texto" (mostrar/ocultar) da subseção
+    // "Linhas verticais ancoradas" (ver DEFAULTS 'trena3DLinhaAncoraLabelVisivel').
+    modal.querySelector('#mc-trena3d-linha-ancora-label-visivel')?.addEventListener('change', async (e) => {
+      await this.set({ trena3DLinhaAncoraLabelVisivel: e.target.checked });
     });
     modal.querySelector('#mc-trena3d-guia-grade')?.addEventListener('change', async (e) => { await this.set({ trena3DGuiaGradeAtiva: e.target.checked }); });
     modal.querySelectorAll('input[name="mc-trena3d-guia-modo"]').forEach((el) => {
       el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DGuiaGradeModoMedida: e.target.value }); });
     });
+    modal.querySelector('#mc-trena3d-guia-grade-finalizada')?.addEventListener('change', async (e) => { await this.set({ trena3DGuiaGradeFinalizada: e.target.checked }); });
+    modal.querySelector('#mc-trena3d-guia-grade-apos-1-ponto')?.addEventListener('change', async (e) => { await this.set({ trena3DGuiaGradeAposPrimeiroPonto: e.target.checked }); });
+    // [RODADA 130] `input` (não `change`) para aplicar em tempo real.
+    modal.querySelector('#mc-trena3d-guia-grade-cor-linha')?.addEventListener('input', async (e) => { await this.set({ trena3DGuiaGradeCorLinha: e.target.value }); });
+    modal.querySelector('#mc-trena3d-guia-grade-cor-texto')?.addEventListener('input', async (e) => { await this.set({ trena3DGuiaGradeCorTexto: e.target.value }); });
+    // [17/09/2026 UTC] NOVO (RODADA 114) — espessura/estilo/dash da "Guia de
+    // grade do mundo" (ver `_wireTrena3DEstiloLinha`).
+    this._wireTrena3DEstiloLinha(modal, 'mc-trena3d-guia-grade', 'trena3DGuiaGrade', { espessuraPadrao: 2.4, dashPadrao: 12, gapPadrao: 8 });
+    this._wireTrena3DDeslocVerticalLabel(modal, 'mc-trena3d-guia-grade', 'trena3DGuiaGradeLabelDeslocVerticalM', { chaveLinhaVertical: 'trena3DGuiaGradeLabelLinhaVertical' });
+    // [17/09/2026 UTC] NOVO (RODADA 125) — "Em cima e no meio"/"Flutuante".
+    modal.querySelectorAll('input[name="mc-trena3d-guia-grade-label"]').forEach((el) => {
+      el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DGuiaGradeLabelEstilo: e.target.value }); });
+    });
+    // [17/09/2026 UTC] NOVO (RODADA 127) — mostrar/ocultar caixa de texto da
+    // "Linhas guia da grade do mundo" (ver DEFAULTS 'trena3DGuiaGradeLabelVisivel').
+    modal.querySelector('#mc-trena3d-guia-grade-label-visivel')?.addEventListener('change', async (e) => {
+      await this.set({ trena3DGuiaGradeLabelVisivel: e.target.checked });
+    });
     modal.querySelector('#mc-trena3d-grade-snap')?.addEventListener('change', async (e) => { await this.set({ trena3DGradeSnapLadrilhoAtiva: e.target.checked }); });
     modal.querySelectorAll('input[name="mc-trena3d-grade-snap-modo"]').forEach((el) => {
       el.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ trena3DGradeSnapLadrilhoModo: e.target.value }); });
     });
-    modal.querySelector('#mc-trena3d-grade-snap-espessura')?.addEventListener('change', async (e) => {
-      const v = Utils.clamp(parseFloat(e.target.value) || 3, 0.5, 10);
-      e.target.value = v;
-      await this.set({ trena3DGradeSnapEspessuraPx: v });
+    this._montarBotaoTriplo(modal, 'mc-trena3d-grade-snap-espessura', {
+      step: 0.5, minDecimals: 1, min: 0.5, max: 10, chave: 'mc-trena3d-grade-snap-espessura',
+      aoCommit: (v) => ({ trena3DGradeSnapEspessuraPx: v || 1 }),
+      aposCommit: () => this._trena3DDesenharPreviewGradeSnap(modal),
     });
-    modal.querySelector('#mc-trena3d-grade-snap-gap')?.addEventListener('change', async (e) => {
-      const v = Utils.clamp(parseFloat(e.target.value) || 2, 0.1, 50);
-      e.target.value = v;
-      await this.set({ trena3DGradeSnapGapCm: v });
+    this._montarBotaoTriplo(modal, 'mc-trena3d-grade-snap-gap', {
+      step: 0.1, minDecimals: 1, min: 0.1, max: 50, chave: 'mc-trena3d-grade-snap-gap',
+      aoCommit: (v) => ({ trena3DGradeSnapGapCm: v || 1.5 }),
+      aposCommit: () => this._trena3DDesenharPreviewGradeSnap(modal),
+    });
+    // [16/09/2026 UTC] NOVO — cor do gradeado (ver DEFAULTS.trena3DGradeSnapCor
+    // e view3d.js '_trena3DAtualizarGradeSnapLadrilho').
+    modal.querySelector('#mc-trena3d-grade-snap-cor')?.addEventListener('input', (e) => {
+      this._trena3DDesenharPreviewGradeSnap(modal);
+    });
+    modal.querySelector('#mc-trena3d-grade-snap-cor')?.addEventListener('change', async (e) => {
+      await this.set({ trena3DGradeSnapCor: e.target.value });
       this._trena3DDesenharPreviewGradeSnap(modal);
     });
 
@@ -4104,16 +5917,51 @@ const MapConfig = {
     // modal (chamadas logo abaixo, fora desta lista de listeners).
     this._trena3DDesenharPreviewGuiaGrade(modal);
     this._trena3DDesenharPreviewGradeSnap(modal);
+    this._trena3DDesenharPreviewDestaqueMira(modal);
+    // [17/09/2026 UTC] NOVO — item 6 (RODADA 110): botão "🌳 Modo
+    // árvore/lista" no cabeçalho da seção "📏 Trena 3D" (ver comentário
+    // grande junto do `<div id="mc-trena3d-secoes">` mais acima). `await`
+    // aqui é seguro — `open()` já é `async` e este trecho já roda depois de
+    // várias outras leituras `await DB.getSetting(...)` (ex.
+    // `fotosMarcarAquiAcao` no topo do método).
+    // [17/09/2026 UTC] CORRIGIDO (RODADA 118) — `_wireTrena3DModoArvore` é
+    // `async` e não tinha nenhum `try/catch` ao redor do `await` — qualquer
+    // exceção lá dentro derrubava TODO o resto de `open()` que viria depois
+    // (silenciosamente, sem nenhum erro visível pro usuário), inclusive
+    // `_aplicarCoresSecoes` logo abaixo — candidato forte pra explicar o
+    // bug relatado ("a cor [...] ainda está a mesma [...] para todas as
+    // seções"). `try/catch` aqui garante que um erro em QUALQUER wiring
+    // anterior nunca mais impeça a coloração das seções (nem qualquer outro
+    // wiring que venha depois dela) de rodar.
+    try { await this._wireTrena3DModoArvore(modal); } catch (e) { console.warn('[MapConfig] _wireTrena3DModoArvore falhou:', e); }
+    // [RODADA 139] toggle "📏 Trena 3D" / "➰ Polilinha 3D" (ver comentário
+    // grande junto de `#mc-trena3d-modo-toggle` no HTML) — troca `trena3DModo`
+    // e re-rotula toda a seção (títulos das subseções) ao vivo.
+    try { this._wireTrena3DModoToggle(modal); } catch (e) { console.warn('[MapConfig] _wireTrena3DModoToggle falhou:', e); }
+    // [17/09/2026 UTC] NOVO (RODADA 117) — pedido verbatim: "A cor da tira
+    // da lateral esquerda deve ser de acordo com a seção, ou seja, toda a
+    // seção (suas subseções também) devem ter aquela cor. E cada seção tem
+    // a sua cor. A cor deve ser suave, não muito brilhante ou intensa/viva."
+    // Ver `_aplicarCoresSecoes` (logo abaixo de `_wireTrena3DModoArvore`).
+    try { this._aplicarCoresSecoes(modal); } catch (e) { console.warn('[MapConfig] _aplicarCoresSecoes falhou:', e); }
     modal.querySelector('#mc-trena3d-guia-grade')?.addEventListener('change', () => this._trena3DDesenharPreviewGuiaGrade(modal));
     modal.querySelectorAll('input[name="mc-trena3d-guia-modo"]').forEach((el) => {
       el.addEventListener('change', () => this._trena3DDesenharPreviewGuiaGrade(modal));
     });
+    // [16/09/2026 UTC] NOVO — os 2 color-pickers novos também redesenham o
+    // preview na hora (mesmo padrão dos outros controles desta subseção).
+    modal.querySelector('#mc-trena3d-guia-grade-cor-linha')?.addEventListener('input', () => this._trena3DDesenharPreviewGuiaGrade(modal));
+    modal.querySelector('#mc-trena3d-guia-grade-cor-texto')?.addEventListener('input', () => this._trena3DDesenharPreviewGuiaGrade(modal));
     modal.querySelector('#mc-trena3d-grade-snap')?.addEventListener('change', () => this._trena3DDesenharPreviewGradeSnap(modal));
     modal.querySelectorAll('input[name="mc-trena3d-grade-snap-modo"]').forEach((el) => {
       el.addEventListener('change', () => this._trena3DDesenharPreviewGradeSnap(modal));
     });
-    modal.querySelector('#mc-trena3d-grade-snap-espessura')?.addEventListener('input', () => this._trena3DDesenharPreviewGradeSnap(modal));
-    modal.querySelector('#mc-trena3d-grade-snap-gap')?.addEventListener('input', () => this._trena3DDesenharPreviewGradeSnap(modal));
+    // [17/09/2026 UTC] REMOVIDO (RODADA 118) — os 2 listeners de 'input' que
+    // ficavam aqui (redesenhar o preview a cada tecla nos antigos
+    // `<input type="number">`) ficaram sem efeito depois da conversão pro
+    // "botão triplo" (o `<input>` não existe mais); o redesenho ao vivo
+    // agora é feito pelo `aposCommit` passado a `_montarBotaoTriplo` acima,
+    // que já dispara a cada passo do arraste.
 
     // ---------- Seção "🚪 Porta / Janela" — mesmo espírito do "Modificador
     // por tecla" da seção 🧱 Parede acima. ----------
@@ -4150,6 +5998,71 @@ const MapConfig = {
     // Modo de alinhamento — mesmo wiring (`wireModoAlinhamento`) da seção
     // "🚪 Porta / Janela" acima, ver DEFAULTS.objetoModoAlinhamento.
     wireModoAlinhamento(modal.querySelector('#mc-objeto-modo-alinhamento'), 'mc-objeto-modo-desc-', 'objetoModoAlinhamento');
+
+    // [16/09/2026 UTC] NOVO (RODADA 92) — pedido verbatim: "Ao trocar nas
+    // 'configurações 3D' as opções, troca na janelinha automaticamente.
+    // Porém, ao trocar na janelinha as opções, acaba por não trocar nas
+    // 'configurações 3D' [...] Deve ser vice versa." CAUSA: a janelinha de
+    // acesso rápido (view3d.js) já escuta `MapConfig.onChange` e se
+    // resincroniza sozinha a cada mudança de config, de QUALQUER origem —
+    // mas esta folha de Configurações (o modal aberto por `open()`, este
+    // método) NUNCA assinava `MapConfig.onChange` pra resincronizar os
+    // PRÓPRIOS `<input>`s dela quando a mudança vinha de FORA do modal (ex.:
+    // um clique num botão da janelinha) — os inputs só refletiam o valor
+    // que tinham no instante em que o modal foi aberto, ou o que o próprio
+    // usuário mudasse DENTRO do modal. CORRIGIDO: resincroniza os
+    // checkboxes/radios da seção "📏 Trena 3D" que também existem na
+    // janelinha de acesso rápido (`_trena3DOpcoesPainelRapido` em
+    // view3d.js) toda vez que a config mudar enquanto este modal estiver
+    // aberto — cobre especificamente os campos controláveis pela
+    // janelinha (o cenário relatado), não a folha inteira (a maioria dos
+    // outros ~200 campos deste modal não tem contraparte fora dele que
+    // pudesse mudá-los "por baixo dos panos" enquanto o modal está aberto).
+    // `default: 'on'` = campo cujo padrão é ativado (checkbox marcado
+    // quando o valor salvo é `undefined`, ou seja, checado via `!== false`
+    // no HTML original acima); `default: 'off'` = o oposto (`=== true`).
+    const trena3DResyncMapaCheckbox = {
+      'mc-trena3d-suprimir-destaque': { campo: 'trena3DSuprimirDestaqueDuranteAncora', default: 'on' },
+      'mc-trena3d-altura-antes-ponto': { campo: 'trena3DMostrarAlturaAoVivoAntesDoPonto', default: 'on' },
+      'mc-trena3d-continuar-linha-ancora': { campo: 'trena3DContinuarLinhaAncoraAposPonto', default: 'on' },
+      'mc-trena3d-mostrar-medida-linha-ancora': { campo: 'trena3DMostrarMedidaNaLinhaAncoraAposPonto', default: 'on' },
+      'mc-trena3d-guia-chao-ao-vivo': { campo: 'trena3DMostrarGuiaChaoAoVivo', default: 'off' },
+      'mc-trena3d-guia-chao-finalizada': { campo: 'trena3DGuiaChaoFinalizada', default: 'off' },
+      'mc-trena3d-superficies-laterais': { campo: 'trena3DPermitirSuperficiesLaterais', default: 'off' },
+      'mc-trena3d-continuar-nivel': { campo: 'trena3DContinuarNoNivel', default: 'off' },
+      'mc-trena3d-linhas-finalizada': { campo: 'trena3DMostrarLinhasAncoraFinalizada', default: 'off' },
+      'mc-trena3d-guia-grade': { campo: 'trena3DGuiaGradeAtiva', default: 'on' },
+      'mc-trena3d-guia-grade-finalizada': { campo: 'trena3DGuiaGradeFinalizada', default: 'off' },
+      'mc-trena3d-guia-grade-apos-1-ponto': { campo: 'trena3DGuiaGradeAposPrimeiroPonto', default: 'off' },
+      'mc-trena3d-grade-snap': { campo: 'trena3DGradeSnapLadrilhoAtiva', default: 'on' },
+      // Os 2 checkboxes de "Janela de acesso rápido" (Configurações 2D e
+      // 3D) já se sincronizavam entre si via listener próprio — incluídos
+      // aqui também, pra cobrir o caso do botão de reabrir (RODADA 92,
+      // item 10) mexer no MESMO campo por fora dos 2.
+      'mc-trena3d-painel-rapido': { campo: 'trena3DPainelRapidoAtivo', default: 'on' },
+      'mc-trena3d-painel-rapido-3d': { campo: 'trena3DPainelRapidoAtivo', default: 'on' },
+    };
+    const trena3DOnExternalChange = (cNovo) => {
+      if (!modal.isConnected) return;
+      for (const [id, info] of Object.entries(trena3DResyncMapaCheckbox)) {
+        const el = modal.querySelector(`#${id}`);
+        if (el && el.type === 'checkbox') {
+          el.checked = info.default === 'on' ? (cNovo[info.campo] !== false) : (cNovo[info.campo] === true);
+        }
+      }
+      modal.querySelectorAll('input[name="mc-trena3d-modo-ancora"]').forEach((el) => {
+        el.checked = (el.value === 'quatroCliques') === (cNovo.trena3DModoAncora === 'quatroCliques');
+      });
+      modal.querySelectorAll('input[name="mc-trena3d-painel-rapido-modo"]').forEach((el) => {
+        el.checked = (el.value === 'simples') === (cNovo.trena3DPainelRapidoModo === 'simples');
+      });
+    };
+    MapConfig.onChange(trena3DOnExternalChange);
+    this._trena3DResyncCleanup = () => {
+      MapConfig.offChange(trena3DOnExternalChange);
+      this._trena3DPrGruposOnChangeCleanup?.();
+      this._trena3DPrGruposOnChangeCleanup = null;
+    };
   },
 
   /** NOVO (07/09/2026), pedido verbatim: "Deve haver um botão para definir
@@ -4253,6 +6166,956 @@ const MapConfig = {
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') salvar(); });
   },
 
+  /** [17/09/2026 UTC] NOVO — pedido verbatim: "Toda a opção deve ter uma
+   *  prévia em formato de ícone renderizada como aparece na cena. A app tem
+   *  capacidade para gerar várias telas e é possível 'simular' colocar
+   *  objetos em cena. Monte uma cena usando recursos do Three.js simula as
+   *  opções renderize e construa as prévias (se possível interagíveis, se
+   *  não 'screenshots' da cena renderizada)." Diferente dos previews de
+   *  `<canvas>` 2D já existentes (`_trena3DDesenharPreviewGuiaChao`/
+   *  `_trena3DDesenharPreviewGuiaGrade`, ilustrações desenhadas à mão com
+   *  `ctx.lineTo` etc.), este é um RENDER DE VERDADE de uma cena 3D
+   *  miniatura, usando as MESMAS primitivas do Three.js que a Trena 3D
+   *  real usa (`THREE.Line`/`LineDashedMaterial`, `THREE.Mesh`/
+   *  `SphereGeometry`, `THREE.Sprite` com um `CanvasTexture` pro texto da
+   *  medida) — só que numa cena pequena e fixa (chão quadriculado + 1
+   *  "objeto" de referência), renderizada 1 ÚNICA VEZ por
+   *  `THREE.WebGLRenderer.render()` e capturada como PNG
+   *  (`renderer.domElement.toDataURL()`) — não é "ao vivo"/interativa (a
+   *  cena de verdade muda a cada frame; o próprio pedido já antecipa
+   *  "screenshots" como alternativa aceitável quando não for interativo).
+   *  `window.THREE` já está GARANTIDO disponível aqui: toda esta seção
+   *  "📏 Trena 3D" só existe dentro do contexto '3d' (`opts.context ===
+   *  '3d'`), só alcançável abrindo "Configurações 3D" de DENTRO do "Ver em
+   *  3D" — onde `engine3d.js`/`view3d.js` já carregaram o Three.js antes
+   *  disso. Resultado cacheado por `chave` em `_trena3DPreviewIconCache`
+   *  (um `Map`) — cada ícone só é renderizado 1x por sessão do app,
+   *  mesmo que a opção correspondente seja redesenhada várias vezes (ex.
+   *  toda vez que o modal reabre). */
+  _trena3DGerarPreviewIcone(chave, montar) {
+    if (!this._trena3DPreviewIconCache) this._trena3DPreviewIconCache = new Map();
+    if (this._trena3DPreviewIconCache.has(chave)) return this._trena3DPreviewIconCache.get(chave);
+    if (typeof THREE === 'undefined') return null;
+    const TAM = 56;
+    try {
+      if (!this._trena3DPreviewRenderer) {
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+        renderer.setSize(TAM, TAM, false);
+        renderer.setClearColor(0x14161c, 1);
+        this._trena3DPreviewRenderer = renderer;
+      }
+      const renderer = this._trena3DPreviewRenderer;
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 50);
+      camera.position.set(2.5, 2.0, 2.5);
+      camera.lookAt(0, 0.55, 0);
+      scene.add(new THREE.AmbientLight(0xffffff, 0.95));
+      const dir = new THREE.DirectionalLight(0xffffff, 0.55);
+      dir.position.set(3, 5, 2);
+      scene.add(dir);
+      // Chão quadriculado 3×3m (mesma escala do ladrilho de 1m do mundo
+      // real, ver `_trena3DAtualizarGradeSnapLadrilho`) — dá o mesmo
+      // contexto espacial em TODOS os ícones, pra ficarem visualmente
+      // consistentes entre si.
+      scene.add(new THREE.GridHelper(3, 6, 0x3a3f4a, 0x24262e));
+      const chaoBase = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), new THREE.MeshBasicMaterial({ color: 0x1c1e24, transparent: true, opacity: 0.55 }));
+      chaoBase.rotation.x = -Math.PI / 2;
+      chaoBase.position.y = -0.004;
+      scene.add(chaoBase);
+      // "Kit" de primitivas — cada `spec` (ver tabela `_trena3DPreviewSpecs`
+      // logo abaixo) chama estas funções pra montar só os elementos que
+      // aquela opção precisa mostrar.
+      const addLinha = (a, b, cor, tracejada) => {
+        const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a), new THREE.Vector3(...b)]);
+        const mat = tracejada
+          ? new THREE.LineDashedMaterial({ color: cor, dashSize: 0.09, gapSize: 0.06 })
+          : new THREE.LineBasicMaterial({ color: cor });
+        const linha = new THREE.Line(geo, mat);
+        if (tracejada) linha.computeLineDistances();
+        scene.add(linha);
+      };
+      const addEsfera = (p, cor, r = 0.055) => {
+        const esf = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 12), new THREE.MeshBasicMaterial({ color: cor }));
+        esf.position.set(...p);
+        scene.add(esf);
+      };
+      const addCone = (p, cor, raio = 0.08, altura = 0.16, rotXDeg = 0) => {
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(raio, altura, 12), new THREE.MeshBasicMaterial({ color: cor }));
+        cone.position.set(...p);
+        cone.rotation.x = (rotXDeg * Math.PI) / 180;
+        scene.add(cone);
+      };
+      const addCaixa = (p, cor, largura = 0.5, altura = 1.1, prof = 0.06) => {
+        const caixa = new THREE.Mesh(new THREE.BoxGeometry(prof, altura, largura), new THREE.MeshStandardMaterial({ color: cor, roughness: 0.9 }));
+        caixa.position.set(...p);
+        scene.add(caixa);
+      };
+      const addTexto = (p, texto, cor) => {
+        const c = document.createElement('canvas'); c.width = 160; c.height = 48;
+        const ctx = c.getContext('2d');
+        ctx.font = 'bold 26px system-ui, sans-serif';
+        ctx.fillStyle = cor; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(texto, 80, 24);
+        const tex = new THREE.CanvasTexture(c);
+        const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+        spr.scale.set(0.85, 0.26, 1);
+        spr.position.set(...p);
+        scene.add(spr);
+      };
+      montar({ addLinha, addEsfera, addCone, addCaixa, addTexto, THREE, scene });
+      renderer.render(scene, camera);
+      const dataUrl = renderer.domElement.toDataURL('image/png');
+      // Limpeza — descarta geometrias/materiais desta cena (o `renderer`
+      // em si é reaproveitado entre ícones, só a `scene` é descartável).
+      scene.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) { if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose()); else obj.material.dispose(); }
+      });
+      this._trena3DPreviewIconCache.set(chave, dataUrl);
+      return dataUrl;
+    } catch (e) {
+      // Rede de segurança — se o WebGL falhar por qualquer motivo (driver,
+      // contexto perdido, etc.), a opção continua funcionando normalmente,
+      // só sem o ícone (não quebra o resto do modal).
+      console.warn('[MapConfig] Falha ao gerar prévia 3D da Trena 3D:', chave, e);
+      return null;
+    }
+  },
+
+  /** [17/09/2026 UTC] NOVO (RODADA 114) — HTML compartilhado pelos novos
+   *  controles de "espessura/estilo/dash" pedidos pro mesmo formato em 3
+   *  subseções distintas ("Guia de grade do mundo", "Guia rente ao chão",
+   *  "Linhas verticais ancoradas") — pedido verbatim: "além de poder
+   *  controlar a cor, deve ser possível definir a espessura das linhas
+   *  guia e se são sólida, tracejada ou pontilhada. o line dash deve ser
+   *  possível controlar (quando aplicável)." Em vez de repetir o mesmo
+   *  bloco de HTML 3 vezes (arriscado — fácil dessincronizar as 3 cópias
+   *  numa rodada futura), esta função gera o bloco 1 vez, parametrizado por
+   *  `prefixoId` (prefixo dos `id=`/`name=` dos campos, ex.
+   *  'mc-trena3d-guia-grade') e `prefixoCampo` (prefixo do NOME do campo de
+   *  config lido de `cfg`, ex. 'trena3DGuiaGrade' → lê/escreve
+   *  `trena3DGuiaGradeEspessuraCm`/`EstiloLinha`/`DashCm`/`GapCm`).
+   *  `opts.comPontas` (opcional) acrescenta a escolha de ponta SIMPLIFICADA
+   *  pedida pra "Guia rente ao chão" — pedido verbatim: "deve ser possível
+   *  escolher as pontas também (como a explicação toda já está na seção
+   *  '📏 Trena 3D — Pontas', então, aqui, deve ser algo bem mais simples)":
+   *  só os 5 radios com o mesmo ícone/nome da seção "Pontas", sem nenhuma
+   *  das subopções de tamanho/dimensão de lá. Ver `_wireTrena3DEstiloLinha`
+   *  (wiring) e `view3d.js#_trena3DBuildLinhaEstilizadaUmaVez`/
+   *  `_trena3DAtualizarLinhaEstilizadaAoVivo` (renderização de verdade). */
+  _trena3DCamposEstiloLinha(prefixoId, prefixoCampo, cfg, opts = {}) {
+    const espessura = Utils.clamp(Number(cfg[`${prefixoCampo}EspessuraCm`]) || opts.espessuraPadrao || 1, 0.1, 15);
+    const estiloBruto = cfg[`${prefixoCampo}EstiloLinha`];
+    const estilo = (estiloBruto === 'tracejada' || estiloBruto === 'pontilhada') ? estiloBruto : (estiloBruto === 'solida' ? 'solida' : (opts.estiloPadrao || 'solida'));
+    const dash = Utils.clamp(Number(cfg[`${prefixoCampo}DashCm`]) || opts.dashPadrao || 12, 0.2, 100);
+    const gap = Utils.clamp(Number(cfg[`${prefixoCampo}GapCm`]) || opts.gapPadrao || 8, 0.2, 100);
+    const mostraDash = estilo === 'tracejada' || estilo === 'pontilhada';
+    let html = `
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:6px 0 4px 0">
+            <div style="display:flex; flex-direction:column; gap:2px; flex:0 0 auto; min-width:150px">
+              <span class="lbl">Espessura (cm)</span>
+              <div id="${prefixoId}-espessura-triplo" data-valor="${espessura}"></div>
+            </div>
+          </div>
+          <div style="margin:0 0 6px 0">
+            <label class="radio-opt" style="display:inline-flex; margin:0 10px 0 0">
+              <input type="radio" name="${prefixoId}-estilo" value="solida" ${estilo === 'solida' ? 'checked' : ''}>
+              <span><span class="t">Sólida</span></span>
+            </label>
+            <label class="radio-opt" style="display:inline-flex; margin:0 10px 0 0">
+              <input type="radio" name="${prefixoId}-estilo" value="tracejada" ${estilo === 'tracejada' ? 'checked' : ''}>
+              <span><span class="t">Tracejada</span></span>
+            </label>
+            <label class="radio-opt" style="display:inline-flex; margin:0">
+              <input type="radio" name="${prefixoId}-estilo" value="pontilhada" ${estilo === 'pontilhada' ? 'checked' : ''}>
+              <span><span class="t">Pontilhada</span></span>
+            </label>
+          </div>
+          <div id="${prefixoId}-dash-wrap" style="display:${mostraDash ? 'flex' : 'none'}; align-items:center; gap:10px; flex-wrap:wrap; margin:0 0 8px 0">
+            <div style="display:flex; flex-direction:column; gap:2px; flex:0 0 auto; min-width:130px">
+              <span class="lbl">Traço (cm)</span>
+              <div id="${prefixoId}-dash-triplo" data-valor="${dash}"></div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:2px; flex:0 0 auto; min-width:130px">
+              <span class="lbl">Espaço (cm)</span>
+              <div id="${prefixoId}-gap-triplo" data-valor="${gap}"></div>
+            </div>
+          </div>`;
+    if (opts.comPontas) {
+      const pontaBruta = cfg[`${prefixoCampo}Ponta`];
+      const ponta = ['nenhuma', 'esfera', 'seta', 'setaDoisTracos', 'traco'].includes(pontaBruta) ? pontaBruta : 'nenhuma';
+      const opcoes = [
+        ['nenhuma', 'Sem pontas'], ['esfera', 'Esfera'], ['seta', 'Seta'], ['setaDoisTracos', '2 traços'], ['traco', 'Traço'],
+      ];
+      html += `<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:2px 0 6px 0">`;
+      opcoes.forEach(([v, label]) => {
+        html += `<label class="radio-opt" style="display:inline-flex; margin:0">
+              <input type="radio" name="${prefixoId}-ponta" value="${v}" ${ponta === v ? 'checked' : ''}>
+              <span><span class="t">${label}</span></span>
+            </label>`;
+      });
+      html += `</div><span class="d" style="display:block; margin:0 0 8px 0">Mesmas opções de "📏 Trena 3D — Pontas" (ver lá a explicação de cada uma) — aqui simplificado, sem as subopções de tamanho/dimensão.</span>`;
+    }
+    return html;
+  },
+
+  /** [17/09/2026 UTC] NOVO (RODADA 114) — liga os campos gerados por
+   *  `_trena3DCamposEstiloLinha` (mesmos `prefixoId`/`prefixoCampo` — ver
+   *  comentário grande lá) aos respectivos campos de config via `this.set`,
+   *  e mostra/esconde `#${prefixoId}-dash-wrap` ao trocar sólida ↔
+   *  tracejada/pontilhada.
+   *  [17/09/2026, RODADA 116] ATUALIZADO — pedido verbatim: "Este mesmo
+   *  tipo de botão [o 'botão triplo', ver o apelido/glossário no comentário
+   *  de `ModelerUI._createNumField`, js/modeler/modeler-ui.js] deve ser
+   *  colocado nas 'configurações 3D' onde tiver alguma variação de valor."
+   *  Espessura/Traço/Espaço (antes `<input type="number">` simples, só
+   *  reagia a `change` — perdia foco/soltar o Enter) agora usam o MESMO
+   *  widget "botão triplo" do Modelador (`ModelerUI._createNumField`, já
+   *  carregado antes deste arquivo — ver `<script>` em index.html): arrasta
+   *  pra variar continuamente, ou clica nas setas ◄► pra passo fixo — a
+   *  aplicação do valor (`onCommit`) já é IMEDIATA a cada passo/arraste, não
+   *  só ao perder o foco, o que também ajuda no bug corrigido nesta mesma
+   *  rodada de "Espessura" não refletindo ao vivo no cenário sem precisar
+   *  mexer em outra opção (ver `view3d.js`). Primeira leva de campos
+   *  convertidos (as 3 subseções que já usam este helper compartilhado);
+   *  os demais campos numéricos de "configurações 3D" (fora deste helper)
+   *  ficam para uma rodada futura de conversão sistemática — ver
+   *  progresso-sessao.md pra o inventário do que falta. */
+  _wireTrena3DEstiloLinha(modal, prefixoId, prefixoCampo, opts = {}) {
+    // `_debouncedPersist` (ver comentário grande lá, logo depois de
+    // `onChange` acima) — aplica na hora (`previewSet`, grátis) a cada
+    // passo do arraste do "botão triplo" e só GRAVA de verdade (`set`, no
+    // IndexedDB) quando o gesto para por `delayMs` — evita gravar a cada
+    // pixel arrastado, igual ao padrão já usado pela trilha de "Hora do dia".
+    const montarBotaoTriplo = (idMount, { step, minDecimals, min, max, chave, onValor }) => {
+      const mount = modal.querySelector(`#${idMount}`);
+      if (!mount || typeof window.ModelerUI?._createNumField !== 'function') return;
+      const valorInicial = Utils.clamp(Number(mount.dataset.valor) || min, min, max);
+      const campo = window.ModelerUI._createNumField({
+        value: valorInicial, step, minDecimals,
+        onCommit: (v) => this._debouncedPersist(chave, onValor(Utils.clamp(v, min, max))),
+      });
+      mount.appendChild(campo.el);
+    };
+    montarBotaoTriplo(`${prefixoId}-espessura-triplo`, {
+      step: 0.1, minDecimals: 1, min: 0.1, max: 1000, chave: `${prefixoId}-espessura`,
+      onValor: (v) => ({ [`${prefixoCampo}EspessuraCm`]: v || (opts.espessuraPadrao || 1) }),
+    });
+    modal.querySelectorAll(`input[name="${prefixoId}-estilo"]`).forEach((r) => {
+      r.addEventListener('change', async (e) => {
+        if (!e.target.checked) return;
+        await this.set({ [`${prefixoCampo}EstiloLinha`]: e.target.value });
+        const wrap = modal.querySelector(`#${prefixoId}-dash-wrap`);
+        if (wrap) wrap.style.display = (e.target.value === 'tracejada' || e.target.value === 'pontilhada') ? 'flex' : 'none';
+      });
+    });
+    montarBotaoTriplo(`${prefixoId}-dash-triplo`, {
+      step: 0.2, minDecimals: 1, min: 0.2, max: 100, chave: `${prefixoId}-dash`,
+      onValor: (v) => ({ [`${prefixoCampo}DashCm`]: v || (opts.dashPadrao || 12) }),
+    });
+    montarBotaoTriplo(`${prefixoId}-gap-triplo`, {
+      step: 0.2, minDecimals: 1, min: 0.2, max: 100, chave: `${prefixoId}-gap`,
+      onValor: (v) => ({ [`${prefixoCampo}GapCm`]: v || (opts.gapPadrao || 8) }),
+    });
+    if (opts.comPontas) {
+      modal.querySelectorAll(`input[name="${prefixoId}-ponta"]`).forEach((r) => {
+        r.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ [`${prefixoCampo}Ponta`]: e.target.value }); });
+      });
+    }
+  },
+
+  /** [17/09/2026 UTC] NOVO (RODADA 118) — "botão triplo" GENÉRICO pra um
+   *  campo numérico AVULSO (fora do grupo Espessura/Traço/Espaço de
+   *  `_trena3DCamposEstiloLinha`/`_wireTrena3DEstiloLinha` acima). Pedido
+   *  verbatim: "Algumas subseções da seção 'Trena 3D' [...] ficaram sem o
+   *  'botão triplo', por exemplo: 'Snap', 'Espessura e cores', 'Pontas' e
+   *  'Gradeado do ladrilho mirado'." Uso: no HTML, troca o
+   *  `<input type="number" id="X">` por `<div id="X" data-valor="...">`
+   *  (mesmo `id`); no JS (aqui em `_wireTrena3D...`), chama
+   *  `this._montarBotaoTriplo(modal, 'X', {step, minDecimals, min, max,
+   *  chave: 'X', aoCommit: (v) => ({ campoDeConfig: v })})`. Assim como
+   *  `montarBotaoTriplo` (função local de `_wireTrena3DEstiloLinha`), usa
+   *  `_debouncedPersist` — aplica na hora via `previewSet`, só GRAVA no
+   *  IndexedDB depois do gesto parar. Como o `<input>` deixa de existir,
+   *  todo código que antes lia `.value` deste campo (ex. os previews em
+   *  canvas de "Snap"/"Gradeado do ladrilho mirado") passa a ler
+   *  `.dataset.valor` do mesmo elemento (atualizado a cada `onCommit`
+   *  aqui). `opts.aposCommit(valorClampado)` (opcional) roda depois do
+   *  `_debouncedPersist`, pra redesenhar previews em tempo real durante o
+   *  próprio arraste (sem esperar o debounce de gravação). */
+  _montarBotaoTriplo(modal, id, { step, minDecimals = 0, min, max, chave, aoCommit, aposCommit }) {
+    const mount = modal.querySelector(`#${id}`);
+    if (!mount || typeof window.ModelerUI?._createNumField !== 'function') return null;
+    // [17/09/2026 UTC] CORRIGIDO (RODADA 119) — `Number(...) || min` tratava
+    // um `data-valor="0"` válido como "ausente" (0 é falsy em JS) e caía
+    // sempre no `min` — inofensivo enquanto todo campo convertido tinha
+    // `min` positivo (nunca havia 0 de verdade no meio da faixa), mas quebra
+    // os novos campos de deslocamento vertical (RODADA 119, `min` negativo,
+    // padrão exatamente 0 — "0 = no meio", pedido verbatim). Trocado por um
+    // teste explícito de `NaN` (`Number('')`/`Number(undefined)` são `NaN`,
+    // únicos casos que devem cair no fallback).
+    const valorBruto = Number(mount.dataset.valor);
+    const valorInicial = Utils.clamp(Number.isNaN(valorBruto) ? min : valorBruto, min, max);
+    const campo = window.ModelerUI._createNumField({
+      value: valorInicial, step, minDecimals,
+      onCommit: (v) => {
+        const vAnterior = Number(mount.dataset.valor);
+        const vc = Utils.clamp(v, min, max);
+        // [18/09/2026 UTC] NOVO (RODADA 136) — pedido verbatim: quando o
+        // usuário segura o botão de incrementar/decrementar e o valor já
+        // está no limite (min/max), o clamp faz `vc` ficar igual ao valor
+        // anterior e nada muda visualmente — sem indicação de que bateu no
+        // limite. Detecta esse caso (valor bruto pedido `v` diferente do
+        // clampado `vc`, ou `vc` igual ao `vAnterior` já no limite) e dá um
+        // feedback rápido: flash de borda vermelha no próprio elemento do
+        // botão triplo por ~200ms. Mudança central aqui — vale para todos
+        // os usos de `_montarBotaoTriplo` de uma vez, sem tocar em cada
+        // chamada individual.
+        if (v !== vc || (!Number.isNaN(vAnterior) && vc === vAnterior && (vc === min || vc === max))) {
+          this._flashLimiteBotaoTriplo(mount);
+        }
+        mount.dataset.valor = vc;
+        this._debouncedPersist(chave, aoCommit(vc));
+        if (typeof aposCommit === 'function') aposCommit(vc);
+      },
+    });
+    mount.appendChild(campo.el);
+    return campo;
+  },
+
+  /** [18/09/2026 UTC] NOVO (RODADA 136) — feedback visual de "bateu no
+   *  limite" usado por `_montarBotaoTriplo`: aplica um flash de borda
+   *  vermelha (outline) por ~200ms no elemento do botão triplo. Reaproveita
+   *  um timer guardado em `dataset` pra não empilhar timeouts se o usuário
+   *  seguir segurando o botão (limite continua batendo a cada tick). */
+  _flashLimiteBotaoTriplo(mount) {
+    if (!mount) return;
+    if (mount._flashLimiteTimer) clearTimeout(mount._flashLimiteTimer);
+    mount.style.outline = '2px solid #ff5555';
+    mount.style.outlineOffset = '1px';
+    mount.style.borderRadius = mount.style.borderRadius || '4px';
+    mount._flashLimiteTimer = setTimeout(() => {
+      mount.style.outline = '';
+      mount.style.outlineOffset = '';
+      mount._flashLimiteTimer = null;
+    }, 200);
+  },
+
+  /** [17/09/2026 UTC] NOVO (RODADA 119) — pedido verbatim: "Deve ser
+   *  possível controlar a distância da caixa do texto em relação [ao ponto
+   *  médio 'mAB' da reta 3D] [...] Sendo exatamente no ponto o 0, acima
+   *  dele valores positivos e abaixo dele valores negativos." HTML do
+   *  controle (1 "botão triplo" + rótulo explicativo curto), reaproveitado
+   *  nas 4 subseções pedidas. `opts.comLinhaVertical` (só usado por "Linhas
+   *  guia da grade do mundo") acrescenta o checkbox de habilitar a linha
+   *  vertical de apoio (ver view3d.js
+   *  `_trena3DAtualizarLinhaVerticalDoLabel`/`_trena3DConstruirLinhaVerticalDoLabelFinalizada`).
+   *  Ver `_wireTrena3DDeslocVerticalLabel` (wiring). */
+  _trena3DCampoDeslocVerticalLabel(idBase, valorM, opts = {}) {
+    const v = Utils.clamp(Number(valorM) || 0, -3, 3);
+    let html = `
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:8px 0 2px 0">
+            <div style="display:flex; flex-direction:column; gap:2px; flex:0 0 auto; min-width:160px">
+              <span class="lbl">Posição do texto (m)</span>
+              <div id="${idBase}-desloc-triplo" data-valor="${v}" title="Distância, em metros, ao longo da linha vertical que passa pelo ponto médio da medida, onde o rótulo de texto (valor da medida) é posicionado. 0 = exatamente no ponto médio; valores positivos deslocam o texto para cima; valores negativos, para baixo."></div>
+            </div>
+          </div>
+          <span class="d" style="display:block; margin:0 0 6px 0">Desloca a caixa de texto ao longo de uma linha vertical (perpendicular ao chão) que passa pelo ponto médio da própria reta 3D da medida — <b>0</b> é exatamente nesse ponto médio, valores <b>positivos</b> deslocam para cima, <b>negativos</b> para baixo.</span>`;
+    if (opts.comLinhaVertical) {
+      html += `
+          <label class="radio-opt">
+            <input type="checkbox" id="${idBase}-desloc-linha-vertical" ${opts.linhaVerticalAtiva ? 'checked' : ''}>
+            <span><span class="t">Mostrar a linha vertical usada para deslocar o texto</span><br><span class="d">Só aparece quando a "Posição do texto" acima for diferente de 0 — ajuda a identificar visualmente até onde o texto foi deslocado a partir do ponto médio real.</span></span>
+          </label>`;
+    }
+    return html;
+  },
+
+  /** [17/09/2026 UTC] NOVO (RODADA 119) — liga o "botão triplo" gerado por
+   *  `_trena3DCampoDeslocVerticalLabel` (mesmo `idBase`) ao campo de config
+   *  `chave` (um dos 4 `trena3D*LabelDeslocVerticalM`, ver DEFAULTS), e —
+   *  quando `opts.chaveLinhaVertical` for passado — o checkbox opcional ao
+   *  campo booleano correspondente (só "Linhas guia da grade do mundo"). */
+  _wireTrena3DDeslocVerticalLabel(modal, idBase, chave, opts = {}) {
+    this._montarBotaoTriplo(modal, `${idBase}-desloc-triplo`, {
+      step: 0.05, minDecimals: 2, min: -3, max: 3, chave: `${idBase}-desloc`,
+      aoCommit: (v) => ({ [chave]: v }),
+    });
+    if (opts.chaveLinhaVertical) {
+      modal.querySelector(`#${idBase}-desloc-linha-vertical`)?.addEventListener('change', async (e) => {
+        await this.set({ [opts.chaveLinhaVertical]: e.target.checked });
+      });
+    }
+  },
+
+  /** [17/09/2026 UTC] NOVO (RODADA 113) — pedido verbatim: "elas devem
+   *  fixar em cache quando já estiverem prontas, para que não tenham de ser
+   *  renderizadas toda vez que se clica no botão 'configurações 3D'."
+   *  Carrega (1x por sessão, guardado por `_trena3DPreviewCacheDiscoCarregado`)
+   *  o cache de prévias já geradas anteriormente, persistido em disco via
+   *  `DB.setSetting`/`DB.getSetting` — sobrevive a reinícios do app (o
+   *  `Map` em memória, `_trena3DPreviewIconCache`, some a cada reload; este
+   *  aqui não). Entradas já presentes no `Map` em memória (geradas nesta
+   *  mesma sessão, antes deste carregamento) NUNCA são sobrescritas pelo
+   *  valor do disco — o disco só preenche o que ainda falta. */
+  async _trena3DCarregarPreviewCacheDoDisco() {
+    if (this._trena3DPreviewCacheDiscoCarregado) return;
+    this._trena3DPreviewCacheDiscoCarregado = true;
+    if (!this._trena3DPreviewIconCache) this._trena3DPreviewIconCache = new Map();
+    try {
+      const salvo = await DB.getSetting('trena3DPreviewIconesCacheV1', null);
+      if (salvo && typeof salvo === 'object') {
+        Object.keys(salvo).forEach((chave) => {
+          if (!this._trena3DPreviewIconCache.has(chave)) this._trena3DPreviewIconCache.set(chave, salvo[chave]);
+        });
+      }
+    } catch (e) {
+      console.warn('[MapConfig] Falha ao carregar cache de prévias 3D da Trena 3D:', e);
+    }
+  },
+
+  /** [17/09/2026 UTC] NOVO (RODADA 113) — salva o `Map` inteiro de prévias
+   *  já geradas (`_trena3DPreviewIconCache`) no disco (`DB.setSetting`),
+   *  pra sobreviver a um reinício do app — chamado toda vez que um ícone
+   *  NOVO é gerado (ver `trena3DPreAquecerPreviewsEmSegundoPlano`/
+   *  `_trena3DPreviewImgTag` logo abaixo). */
+  async _trena3DSalvarPreviewCacheNoDisco() {
+    try {
+      const obj = {};
+      (this._trena3DPreviewIconCache || new Map()).forEach((v, k) => { obj[k] = v; });
+      await DB.setSetting('trena3DPreviewIconesCacheV1', obj);
+    } catch (e) {
+      console.warn('[MapConfig] Falha ao salvar cache de prévias 3D da Trena 3D:', e);
+    }
+  },
+
+  /** [17/09/2026 UTC] NOVO (RODADA 113) — pedido verbatim: "Até para a
+   *  primeira vez que as prévias são geradas, elas devem ser feitas em
+   *  segundo plano para já ficarem prontas caso ainda não se tenha uma
+   *  prévia já cacheada." Chamado (fire-and-forget) assim que "Ver em 3D"
+   *  monta (`view3d.js#mount`) — bem antes do usuário conseguir abrir
+   *  "Configurações 3D". Gera, em segundo plano (via `requestIdleCallback`,
+   *  fallback `setTimeout`, um de cada vez pra nunca travar a thread
+   *  principal por muito tempo), toda prévia que AINDA não esteja em cache
+   *  (nem em memória, nem em disco) — na prática, quando o usuário abrir o
+   *  modal de verdade, a maioria (ou todas) já estarão prontas. Se o modal
+   *  já estiver aberto (ex.: usuário reabriu rápido), atualiza também
+   *  qualquer `<img data-mc-preview-chave="...">` já presente no DOM. */
+  async trena3DPreAquecerPreviewsEmSegundoPlano() {
+    await this._trena3DCarregarPreviewCacheDoDisco();
+    const chaves = Object.keys(this._trena3DPreviewSpecs || {});
+    const pendentes = chaves.filter((c) => !this._trena3DPreviewIconCache.has(c));
+    if (!pendentes.length) return;
+    const agendar = (typeof requestIdleCallback === 'function')
+      ? (fn) => requestIdleCallback(fn, { timeout: 500 })
+      : (fn) => setTimeout(fn, 60);
+    let algumaNova = false;
+    const processarUm = () => {
+      const chave = pendentes.shift();
+      if (chave) {
+        const src = this._trena3DGerarPreviewIcone(chave, this._trena3DPreviewSpecs[chave]);
+        if (src) {
+          algumaNova = true;
+          document.querySelectorAll(`img[data-mc-preview-chave="${chave}"]`).forEach((img) => { img.src = src; });
+        }
+      }
+      if (pendentes.length) agendar(processarUm);
+      else if (algumaNova) this._trena3DSalvarPreviewCacheNoDisco();
+    };
+    agendar(processarUm);
+  },
+
+  /** Devolve o HTML de um `<img>` já pronto pra uma `chave` de
+   *  `_trena3DPreviewSpecs` (ver logo abaixo) — string vazia se a `chave`
+   *  não existir na tabela de especificações.
+   *  [17/09/2026 UTC] REESCRITO (RODADA 113) — pedido verbatim: "para que
+   *  não tenham de ser renderizadas toda vez que se clica no botão
+   *  'configurações 3D' (o que causaria um gargalo e demoraria para abrir a
+   *  janela)." A versão anterior (RODADA 111) renderizava a prévia
+   *  SINCRONAMENTE, aqui mesmo, na hora de montar o HTML do modal — com
+   *  ~19 ícones distintos, era um gargalo real na 1ª abertura de cada
+   *  sessão. CORRIGIDO: se a `chave` já está no cache em memória (a maioria
+   *  das vezes, graças ao pré-aquecimento em segundo plano — ver
+   *  `trena3DPreAquecerPreviewsEmSegundoPlano` — disparado bem antes, ao
+   *  montar "Ver em 3D"), devolve o `<img>` já com `src` pronto,
+   *  instantâneo. Senão (ainda não cacheada — ex.: 1ª vez, antes do
+   *  pré-aquecimento terminar), devolve um `<img>` SEM `src` (só o
+   *  placeholder, com as mesmas dimensões — não deixa "buraco" no layout)
+   *  e agenda a geração pra rodar logo em seguida (`setTimeout(...,0)`,
+   *  fora do fluxo síncrono de montagem do modal), atualizando a imagem no
+   *  lugar quando ficar pronta — o modal NUNCA espera o WebGL renderizar
+   *  pra abrir, nem na 1ª vez. */
+  _trena3DPreviewImgTag(chave) {
+    const spec = this._trena3DPreviewSpecs[chave];
+    if (!spec) return '';
+    if (!this._trena3DPreviewIconCache) this._trena3DPreviewIconCache = new Map();
+    const estilo = 'border-radius:6px; border:1px solid rgba(255,255,255,0.14); vertical-align:-13px; margin-right:6px; background:#14161c; flex:0 0 auto';
+    // [17/09/2026 UTC] classe `mc-trena3d-preview-icon` (RODADA 110, item 6)
+    // segue igual — pro modo árvore/lista conseguir esconder só estes
+    // ícones via CSS (ver `.mapconfig-sheet--trena3d-arvore` em css/style.css).
+    const cacheado = this._trena3DPreviewIconCache.get(chave);
+    if (cacheado) {
+      return `<img class="mc-trena3d-preview-icon" data-mc-preview-chave="${chave}" src="${cacheado}" width="40" height="40" style="${estilo}" alt="">`;
+    }
+    setTimeout(() => {
+      if (this._trena3DPreviewIconCache.has(chave)) return; // já foi gerado por outra via (ex.: pré-aquecimento terminou antes) enquanto este timeout esperava
+      const src = this._trena3DGerarPreviewIcone(chave, spec);
+      if (!src) return;
+      document.querySelectorAll(`img[data-mc-preview-chave="${chave}"]`).forEach((img) => { img.src = src; });
+      this._trena3DSalvarPreviewCacheNoDisco();
+    }, 0);
+    return `<img class="mc-trena3d-preview-icon" data-mc-preview-chave="${chave}" width="40" height="40" style="${estilo}" alt="">`;
+  },
+
+  /** [17/09/2026 UTC] NOVO — tabela de especificações usada por
+   *  `_trena3DPreviewImgTag`/`_trena3DGerarPreviewIcone` (ver comentário
+   *  grande acima) — 1 entrada por "aparência distinta" das opções da
+   *  seção "📏 Trena 3D". ESCOPO desta rodada (documentado aqui em vez de
+   *  espalhado pelo código): a maioria das ~45 opções da seção ganhou um
+   *  ícone PRÓPRIO e distinto; algumas checkboxes que descrevem o MESMO
+   *  resultado visual final, só mudando o MOMENTO/gatilho em que ele
+   *  aparece (ex. as 2 opções de "Modo de ancoragem", que só diferem em
+   *  COMO a âncora é acionada, nunca em como ela se parece; ou "Mostrar já
+   *  ao segurar o Ctrl"/"...antes de fixar o ponto", que são o mesmo
+   *  desenho — bolinha laranja + linha tracejada + texto — em 2 instantes
+   *  diferentes da mesma interação), COMPARTILHAM a mesma `chave`/ícone de
+   *  propósito — repetir o MESMO desenho não ensinaria nada a mais sobre
+   *  aquela opção especificamente, e está documentado abaixo, opção por
+   *  opção, qual reaproveita qual. */
+  _trena3DPreviewSpecs: {
+    // "Modo de ancoragem (ctrl)" — 2 radios (ctrl/quatroCliques):
+    // resultado visual da âncora é IDÊNTICO nos 2 (só o clique que aciona
+    // muda) — 1 ícone só, reaproveitado pelos 2 radios.
+    modoAncora: (k) => {
+      k.addLinha([0.35, 0, -0.3], [0.35, 1.05, -0.3], 0xff9f4d, true);
+      k.addEsfera([0.35, 0, -0.3], 0xff9f4d, 0.06);
+      k.addEsfera([0.35, 1.05, -0.3], 0xff9f4d, 0.06);
+    },
+    // "Medição em superfícies laterais" — mostra a mira atingindo a face
+    // LATERAL de um objeto (uma "parede"), não só o topo.
+    superficiesLaterais: (k) => {
+      k.addCaixa([0, 0.55, -0.5], 0x6b7280, 0.06, 1.1, 0.9);
+      k.addEsfera([0.031, 0.7, -0.15], 0x5ec8ff, 0.05);
+      k.addLinha([0.8, 0.7, 0.6], [0.031, 0.7, -0.15], 0x5ec8ff, false);
+    },
+    // "Continuar no nível do 1º ponto" — plano horizontal extra (gradeado)
+    // numa altura fixa, com a mira presa nele.
+    continuarNivel: (k) => {
+      const grade = new k.THREE.GridHelper(2.2, 5, 0x5ec8ff, 0x2e4a5c);
+      grade.position.y = 0.65;
+      k.scene.add(grade);
+      k.addEsfera([0.3, 0.65, 0.2], 0x5ec8ff, 0.05);
+    },
+    // "Snap" — gradeado fino (pontilhado) dentro de 1 ladrilho, evidenciando
+    // os pontos onde a mira "encaixa".
+    snap: (k) => {
+      for (let i = -1; i <= 1; i++) {
+        for (let j = -1; j <= 1; j++) {
+          k.addEsfera([i * 0.45, 0.01, j * 0.45], 0xffffff, 0.02);
+        }
+      }
+      k.addEsfera([0.45, 0.01, -0.45], 0xff9f4d, 0.05);
+    },
+    // "Aparência da medida" — 2 radios: texto sobreposto ao meio da linha
+    // ("sobreLinhaMeio") vs texto flutuando acima dela ("sobreLinha").
+    labelSobreLinhaMeio: (k) => {
+      k.addLinha([-0.8, 0.6, 0], [0.8, 0.6, 0], 0xffd166, false);
+      k.addEsfera([-0.8, 0.6, 0], 0xffd166, 0.05);
+      k.addEsfera([0.8, 0.6, 0], 0xffd166, 0.05);
+      k.addTexto([0, 0.6, 0.01], '1.60m', '#ffd166');
+    },
+    labelSobreLinha: (k) => {
+      k.addLinha([-0.8, 0.6, 0], [0.8, 0.6, 0], 0xffd166, false);
+      k.addEsfera([-0.8, 0.6, 0], 0xffd166, 0.05);
+      k.addEsfera([0.8, 0.6, 0], 0xffd166, 0.05);
+      k.addTexto([0, 0.95, 0], '1.60m', '#ffd166');
+    },
+    // "Visibilidade" — 2 radios: linha só aparece se não houver nada na
+    // frente ("seVisivel", `depthTest` normal — a caixa cobre ela) vs
+    // sempre por cima ("sempre", `depthTest:false` na linha).
+    visSeVisivel: (k) => {
+      k.addLinha([-0.8, 0.6, -0.5], [0.8, 0.6, -0.5], 0xffd166, false);
+      k.addCaixa([0, 0.55, 0], 0x454b58, 0.5, 1.0, 1.0);
+    },
+    visSempre: (k) => {
+      const geo = new k.THREE.BufferGeometry().setFromPoints([new k.THREE.Vector3(-0.8, 0.6, -0.5), new k.THREE.Vector3(0.8, 0.6, -0.5)]);
+      const mat = new k.THREE.LineBasicMaterial({ color: 0xffd166, depthTest: false });
+      const linha = new k.THREE.Line(geo, mat);
+      linha.renderOrder = 999;
+      k.scene.add(linha);
+      k.addCaixa([0, 0.55, 0], 0x454b58, 0.5, 1.0, 1.0);
+    },
+    // "Espessura e cores" — 1 ícone representando as 3 cores configuráveis
+    // ao mesmo tempo (linha/âncora/mira), num traço mais grosso (cilindro,
+    // não uma `THREE.Line` fina) pra também sugerir a "espessura".
+    espessuraCores: (k) => {
+      const cilindro = new k.THREE.Mesh(new k.THREE.CylinderGeometry(0.035, 0.035, 1.1, 10), new k.THREE.MeshStandardMaterial({ color: 0xffd166 }));
+      cilindro.rotation.z = Math.PI / 2;
+      cilindro.position.set(0, 0.6, -0.2);
+      k.scene.add(cilindro);
+      k.addEsfera([-0.55, 0.6, -0.2], 0xff9f4d, 0.06);
+      k.addEsfera([0.55, 0.6, -0.2], 0x5ec8ff, 0.06);
+    },
+    // "Pontas" — 5 radios, 1 ícone cada, mesma linha base (traço amarelo).
+    // [17/09/2026 UTC] NOVO (RODADA 114) — "Sem pontas": só a linha, nada
+    // nas extremidades (ver `_trena3DBuildEndpoint`, `kind === 'nenhuma'`
+    // devolve `null`).
+    pontaNenhuma: (k) => {
+      k.addLinha([-0.7, 0.6, 0], [0.7, 0.6, 0], 0xffd166, false);
+    },
+    pontaEsfera: (k) => {
+      k.addLinha([-0.7, 0.6, 0], [0.7, 0.6, 0], 0xffd166, false);
+      k.addEsfera([-0.7, 0.6, 0], 0xffd166, 0.08);
+      k.addEsfera([0.7, 0.6, 0], 0xffd166, 0.08);
+    },
+    pontaSeta: (k) => {
+      k.addLinha([-0.7, 0.6, 0], [0.7, 0.6, 0], 0xffd166, false);
+      k.addCone([-0.85, 0.6, 0], 0xffd166, 0.09, 0.22, -90);
+      k.addCone([0.85, 0.6, 0], 0xffd166, 0.09, 0.22, 90);
+    },
+    // [17/09/2026 UTC] CORRIGIDO (RODADA 114) — bug verbatim: "a
+    // renderização de prévia acabou ficando com os traços voltados para o
+    // lado de fora da medida [...] Deve ficar voltada para o lado de dentro
+    // da medida." As pontas soltas de cada traço (a 2ª coordenada de cada
+    // `addLinha`, mais afastada do vértice) estavam em `x` MAIS EXTREMO que
+    // o próprio vértice (`-0.85`/`0.85`, além de `-0.7`/`0.7`) — abrindo
+    // "pra fora" da medida, ao contrário da geometria de verdade
+    // (`_trena3DBuildEndpoint`/`kind === 'setaDoisTracos'`, ver comentário
+    // grande lá: as pontas soltas ficam recuadas EM DIREÇÃO AO OUTRO PONTO
+    // da medida, ou seja, "pra dentro"). CORRIGIDO: as pontas soltas agora
+    // ficam em `x` MENOS EXTREMO que o vértice (`-0.55`/`0.55`, entre o
+    // vértice e o centro da linha) — abrindo pra dentro, como na cena real.
+    pontaSetaDoisTracos: (k) => {
+      k.addLinha([-0.7, 0.6, 0], [0.7, 0.6, 0], 0xffd166, false);
+      k.addLinha([-0.55, 0.75, 0], [-0.7, 0.6, 0], 0xffd166, false);
+      k.addLinha([-0.55, 0.45, 0], [-0.7, 0.6, 0], 0xffd166, false);
+      k.addLinha([0.55, 0.75, 0], [0.7, 0.6, 0], 0xffd166, false);
+      k.addLinha([0.55, 0.45, 0], [0.7, 0.6, 0], 0xffd166, false);
+    },
+    pontaTraco: (k) => {
+      k.addLinha([-0.7, 0.6, 0], [0.7, 0.6, 0], 0xffd166, false);
+      k.addLinha([-0.7, 0.75, 0], [-0.7, 0.45, 0], 0xffd166, false);
+      k.addLinha([0.7, 0.75, 0], [0.7, 0.45, 0], 0xffd166, false);
+    },
+    // "Guia rente ao chão" — 2 checkboxes (ao vivo/finalizada) reaproveitam
+    // o MESMO ícone (a diferença entre elas é só QUANDO a guia aparece —
+    // durante a medição, ou também depois de pronta — não como ela se
+    // parece) + as 2 opções de cor da mesma subseção.
+    guiaChao: (k) => {
+      k.addLinha([-0.7, 0.01, 0.3], [0.7, 0.01, 0.3], 0x5ec8ff, true);
+      k.addEsfera([-0.7, 0.01, 0.3], 0x5ec8ff, 0.05);
+      k.addEsfera([0.7, 0.01, 0.3], 0x5ec8ff, 0.05);
+      k.addTexto([0, 0.28, 0.3], '2.00m', '#5ec8ff');
+    },
+    // "Linhas verticais ancoradas" — "Altura ao vivo": as 2 checkboxes
+    // (antes/depois da âncora) reaproveitam o MESMO ícone (mesmo desenho —
+    // bolinha "no ar" + linha tracejada + texto perto do topo, ver o fix do
+    // item 4 da RODADA 110 — só o INSTANTE da interação muda entre elas).
+    medidaAoVivoAncora: (k) => {
+      k.addLinha([0.2, 0, 0.2], [0.2, 1.3, 0.2], 0xff9f4d, true);
+      k.addEsfera([0.2, 0, 0.2], 0xff9f4d, 0.05);
+      k.addEsfera([0.2, 1.3, 0.2], 0x5ec8ff, 0.05);
+      k.addTexto([0.2, 1.15, 0.2], '⬍1.30m', '#ff9f4d');
+    },
+    // "Linha da âncora após o 1º ponto" — checkbox "continuar desenhando" +
+    // checkbox "mostrar o texto" reaproveitam o MESMO ícone base (linha até
+    // o 1º ponto, real, "ateOPonto"); os 2 radios de "Comprimento da linha"
+    // têm ícone PRÓPRIO cada um (curta vs. sem teto).
+    linhaAncoraAteOPonto: (k) => {
+      k.addLinha([0.2, 0, 0.2], [0.2, 0.95, 0.2], 0xff9f4d, true);
+      k.addEsfera([0.2, 0, 0.2], 0xff9f4d, 0.05);
+      k.addEsfera([0.2, 0.95, 0.2], 0xff9f4d, 0.06);
+      k.addTexto([0.2, 1.15, 0.2], '⬍0.95m', '#ff9f4d');
+    },
+    linhaAncoraInfinita: (k) => {
+      k.addLinha([0.2, 0, 0.2], [0.2, 2.4, 0.2], 0xff9f4d, true);
+      k.addEsfera([0.2, 0, 0.2], 0xff9f4d, 0.05);
+      k.addEsfera([0.2, 0.95, 0.2], 0xff9f4d, 0.06);
+    },
+    // "Linhas verticais das medidas finalizadas" — checkbox "manter" usa o
+    // ícone com as 2 linhas de uma medida já pronta (2 pontos "no ar" +
+    // linha amarela entre eles); os 2 radios de "Comprimento da linha"
+    // (aplicados às 2 linhas ao mesmo tempo) reaproveitam
+    // `linhaAncoraAteOPonto`/`linhaAncoraInfinita` acima — MESMO conceito
+    // de comprimento, só que documentado aqui como reaproveitado em vez de
+    // desenhado nas 2 pontas simultaneamente (simplificação consciente:
+    // desenhar as 2 pontas dobraria o número de elementos sem ensinar nada
+    // novo sobre "curta" vs. "infinita" em si).
+    linhasFinalizadas: (k) => {
+      k.addLinha([-0.5, 0, -0.2], [-0.5, 0.7, -0.2], 0xff9f4d, true);
+      k.addLinha([0.5, 0, 0.3], [0.5, 1.1, 0.3], 0xff9f4d, true);
+      k.addEsfera([-0.5, 0, -0.2], 0xff9f4d, 0.045);
+      k.addEsfera([0.5, 0, 0.3], 0xff9f4d, 0.045);
+      k.addLinha([-0.5, 0.7, -0.2], [0.5, 1.1, 0.3], 0xffd166, false);
+      k.addEsfera([-0.5, 0.7, -0.2], 0xffd166, 0.05);
+      k.addEsfera([0.5, 1.1, 0.3], 0xffd166, 0.05);
+    },
+    // "Gradeado do ladrilho mirado" — pontilhado denso dentro de 1
+    // ladrilho, mais fino/mais denso que o de "Snap" acima (espaçamento
+    // menor, sugerindo o sub-grid configurável).
+    gradeSnapLadrilho: (k) => {
+      for (let i = -2; i <= 2; i++) {
+        for (let j = -2; j <= 2; j++) {
+          k.addEsfera([i * 0.18, 0.008, j * 0.18], 0xb7ff5e, 0.012);
+        }
+      }
+    },
+    // "Linhas guia da grade do mundo" — 3 checkboxes (ao vivo/após 1º
+    // ponto/finalizada) + 2 cores reaproveitam o MESMO ícone (2 linhas
+    // sólidas rente ao chão até a grade mais próxima, cor azul —
+    // consistente com o fix da RODADA 109 que unificou verde/azul).
+    guiaGradeMundo: (k) => {
+      k.addLinha([0.4, 0.008, -0.9], [0.4, 0.008, 0.9], 0x5ec8ff, false);
+      k.addLinha([-0.9, 0.008, -0.4], [0.9, 0.008, -0.4], 0x5ec8ff, false);
+      k.addEsfera([0.4, 0.008, -0.4], 0x5ec8ff, 0.05);
+      k.addTexto([0.4, 0.25, -0.65], '0.60m', '#5ec8ff');
+    },
+  },
+
+  /** [17/09/2026 UTC] NOVO — item 6 (RODADA 110), pedido verbatim: "no
+   *  cabeçalho da seção 'Trena 3D', coloque um botão de controle de modo
+   *  de apresentação das informações [...] a versão em árvore/lista como
+   *  uma estrutura de pastas, mas não faltando em nada [...] (sem desenhos
+   *  grandes, textos explicativos enormes, nem grandes espaçamentos)."
+   *  Liga o botão "🌳 Modo árvore/lista" (dentro do `<h4>` da 1ª
+   *  `.mapconfig-section` da Trena 3D, ver `#mc-trena3d-secoes` no
+   *  template). NÃO duplica nenhum conteúdo: reorganiza visualmente
+   *  (classes CSS, ver `.mapconfig-sheet--trena3d-arvore` em
+   *  css/style.css) o MESMO DOM já renderizado pelo modo padrão — todo
+   *  campo/opção continua existindo e funcionando idêntico nos 2 modos,
+   *  só a apresentação muda. Estado (ligado/desligado) persistido em
+   *  `DB.setting` ('mapconfig3DModoArvoreTrena3D'), lido de novo a cada
+   *  abertura do modal (mesmo padrão "solto", fora do blob `mapa3dConfig`,
+   *  já usado por `mc3dTextoSelecionavel` no topo de `open()`). Se o
+   *  contexto for '2d' (`#mc-trena3d-secoes` não existe nesse template),
+   *  sai cedo sem fazer nada.
+   *  [17/09/2026 UTC] ATUALIZADO (RODADA 117), 2 pedidos verbatim: (1) "o
+   *  padrão, agora, deve ser o 'árvore'" — `DB.getSetting(...)` abaixo
+   *  trocou o fallback de `false` pra `true`; note que isso só muda o
+   *  padrão de uma instalação NOVA (sem nada salvo ainda) — quem já tinha
+   *  escolhido o modo padrão explicitamente continua exatamente como
+   *  escolheu, já que o valor salvo sempre vence o fallback. (2) "No modo
+   *  'árvore', as subseções não devem ser botões [...] estando como
+   *  botões, ao clicar, algumas opções acabam ficando ocultadas" — REMOVIDO
+   *  todo o mecanismo de clicar no `<h4>` de uma subseção pra
+   *  esconder/mostrar o próprio conteúdo (bug relatado pelo usuário); as
+   *  subseções agora só recebem a apresentação compacta (CSS), nunca
+   *  escondem opções. A única exceção pedida — o toggle "aparece/não
+   *  aparece" da lista de botões da janelinha, dentro de "Janela de acesso
+   *  rápido" — vira um wiring PRÓPRIO aqui embaixo
+   *  (`#mc-trena3d-pr-chips-toggle`/`#mc-trena3d-pr-chips-wrap`, ver
+   *  também css/style.css), independente do modo árvore/padrão. */
+  /** [RODADA 131] NOVO — 2 pedidos verbatim do mesmo lote, aplicados aqui
+   *  porque rodam sempre que a seção "📏 Trena 3D" é (re)desenhada, igual ao
+   *  restante deste método:
+   *  (1) "Sobre os enables na seção 'Trena 3D', deve ser só clicando em cima
+   *  da região da caixinha do enable, não a linha toda [...]." Por padrão,
+   *  um `<label>` HTML propaga o clique em QUALQUER parte dele (inclusive o
+   *  texto/descrição) pro `<input>` de dentro — aqui isso é interceptado
+   *  (`e.preventDefault()` no evento 'click' do LABEL, só quando o alvo do
+   *  clique não é o próprio `<input>`) restrito à seção da Trena 3D, sem
+   *  mexer no comportamento do resto do app.
+   *  (2) "Na seção 'Trena 3D', quando estiver no modo árvore, os titles (do
+   *  hover do mouse) devem ter as explicações que tem no outro modo ('modo
+   *  explicativo')." No modo árvore a descrição (`.d`) fica escondida via
+   *  CSS (`.mapconfig-sheet--trena3d-arvore ... .d { display:none }`) —
+   *  preenche um `title` (tooltip nativo do navegador, funciona nos 2 modos)
+   *  com o texto do rótulo (`.t`) + descrição (`.d`) de cada opção que ainda
+   *  não tiver um `title` próprio mais específico (não sobrescreve nenhum já
+   *  existente, ex. o de "Suprimir destaque..."). Chamado 1x, aqui — os
+   *  titles ficam disponíveis nos 2 modos (inofensivo/redundante no modo
+   *  explicativo, onde a descrição já aparece visível). */
+  _trena3DAplicarRestricoesEnableETitles(raiz) {
+    if (!raiz) return;
+    raiz.querySelectorAll('label.radio-opt, label.field').forEach((label) => {
+      const input = label.querySelector(':scope > input, :scope > span > input');
+      if (input && (input.type === 'checkbox' || input.type === 'radio')) {
+        label.addEventListener('click', (e) => {
+          if (e.target !== input) e.preventDefault();
+        });
+      }
+      // [RODADA 132] MUDANÇA — pedido verbatim: "Os titles, no modo árvore,
+      // devem aparecer em toda a linha, não só nas caixas dos enables." O
+      // title agora é aplicado no `<label>` inteiro (cobre ícone + texto +
+      // descrição, a linha toda), não mais só no `<input>`. Reaproveita um
+      // `title` mais específico já existente no `<input>` (ex. o da opção
+      // "Suprimir destaque..."), quando houver; senão monta a partir de
+      // `.t`/`.d`, igual antes. Nunca sobrescreve um `title` que o próprio
+      // `<label>` já tenha.
+      if (label.title) return;
+      let texto = input && input.title ? input.title : '';
+      if (!texto) {
+        const tEl = label.querySelector('.t');
+        const dEl = label.querySelector('.d');
+        texto = tEl ? tEl.textContent.trim() : '';
+        if (dEl && dEl.textContent.trim()) texto += (texto ? ' — ' : '') + dEl.textContent.trim();
+      }
+      if (texto) label.title = texto;
+    });
+  },
+
+  /** [RODADA 139] Toggle "📏 Trena 3D" / "➰ Polilinha 3D" — pedido verbatim:
+   *  "deve ter um botão 'Trena 3D' e um botão 'Polilinha 3D' [...] Ao clicar
+   *  em um desativa o outro [...] todas as seções devem trocar de nome [...]
+   *  Inclusive no botão de cabeçalho das 'configurações 3D' e no botão do
+   *  rodapé do 'Ver em 3D'." A "➰ Polilinha 3D" não existe mais como
+   *  ferramenta separada — é só um modo (`trena3DModo`) da própria
+   *  "📏 Trena 3D", então trocar aqui só precisa: 1) gravar a config, 2)
+   *  re-rotular os títulos desta MESMA seção (`_trena3DAplicarTitulosModo`),
+   *  3) re-render dos botões deste toggle. O rodapé do "Ver em 3D"
+   *  (`_renderHotbar()` em view3d.js) e a "janelinha" de acesso rápido já se
+   *  re-renderizam sozinhos via `MapConfig.onChange` (ver `set()` abaixo). */
+  _wireTrena3DModoToggle(modal) {
+    const wrap = modal.querySelector('#mc-trena3d-modo-toggle');
+    if (!wrap) return;
+    const btnTrena = modal.querySelector('#mc-trena3d-modo-trena');
+    const btnPoli = modal.querySelector('#mc-trena3d-modo-poli');
+    this._trena3DAplicarTitulosModo(modal, (this._cache?.trena3DModo) || this.DEFAULTS?.trena3DModo || 'trena');
+    const escolher = async (modo) => {
+      await this.set({ trena3DModo: modo });
+      if (btnTrena) btnTrena.classList.toggle('secondary', modo !== 'trena');
+      if (btnPoli) btnPoli.classList.toggle('secondary', modo !== 'poli');
+      this._trena3DAplicarTitulosModo(modal, modo);
+    };
+    btnTrena?.addEventListener('click', () => escolher('trena'));
+    btnPoli?.addEventListener('click', () => escolher('poli'));
+  },
+
+  /** Troca o prefixo "📏 Trena 3D"/"➰ Polilinha 3D" no início de CADA
+   *  título (`<h4>`) dentro da seção "📏 Trena 3D" das Configurações 3D
+   *  (`#mc-trena3d-secoes`), preservando qualquer botão/texto que venha
+   *  DEPOIS do prefixo no mesmo `<h4>` (ex. "📏 Trena 3D — Snap", os botões
+   *  "📖 Sobre"/"🌳 Modo árvore/lista" do cabeçalho principal). Só troca o
+   *  PRIMEIRO nó de texto de cada `<h4>` — nunca mexe em filhos (botões,
+   *  spans) nem em textos de outras seções fora deste escopo. */
+  _trena3DAplicarTitulosModo(modal, modo) {
+    const raiz = modal.querySelector('#mc-trena3d-secoes');
+    if (!raiz) return;
+    const de = 'Trena 3D', paraDe = 'Polilinha 3D';
+    const iconeDe = '📏', iconePara = '➰';
+    raiz.querySelectorAll('h4').forEach((h4) => {
+      const noTexto = h4.childNodes[0];
+      if (!noTexto || noTexto.nodeType !== 3) return; // só o 1º nó, e só se for texto puro
+      const txt = noTexto.textContent;
+      if (modo === 'poli' && txt.includes(`${iconeDe} ${de}`)) {
+        noTexto.textContent = txt.replace(`${iconeDe} ${de}`, `${iconePara} ${paraDe}`);
+      } else if (modo !== 'poli' && txt.includes(`${iconePara} ${paraDe}`)) {
+        noTexto.textContent = txt.replace(`${iconePara} ${paraDe}`, `${iconeDe} ${de}`);
+      }
+    });
+  },
+
+  async _wireTrena3DModoArvore(modal) {
+    const raiz = modal.querySelector('#mc-trena3d-secoes');
+    try { this._trena3DAplicarRestricoesEnableETitles(raiz); } catch (e) { console.warn('[MapConfig] _trena3DAplicarRestricoesEnableETitles falhou:', e); }
+    const btn = modal.querySelector('#mc-trena3d-modo-arvore');
+    if (raiz && btn) {
+      const sheet = modal.querySelector('.mapconfig-sheet');
+      // [17/09/2026 UTC] CORRIGIDO (RODADA 120) — pedido verbatim: "em vez
+      // de o outro modo se chamar 'Modo padrão' deve se chamar 'Modo
+      // explicativo' (coloque um ícone que traga esta ideia). E o modo
+      // atual que ficar ativo é que deve ficar aparecendo ali no botão.
+      // Por exemplo, caso esteja-se no modo árvore, então, o ícone deve
+      // ser da árvore. Atualmente esta lógica está invertida." Antes,
+      // `btn.textContent` mostrava o rótulo do modo PRA ONDE o clique iria
+      // (o modo alternativo) — invertido do pedido. Agora mostra o rótulo
+      // do modo ATUALMENTE ativo. "Modo padrão" renomeado pra "Modo
+      // explicativo" (ícone 💡, distinto do 📖 já usado pelo botão vizinho
+      // "Sobre a Trena 3D").
+      const aplicar = (ativo) => {
+        sheet.classList.toggle('mapconfig-sheet--trena3d-arvore', ativo);
+        btn.textContent = ativo ? '🌳 Modo árvore/lista' : '💡 Modo explicativo';
+        btn.title = ativo
+          ? 'Alterna entre o modo árvore/lista (atual — compacto, como uma estrutura de pastas — mesmas opções, sem nada faltando, só sem os desenhos/textos longos/espaçamentos grandes) e o modo explicativo (ilustrado, com prévias grandes e textos explicativos completos).'
+          : 'Alterna entre o modo explicativo (atual — ilustrado, com prévias grandes e textos explicativos completos) e o modo árvore/lista (compacto, como uma estrutura de pastas — mesmas opções, sem nada faltando, só sem os desenhos/textos longos/espaçamentos grandes).';
+      };
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const novo = !sheet.classList.contains('mapconfig-sheet--trena3d-arvore');
+        await DB.setSetting('mapconfig3DModoArvoreTrena3D', novo);
+        aplicar(novo);
+      });
+      const modoInicial = await DB.getSetting('mapconfig3DModoArvoreTrena3D', true);
+      aplicar(modoInicial);
+    }
+    // Único toggle "aparece/não aparece" que sobrou (ver comentário grande
+    // acima) — some/aparece só a lista de chips com o ícone de cada botão
+    // da janelinha, fechada por padrão (sem persistir estado entre
+    // aberturas: reabrir o modal sempre começa fechado, de propósito, pra
+    // manter a folha compacta ao abrir).
+    const chipsToggleBtn = modal.querySelector('#mc-trena3d-pr-chips-toggle');
+    const chipsWrap = modal.querySelector('#mc-trena3d-pr-chips-wrap');
+    if (chipsToggleBtn && chipsWrap) {
+      chipsToggleBtn.addEventListener('click', () => {
+        const aberto = chipsWrap.classList.toggle('mc-pr-chips-aberto');
+        chipsToggleBtn.textContent = aberto ? '🙈 Esconder botões da janelinha' : '🐵 Mostrar botões da janelinha';
+      });
+    }
+  },
+
+  /** [17/09/2026 UTC] NOVO (RODADA 117) — pedido verbatim: "A cor da tira
+   *  da lateral esquerda deve ser de acordo com a seção, ou seja, toda a
+   *  seção (suas subseções também) devem ter aquela cor. E cada seção tem
+   *  a sua cor. A cor deve ser suave, não muito brilhante ou intensa/viva."
+   *  Antes, TODA `.mapconfig-section` da folha (2D e 3D, ~55 no total)
+   *  usava a MESMA cor fixa pra tira da esquerda (`border-left`, RODADA
+   *  99) — nenhum sistema de cor por seção existia ainda (ver comentário
+   *  antigo em css/style.css, removido/superado por este). Agora: cada
+   *  "seção" (ex. "📏 Trena 3D", "🎬 Apresentação", "📦 Objeto") ganha 1 cor
+   *  própria, determinística (mesmo texto → sempre a mesma cor, entre
+   *  aberturas/sessões — não é aleatório, é um hash simples do texto do
+   *  título), e TODAS as suas subseções (ex. as ~13 "📏 Trena 3D — X")
+   *  herdam a MESMA cor da seção-mãe — o "grupo" de cada `.mapconfig-section`
+   *  é o texto do `<h4>` até o primeiro " — " (as subseções sempre nomeiam
+   *  assim, "Título da seção — Nome da subseção"; sem " — ", o próprio
+   *  título inteiro já É o grupo, ex. seções sem subseção nenhuma). Cor
+   *  "suave" pedida: HSL com saturação e luminosidade FIXAS e moderadas
+   *  (35%/58%) — só o MATIZ (hue) varia por seção, evitando qualquer tom
+   *  berrante/neon (que exigiria saturação/luminosidade altas) em qualquer
+   *  hash que caia. */
+  _mapConfigHashSimples(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) h = (Math.imul(h, 31) + str.charCodeAt(i)) >>> 0;
+    return h;
+  },
+  _mapConfigCorSecao(grupo) {
+    const hue = this._mapConfigHashSimples(grupo) % 360;
+    // [17/09/2026 UTC] AJUSTADO (RODADA 118) — saturação subiu de 35% pra
+    // 46% (ainda longe de berrante/neon, que exigiria algo por volta de
+    // 80-100%) só pra garantir que a diferença de matiz entre seções fique
+    // perceptível de verdade contra o fundo escuro do app — a versão
+    // anterior (35%/58%) não foi confirmada ao vivo num navegador ainda.
+    return `hsl(${hue}, 46%, 56%)`;
+  },
+  _aplicarCoresSecoes(modal) {
+    const secoes = modal.querySelectorAll('.mapconfig-section');
+    const corPorGrupo = new Map();
+    secoes.forEach((sec) => {
+      const h4 = sec.querySelector(':scope > h4');
+      if (!h4) return;
+      // Só o TEXTO direto do <h4> (ignora <svg>/<button> filhos, ex. o
+      // ícone SVG de "Fotos" ou os botões "📖 Sobre"/"🌳 Modo árvore" dentro
+      // do <h4> principal da Trena 3D) — o título de verdade da seção.
+      let titulo = '';
+      h4.childNodes.forEach((n) => { if (n.nodeType === Node.TEXT_NODE) titulo += n.textContent; });
+      titulo = titulo.trim();
+      if (!titulo) return;
+      const grupo = titulo.split(' — ')[0].trim() || titulo;
+      if (!corPorGrupo.has(grupo)) corPorGrupo.set(grupo, this._mapConfigCorSecao(grupo));
+      // [17/09/2026 UTC] CORRIGIDO (RODADA 118) — `setProperty(...,
+      // 'important')` em vez de `sec.style.borderLeftColor = ...`: um
+      // `!important` inline sempre vence QUALQUER regra da folha de
+      // estilos (mesmo uma futura com `!important` também, que inline
+      // sempre tem prioridade maior) — blinda contra o bug relatado ("a
+      // cor [...] ainda está a mesma [...] para todas as seções"), que
+      // pode ter vindo de uma exceção anterior impedindo esta função de
+      // rodar (ver `try/catch` no ponto de chamada, em `open()`) ou de
+      // qualquer outra causa não confirmada ainda sem navegador de
+      // verdade.
+      sec.style.setProperty('border-left-color', corPorGrupo.get(grupo), 'important');
+    });
+  },
+
   /** [16/09/2026 UTC] NOVO — pedido verbatim: "Em '📏 Trena 3D — Guia de
    *  grade do mundo' [...] faça um preview de canvas para se ter noção do
    *  que se trata." Desenho 2D simplificado, visto de cima, de UM ladrilho
@@ -4283,8 +7146,21 @@ const MapConfig = {
     // desenhados se a opção estiver ativa — o ladrilho (cinza) continua
     // sempre visível, só de contexto.
     const guiaAtiva = modal.querySelector('#mc-trena3d-guia-grade')?.checked !== false;
+    // [16/09/2026 UTC] CORRIGIDO — pedido verbatim: "Deve ser possível
+    // definir a cor das linhas guia. Atualmente elas são desenhadas com
+    // verde. E na preview está como azul. Deve ser azul para ambos, como
+    // padrão." Este preview usava um azul FIXO (`#5ec8ff`), sem nenhuma
+    // ligação com a cor de verdade usada na cena 3D (que era um verde FIXO
+    // diferente, `0xb7ff5e`) — daí a inconsistência relatada. Agora lê os 2
+    // campos novos (`trena3DGuiaGradeCorLinha`/`trena3DGuiaGradeCorTexto`),
+    // direto dos color-pickers logo abaixo (não precisa reabrir o modal pra
+    // refletir uma mudança de cor — os listeners desses pickers já chamam
+    // este método de novo, mesmo padrão dos outros radios/checkboxes desta
+    // subseção).
+    const corLinhaPreview = modal.querySelector('#mc-trena3d-guia-grade-cor-linha')?.value || '#5ec8ff';
+    const corTextoPreview = modal.querySelector('#mc-trena3d-guia-grade-cor-texto')?.value || '#5ec8ff';
     if (guiaAtiva) {
-      ctx.strokeStyle = '#5ec8ff';
+      ctx.strokeStyle = corLinhaPreview;
       ctx.lineWidth = 2;
       ctx.setLineDash([]);
       // Linha X: esquerda→ponto (padrão) ou lado mais próximo (direita, no exemplo)
@@ -4296,7 +7172,7 @@ const MapConfig = {
       if (modoMaisPerto) { ctx.moveTo(px, y1); ctx.lineTo(px, py); } else { ctx.moveTo(px, y0); ctx.lineTo(px, py); }
       ctx.stroke();
       // Rótulos das medidas, centralizados no meio de cada linha
-      ctx.fillStyle = '#5ec8ff';
+      ctx.fillStyle = corTextoPreview;
       ctx.font = '600 11px system-ui, sans-serif';
       ctx.textAlign = 'center';
       const mxTxt = modoMaisPerto ? '0,28m' : '0,72m';
@@ -4311,20 +7187,125 @@ const MapConfig = {
       ctx.restore();
     }
     // Bolinha do ponto mirado
-    ctx.fillStyle = '#5ec8ff';
+    ctx.fillStyle = corLinhaPreview;
     ctx.beginPath();
     ctx.arc(px, py, 5, 0, Math.PI * 2);
     ctx.fill();
+  },
+
+  /** [16/09/2026 UTC] REFEITO — pedido verbatim: "o preview deve ser de uma
+   *  caixa recebendo o destaque 'Raycasting (mira do 3D)'->'Estilo do
+   *  destaque' ('Contorno pontilhado na projeção da tela'). E o ladrilho de
+   *  mundo em baixo [...] É como montar esta cena no 'Ver em 3D' [...] em
+   *  perspectiva de modo que dê pra ver 3 faces do cubo [...] tirar um
+   *  screenshot com e sem o pontilhado destacando o cubo." Desenha uma
+   *  caixinha isométrica (3 faces visíveis, mesma ideia de "ver de cima
+   *  inclinado") sobre um ladrilho de chão, em 2 painéis lado a lado — um
+   *  representando o destaque NORMAL (mira comum, sem âncora em jogo — o
+   *  contorno pontilhado sempre aparece) e outro representando o momento em
+   *  que a âncora está em uso, cujo contorno reage à opção acima. O
+   *  contorno usa a MESMA cor/traço do destaque de verdade
+   *  (`engine3d.js` `_drawOutline2D`: `rgba(255,242,117,0.85)`,
+   *  `setLineDash([5,4])`), só desenhado ao redor da silhueta hexagonal
+   *  aproximada da caixa (top+2 faces laterais) em vez do fecho convexo
+   *  calculado a partir da projeção 3D de verdade. */
+  _trena3DDesenharPreviewDestaqueMira(modal) {
+    const canvas = modal.querySelector('#mc-trena3d-destaque-preview');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    const suprimirAtivo = modal.querySelector('#mc-trena3d-suprimir-destaque')?.checked !== false;
+    const desenharCena = (cx, mostrarContorno, legenda) => {
+      const topoY = 20, meioY = 46; // ápice/centro vertical do topo em losango
+      const halfW = 24, halfHup = 13, alturaCubo = 30;
+      const top = { x: cx, y: topoY };
+      const right = { x: cx + halfW, y: topoY + halfHup };
+      const bottom = { x: cx, y: topoY + halfHup * 2 };
+      const left = { x: cx - halfW, y: topoY + halfHup };
+      const rightH = { x: right.x, y: right.y + alturaCubo };
+      const bottomH = { x: bottom.x, y: bottom.y + alturaCubo };
+      const leftH = { x: left.x, y: left.y + alturaCubo };
+      // Ladrilho de chão — losango maior, centrado logo abaixo da base do cubo.
+      const chaoCy = bottomH.y + 12, chaoHalfW = 40, chaoHalfH = 16;
+      ctx.strokeStyle = '#3a3d47';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx, chaoCy - chaoHalfH);
+      ctx.lineTo(cx + chaoHalfW, chaoCy);
+      ctx.lineTo(cx, chaoCy + chaoHalfH);
+      ctx.lineTo(cx - chaoHalfW, chaoCy);
+      ctx.closePath();
+      ctx.stroke();
+      // 3 faces do cubo (top mais clara, laterais mais escuras — sombreado
+      // simples só pra dar noção de volume 3D).
+      const face = (pts, cor) => {
+        ctx.fillStyle = cor;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        ctx.fill();
+      };
+      face([top, right, bottom, left], '#6b7280');
+      face([left, bottom, bottomH, leftH], '#454b58');
+      face([right, bottom, bottomH, rightH], '#565c6a');
+      // Contorno pontilhado amarelo — mesma cor/traço do destaque real
+      // ("outline2d"), ao redor da silhueta hexagonal (top→right→rightH→
+      // bottomH→leftH→left→top).
+      if (mostrarContorno) {
+        ctx.strokeStyle = 'rgba(255,242,117,0.85)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(top.x, top.y);
+        ctx.lineTo(right.x, right.y);
+        ctx.lineTo(rightH.x, rightH.y);
+        ctx.lineTo(bottomH.x, bottomH.y);
+        ctx.lineTo(leftH.x, leftH.y);
+        ctx.lineTo(left.x, left.y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.fillStyle = mostrarContorno ? '#ffdf75' : '#7d8390';
+      ctx.font = '600 9px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(legenda, cx, H - 6);
+    };
+    desenharCena(W * 0.27, true, 'mira normal');
+    desenharCena(W * 0.73, !suprimirAtivo, 'durante a âncora');
+    // Linha divisória sutil entre os 2 painéis.
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(W / 2, 8);
+    ctx.lineTo(W / 2, H - 16);
+    ctx.stroke();
   },
 
   /** [16/09/2026 UTC] NOVO — pedido verbatim: "Em [...] '📏 Trena 3D —
    *  Gradeado do ladrilho mirado', faça um preview de canvas para se ter
    *  noção do que se trata." Desenho 2D simplificado, visto de cima, do(s)
    *  ladrilho(s) cobertos pelo gradeado conforme o modo escolhido
-   *  ("atual"/"quatroLadrilhos"/"metadeEntorno"), com pontinhos cujo
-   *  tamanho reage ao campo "Espessura" e cujo espaçamento reage ao campo
-   *  "Vão" — mesma ideia ilustrativa do preview acima, sem dado real da
-   *  cena 3D. */
+   *  ("atual"/"quatroLadrilhos"/"metadeEntorno").
+   *  [16/09/2026 UTC] CORRIGIDO — pedido verbatim: "O preview não está
+   *  condizente com a realidade quando se varia o 'Vão' [...] se o ladrilho
+   *  do mundo é 1m×1m e o snap [...] está em 0,1m, então deve aparecer uma
+   *  grade de 10×10 'células'. Porém ao aumentar o valor em 'Vão', o
+   *  gradeado que aparece no preview está sendo escalado e acaba ficando
+   *  com menos 'células visíveis'." CAUSA: a versão anterior usava o mesmo
+   *  espaçamento (derivado só do "Vão") tanto pro TAMANHO DA CÉLULA quanto
+   *  pro espaçamento dos pontinhos — na cena 3D de verdade
+   *  (`_trena3DAtualizarGradeSnapLadrilho`) essas são 2 contas
+   *  INDEPENDENTES: o número de células vem do "📏 Trena 3D — Snap"
+   *  (`trena3DSnapMetros`/`trena3DSnapAtivo`, outra seção), e "Vão"/
+   *  "Espessura" só decidem a aparência do PONTILHADO ao longo de cada
+   *  linha de célula já definida por ele — mudar "Vão" nunca muda quantas
+   *  células existem. CORRIGIDO: agora o preview calcula `n` (células por
+   *  lado) a partir do snap de verdade, desenha as `n-1` linhas internas
+   *  de divisão nessa contagem FIXA, e só DEPOIS decora cada uma com
+   *  pontinhos espaçados pelo "Vão" — as 2 contas nunca mais se misturam. */
   _trena3DDesenharPreviewGradeSnap(modal) {
     const canvas = modal.querySelector('#mc-trena3d-grade-snap-preview');
     if (!canvas) return;
@@ -4332,8 +7313,23 @@ const MapConfig = {
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
     const modo = modal.querySelector('input[name="mc-trena3d-grade-snap-modo"]:checked')?.value || 'atual';
-    const espessuraPx = Utils.clamp(parseFloat(modal.querySelector('#mc-trena3d-grade-snap-espessura')?.value) || 3, 0.5, 10);
-    const gapCm = Utils.clamp(parseFloat(modal.querySelector('#mc-trena3d-grade-snap-gap')?.value) || 2, 0.1, 50);
+    // [17/09/2026 UTC] ATUALIZADO (RODADA 118) — estes 2 campos viraram
+    // "botão triplo" (`_montarBotaoTriplo`); o `<input>` some, o valor atual
+    // fica em `dataset.valor` do próprio `<div>` mount (atualizado a cada
+    // `onCommit`), não mais em `.value`.
+    const espessuraPx = Utils.clamp(parseFloat(modal.querySelector('#mc-trena3d-grade-snap-espessura')?.dataset.valor) || 1, 0.5, 10);
+    const gapCm = Utils.clamp(parseFloat(modal.querySelector('#mc-trena3d-grade-snap-gap')?.dataset.valor) || 1.5, 0.1, 50);
+    // [16/09/2026 UTC] NOVO — lê o snap de verdade (seção "📏 Trena 3D —
+    // Snap", campos `#mc-trena3d-snap-on`/`#mc-trena3d-snap`) pra decidir
+    // quantas células por lado desenhar — MESMA conta de
+    // `_trena3DAtualizarGradeSnapLadrilho` (`passo = snap em metros`;
+    // `n = 1/passo`, ex.: 0,1m → 10 células). Sem snap ativo, ou passo ≥ 1m,
+    // não há linha interna nenhuma pra desenhar (1 única célula = o próprio
+    // ladrilho) — mesmo comportamento da cena 3D real.
+    const snapAtivo = modal.querySelector('#mc-trena3d-snap-on')?.checked !== false;
+    const snapM = parseFloat(modal.querySelector('#mc-trena3d-snap')?.dataset.valor) || 0.1;
+    const passo = snapAtivo ? snapM : 1;
+    const n = (passo > 0 && passo < 0.999) ? Utils.clamp(Math.round(1 / passo), 1, 20) : 1;
     const pad = 20;
     const areaLado = Math.min(W, H) - pad * 2;
     // "quatroLadrilhos"/"metadeEntorno" cobrem uma área 2m×2m (4 ladrilhos
@@ -4364,21 +7360,68 @@ const MapConfig = {
     // pontinhos) só aparece com a opção ativa.
     const gradeSnapAtivo = modal.querySelector('#mc-trena3d-grade-snap')?.checked !== false;
     if (gradeSnapAtivo) {
-      ctx.strokeStyle = '#ffd166';
+      // [16/09/2026 UTC] MUDANÇA — pedido verbatim: "Faça a preview da mesma
+      // cor que estiver o gradeado no ladrilho do mundo [...] deve ser
+      // possível escolher a cor do gradeado." Lê AO VIVO do campo de cor
+      // (`#mc-trena3d-grade-snap-cor`), não do valor salvo — assim o preview
+      // já reflete a cor escolhida antes mesmo de fechar o modal/salvar.
+      const corGrade = modal.querySelector('#mc-trena3d-grade-snap-cor')?.value || '#7fd8ff';
+      ctx.strokeStyle = corGrade;
       ctx.lineWidth = 1.5;
       ctx.strokeRect(ax0, ay0, ax1 - ax0, ay1 - ay0);
-      // Pontinhos — espaçamento proporcional ao "Vão" (mapeado numa faixa
-      // razoável de pixels só pro preview, já que a escala real depende do
-      // snap configurado em outra seção) e tamanho igual à "Espessura".
-      const espacamentoPx = Utils.clamp(4 + gapCm * 2.2, 6, 24);
-      ctx.fillStyle = '#ffd166';
-      for (let gx = ax0; gx <= ax1 + 0.01; gx += espacamentoPx) {
-        for (let gy = ay0; gy <= ay1 + 0.01; gy += espacamentoPx) {
+      // Pontinhos ao longo de cada linha — espaçamento proporcional ao
+      // "Vão" (mapeado numa faixa razoável de pixels só pro preview) e
+      // tamanho igual à "Espessura". Independente de `n` (nº de células),
+      // que já foi decidido acima só a partir do snap de verdade.
+      // [16/09/2026 UTC] MUDANÇA (RODADA 91) — pedido verbatim: "o preview
+      // deve ser mais preciso quanto aos valores selecionados em 'Vão'
+      // [...] o desenho só está apresentando mudança visual, após variar
+      // de '0,1' para '1'." CAUSA: a fórmula antiga (`4 + gapCm*2.2`,
+      // clamp mínimo 6) fazia QUALQUER `gapCm` entre 0,1 e ~0,9 cair
+      // abaixo do próprio clamp mínimo (4+0,9*2,2=5,98 < 6) — ou seja,
+      // todo esse intervalo colapsava no MESMO valor final (6px), sem
+      // diferença visual nenhuma entre eles. CORRIGIDO: multiplicador bem
+      // maior (2.2 -> 6) e clamp mínimo mais baixo (6 -> 4), dando uma
+      // progressão perceptível já dentro de 0,1 a 1,0 (testado
+      // mentalmente: 0,1->4(piso do clamp) 0,5->6 1,0->9 1,5->12 5->33
+      // 10->40(teto do clamp, valores maiores continuam só "bem
+      // espaçado", sem sobrepor pontos nem sumir).
+      const espacamentoPx = Utils.clamp(3 + gapCm * 6, 4, 40);
+      ctx.fillStyle = corGrade;
+      // [16/09/2026 UTC] RODADA 100 — pedido verbatim: "o preview deve
+      // ficar mais semelhante ao que aparece na grade no sentido de como o
+      // gradeado é montado. Se puder, use a mesma função de impressão
+      // adaptada para o preview (sua escala e perspectiva)." ABORDAGEM
+      // TOMADA: reuso de FUNÇÃO PURA DE CÁLCULO (não replicação adaptada) —
+      // `View3D._trena3DCalcularGradeSnap` (view3d.js) foi extraída
+      // exatamente pra isso na Rodada 100: ela não sabe nada de Three.js
+      // nem de canvas, só recebe limites x/z + passo do snap + espaçamento,
+      // e devolve a lista de linhas + pontos ao longo de cada uma — a MESMA
+      // lógica de "quantas linhas, onde ficam, como os pontos se
+      // distribuem" que decide o gradeado real da cena 3D. Aqui, o
+      // retângulo do preview (`ax0..ax1`/`ay0..ay1`, em PIXELS de canvas)
+      // é tratado como um sistema de coordenadas local próprio (0 é o
+      // canto do retângulo pontilhado) — como 0 é sempre múltiplo de
+      // qualquer `passo`, o alinhamento "a partir da origem" da função
+      // pura cai exatamente nas `n-1` linhas igualmente espaçadas
+      // (equivalente ao que a conta antiga fazia manualmente com `i/n`,
+      // só que agora vem da MESMA função que a cena 3D usa, não de uma
+      // fórmula duplicada). Não foi replicada a perspectiva 3D completa —
+      // o preview continua sendo um desenho top-down 2D simples (já era
+      // assim antes, e é o estilo mais legível pra um preview pequeno
+      // dentro do modal) — só a PARTE DE CÁLCULO (não a de desenho) é
+      // 100% compartilhada com a cena real, que era o pedido central.
+      const passoPreview = n > 1 ? (ax1 - ax0) / n : 1e9; // n=1 → sem linha interna (mesmo caso "sem snap"/"passo>=1m" da cena real)
+      const { pontosPorLinha } = window.View3D?._trena3DCalcularGradeSnap
+        ? window.View3D._trena3DCalcularGradeSnap({ xMin: ax0, xMax: ax1, zMin: ay0, zMax: ay1, passo: passoPreview, espacamento: espacamentoPx })
+        : { pontosPorLinha: [] };
+      pontosPorLinha.forEach((pontos) => {
+        pontos.forEach((p) => {
           ctx.beginPath();
-          ctx.arc(gx, gy, espessuraPx / 2, 0, Math.PI * 2);
+          ctx.arc(p.x, p.z, espessuraPx / 2, 0, Math.PI * 2);
           ctx.fill();
-        }
-      }
+        });
+      });
     }
   },
 
@@ -4412,7 +7455,7 @@ const MapConfig = {
 
           <h4>Medindo pontos "no ar" — a âncora</h4>
           <p>Nem todo ponto que você quer medir está numa superfície de verdade — por exemplo, o topo de uma parede a 2,5m de altura, medido a partir do chão bem abaixo dele. Pra esses casos existe a <b>âncora</b>: um clique de ancoragem trava as 2 dimensões horizontais (X e Z) num ponto real da superfície mirada, e libera só a 3ª dimensão (a altura, Y) — o próximo clique fixa essa altura livremente, mirando pra cima ou pra baixo ao longo dessa reta vertical "no ar".</p>
-          <p>Há 2 jeitos configuráveis de acionar a âncora (escolha em Configurações 3D → "📏 Trena 3D — Como funciona a ancoragem (Ctrl)"):</p>
+          <p>Há 2 jeitos configuráveis de acionar a âncora (escolha em Configurações 3D → "📏 Trena 3D — Modo de ancoragem (ctrl)"):</p>
 
           <p><b>Modo "Segurando Ctrl" (padrão):</b></p>
           <ol style="padding-left:20px; margin:6px 0">
@@ -4431,19 +7474,30 @@ const MapConfig = {
           </ol>
 
           <h4>Enquanto mira, antes de clicar</h4>
-          <p>Sempre que uma referência vertical estiver "em jogo" (Ctrl fisicamente segurado no modo Ctrl, ou aguardando o clique de ancoragem no modo 4 cliques), a bolinha de mira e a linha guia tracejada infinita (do chão até o teto de 6m) ficam laranja em vez de azul. Se a âncora ainda não foi commitada (você está só segurando Ctrl, decidindo onde ela vai cair), a opção "Mostrar já ao segurar o Ctrl" decide se a medida do chão até a bolinha já aparece nesse momento, ou só depois de a âncora ser marcada de fato. Depois que a âncora já foi marcada (clique feito) mas o ponto "no ar" ainda não foi fixado, a opção "Mostrar a medida entre a âncora e a bolinha 'no ar' antes de fixar o ponto" cobre essa 2ª etapa. Ambas ficam em Configurações 3D → "📏 Trena 3D — Altura ao vivo (Antes mesmo de definir o ponto)".</p>
+          <p>Sempre que uma referência vertical estiver "em jogo" (Ctrl fisicamente segurado no modo Ctrl, ou aguardando o clique de ancoragem no modo 4 cliques), a bolinha de mira e a linha guia tracejada infinita (do chão pra cima, sem teto de altura) ficam laranja em vez de azul. A opção "Mostrar a medida entre a âncora e a bolinha 'no ar' antes de fixar o ponto" decide se essa medida do chão até a bolinha já aparece nesse momento — cobre os 2 casos (Ctrl segurado, âncora ainda não commitada, E âncora já commitada aguardando o 2º clique). Fica em Configurações 3D → "📏 Trena 3D — Linhas verticais ancoradas" → "Altura ao vivo (Antes mesmo de definir o ponto)".</p>
 
           <h4>A linha da âncora depois do 1º ponto já fixado</h4>
-          <p>Por padrão, assim que o 1º ponto da medida é fixado "no ar", a linha tracejada laranja daquela âncora some — só volta a aparecer uma referência vertical quando você ancorar de novo pro 2º ponto. Em Configurações 3D → "📏 Trena 3D — Linha da âncora após o 1º ponto" dá pra fazer ela continuar desenhada mesmo depois disso (opção "Continuar desenhando a linha tracejada..."), escolhendo se ela para na altura real do 1º ponto ou continua infinita até o teto de 6m — e, numa subopção separada, se o texto da medida (⬍ Xm) some junto com o texto ou continua aparecendo do lado da linha.</p>
+          <p>Por padrão, assim que o 1º ponto da medida é fixado "no ar", a linha tracejada laranja daquela âncora some — só volta a aparecer uma referência vertical quando você ancorar de novo pro 2º ponto. Em Configurações 3D → "📏 Trena 3D — Linhas verticais ancoradas" → "Linha da âncora após o 1º ponto" dá pra fazer ela continuar desenhada mesmo depois disso (opção "Continuar desenhando a linha tracejada..."), escolhendo se ela para na altura real do 1º ponto ou continua infinita, sem teto de altura — e, numa subopção separada, se o texto da medida (⬍ Xm) some junto com o texto ou continua aparecendo do lado da linha.</p>
 
           <h4>Linhas verticais depois da medida pronta</h4>
-          <p>As 2 linhas acima (a do 1º e a do 2º ponto ancorados) somem por padrão assim que a medida é finalizada (os 2 pontos já fixados). Em Configurações 3D → "📏 Trena 3D — Linhas verticais das medidas finalizadas" (desativada por padrão) dá pra manter as 2 linhas desenhadas permanentemente junto com a medida já pronta, do chão até cada ponto "no ar" — com a mesma subopção de "até o ponto" ou "infinita" até o teto de 6m. Pontos que já estavam no chão (sem âncora nenhuma envolvida) não geram linha nenhuma, já que a altura deles já é zero.</p>
+          <p>As 2 linhas acima (a do 1º e a do 2º ponto ancorados) somem por padrão assim que a medida é finalizada (os 2 pontos já fixados). Em Configurações 3D → "📏 Trena 3D — Linhas verticais ancoradas" → "Linhas verticais das medidas finalizadas" (desativada por padrão) dá pra manter as 2 linhas desenhadas permanentemente junto com a medida já pronta, do chão até cada ponto "no ar" — com a mesma subopção de "até o ponto" ou "infinita" (sem teto de altura). Pontos que já estavam no chão (sem âncora nenhuma envolvida) não geram linha nenhuma, já que a altura deles já é zero.</p>
 
           <h4>Cancelando uma medida em andamento</h4>
           <p>Pressione <b>Esc</b> a qualquer momento durante uma medida ainda não concluída — isso descarta o(s) ponto(s) já marcado(s) e qualquer âncora pendente, sem criar nenhuma medida.</p>
 
           <h4>Outras opções relacionadas</h4>
           <p>Snap de posição (arredonda cada ponto pro múltiplo mais próximo de um valor configurável — segure <b>Shift</b> pra desligar o snap temporariamente), guias de grade do mundo, gradeado do ladrilho mirado (ambos com um preview de canvas ilustrativo, logo abaixo da opção de ativar cada um), estilo/cor/espessura/pontas da medida finalizada, e visibilidade (some ou não quando algo bloqueia a visão) — todas na mesma seção "📏 Trena 3D" das Configurações 3D, aplicadas imediatamente às medidas já desenhadas.</p>
+
+          <!-- [16/09/2026 UTC] NOVO (RODADA 91) — pedido verbatim, texto pra
+               ir no FINAL do conteúdo deste popup, preservando quebras de
+               linha como parágrafos. -->
+          <!-- [16/09/2026 UTC] MUDANÇA (RODADA 95) — pedido verbatim: "não
+               deve ser itálico, deve ser normal." Removido 'font-style:italic'
+               -- resto do estilo discreto (cor/tamanho) mantido como estava. -->
+          <div style="margin-top:18px; padding-top:10px; border-top:1px solid var(--border); color:var(--text-dim, #9aa1ad); font-size:0.92em">
+            <p>E é claro que, ao falar em medidas, é inevitável pensar na palavra que diz:</p>
+            <p>Não julgueis, para que não sejais julgados, porque com o juízo com que julgardes sereis julgados, e com a medida com que tiverdes medido vos hão de medir a vós. Mateus 7:1-2 (ARC). <a id="mc-trena3d-doc-versiculo-link" href="https://www.bible.com/pt/bible/212/MAT.7.ARC" target="_blank" rel="noopener">link</a></p>
+          </div>
         </div>
         <div style="display:flex; gap:10px; margin-top:14px">
           <button type="button" class="btn" id="mc-trena3d-doc-close" style="flex:1">Fechar</button>
@@ -4454,6 +7508,29 @@ const MapConfig = {
     modal.querySelector('#mc-trena3d-doc-close-top').onclick = fechar;
     modal.querySelector('#mc-trena3d-doc-close').onclick = fechar;
     modal.addEventListener('pointerdown', (e) => { if (e.target === modal) fechar(); });
+    // [16/09/2026 UTC] ENDURECIDO (RODADA 96) — pedido verbatim: "Ao clicar
+    // no link do versículo bíblico com o botão esquerdo do mouse, deve
+    // abrir em uma nova guia." A tag já tinha `target="_blank"
+    // rel="noopener"` (comportamento padrão do navegador já deveria bastar
+    // sozinho) — não foi encontrado nenhum `preventDefault`/handler de
+    // clique GLOBAL em `<a>` nos arquivos disponíveis nesta sessão
+    // (`mapconfig.js`/`view3d.js`/`mapview.js`/`engine3d.js`) que pudesse
+    // estar interceptando; `app.js` (fora dos arquivos desta sessão) não
+    // pôde ser inspecionado pra descartar 100% um handler global de lá.
+    // Como reforço defensivo (não deveria ser necessário, mas garante o
+    // comportamento pedido mesmo que algo em outro arquivo interfira):
+    // listener dedicado no próprio link, que chama `window.open(...)`
+    // explicitamente pra um clique de botão esquerdo (`e.button === 0`),
+    // com `stopPropagation()` pra não deixar nenhum handler ancestral (ex.
+    // o `pointerdown`/fechar do próprio modal, ou qualquer coisa em
+    // `app.js`) processar esse clique antes.
+    const linkVersiculo = modal.querySelector('#mc-trena3d-doc-versiculo-link');
+    linkVersiculo?.addEventListener('click', (e) => {
+      if (e.button !== 0) return; // só botão esquerdo — botão do meio/direito já têm seu próprio comportamento nativo (abrir em guia/menu de contexto)
+      e.stopPropagation();
+      window.open(linkVersiculo.href, '_blank', 'noopener');
+      e.preventDefault(); // evita 2 guias abertas (a nossa + a navegação padrão do <a>)
+    });
   },
 };
 

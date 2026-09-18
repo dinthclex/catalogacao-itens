@@ -10061,6 +10061,56 @@ class Engine3D {
     return best;
   }
 
+  /** [16/09/2026 UTC] NOVO (RODADA 98) — pedido verbatim: "Deve ser possível
+   *  colocar medidas apontando para lados (parede, porta janela, objetos
+   *  pela lateral). Atualmente, é só a parte de cima dos objetos." Usado
+   *  SÓ pela Trena 3D (view3d.js `_trena3DRaycastPrincipal`), quando a nova
+   *  opção "Medição em superfícies laterais" está ativa
+   *  (`trena3DPermitirSuperficiesLaterais`). INVESTIGAÇÃO: `raycastSurface`
+   *  (acima) já filtra por `worldNormal.y < 0.5` (só topo) E só considera
+   *  malhas de tipo 'object'/'tijolo' — paredes ('wall') e porta/janela
+   *  NUNCA entravam nesse raycast, mesmo com uma face de fato virada pra
+   *  cima (ex. o peitoril de uma janela), e nenhuma face lateral (de
+   *  qualquer tipo) nunca era considerada. Este método NÃO filtra por
+   *  normal nenhuma — pega a interseção mais próxima entre TODAS as malhas
+   *  relevantes (chão, objeto/tijolo em qualquer face, parede, porta,
+   *  janela), topo OU lateral, e devolve o ponto+normal de verdade. Mesmo
+   *  formato de retorno de `raycastSurface` (`{x,y,z,t,restingOnId}`), com
+   *  `normal` a mais. */
+  raycastSurfaceAmpliado(origin, dir) {
+    const floorHit = this.raycastFloor(origin, dir);
+    let best = floorHit ? { x: floorHit.x, y: 0, z: floorHit.z, t: floorHit.t, restingOnId: null, normal: { x: 0, y: 1, z: 0 } } : null;
+    if (this.THREE && this._raycaster && this._pickMeshes?.length) {
+      const THREE = this.THREE;
+      this._raycaster.set(
+        new THREE.Vector3(origin.x, origin.y, origin.z),
+        new THREE.Vector3(dir.x, dir.y, dir.z).normalize(),
+      );
+      // Diferença chave pra `raycastSurface`: inclui 'wall'/'porta'/'janela'
+      // (fora de lá) e NÃO filtra por normal — qualquer face (topo ou
+      // lateral) de qualquer um desses tipos conta.
+      const alvos = this._pickMeshes.filter((m) => {
+        const t = m.userData?.pick?.type;
+        return t === 'object' || t === 'tijolo' || t === 'wall' || t === 'porta' || t === 'janela';
+      });
+      // `intersectObjects` já devolve os hits ordenados por distância
+      // crescente — o 1º (se houver) já é a interseção mais próxima entre
+      // TODOS esses tipos de malha, sem precisar iterar o resto.
+      const hits = this._raycaster.intersectObjects(alvos, false);
+      const perto = hits.length ? hits[0] : null;
+      if (perto && (!best || perto.distance < best.t)) {
+        const localNormal = perto.face?.normal;
+        const worldNormal = localNormal ? localNormal.clone().transformDirection(perto.object.matrixWorld).normalize() : { x: 0, y: 1, z: 0 };
+        best = {
+          x: perto.point.x, y: perto.point.y, z: perto.point.z, t: perto.distance,
+          restingOnId: perto.object.userData?.pick?.id ?? null,
+          normal: { x: worldNormal.x, y: worldNormal.y, z: worldNormal.z },
+        };
+      }
+    }
+    return best;
+  }
+
   /** Raio da mira contra a face LATERAL de um objeto/porta/janela já
    *  existente (a normal do triângulo atingido aponta pro lado, não pra
    *  cima) — pedido do usuário (rodada 50): "posicionar os objetos um do

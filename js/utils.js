@@ -247,14 +247,41 @@ const Utils = {
       host.id = 'toast-host';
       document.body.appendChild(host);
     }
+    // Deduplicação de toasts "exatamente iguais" (mesmo texto): em vez de
+    // empilhar um elemento novo por clique/chamada repetida, reaproveita o
+    // toast ainda visível com o mesmo texto e mostra um sufixo " x2", " x3",
+    // etc, resetando o timeout de sumiço a cada repetição. Mensagens com
+    // texto diferente continuam totalmente independentes entre si.
+    if (!this._toastRegistry) this._toastRegistry = new Map();
+    const registry = this._toastRegistry;
+    const anterior = registry.get(msg);
+    if (anterior && anterior.el.isConnected) {
+      anterior.count += 1;
+      anterior.el.textContent = `${msg} x${anterior.count}`;
+      clearTimeout(anterior.hideTimer);
+      clearTimeout(anterior.removeTimer);
+      anterior.hideTimer = setTimeout(() => {
+        anterior.el.classList.remove('toast--show');
+        anterior.removeTimer = setTimeout(() => {
+          anterior.el.remove();
+          if (registry.get(msg) === anterior) registry.delete(msg);
+        }, 300);
+      }, duration);
+      return;
+    }
     const el = document.createElement('div');
     el.className = `toast toast--${type}`;
     el.textContent = msg;
     host.appendChild(el);
     requestAnimationFrame(() => el.classList.add('toast--show'));
-    setTimeout(() => {
+    const entry = { el, count: 1, hideTimer: null, removeTimer: null };
+    registry.set(msg, entry);
+    entry.hideTimer = setTimeout(() => {
       el.classList.remove('toast--show');
-      setTimeout(() => el.remove(), 300);
+      entry.removeTimer = setTimeout(() => {
+        el.remove();
+        if (registry.get(msg) === entry) registry.delete(msg);
+      }, 300);
     }, duration);
   },
 

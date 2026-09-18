@@ -145,6 +145,25 @@ const ClassicMode = {
    *  conjuntos de botões (ver `_FOOTER_DEFS_PADRAO`/
    *  `_FOOTER_DEFS_MAPEAMENTO` abaixo). */
   isModoMapeamento() { return this.readCachedOpMode() === 'mapeamento'; },
+
+  /** [RODADA 128] Esconde/mostra o botão "👁️ Ver lista simples" do
+   *  cabeçalho (`#btn-verlista-top`, ver index.html/app.js) conforme o modo
+   *  de operação — pedido do usuário verbatim: "Na Tela de Abertura do app,
+   *  se for clicado em 'Mapeamento de ambientes', o botão 'Ver lista
+   *  simples' deve deixar de aparecer no cabeçalho [...] Se marcar
+   *  'Conferência de patrimônios', então, deve permanecer." Esse botão abre
+   *  a cópia leve global do LocalBackup (ver verlistasimples.js) — só faz
+   *  sentido no modo 'Conferência de patrimônios'. Chamada em `finish()`
+   *  (troca de modo pela splash) e em `restoreFromSettings()` (boot, já com
+   *  o modo cacheado em localStorage — mesma leitura síncrona que
+   *  `isModoMapeamento()` já usa pro rodapé). O botão existe nos dois modos
+   *  de apresentação (Clássico/Workspace) porque é o MESMO elemento físico
+   *  `header.topbar` movido entre eles (ver comentário grande no topo deste
+   *  arquivo) — uma única chamada já cobre os dois. */
+  _updateVerListaTopBtnVisibility() {
+    const btn = document.getElementById('btn-verlista-top');
+    if (btn) btn.style.display = this.isModoMapeamento() ? 'none' : '';
+  },
   // Definição dos 5 botões do rodapé — 2 conjuntos, um por modo de
   // operação (ver `isModoMapeamento()` acima). `slot` é uma posição FIXA
   // (0 a 4) independente da chave (`key`) do botão que ocupa aquela
@@ -298,6 +317,7 @@ const ClassicMode = {
         this._syncOpModeLSCache(modo);
         const modoMapeamento = modo === 'mapeamento';
         try { this.updateFooterForMode(modoMapeamento); } catch (e) { console.warn('[ClassicMode] falha ao animar o rodapé do modo Clássico:', e); }
+        try { this._updateVerListaTopBtnVisibility(); } catch (e) { console.warn('[ClassicMode] falha ao atualizar visibilidade do botão "Ver lista simples":', e); }
         try { window.BSPLayout?.updateBotoesForMode?.(modoMapeamento); } catch (e) { console.warn('[ClassicMode] falha ao animar o rodapé do Workspace:', e); }
         // [15/09/2026 UTC] NOVO — pedido verbatim: "Ao selecionar o
         // 'Mapeamento de ambientes', na Tela de Abertura, acaba ficando o
@@ -626,6 +646,7 @@ const ClassicMode = {
       // splash screen aparecer de novo (o que, com um modo já salvo, só
       // acontece se a pessoa reabrir a Tela de Abertura na mão).
       try { const opModo = await DB.getSetting(this._OPMODE_KEY, ''); if (opModo) this._syncOpModeLSCache(opModo); } catch (e) { /* melhor esforço */ }
+      try { this._updateVerListaTopBtnVisibility(); } catch (e) { /* melhor esforço — ver comentário grande na função */ }
       if (modo === 'classic') await this.enter(); // enter() já sincroniza o cache de novo e #app já está/fica escondido — nenhum flash
     } catch (e) {
       console.warn('[ClassicMode] falha ao restaurar o modo de layout salvo:', e);
