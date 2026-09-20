@@ -414,6 +414,44 @@ function buildSmoothedTriGeometry(THREE, verts, faces, faceColorsRGB) {
   return geo;
 }
 
+/** [20/09/2026 UTC] Geometria das faces de VIDRO de uma malha editada (customMesh) com UV planar por face
+ *  (cada face vira um "painel" 0..1), para receber a MESMA textura de vidro do cenário (`_glassShineTexture`).
+ *  Sem normais/cores: o material do vidro é MeshBasicMaterial. Usada também pelo Modelador. */
+function buildGlassFaceGeometry(THREE, verts, faces) {
+  const pos = [], uv = [];
+  (faces || []).forEach((f) => {
+    if (!f || f.length < 3) return;
+    const p0 = verts[f[0]], p1 = verts[f[1]], p2 = verts[f[2]];
+    if (!p0 || !p1 || !p2) return;
+    let ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2];
+    const lu = Math.hypot(ux, uy, uz); if (!lu) return;
+    ux /= lu; uy /= lu; uz /= lu;
+    const ax = p2[0] - p0[0], ay = p2[1] - p0[1], az = p2[2] - p0[2];
+    let nx = uy * az - uz * ay, ny = uz * ax - ux * az, nz = ux * ay - uy * ax;
+    const ln = Math.hypot(nx, ny, nz); if (!ln) return;
+    nx /= ln; ny /= ln; nz /= ln;
+    const vx = ny * uz - nz * uy, vy = nz * ux - nx * uz, vz = nx * uy - ny * ux;
+    const pu = [], pv = [];
+    let mnU = Infinity, mxU = -Infinity, mnV = Infinity, mxV = -Infinity;
+    f.forEach((vi, i) => {
+      const p = verts[vi]; const dx = p[0] - p0[0], dy = p[1] - p0[1], dz = p[2] - p0[2];
+      const a = dx * ux + dy * uy + dz * uz, b = dx * vx + dy * vy + dz * vz;
+      pu[i] = a; pv[i] = b;
+      if (a < mnU) mnU = a; if (a > mxU) mxU = a; if (b < mnV) mnV = b; if (b > mxV) mxV = b;
+    });
+    const su = (mxU - mnU) || 1, sv = (mxV - mnV) || 1;
+    const push = (i) => { const p = verts[f[i]]; pos.push(p[0], p[1], p[2]); uv.push((pu[i] - mnU) / su, (pv[i] - mnV) / sv); };
+    for (let k = 1; k < f.length - 1; k++) { push(0); push(k); push(k + 1); }
+  });
+  const geo = new THREE.BufferGeometry();
+  if (pos.length) {
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  }
+  return geo;
+}
+
+
 // `OBJECT3D_PROFILES`/`OBJECT3D_DEFAULT_PROFILE` (dimensões/forma/cor de
 // cada tipo de objeto padrão) mudaram de casa na rodada 51 — ver
 // js/engine3d-profiles.js. Continuam visíveis aqui como identificadores
@@ -426,6 +464,7 @@ function buildSmoothedTriGeometry(THREE, verts, faces, faceColorsRGB) {
 // o hit-test de raycasting das paredes (hoverPick) use o MESMO valor da
 // malha visível, e não fique testando contra uma caixa de tamanho errado.
 const WALL_THICKNESS_3D = 0.12;
+
 // Exposta em window (mesmo padrão de OBJECT3D_DEFAULT_PROFILE acima) — pedido
 // do usuário, 25/08/2026: view3d.js precisa deste MESMO valor pra testar
 // colisão objeto×parede ao colocar objeto/item (ver view3d.js
@@ -1901,7 +1940,7 @@ class Engine3D {
       // caixas (preview não precisa bater o nº exato de degraus do objeto
       // final, que só existe depois de clicar — ver comentário no
       // construtor) — só a altura TOTAL empilhada precisa estar certa.
-      const alturaTotal = this.mapData?.alturaPiso || 2.8;
+      const alturaTotal = 2.0; // altura de fábrica do catálogo (a escada real usa a própria altura)
       const nDegraus = this._GHOST_ESCADA_DEGRAUS;
       const stepDepth = profundidadeTotal / nDegraus;
       const stepHeight = alturaTotal / nDegraus;
@@ -3021,6 +3060,10 @@ class Engine3D {
     // específico (uma porta de cada vez), não uma varredura completa.
     // Recriado do zero a cada setScene, igual aos outros caches acima.
     this._doorRuntime = new Map();
+    this._redeRuntime = new Map(); this._cabosGroup = null; // [18/09/2026 UTC] RODADA 166 -- equipamentos de rede + cabos
+    this._caboMoldarAtivo = false; // [19/09/2026 UTC] RODADA 190 -- ver `caboMoldarSetAtivo`
+    this._cabosInfo = new Map(); this._feixes = []; this._redeCarga = null; // RODADA 167 -- cabos (percurso), feixes
+    this._rackRuntime = new Map(); // [18/09/2026 UTC] RODADA 164 — portas animadas dos Racks (ver _buildRackMesh)
     // [11/09/2026] NOVO — item 1 do pedido "parte do cone aparece na frente
     // da câmera" em "Ver através desta câmera": índice camId -> [malhas
     // caixa+cone] daquela câmera, repovoado do zero a cada setScene (mesmo
@@ -3424,12 +3467,6 @@ class Engine3D {
     // sem `parentWallId`) não cortam nada (não há parede-mãe) — ver o loop
     // de portas/janelas logo abaixo desta função, que desenha a malha delas
     // à parte (presa OU solta, aberta OU fechada).
-    const DOOR_TYPES3D = window.DOOR_TYPES || {};
-    const WINDOW_TYPES3D = window.WINDOW_TYPES || {};
-    const colorFromHex = (hex, fallback) => {
-      const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim());
-      return m ? parseInt(m[1], 16) : fallback;
-    };
     /** Uma caixa de parede (usada tanto pro corpo inteiro quanto por cada
      *  segmento/verga/peitoril de uma parede com vão aberto) — `t0`/`t1` em
      *  METROS ao longo da parede (a partir de x1,y1), `y0`/`y1` em altura. */
@@ -3564,423 +3601,23 @@ class Engine3D {
     // (mesma técnica de _buildMesaMesh, ver comentário lá: local->mundo via
     // cos/sin da rotação em Y).
     // Versão com borda DIFERENTE entre cima/baixo (`borderTB`) e os dois
-    // lados (`borderLR`) — pedido do usuário (rodada seguinte, armadura
-    // interna da janela de correr): "em cima e em baixo, 4cm; e nas
-    // laterais 1,5cm". `buildFrameRingParts` (logo abaixo) é só o caso
-    // particular onde as quatro bordas são iguais.
-    const buildFrameRingPartsTB_LR = (w, h, depth, borderTB, borderLR, mat) => {
-      const meioH = Math.max(0.001, h - borderTB * 2);
-      return [
-        { mesh: new THREE.Mesh(new THREE.BoxGeometry(w, borderTB, depth), mat), lx: 0, ly: h / 2 - borderTB / 2, lz: 0 }, // barra de cima
-        { mesh: new THREE.Mesh(new THREE.BoxGeometry(w, borderTB, depth), mat), lx: 0, ly: -(h / 2 - borderTB / 2), lz: 0 }, // barra de baixo
-        { mesh: new THREE.Mesh(new THREE.BoxGeometry(borderLR, meioH, depth), mat), lx: -(w / 2 - borderLR / 2), ly: 0, lz: 0 }, // barra da esquerda
-        { mesh: new THREE.Mesh(new THREE.BoxGeometry(borderLR, meioH, depth), mat), lx: (w / 2 - borderLR / 2), ly: 0, lz: 0 }, // barra da direita
-      ];
-    };
-    const buildFrameRingParts = (w, h, depth, borderT, mat) => buildFrameRingPartsTB_LR(w, h, depth, borderT, borderT, mat);
-
-    /** Janela de correr, 2 folhas — pedido do usuário (24/08/2026): "deve
-     *  haver mais um tipo de janela", com medidas de CATÁLOGO reais (não são
-     *  um "padrão sugerido" livre — o painel de propriedades, mapview.js
-     *  _openWindowPanel, já preenche largura/altura/peitoril com estes MESMOS
-     *  valores ao escolher `tipo: 'correr_2folhas'`, mas o desenho 3D usa as
-     *  constantes fixas abaixo direto, não os campos largura/altura do
-     *  elemento — pra o formato da armadura/folhas nunca ficar torto se
-     *  alguém editar largura/altura na mão depois de escolher este tipo):
-     *   - Armadura (moldura externa, com 2 trilhos p/ 2 folhas): limite de
-     *     204,5×108cm, "espessura" (perfil de alumínio) de 0,8mm, profundidade
-     *     (o quanto ocupa da parede) de 8,5cm.
-     *   - Cada folha (o caixilho que desliza, com o vidro): 112×97cm, com
-     *     4cm de borda de metal (feito uma moldura de quadro, por DENTRO
-     *     desses 112×97 — vidro visível de 104×89cm), profundidade de 3cm.
-     *   - As DUAS folhas ficam cada uma no seu trilho da MESMA armadura —
-     *     como a armadura (204,5cm) é bem mais larga que UMA folha (112cm),
-     *     as duas se sobrepõem no meio (2×112−204,5 = 19,5cm) — representadas
-     *     aqui na posição "fechada" (uma encostada em cada lateral da
-     *     armadura, se encontrando no meio), cada uma no seu Z (profundidade)
-     *     pra não conflitar com a outra (dois trilhos de verdade, um um
-     *     pouco mais pra fora que o outro). Sem animação de abrir puxando
-     *     uma folha por cima da outra (fora do escopo pedido — a caixa
-     *     "Aberta (3D)" do painel continua só controlando o buraco cortado
-     *     na parede, ver `openings` acima, igual pros outros tipos).
-     *  O vidro de cada folha usa o MESMO tratamento "Minecraft" (pedido do
-     *  usuário: "todo vidro no projeto deve ser representado como no
-     *  Minecraft") de qualquer outra janela — ver _buildGlassPane; só a
-     *  moldura de metal (armadura + armadura interna + folhas) é geometria
-     *  de verdade.
-     *
-     *  Rodada seguinte (pedido do usuário) — acrescentada uma SEGUNDA
-     *  armadura, mais interna (198,5×108cm... 198,5×101cm — dentro da
-     *  primeira, 204,5×108cm), profundidade também de 8,5cm, que é onde as
-     *  folhas correm de verdade (a armadura externa, de 0,8mm, é só o
-     *  acabamento/moldura da parede em volta):
-     *   - Moldura de quadro DESIGUAL: 4cm em cima e embaixo, 1,5cm nas
-     *     laterais (medidos pra DENTRO dos 198,5×101cm).
-     *   - A barra de CIMA é maciça, extrudada ponta a ponta dos 8,5cm de
-     *     profundidade (igual a qualquer barra "normal" deste arquivo).
-     *   - A barra de BAIXO é OCA — "como no metrô de um trem": em vez de
-     *     uma caixa maciça, dois trilhos finos (um pra cada folha/trilho de
-     *     profundidade, ver `folhaZ` abaixo), com vão entre eles — é ali que
-     *     as folhas se encaixam pra deslizar.
-     *   - As duas armaduras (externa e interna) não podem "ficar voando"
-     *     desconectadas — uma TERCEIRA peça, um anel bem mais FINO na
-     *     profundidade (`CONECTOR_D`, bem menor que 8,5cm — "uma extrusão
-     *     mais fina"), preenche exatamente o vão entre elas (a mesma conta
-     *     de moldura-de-quadro, com bordas TB/LR = a metade da diferença
-     *     entre os dois tamanhos de armadura), soldando as duas numa peça só. */
-    const buildJanelaCorrer2Folhas = (el) => {
-      const pos = (typeof Mapping !== 'undefined') ? Mapping.resolveDoorWindowPos(mapData, el) : { x: el.x, y: el.y, angulo: el.angulo || 0 };
-      const FRAME_W = 2.045, FRAME_H = 1.08, FRAME_D = 0.085, FRAME_T = 0.0008;
-      const ARM2_W = 1.985, ARM2_H = 1.01, ARM2_D = 0.085; // armadura interna — mesma profundidade da externa (correm as folhas nela)
-      const ARM2_BORDA_TB = 0.04, ARM2_BORDA_LR = 0.015; // 4cm cima/baixo, 1,5cm laterais
-      const CONECTOR_D = 0.02; // "extrusão mais fina" — só uma solda visual entre as duas armaduras, não estrutural de verdade
-      const FOLHA_W = 1.12, FOLHA_H = 0.97, FOLHA_D = 0.03, FOLHA_BORDA = 0.04;
-      // 92cm (pedido do usuário) — MESMO valor que o painel já preenche em
-      // `alturaPeitoril` ao escolher este tipo; `!= null` (não `||`) porque
-      // 0 é um peitoril válido (janela batendo no chão), não "sem valor".
-      const baseY = el.alturaPeitoril != null ? el.alturaPeitoril : 0.92;
-      const corMoldura = colorFromHex(WINDOW_TYPES3D[el.tipo]?.frameColor, 0xc7ccd4);
-      const matMetal = wireframe
-        ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-        : new THREE.MeshLambertMaterial({ color: corMoldura });
-      const partsLocal = [];
-      partsLocal.push(...buildFrameRingParts(FRAME_W, FRAME_H, FRAME_D, FRAME_T, matMetal)); // armadura EXTERNA — um anel só, ao redor do vão inteiro
-
-      // Conector — preenche exatamente o vão entre a armadura externa
-      // (204,5×108) e a interna (198,5×101): as bordas TB/LR abaixo são a
-      // metade da diferença entre os dois tamanhos, então o anel resultante
-      // encosta nas duas ao mesmo tempo, sem sobra nem vão — ver conta no
-      // comentário grande acima. `CONECTOR_D` bem menor que 8,5cm ("extrusão
-      // mais fina", pedido do usuário) — centrado na mesma profundidade das
-      // armaduras (lz=0 em todas), só mais fino.
-      const conectorBordaTB = (FRAME_H - ARM2_H) / 2, conectorBordaLR = (FRAME_W - ARM2_W) / 2;
-      partsLocal.push(...buildFrameRingPartsTB_LR(FRAME_W, FRAME_H, CONECTOR_D, conectorBordaTB, conectorBordaLR, matMetal));
-
-      // Armadura INTERNA — cima e laterais maciças (parte de cima "ponta a
-      // ponta da profundidade", pedido do usuário); base tratada à parte
-      // logo abaixo (oca, os trilhos).
-      const meioArm2H = Math.max(0.001, ARM2_H - ARM2_BORDA_TB * 2);
-      partsLocal.push({ mesh: new THREE.Mesh(new THREE.BoxGeometry(ARM2_W, ARM2_BORDA_TB, ARM2_D), matMetal), lx: 0, ly: ARM2_H / 2 - ARM2_BORDA_TB / 2, lz: 0 }); // barra de cima — maciça
-      partsLocal.push({ mesh: new THREE.Mesh(new THREE.BoxGeometry(ARM2_BORDA_LR, meioArm2H, ARM2_D), matMetal), lx: -(ARM2_W / 2 - ARM2_BORDA_LR / 2), ly: 0, lz: 0 }); // lateral esquerda
-      partsLocal.push({ mesh: new THREE.Mesh(new THREE.BoxGeometry(ARM2_BORDA_LR, meioArm2H, ARM2_D), matMetal), lx: (ARM2_W / 2 - ARM2_BORDA_LR / 2), ly: 0, lz: 0 }); // lateral direita
-
-      // Deslocamento lateral de cada folha (ver conta no comentário grande
-      // acima) — encostada na lateral da armadura INTERNA do seu lado (é
-      // nela que as folhas correm — "é onde as duas folhas de janela
-      // correm", pedido do usuário — não mais na externa). `folhaZ` deixa
-      // uma folha um pouco mais pra fora e a outra um pouco mais pra dentro
-      // (dois trilhos de verdade), sem furar pra fora da profundidade da
-      // armadura (ARM2_D/2 = 4,25cm é bem maior que FOLHA_D/2+0,005 = 2cm).
-      const folhaOffsetX = ARM2_W / 2 - FOLHA_W / 2;
-      const folhaZ = FOLHA_D / 2 + 0.005;
-      // Base da armadura interna — OCA ("como no metrô de um trem"): em vez
-      // da barra maciça de baixo (que a armadura externa e o topo desta
-      // interna têm), DOIS trilhos finos, um bem no MESMO Z de cada folha
-      // (`folhaZ` acima) — é literalmente ali que a base de cada folha se
-      // encaixa pra deslizar, com vão (oco) entre os dois trilhos e entre
-      // eles e as bordas da profundidade (ARM2_D), em vez de uma caixa só.
-      const trilhoAltura = 0.01, trilhoProfundidade = 0.012;
-      const baseLy = -(ARM2_H / 2 - ARM2_BORDA_TB / 2); // mesma altura em que ficaria a barra de baixo, se fosse maciça
-      [-1, 1].forEach((lado) => {
-        partsLocal.push({ mesh: new THREE.Mesh(new THREE.BoxGeometry(ARM2_W, trilhoAltura, trilhoProfundidade), matMetal), lx: 0, ly: baseLy, lz: lado * folhaZ });
-      });
-
-      [-1, 1].forEach((lado) => {
-        partsLocal.push(...buildFrameRingParts(FOLHA_W, FOLHA_H, FOLHA_D, FOLHA_BORDA, matMetal)
-          .map((p) => ({ ...p, lx: p.lx + lado * folhaOffsetX, lz: p.lz + lado * folhaZ })));
-        const glassW = FOLHA_W - FOLHA_BORDA * 2, glassH = FOLHA_H - FOLHA_BORDA * 2;
-        partsLocal.push({ mesh: this._buildGlassPane(glassW, glassH), lx: lado * folhaOffsetX, ly: 0, lz: lado * folhaZ });
-      });
-      const rotY = objAnguloToRotY(pos.angulo || 0);
-      const cosR = Math.cos(rotY), sinR = Math.sin(rotY);
-      const meshesAdded = [];
-      partsLocal.forEach(({ mesh, lx, ly, lz }) => {
-        mesh.position.set(pos.x + lx * cosR + lz * sinR, baseY + FRAME_H / 2 + ly, pos.y - lx * sinR + lz * cosR);
-        mesh.rotation.y = rotY;
-        this._group.add(mesh);
-        meshesAdded.push(mesh);
-      });
-      const half = { x: FRAME_W / 2, y: FRAME_H / 2, z: FRAME_D / 2 };
-      const posPick = { x: pos.x, y: baseY + FRAME_H / 2, z: pos.y };
-      const pick = { id: el.id, type: 'janela', ref: el, pos: posPick, center: posPick, radius: Math.max(FRAME_W, FRAME_H) / 2, obb: { half, rotY } };
-      this.pickables.push(pick);
-      meshesAdded.forEach((m) => { m.userData.pick = pick; this._pickMeshes.push(m); });
-    };
-
-    const buildDoorOrWindowMesh = (el, kind) => {
-      if (!mapData) return;
-      // Pedido do usuário: "deve haver mais um tipo de janela" — a de correr
-      // de 2 folhas tem geometria BEM diferente da caixa única genérica
-      // abaixo (armadura + 2 folhas com trilhos, não uma placa só) —
-      // delegada inteira pra buildJanelaCorrer2Folhas, acima.
-      if (kind === 'janela' && el.tipo === 'correr_2folhas') { buildJanelaCorrer2Folhas(el); return; }
-      const pos = (typeof Mapping !== 'undefined') ? Mapping.resolveDoorWindowPos(mapData, el) : { x: el.x, y: el.y, angulo: el.angulo || 0 };
-      const largura = el.largura || (kind === 'porta' ? 0.8 : 1.2);
-      const altura = el.altura || (kind === 'porta' ? 2.1 : 1.2);
-      // NOVO (01/09/2026), item GRANDE #9 — "andares de verdade" (ver
-      // comentário grande em Mapping.addWall/addDoor/addWindow, js/
-      // mapping.js). PRESA numa parede (parentWallId): usa o piso DA PAREDE
-      // (nunca o próprio `el.piso`) — a porta/janela deve sempre ficar no
-      // mesmo andar físico da parede que ela corta, mesmo que `el.piso`
-      // tenha ficado desatualizado (ex.: a parede foi movida pra outro piso
-      // depois). SOLTA (parentWallId null): usa o próprio `el.piso`, igual a
-      // qualquer objeto solto no mapa.
-      const parentWallPD = el.parentWallId ? (mapData.walls || []).find((w) => w.id === el.parentWallId) : null;
-      const pisoY = ((parentWallPD ? parentWallPD.piso : el.piso) || 0) * (mapData.alturaPiso || 2.8);
-      const baseY = (kind === 'porta' ? 0 : (el.alturaPeitoril || 0)) + pisoY;
-      const tipos = kind === 'porta' ? DOOR_TYPES3D : WINDOW_TYPES3D;
-      const corHex = el.colorRGB
-        ? (el.colorRGB[0] << 16) | (el.colorRGB[1] << 8) | el.colorRGB[2]
-        : colorFromHex(tipos[el.tipo]?.color, kind === 'porta' ? 0x8a5a34 : 0xbfe3ff);
-      // Espessura da malha: fina (encostada na parede) — "folha" da porta ou
-      // vidro da janela, não a parede em si. Aberta encolhe pra ficar quase
-      // rente à lateral do vão (só uma pista visual, ver comentário acima).
-      const espMesh = el.aberta ? wallThickness * 0.3 : wallThickness * 0.85;
-      // Pedido do usuário: "todo vidro no projeto deve ser representado como
-      // no Minecraft". PORTA continua sendo sempre uma placa única sólida
-      // (nunca teve vidro — só madeira/metal, ver DOOR_TYPES). JANELA
-      // genérica (qualquer tipo que não seja a de correr detalhada acima)
-      // passa a ser uma MOLDURA fina (4 barras, cor de `frameColor`) + um
-      // painel de vidro "Minecraft" (_buildGlassPane) no meio, em vez de uma
-      // única placa opaca cobrindo o vão inteiro — mais parecido com uma
-      // janela de verdade (não é um bloco maciço) e mais barato (o vidro não
-      // pinta quase nada da própria área, ver _buildGlassShineTexture).
-      const partsLocal = []; // { mesh, lx, ly, lz } — mesma convenção de buildFrameRingParts/buildJanelaCorrer2Folhas acima
-      if (kind === 'porta') {
-        const geo = new THREE.BoxGeometry(largura, altura, espMesh);
-        const mat = wireframe
-          ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-          : new THREE.MeshLambertMaterial({ color: corHex });
-        partsLocal.push({ mesh: new THREE.Mesh(geo, mat), lx: 0, ly: 0, lz: 0 });
-      } else {
-        // 5cm de moldura (ou menos, se a janela for pequena o bastante pra
-        // isso não caber — min() de segurança) — tipos genéricos não têm
-        // medida própria de moldura (só a de correr detalhada, acima, tem
-        // catálogo real com 4cm por folha); 5cm é um valor razoável de
-        // esquadria comum, só pra dar a mesma "moldura fina + vidro" que
-        // toda janela agora tem.
-        const bordaFrame = Math.min(0.05, Math.min(largura, altura) * 0.3);
-        const corMoldura = colorFromHex(tipos[el.tipo]?.frameColor, 0xe8ecf2);
-        const matFrame = wireframe
-          ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-          : new THREE.MeshLambertMaterial({ color: corMoldura });
-        partsLocal.push(...buildFrameRingParts(largura, altura, espMesh, bordaFrame, matFrame));
-        const glassW = Math.max(0.02, largura - bordaFrame * 2), glassH = Math.max(0.02, altura - bordaFrame * 2);
-        partsLocal.push({ mesh: this._buildGlassPane(glassW, glassH), lx: 0, ly: 0, lz: 0 });
-      }
-      // Ângulo — bug relatado pelo usuário: "a orientação da rotação do 2D
-      // não está correspondendo no 3D... aparece 90 graus de diferença...
-      // as janelas, no 3D, ainda estão ficando 90 graus diferente do 2D", e
-      // também "a porta fica afastada da parede no 3D" (a folha não batia
-      // com a dobradiça no canto — ver mais abaixo por que os dois sintomas
-      // têm a MESMA causa).
-      //
-      // Fórmula ANTIGA (errada): `rotY = π/2 - angulo`, herdada por engano
-      // da convenção da PAREDE (`wRotY = atan2(dx,dz)`, ver addWallBox
-      // acima) — mas porta/janela NÃO usa a mesma geometria da parede: a
-      // BoxGeometry da parede tem a espessura no eixo local X e o
-      // COMPRIMENTO no eixo local Z (`BoxGeometry(wallThickness, segH,
-      // segLen)`), enquanto a de porta/janela (logo abaixo,
-      // `BoxGeometry(largura, altura, espMesh)`) tem a LARGURA no eixo
-      // local X e a espessura no Z — exatamente a mesma convenção de
-      // mesa/objeto/luminária (`BoxGeometry(perfil.w, perfil.h, perfil.d)`,
-      // ver OBJECT3D_PROFILES/setScene no topo do arquivo), não a da
-      // parede. E no 2D (`Map2DRenderer._drawDoorShape`/`_drawWindowShape`,
-      // ver mapview.js) porta/janela são desenhadas do MESMO jeito que um
-      // objeto (`ctx.rotate(pos.angulo)`, `largura` ao longo do eixo local
-      // X) — não do jeito que uma parede é desenhada. Ou seja, porta/janela
-      // precisa da MESMA fórmula já corrigida para objetos nesta rodada
-      // anterior (ver `objAnguloToRotY` no topo do arquivo: `rotY =
-      // -angulo`), não da fórmula da parede.
-      //
-      // Os dois bugs relatados eram o MESMO: com a fórmula errada, a folha
-      // da porta/janela (fechada) ficava girada 90° a mais — pra quem olha,
-      // parece "girada" (o sintoma da janela) e, ao mesmo tempo, como a
-      // malha é um retângulo fino centralizado no MEIO do vão, girado 90°
-      // ele passa a se estender pra FORA da parede em vez de ao LONGO dela
-      // — o que parece "afastado"/destacado da parede (o sintoma da porta).
-      // Corrigindo a rotação de base, os dois somem juntos.
-      const rotY = objAnguloToRotY(pos.angulo || 0);
-      let meshX = pos.x, meshZ = pos.y, meshRotY = rotY;
-      // [14/09/2026] NOVO — `el.anguloAbertura` (0..90°, campo NOVO,
-      // independente do booleano `el.aberta`): quando definido, tem
-      // PRIORIDADE sobre `el.aberta` pra decidir o ângulo de abertura da
-      // folha — permite um Script (js/components.js) animar a porta em
-      // qualquer ângulo intermediário, não só aberta/fechada. `el.aberta`
-      // sozinho (sem `anguloAbertura`) continua se comportando exatamente
-      // como antes (0° fechada / 90° aberta) — ZERO mudança de
-      // comportamento padrão pra porta sem Script.
-      if (kind === 'porta') {
-        const openDeg = (el.anguloAbertura !== undefined && el.anguloAbertura !== null)
-          ? Math.max(0, Math.min(90, el.anguloAbertura))
-          : (el.aberta ? 90 : 0);
-        const phi = openDeg * Math.PI / 180;
-        // Porta ABERTA (phi>0): a folha gira a partir da DOBRADIÇA, igual ao
-        // símbolo arquitetônico do 2D (_drawDoorShape — hinge num CANTO do
-        // vão + arco de até 90°, `el.abertura`: 'esquerda'|'direita' escolhe
-        // qual ponta é fixa). Fórmula generalizada (era só phi=90° fixo,
-        // antes de `anguloAbertura` existir): o centro da folha percorre um
-        // arco de raio `largura/2` em torno da dobradiça — `v0` é o vetor
-        // dobradiça->centro quando FECHADA (ao longo do vão) e `v1` o mesmo
-        // vetor quando TOTALMENTE ABERTA (perpendicular ao vão); como os
-        // dois são perpendiculares entre si e de mesmo módulo, interpolar
-        // com cos(phi)/sin(phi) (em vez de lerp linear de x/z) traça o arco
-        // certo pra qualquer phi intermediário — em phi=0 dá exatamente
-        // `pos.x/pos.y` (fechada, sem essa conta) e em phi=90° dá
-        // exatamente a fórmula antiga (aberta).
-        const ang = pos.angulo || 0;
-        const alongX = Math.cos(ang), alongY = Math.sin(ang); // ao longo da parede/vão
-        const perpX = -Math.sin(ang), perpY = Math.cos(ang); // perpendicular — direção do giro ao abrir
-        const hingeSign = el.abertura === 'esquerda' ? -1 : 1;
-        const hingeX = pos.x + alongX * hingeSign * (largura / 2);
-        const hingeZ = pos.y + alongY * hingeSign * (largura / 2);
-        const v0x = -hingeSign * alongX * (largura / 2), v0z = -hingeSign * alongY * (largura / 2);
-        const v1x = perpX * (largura / 2), v1z = perpY * (largura / 2);
-        meshX = hingeX + Math.cos(phi) * v0x + Math.sin(phi) * v1x;
-        meshZ = hingeZ + Math.cos(phi) * v0z + Math.sin(phi) * v1z;
-        meshRotY = rotY + phi;
-      }
-      // `partsLocal` — UMA peça (porta) ou VÁRIAS (moldura+vidro da janela,
-      // ver acima): cada uma em coordenadas LOCAIS (lx/lz giram junto com
-      // meshRotY, ly só soma direto na altura) — mesma técnica de
-      // _buildMesaMesh/buildJanelaCorrer2Folhas (local->mundo via cos/sin).
-      // Pra porta (só 1 peça, lx=ly=lz=0) dá exatamente a mesma posição de
-      // antes desta rodada — nada muda pra ela.
-      const cosR = Math.cos(meshRotY), sinR = Math.sin(meshRotY);
-      const meshesAdded = [];
-      partsLocal.forEach(({ mesh, lx, ly, lz }) => {
-        mesh.position.set(meshX + lx * cosR + lz * sinR, baseY + altura / 2 + ly, meshZ - lx * sinR + lz * cosR);
-        mesh.rotation.y = meshRotY;
-        this._group.add(mesh);
-        meshesAdded.push(mesh);
-      });
-      const half = { x: largura / 2, y: altura / 2, z: espMesh / 2 };
-      // `pos` (além de `center`, valor idêntico): hoverPick/pickFromRay leem
-      // `p.pos` pra QUALQUER pickable (item/câmera/objeto já tinham os dois
-      // campos) — faltando aqui, todo quadro em que existisse uma porta/
-      // janela no ambiente quebrava `_raySphereT` (`.x` de `undefined`),
-      // travando o loop de render inteiro (bug real: "tela 3D preta", já com
-      // o motor carregando certo — o erro só aparecia DEPOIS do carregamento
-      // funcionar, por isso não tinha aparecido nas rodadas anteriores).
-      // Usa meshX/meshZ/meshRotY (não pos.x/pos.y/rotY) — o pick precisa
-      // coincidir com a malha DE VERDADE, inclusive quando ela pivotou pro
-      // canto da dobradiça acima.
-      const posPick = { x: meshX, y: baseY + altura / 2, z: meshZ };
-      const pick = { id: el.id, type: kind, ref: el, pos: posPick, center: posPick, radius: Math.max(largura, altura) / 2, obb: { half, rotY: meshRotY } };
-      this.pickables.push(pick);
-      // Mesma peça de `pick` em TODAS as malhas do elemento (moldura+vidro
-      // da janela, ou só a peça única da porta) — mesmo padrão já usado por
-      // qualquer pickable de várias malhas neste arquivo (ver _buildMesaMesh/
-      // _buildLuminariaMesh: câmera, mesa, luminária) — hover/seleção/remover
-      // funcionam mirando em QUALQUER pedaço, e o modo 'pixelperfect'
-      // (_hoverPickPixelPerfect) também acerta a malha de verdade certinho.
-      meshesAdded.forEach((m) => { m.userData.pick = pick; this._pickMeshes.push(m); });
-      // [14/09/2026] NOVO — guarda a malha da folha + os dados pra
-      // recalcular o arco de abertura (mesmo `pos`/`largura`/`altura`/
-      // `baseY`/`rotY` usados acima) em `el._doorLeafMesh`/
-      // `el._doorPivotInfo` — só pra porta (1 peça única, `meshesAdded[0]`).
-      // Usado por `_updateDoorAnimations` (chamado a cada quadro por
-      // `view3d.js` `_updateScriptLifecycle`) pra animar `el.anguloAbertura`
-      // suavemente SEM precisar reconstruir a cena inteira a cada mudança —
-      // ver `Components`/exemplo de Script "Porta Automática".
-      if (kind === 'porta') {
-        // [correção 13/09/2026] guardado em `this._doorRuntime` (Map por
-        // id), NÃO em `el` — ver comentário grande em `setScene` sobre por
-        // que anexar um THREE.Mesh direto na entidade persistida quebrava
-        // o salvamento no IndexedDB.
-        const rt = { leafMesh: meshesAdded[0] || null, pivotInfo: { pos, largura, altura, baseY, rotY }, manetaMesh: null };
-        this._doorRuntime.set(el.id, rt);
-        // [13/09/2026] NOVO — variante "porta com maçaneta" (pedido do
-        // usuário: "faça uma porta com maçaneta e deve ter um script para
-        // fazer a animação de movimento da maçaneta quando se dá dois
-        // cliques..."). `el.comManeneta:true` é um campo NOVO e opcional —
-        // sem ele, a porta continua exatamente como sempre (placa lisa sem
-        // maçaneta), ZERO mudança de comportamento padrão.
-        //
-        // Construída como um GRUPO (cilindro fino "espelho"/rosca + alavanca
-        // em L) e adicionada como FILHO de `el._doorLeafMesh` (`mesh.add`,
-        // não `this._group.add`) — assim ela HERDA automaticamente toda
-        // posição/rotação que `_updateDoorAnimations` já aplica na folha a
-        // cada quadro (abrir/fechar), sem precisar recalcular nada aqui: o
-        // grupo da maçaneta só faz sua PRÓPRIA rotação extra (eixo local Z,
-        // perpendicular à face da porta) em cima disso, cuidado por
-        // `_updateDoorAnimations` (ver mais abaixo, junto da animação da
-        // folha) quando `anguloAbertura` muda de alvo.
-        //
-        // Posição local (relativa ao CENTRO da folha, já que a geometria da
-        // porta é uma BoxGeometry centrada em 0,0,0): lado OPOSTO à
-        // dobradiça (`hingeSign` já calculado acima pro arco de abertura),
-        // altura ~1m absoluto (convertido pra offset local subtraindo
-        // `altura/2`, já que o eixo Y local da folha tem origem no centro
-        // dela), levemente à frente da face (metade da espessura da folha +
-        // uma folga pequena) — posição típica de maçaneta real.
-        const doorMesh = meshesAdded[0];
-        if (el.comManeneta && doorMesh) {
-          // [correção 13/09/2026] `hingeSign` foi calculado num bloco
-          // `if (kind === 'porta')` ANTERIOR (linha ~3730), com escopo de
-          // `const` só daquele bloco — reusá-lo aqui (bloco `if` separado)
-          // dava `ReferenceError: hingeSign is not defined` e quebrava o
-          // motor 3D inteiro. Mesma fórmula de lá, recalculada aqui.
-          const hingeSign = el.abertura === 'esquerda' ? -1 : 1;
-          const corManeta = el.colorManeta
-            ? colorFromHex(el.colorManeta, 0xc9c9c9)
-            : 0xc9c9c9; // metálico padrão (dourado: passar `el.colorManeta = 0xd4af37`)
-          const matManeta = wireframe
-            ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-            : new THREE.MeshLambertMaterial({ color: corManeta });
-          // [15/09/2026 UTC] ALTERADO — pedido verbatim: "O modelo 3D da
-          // porta deve ter a maçaneta voltada para o lado certo." Antes só
-          // havia UM grupo de maçaneta, montado inteiro no lado +Z local da
-          // folha — uma porta de verdade tem maçaneta/puxador nas DUAS
-          // faces (cada lado do ambiente que a porta separa precisa abrir
-          // pelo seu próprio lado); com só uma face montada, olhando a
-          // porta do lado sem maçaneta ela aparecia "sem nada"/errada — o
-          // sintoma batido de "voltada pro lado errado". CORRIGIDO: a
-          // montagem da maçaneta virou uma função local (`montarManeta`),
-          // chamada 2x — uma pro lado +Z, outra pro lado -Z (espelhada em Z
-          // e também em X, já que uma maçaneta vista pelo lado de trás é a
-          // imagem espelhada da vista pela frente) — cada face agora tem seu
-          // próprio grupo, sempre do lado OPOSTO à dobradiça (`hingeSign`,
-          // mesma lógica de antes, inalterada) em X. `rt.manetaMesh` vira um
-          // array com os 2 grupos (`_updateDoorAnimations`, mais abaixo, só
-          // precisa girar TODOS eles do mesmo jeito ao animar).
-          const montarManeta = (ladoZ) => {
-            const manetaGrupo = new THREE.Group();
-            // Rosca/espelho: cilindro curto, eixo alinhado ao Z local
-            // (protunde pra fora da face da porta) — `CylinderGeometry`
-            // nasce com eixo Y, por isso o `rotation.x = π/2` (deita o
-            // cilindro pro eixo Z).
-            const rosca = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.04, 12), matManeta);
-            rosca.rotation.x = Math.PI / 2;
-            rosca.position.set(0, 0, ladoZ * (espMesh / 2 + 0.02));
-            manetaGrupo.add(rosca);
-            // Alavanca em L: barra fina saindo da rosca — estende no sentido
-            // da dobradiça (`-hingeSign` em X), formato "L" simples (2
-            // caixas: a haste que sai da rosca + a ponta que dobra, ambas
-            // filhas do MESMO grupo, então giram juntas na animação de
-            // "girar a maçaneta"). `ladoZ` espelha a profundidade (Z) pra
-            // cada face olhar pro lado certo.
-            const haste = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.02, 0.02), matManeta);
-            haste.position.set(-hingeSign * 0.05, 0, ladoZ * (espMesh / 2 + 0.045));
-            manetaGrupo.add(haste);
-            const ponta = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.03), matManeta);
-            ponta.position.set(-hingeSign * 0.095, 0, ladoZ * (espMesh / 2 + 0.06));
-            manetaGrupo.add(ponta);
-            // Posição do GRUPO inteiro: lado oposto à dobradiça, ~1m de
-            // altura absoluta (offset local = altura alvo - metade da
-            // altura da folha, já que a folha é centrada em seu próprio
-            // meio) — mesma fórmula de X/Y de antes, só Z passa a depender
-            // de `ladoZ`.
-            manetaGrupo.position.set(-hingeSign * (largura / 2 - 0.06), 1.0 - altura / 2, 0);
-            doorMesh.add(manetaGrupo);
-            return manetaGrupo;
-          };
-          rt.manetaMesh = [montarManeta(1), montarManeta(-1)];
-        }
-      }
-    };
-    (mapData.portas || []).forEach((d) => buildDoorOrWindowMesh(d, 'porta'));
-    (mapData.janelas || []).forEach((j) => buildDoorOrWindowMesh(j, 'janela'));
+    // [22/09/2026 UTC] porta/janela MIGRADOS pro registro
+    // (`js/objecttypes/porta.js`, `janela.js`) -- pedido verbatim: "Porta
+    // e janela [...] devem ser tratados do mesmo jeito que os demais
+    // objetos, com suas classes próprias". `buildDoorOrWindowMesh`/
+    // `buildJanelaCorrer2Folhas`/`buildFrameRingParts` (que eram closures
+    // AQUI DENTRO de `setScene`) viraram métodos de verdade em
+    // `Engine3D.prototype` (`_buildDoorOrWindowMesh` etc., ver embaixo --
+    // não mais capturando `mapData`/`wireframe`/etc. por closure, recebem
+    // tudo por parâmetro agora). Cada elemento de `mapData.portas`/
+    // `mapData.janelas` continua um "elemento de parede" (não um `obj` de
+    // `mapData.objects`), então o dispatch continua sendo este loop
+    // dedicado -- só que agora delegando pro registro, igual
+    // "imagem"/"objimport" acima, em vez de chamar uma closure local.
+    const portaDef = window.ObjectTypes.get('porta');
+    const janelaDef = window.ObjectTypes.get('janela');
+    (mapData.portas || []).forEach((d) => portaDef.buildMesh3D(this, d, mapData));
+    (mapData.janelas || []).forEach((j) => janelaDef.buildMesh3D(this, j, mapData));
 
     // --- marcadores dos itens (pirâmides — cone de 4 lados = base quadrada) ---
     (mapData.itens || []).forEach((it) => {
@@ -4467,7 +4104,14 @@ class Engine3D {
         // a placa pelo MESMO método por quaternion do cone (a normal padrão
         // do `PlaneGeometry`, +Z local, apontada pro vetor `dir`) — sem
         // reintroduzir nenhuma variável de ângulo solta.
-        placa.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dirVec);
+        // Sem roll: base montada com o "cima" do mundo (giro em Y e depois inclinação), como o
+        // retângulo de enquadramento. `setFromUnitVectors` (menor arco) girava a placa em torno do
+        // próprio apontamento quando havia yaw e inclinação juntos.
+        {
+          const upPlaca = Math.abs(dirVec.y) > 0.999 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+          const mPlaca = new THREE.Matrix4().lookAt(new THREE.Vector3(0, 0, 0), dirVec.clone().negate(), upPlaca);
+          placa.quaternion.setFromRotationMatrix(mPlaca);
+        }
         this._group.add(placa);
         // [11/09/2026] `fotoPick` já foi criado/registrado ACIMA (fora
         // deste `if`, ver comentário grande) — a placa só GANHA o mesmo
@@ -4495,6 +4139,7 @@ class Engine3D {
       this._buildOneObjectMesh(obj, wireframe, colWireframe);
       this._applyObjMaterialOverride(obj, childrenBefore);
     });
+    this.rebuildCabos(); // [18/09/2026 UTC] RODADA 166 -- cabos entre portas de equipamentos de rede
 
     // NOVO (07/09/2026), pedido verbatim: "blocos de construção" (tijolos
     // autofundíveis) — ver js/tijolos.js pro algoritmo de fusão/culling de
@@ -4762,63 +4407,14 @@ class Engine3D {
     return tex;
   }
 
-  /** [15/09/2026] NOVO — textura procedural do MOSTRADOR do relógio
-   *  (marcações de hora), pedido do usuário: "Também deve ter marcações
-   *  das horas, além dos ponteiros, se for menos custoso em processamento,
-   *  faça uma textura para as horas e imprima os ponteiros por cima."
-   *  MESMO padrão de cache de `_getProceduralFloorTexture` acima (canvas 2D
-   *  desenhado UMA vez, cacheado por chave, nunca redesenhado por objeto/
-   *  quadro) — aqui mais simples ainda: como o disco do mostrador é sempre
-   *  aplicado como UMA textura direta cobrindo o disco inteiro (sem
-   *  `repeat`/mosaico como no piso — um relógio não "ladrilha" o próprio
-   *  mostrador), não existe a etapa de clonar-por-tamanho; a chave de cache
-   *  é só a cor de fundo (`perfil.color`, permite reaproveitar entre
-   *  relógios de skins diferentes sem redesenhar o canvas de novo pra cada
-   *  um).
-   *
-   *  DESENHO — canvas 256×256: fundo pintado com a cor do mostrador
-   *  (mesma `perfil.color` do disco — ver comentário em `_buildRelogioMesh`
-   *  sobre por que o material usa `color: 0xffffff` com essa textura como
-   *  `map`), um círculo fino de moldura, e 12 tracinhos radiais nas
-   *  posições de hora (a cada 30°) — mais GROSSOS/LONGOS nas posições
-   *  12/3/6/9 (múltiplos de 90°) pra dar aquele destaque de "marcador
-   *  cardinal" que a maioria dos relógios de parede tem. Os PONTEIROS
-   *  continuam sendo geometria (caixas finas, `fazPonteiro` acima) — a
-   *  textura cobre só o mostrador de baixo, os ponteiros ficam por CIMA
-   *  dela (meshes-filho separados, ver `_buildRelogioMesh`), exatamente
-   *  como pedido ("imprima os ponteiros por cima"). */
-  _getProceduralMostradorTexture(corFundo) {
-    const THREE = this.THREE;
-    this._texturaProceduralCache = this._texturaProceduralCache || {};
-    const cor = (corFundo === undefined || corFundo === null) ? 0xf2ede0 : corFundo;
-    const cacheKey = 'mostrador::' + cor.toString(16);
-    let tex = this._texturaProceduralCache[cacheKey];
-    if (tex) return tex;
-    const CANVAS_PX = 256;
-    const canvas = document.createElement('canvas');
-    canvas.width = CANVAS_PX; canvas.height = CANVAS_PX;
-    const ctx = canvas.getContext('2d');
-    // [16/09/2026 UTC] ALTERADO — pedido verbatim: "faça um arquivo
-    // específico do projeto [...] para gerar a textura 2D do relógio
-    // (colocando a sequência de comandos de canvas para gerá-lo) e carregue
-    // para gerar a mesma imagem." Os comandos de canvas (fundo/moldura/12
-    // marcações de hora) que antes moravam INLINE aqui foram extraídos pra
-    // `assets/js/mostrador-canvas.js` (`window.MostradorCanvas.desenhar`,
-    // carregado via `<script>` no index.html ANTES deste arquivo) — usado
-    // tanto por esta função (textura ao vivo, `<canvas>` de navegador de
-    // verdade) quanto pela ferramenta de geração de `.glb` do relógio
-    // (`ferramentas/gerar_malhas.js`, textura ASSADA em PNG, rodando em
-    // Node) — MESMO código-fonte, garantindo a MESMA imagem nos dois casos.
-    const corHex = '#' + ('000000' + (cor >>> 0).toString(16)).slice(-6);
-    window.MostradorCanvas.desenhar(ctx, CANVAS_PX, corHex);
-    tex = new THREE.CanvasTexture(canvas);
-    // Sem `repeat`/wrap especial — a textura cobre o disco inteiro de uma
-    // vez só (UV padrão do `CylinderGeometry` já mapeia a face circular do
-    // topo/base 1:1 num círculo centralizado no quadrado da textura, que é
-    // exatamente como este canvas foi desenhado).
-    this._texturaProceduralCache[cacheKey] = tex;
-    return tex;
-  }
+  // [20/09/2026 UTC] `_getProceduralMostradorTexture` MOVIDO daqui pra
+  // `js/objecttypes/relogio.js` (`RelogioMeshBuilder.prototype`) -- pedido
+  // verbatim: "O arquivo 'mostrador-canvas.js' é para gerar a imagem do
+  // relógio. Dê algum jeito de integrar isso ao relógio." Só o relógio usa
+  // esta textura, então ela não precisa mais viver como método genérico de
+  // `Engine3D` -- ver `relogio.js` pro método e o `<script>` de
+  // `js/objecttypes/mostrador-canvas.js` (também relocado, antes em
+  // `assets/js/`) no index.html.
 
   /** [13/09/2026] NOVO — "Teto de gesso com rodelas de acesso" (pedido do
    *  usuário: "teto de gesso com rodelas de acesso (gabinete/chefia)").
@@ -4834,189 +4430,6 @@ class Engine3D {
    *  os discos como filhos de UM `THREE.Group`, registra esse grupo (não a
    *  placa sozinha) no pick/`_group`/`_pickMeshes` igual a qualquer objeto
    *  comum, pra continuar selecionável/arrastável do jeito de sempre. */
-  _buildTetoGessoMesh(obj, perfil, baseY, wireframe, colWireframe) {
-    const THREE = this.THREE;
-    const group = new THREE.Group();
-    const matPlaca = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: perfil.color });
-    const placaGeo = new THREE.BoxGeometry(perfil.w, perfil.h, perfil.d);
-    const placa = new THREE.Mesh(placaGeo, matPlaca);
-    group.add(placa);
-    // Rodelas de acesso: grid espaçado a cada 2m, começando perto de uma
-    // borda (não centralizado exatamente na borda, pra não cortar metade da
-    // rodela pra fora da placa) — mesma ideia do grid do retículo métrico
-    // (`obj.reticuloMetrico`) logo abaixo neste arquivo, só que fixo em 2m
-    // e sem opção de configurar (pedido não pediu controle nenhum pro
-    // usuário aqui, só o efeito visual).
-    if (!wireframe) {
-      const ESPACAMENTO = 2; // metros
-      const RAIO_RODELA = 0.075; // 15cm de diâmetro
-      const ESPESSURA_RODELA = 0.01; // 1cm
-      const matRodela = new THREE.MeshLambertMaterial({ color: 0xc7cbd1 });
-      const rodelaGeo = new THREE.CylinderGeometry(RAIO_RODELA, RAIO_RODELA, ESPESSURA_RODELA, 16);
-      const hw = perfil.w / 2, hd = perfil.d / 2;
-      const margem = Math.min(ESPACAMENTO / 2, hw, hd);
-      for (let x = -hw + margem; x <= hw - margem + 1e-6; x += ESPACAMENTO) {
-        for (let z = -hd + margem; z <= hd - margem + 1e-6; z += ESPACAMENTO) {
-          const rodela = new THREE.Mesh(rodelaGeo, matRodela);
-          // Face de BAIXO da placa: -perfil.h/2 (centro da placa é y=0 no
-          // espaço local do grupo) menos metade da espessura da rodela,
-          // menos uma folga mínima só pra evitar z-fighting.
-          rodela.position.set(x, -perfil.h / 2 - ESPESSURA_RODELA / 2 - 0.0005, z);
-          group.add(rodela);
-        }
-      }
-    }
-    const centerY = baseY + perfil.y0 + perfil.h / 2;
-    group.position.set(obj.x, centerY, obj.y);
-    group.rotation.y = objAnguloToRotY(obj.angulo);
-    this._group.add(group);
-    const raioPick = Math.max(perfil.w || 0.5, perfil.d || 0.5) * 0.6;
-    const objPos = { x: obj.x, y: centerY, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: raioPick, ref: obj, obb: { half: { x: perfil.w / 2, y: perfil.h / 2, z: perfil.d / 2 }, rotY: group.rotation.y, shape: 'box', segments: 14 } };
-    this.pickables.push(objPick);
-    group.userData.pick = objPick;
-    this._pickMeshes.push(group);
-    if (Array.isArray(obj.components) && obj.components.some((c) => c.type === 'Script' && c.enabled !== false)) this._tagScriptBase(group, obj, baseY);
-  }
-
-  /** [13/09/2026] NOVO — "carro dirigível" (pedido verbatim: "Faça um
-   *  carro, que é possível entrar nele e sair andando [...] Deve ter
-   *  rodas, vidros e um formato de carro de verdade"). Geometria composta
-   *  com THREE puro, mesmo padrão dos outros builders bespoke deste
-   *  arquivo (mesa/luminária/poste/escada/teto-gesso — TODAS malhas filhas
-   *  de um único `THREE.Group`, registrado inteiro em `pickables`/
-   *  `_pickMeshes` como se fosse UMA peça só, igual `_buildTetoGessoMesh`
-   *  logo acima):
-   *    - Carroceria: 1 caixa larga (base, `perfil.w x perfil.h x perfil.d`
-   *      — perfil vem de `OBJECT3D_PROFILES.carro`, engine3d-profiles.js:
-   *      1.75 x 1.4 x 4.3m por padrão) + 1 caixa mais estreita/baixa por
-   *      cima simulando a cabine/teto (proporção fixa: 70% da largura, 45%
-   *      do comprimento, 45% da altura da base — não configurável por
-   *      instância nesta rodada, mesmo espírito "1 forma plausível, não um
-   *      modelo fiel por tipo" documentado no topo de engine3d-profiles.js).
-   *    - 4 rodas: cilindros pretos nos 4 cantos inferiores da carroceria,
-   *      raio 0.32m / largura(altura do cilindro) 0.22m, EIXO alinhado ao
-   *      comprimento do carro (CylinderGeometry nasce com o eixo em Y —
-   *      girado 90° em Z pra "deitar", ficando com o eixo ao longo de X
-   *      local do carro, que é a LARGURA — mesma convenção w=eixo local X/
-   *      d=eixo local Z de todo objeto 'retangulo' deste arquivo, ver
-   *      `objAnguloToRotY`).
-   *    - "Vidros": planos finos (BoxGeometry bem fina, não PlaneGeometry —
-   *      evita o problema de um Plane ficar invisível vista de trás/de
-   *      lado por causa de backface culling, já que o jogador pode olhar o
-   *      carro de qualquer ângulo) nas 2 laterais + frente + trás da
-   *      cabine, material `MeshLambertMaterial({color:0x88bbdd,
-   *      transparent:true, opacity:0.4})` — pedido verbatim de cor/opacidade.
-   *  Cor da carroceria/cabine: `obj.cor` (mesmo campo hex de sempre,
-   *  retângulo/polígono) se definido, senão `perfil.color` (vermelho
-   *  default do profile, já passado por `_tintForLight` pelo chamador).
-   *  Registrado no pick/`_pickMeshes` (clicável — `carro.model.js` usa
-   *  `onModelClick` pra entrar no carro, ver `view3d.js
-   *  _entrarNoCarro`). LIMITAÇÃO — ver comentário grande em
-   *  `_updateCarrosControlados` (view3d.js) pra tudo que este carro NÃO
-   *  faz ainda (colisão contra paredes, suspensão/inclinação em curva). */
-  _buildCarroMesh(obj, perfil, baseY, wireframe, colWireframe) {
-    const THREE = this.THREE;
-    const group = new THREE.Group();
-    const corCarroceria = obj.cor ? _hexToThreeColor(obj.cor) : perfil.color;
-    const matCarroceria = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: corCarroceria });
-
-    // Carroceria (base) — apoiada no chão (y local 0 = topo das rodas,
-    // ver `alturaRoda` abaixo definir onde a base do carro fica).
-    const raioRoda = 0.32, larguraRoda = 0.22;
-    const alturaCarroceria = perfil.h; // 1.4m default
-    const yCarroceriaBase = raioRoda * 0.75; // carroceria fica um pouco acima do centro da roda, "encaixada" nela
-    const carroceriaGeo = new THREE.BoxGeometry(perfil.w, alturaCarroceria, perfil.d);
-    const carroceria = new THREE.Mesh(carroceriaGeo, matCarroceria);
-    carroceria.position.set(0, yCarroceriaBase + alturaCarroceria / 2, 0);
-    group.add(carroceria);
-
-    // Cabine/teto — caixa mais estreita/baixa, centralizada e puxada um
-    // pouco pra trás do centro (proporção fixa documentada no comentário
-    // grande acima do método).
-    const cabineW = perfil.w * 0.7, cabineD = perfil.d * 0.45, cabineH = alturaCarroceria * 0.45;
-    const cabineGeo = new THREE.BoxGeometry(cabineW, cabineH, cabineD);
-    const cabine = new THREE.Mesh(cabineGeo, matCarroceria);
-    const yCabineBase = yCarroceriaBase + alturaCarroceria; // apoiada no topo da carroceria
-    cabine.position.set(0, yCabineBase + cabineH / 2, -perfil.d * 0.05); // leve deslocamento pra trás
-    group.add(cabine);
-
-    // 4 rodas — cantos inferiores da carroceria, giradas 90° em Z (eixo do
-    // cilindro passa a apontar ao longo de X local, "deitando" a roda).
-    if (!wireframe) {
-      const matRoda = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
-      const rodaGeo = new THREE.CylinderGeometry(raioRoda, raioRoda, larguraRoda, 16);
-      const offsetX = perfil.w / 2 - larguraRoda * 0.15; // roda quase na borda externa da carroceria
-      const offsetZ = perfil.d / 2 - raioRoda * 1.1; // um pouco pra dentro das extremidades dianteira/traseira
-      for (const sx of [-1, 1]) {
-        for (const sz of [-1, 1]) {
-          const roda = new THREE.Mesh(rodaGeo, matRoda);
-          roda.rotation.z = Math.PI / 2;
-          roda.position.set(sx * offsetX, raioRoda, sz * offsetZ);
-          group.add(roda);
-        }
-      }
-    }
-
-    // "Vidros" — 4 placas finas (BoxGeometry, não Plane — ver comentário
-    // grande acima do método) nas laterais/frente/trás da cabine.
-    if (!wireframe) {
-      const matVidro = new THREE.MeshLambertMaterial({ color: 0x88bbdd, transparent: true, opacity: 0.4 });
-      const ESPESSURA = 0.02;
-      const yVidro = yCabineBase + cabineH / 2;
-      // Laterais (esquerda/direita) — placa fina ao longo de Z (comprimento
-      // da cabine), quase da largura total da cabine.
-      const vidroLatGeo = new THREE.BoxGeometry(ESPESSURA, cabineH * 0.65, cabineD * 0.9);
-      for (const sx of [-1, 1]) {
-        const vidro = new THREE.Mesh(vidroLatGeo, matVidro);
-        vidro.position.set(sx * (cabineW / 2 - ESPESSURA / 2), yVidro, cabine.position.z);
-        group.add(vidro);
-      }
-      // Frente/trás — placa fina ao longo de X (largura da cabine).
-      const vidroFrenteGeo = new THREE.BoxGeometry(cabineW * 0.85, cabineH * 0.6, ESPESSURA);
-      for (const sz of [-1, 1]) {
-        const vidro = new THREE.Mesh(vidroFrenteGeo, matVidro);
-        vidro.position.set(0, yVidro, cabine.position.z + sz * (cabineD / 2 - ESPESSURA / 2));
-        group.add(vidro);
-      }
-    }
-
-    const centerY = baseY + perfil.y0; // grupo já tem a geometria toda posicionada relativa ao chão (y local 0 = chão)
-    group.position.set(obj.x, centerY, obj.y);
-    group.rotation.y = objAnguloToRotY(obj.angulo);
-    this._group.add(group);
-    const alturaTotal = yCabineBase + cabineH;
-    const raioPick = Math.max(perfil.w, perfil.d) * 0.6;
-    const objPos = { x: obj.x, y: centerY + alturaTotal / 2, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: raioPick, ref: obj, obb: { half: { x: perfil.w / 2, y: alturaTotal / 2, z: perfil.d / 2 }, rotY: group.rotation.y, shape: 'box', segments: 14 } };
-    this.pickables.push(objPick);
-    group.userData.pick = objPick;
-    this._pickMeshes.push(group);
-    // Guarda a referência do Group real desta instância pra
-    // `view3d._updateCarroCamera`/física poderem reposicionar o carro TODO
-    // quadro enquanto controlado (ver `entity._velocidade` em
-    // `_updateCarrosControlados`, view3d.js) sem precisar reconstruir a
-    // cena a cada frame — mesmo espírito de `_camPs1RefsById`/refs vivas já
-    // usadas por câmera/relógio neste arquivo. [correção 13/09/2026] Guarda
-    // em `this._carroRefsById` (por id), NÃO em `obj` — ver comentário
-    // grande em `setScene` sobre `_doorRuntime`/por que anexar um
-    // THREE.Group direto na entidade persistida quebrava o IndexedDB.
-    this._carroRefsById[obj.id] = group;
-    // [13/09/2026] SEMPRE marcado (diferente do `if (temScriptAtivo)`
-    // condicional usado pelos outros builders acima) — um carro não
-    // precisa de nenhum `ScriptComponent` pra se mover: a física de
-    // inércia (`view3d.js _updateCarrosControlados`) muda `obj.x`/`obj.y`/
-    // `obj.angulo` diretamente enquanto o jogador dirige, e reaproveitar
-    // `_syncScriptedObjectTransforms` (chamado TODO quadro por
-    // `_updateScriptLifecycle`, ver lá) já resolve "refletir esses valores
-    // na malha de verdade" de graça, sem precisar duplicar a lógica de
-    // reposicionamento aqui.
-    this._tagScriptBase(group, obj, baseY);
-  }
 
   /** Constrói a malha de UM objeto e a registra em `this._group`/
    *  `this.pickables`/`this._pickMeshes` — corpo do laço `mapData.objects`
@@ -5102,18 +4515,9 @@ class Engine3D {
    *  Mesma lógica de `Modeler3D._escadaFoiModificada` (js/modeler/
    *  modeler-core.js) — mantida duplicada de propósito, ver ali. */
   _escadaFoiModificada(obj) {
-    const perfil = (typeof OBJECT3D_PROFILES !== 'undefined' && OBJECT3D_PROFILES.escada) || {};
-    const larguraPadrao = perfil.w ?? 1.3;
-    const profundidadePadrao = perfil.d ?? 3.0;
-    if (obj.largura && Math.abs(obj.largura - larguraPadrao) > 1e-6) return true;
-    if (obj.profundidade && Math.abs(obj.profundidade - profundidadePadrao) > 1e-6) return true;
-    if (obj.escadaDegraus != null && obj.escadaDegraus !== '') {
-      const alturaTotal = obj.alturaEscada || this.mapData?.alturaPiso || perfil.h || 2.8;
-      const degrausPadrao = Math.round(alturaTotal / 0.18) || 11;
-      if (Math.round(obj.escadaDegraus) !== degrausPadrao) return true;
-    }
-    if (obj.alturaEscada && perfil.h && Math.abs(obj.alturaEscada - perfil.h) > 1e-6) return true;
-    return false;
+    // A escada é sempre gerada por código a partir das propriedades do próprio objeto
+    // (degraus, largura, profundidade, altura), nunca de uma malha de arquivo.
+    return obj.tipo === 'escada';
   }
 
   _buildOneObjectMeshCore(obj, wireframe, colWireframe) {
@@ -5260,19 +4664,32 @@ class Engine3D {
     // `perfil` de caixa/cilindro abaixo (pedido do usuário, 25/08/2026:
     // "o objeto imagem deve aparecer também [no 3D]" — antes caía sem
     // querer no perfil GENÉRICO cinza de OBJECT3D_DEFAULT_PROFILE, do
-    // tamanho fixo errado, ver _buildImagemMesh).
-    if (obj.forma === 'imagem') { this._buildImagemMesh(obj, baseY); return; }
-    // Objeto importado de .obj (pedido do usuário, rodada 51: "Deve ser
-    // possível carregar arquivos .obj de modo que sejam incorporados ao
-    // app [...] um botão de importar .obj para que apareça junto com os
-    // demais objetos") — `obj.tipo` é a chave em memória do arquivo
-    // importado (`ObjImport.isCustomKey`, ver js/objimport.js), NUNCA salva
-    // em disco de propósito ("fica na memória RAM, enquanto a página não
-    // der refresh") — se o mapa for recarregado depois de um refresh sem
-    // reimportar o mesmo .obj, `ObjImport.getGeometryData` devolve `null` e
-    // este objeto cai no perfil genérico cinza (OBJECT3D_DEFAULT_PROFILE,
-    // ramo comum logo abaixo) em vez de sumir/travar.
-    if (window.ObjImport?.isCustomKey(obj.tipo) && this._buildObjImportMesh(obj, baseY, wireframe, colWireframe)) return;
+    // tamanho fixo errado).
+    // [20/09/2026 UTC] MIGRADO pro registro (`js/objecttypes/imagem.js`) --
+    // pedido verbatim: "ajuste a imagem para que fique homogêneo a
+    // estrutura do Mapview" -- a assinatura de `buildMesh3D` virou a MESMA
+    // de todo tipo do registro (`obj, perfil, baseY, wireframe,
+    // colWireframe`, mesmo `perfil` não sendo usado aqui). Continua
+    // resolvido NESTE ponto específico (antes de `perfil` existir) porque
+    // "imagem" é identificado por `obj.forma`, não por `obj.tipo` -- não dá
+    // pra cair na chamada genérica `tryBuildMesh3D` mais abaixo (que já
+    // assume `perfil` calculado); em vez de duplicar a lógica aqui, busca a
+    // MESMA definição registrada em `window.ObjectTypes` e chama direto.
+    if (obj.forma === 'imagem') {
+      const def = window.ObjectTypes.get('imagem');
+      if (def) { def.buildMesh3D(this, obj, null, baseY, wireframe, colWireframe); return; }
+    }
+    // Objeto importado de .obj (pedido do usuário, rodada 51) — se o mapa
+    // for recarregado depois de um refresh sem reimportar o mesmo .obj,
+    // este objeto cai no perfil genérico cinza em vez de sumir/travar.
+    // [20/09/2026 UTC] MIGRADO pro registro (`js/objecttypes/objimport.js`)
+    // -- mesmo padrão/mesmo motivo de "imagem" acima (identificação
+    // dinâmica, não por `obj.tipo` fixo, então não dá pra usar a chamada
+    // genérica `tryBuildMesh3D` mais abaixo).
+    {
+      const def = window.ObjectTypes.get('objimport');
+      if (def && def.matchesMesh3D(obj) && def.buildMesh3D(this, obj, null, baseY, wireframe, colWireframe)) return;
+    }
     let perfil;
     if (obj.forma === 'retangulo') {
       perfil = { shape: 'box', w: obj.largura || 0.5, d: obj.profundidade || 0.5, h: obj.altura || 0.5, y0: 0, color: _hexToThreeColor(obj.cor) };
@@ -5333,107 +4750,48 @@ class Engine3D {
     // _addItemAssociadoDestaque acima, só que mais simples: um pontinho só,
     // sem contorno/flags).
     this._addHistoricoDestaque(obj, perfil, baseY);
-    // Mesa: 4 pernas + tampo fino, não um bloco sólido — pedido do
-    // usuário ("faça o 3D da mesa com 4 pernas de mesa e um tampo de
-    // mesa, para que pareça uma e não um cubo"). Colocar uma mesa pelo
-    // painel de Objetos sempre vira uma forma 'retangulo' por baixo dos
-    // panos (ver mapview.js _MESA_FORMA_DEF), então `perfil.shape` já é
-    // sempre 'box' aqui pra ela — a checagem é só defensiva.
-    if (obj.tipo === 'mesa' && perfil.shape === 'box') {
-      this._buildMesaMesh(obj, perfil, baseY, wireframe, colWireframe);
-      return;
-    }
-    // [15/09/2026 UTC] NOVO — pedido verbatim: "faça dois novos objetos:
-    // 'Mesa' e 'Pilar' [...] O objeto 'Pilar' deve ter a altura que define
-    // a distância entre um andar e outro." Builder DEDICADO (em vez de
-    // cair no ramo genérico logo abaixo, que usaria `perfil.h` — um valor
-    // FIXO de fábrica) só pra poder ler `this.mapData?.alturaPiso` (a
-    // distância de VERDADE entre andares deste mapa, configurável) na hora
-    // de montar a malha — mesmo motivo/mesma técnica de `_buildEscadaMesh`
-    // (`alturaTotal = obj.alturaEscada || this.mapData?.alturaPiso || 2.8`).
-    if (obj.tipo === 'pilar' && perfil.shape === 'box') {
-      this._buildPilarMesh(obj, perfil, baseY, wireframe, colWireframe);
-      return;
-    }
-    // [15/09/2026 UTC] NOVO — pedido verbatim: "Faça um modelo 3D
-    // diferente para a cadeira (substituindo-o), faça uma 'cadeira de
-    // verdade' com pernas e encosto. Não uma caixa genérica como é
-    // atualmente." Builder DEDICADO (mesmo padrão de mesa/pilar acima —
-    // várias `Mesh` soltas, sem `THREE.Group`), ver `_buildCadeiraMesh`.
-    // Checagem defensiva de shape:'box' igual às outras dedicadas.
-    if (obj.tipo === 'cadeira' && perfil.shape === 'box') {
-      this._buildCadeiraMesh(obj, perfil, baseY, wireframe, colWireframe);
-      return;
-    }
-    // [15/09/2026 UTC] NOVO — pedido verbatim: "Faça o mesmo para o
-    // vaso." Builder DEDICADO (vaso de terracota + folhagem em cima, em
-    // vez do cone verde solto saindo do chão), ver `_buildPlantaMesh`.
-    // Checagem defensiva de shape:'cone' (perfil.planta), mesmo padrão das
-    // outras dedicadas acima.
-    if (obj.tipo === 'planta' && perfil.shape === 'cone') {
-      this._buildPlantaMesh(obj, perfil, baseY, wireframe, colWireframe);
-      return;
-    }
-    // Luminária: 2 tubos fluorescentes + folha metálica + caixas nas
-    // pontas, mais uma luz de verdade — pedido do usuário ("faça uma
-    // luminária com aquelas lâmpadas fluorescentes longas... Faça o 3D
-    // bem feito"). Mesma checagem defensiva de shape:'box' da mesa acima.
-    if (obj.tipo === 'luminaria' && perfil.shape === 'box') {
-      this._buildLuminariaMesh(obj, perfil, baseY, wireframe, colWireframe);
-      return;
-    }
-    // Poste de iluminação pública (NOVO, 01/09/2026, item #11 do pedido de
-    // 12 itens) — haste + braço + luminária na ponta, mais uma luz de
-    // verdade — mesmo padrão de mesa/luminária acima. Checagem defensiva de
-    // shape:'cylinder' igual às duas de cima (perfil.poste, engine3d-profiles.js).
-    if (obj.tipo === 'poste' && perfil.shape === 'cylinder') {
-      this._buildPosteMesh(obj, perfil, baseY, wireframe, colWireframe);
-      return;
-    }
-    // Escada paramétrica (NOVO, 01/09/2026, "itens grandes" — ver comentário
-    // grande em _buildEscadaMesh, abaixo). Mesma checagem defensiva de
-    // shape:'box' das outras dedicadas (mesa/luminária) acima.
-    if (obj.tipo === 'escada' && perfil.shape === 'box') {
-      this._buildEscadaMesh(obj, perfil, baseY, wireframe, colWireframe);
-      return;
-    }
-    // Relógio (CORRIGIDO 15/09/2026 — bug confirmado pelo usuário: "Os
-    // relógios... ficam deitados... é só girar o relógio para que fique na
-    // parede"). Antes deste `if`, o relógio caía no ramo genérico logo
-    // abaixo, que monta um CylinderGeometry cru só com `mesh.rotation.y =
-    // objAnguloToRotY(obj.angulo)` — como o eixo do CylinderGeometry é Y por
-    // padrão, isso deixa o disco DEITADO (mostrador virado pro teto/chão,
-    // igual uma moeda em cima de uma mesa), nunca DE PÉ contra a parede,
-    // não importa o ângulo. Mesma checagem defensiva de shape:'cylinder' já
-    // usada por poste/robô acima. Ver `_buildRelogioMesh` pra rotação
-    // corrigida + ponteiros animados (tempo real do prédio).
-    if (obj.tipo === 'relogio' && perfil.shape === 'cylinder') {
-      this._buildRelogioMesh(obj, perfil, baseY, wireframe, colWireframe);
-      return;
-    }
-    // Porta-retrato de mesa (NOVO, 15/09/2026) — único tipo do catálogo com
-    // uma inclinação FIXA (~12°) simulando o objeto "em pé" apoiado numa
-    // superfície, tipo um porta-retrato de verdade encostado pra trás.
-    // Mesma checagem defensiva de shape:'box' de mesa/luminária/escada
-    // acima.
-    if (obj.tipo === 'quadro-mesa' && perfil.shape === 'box') {
-      this._buildQuadroMesaMesh(obj, perfil, baseY, wireframe, colWireframe);
-      return;
-    }
-    // Teto de gesso com rodelas de acesso (NOVO, 13/09/2026 — pedido do
-    // usuário). Mesma checagem defensiva de shape:'box' das outras
-    // dedicadas acima.
-    if (obj.tipo === 'teto-gesso' && perfil.shape === 'box') {
-      this._buildTetoGessoMesh(obj, perfil, baseY, wireframe, colWireframe);
-      return;
-    }
-    // Carro dirigível (NOVO, 13/09/2026 — pedido verbatim: "Faça um carro
-    // [...] Deve ter rodas, vidros e um formato de carro de verdade").
-    // Mesma checagem defensiva de shape:'box' das outras bespoke acima.
-    if (obj.tipo === 'carro' && perfil.shape === 'box') {
-      this._buildCarroMesh(obj, perfil, baseY, wireframe, colWireframe);
-      return;
-    }
+    // [18/09/2026 UTC] NOVO -- "Rack" modular de 19" (pedido verbatim:
+    // "Integre ao catalogo este novo objeto modular chamado 'Rack'"). Builder
+    // DEDICADO, ver `_buildRackMesh` e js/rack-modular.js. Se o modulo nao
+    // carregou (`window.RackModular` ausente), cai na caixa generica abaixo.
+    // [20/09/2026 UTC] MIGRADO pro registro de tipos (pedido verbatim: "O
+    // app deve se tornar modular [...] Transforme em classe do objeto,
+    // métodos, propriedades") -- a condição e a chamada acima viraram
+    // `js/objecttypes/rack.js` (`RackObjectType`), registrado em
+    // `window.ObjectTypes`. Mesmo comportamento exato, só que decidido de
+    // fora deste arquivo -- ver comentário grande em
+    // `js/objecttypes/object-type-registry.js`.
+    //
+    // [20/09/2026 UTC] Mesa/Pilar/Cadeira também MIGRADOS pro registro
+    // (`js/objecttypes/mesa.js`, `pilar.js`, `cadeira.js`) -- os `if`s que
+    // existiam aqui pra eles (mesma posição/prioridade de antes) foram
+    // removidos; a chamada genérica abaixo cobre os 4 tipos já migrados
+    // (mesa, pilar, cadeira, rack), na ordem de registro (mesma ordem dos
+    // `<script>` em index.html). Comentários originais de cada um
+    // preservados nos respectivos arquivos novos.
+    if (window.ObjectTypes.tryBuildMesh3D(this, obj, perfil, baseY, wireframe, colWireframe)) return;
+    // Família "rede" (equipamentos de rack) e as peças de catálogo de tamanho fixo (cada uma com seu próprio arquivo, inclusive
+    // eletrocalha, leito, canaleta e eletroduto) já estão no registro (`js/objecttypes/`), cobertas
+    // pela chamada genérica `tryBuildMesh3D` logo acima.
+    // [20/09/2026 UTC] teto-gesso e carro MIGRADOS pro registro
+    // (`js/objecttypes/teto-gesso.js`, `carro.js`) -- os `if`s que
+    // existiam aqui foram removidos; cobertos pela chamada genérica
+    // `window.ObjectTypes.tryBuildMesh3D(...)` mais acima.
+    this._buildGenericCatalogMesh(obj, perfil, baseY, wireframe, colWireframe);
+  }
+
+  /** Builder GENÉRICO (caixa/cilindro/cone a partir de `perfil`) --
+   *  extraído do corpo de `_buildOneObjectMeshCore` pra virar um método
+   *  próprio, reaproveitável por qualquer tipo do catálogo que ainda não
+   *  tem builder bespoke (a maioria) E por tipos JÁ migrados pro registro
+   *  (`window.ObjectTypes`) que só precisam da geometria genérica --
+   *  ex.: os robôs (`robo-copa`/`robo-limpeza`/`robo-recepcionista`, ver
+   *  `js/objecttypes/robo-*.js`), que viraram tipo de catálogo NORMAL
+   *  (pedido verbatim: "Os robôs [...] devem ser do catálogo normal
+   *  também") mas continuam usando a MESMA malha simples (cilindro
+   *  colorido) que sempre tiveram -- não duplica a lógica, só reusa. */
+  _buildGenericCatalogMesh(obj, perfil, baseY, wireframe, colWireframe) {
+    const THREE = this.THREE;
     let geo;
     if (perfil.shape === 'cylinder') geo = new THREE.CylinderGeometry(perfil.r, perfil.r, perfil.h, perfil.segments || 14);
     else if (perfil.shape === 'cone') geo = new THREE.ConeGeometry(perfil.r, perfil.h, 14);
@@ -5564,6 +4922,472 @@ class Engine3D {
     if (temScriptAtivo) this._tagScriptBase(mesh, obj, baseY);
   }
 
+  /** Helper de cor pra porta/janela (extraído da closure `colorFromHex`
+   *  que existia dentro de `setScene`) -- converte hex '#rrggbb' em
+   *  inteiro 0xrrggbb, ou devolve `fallback` se inválido/ausente. */
+  _colorFromHex3D(hex, fallback) {
+    const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim());
+    return m ? parseInt(m[1], 16) : fallback;
+  }
+
+  _buildFrameRingPartsTB_LR(w, h, depth, borderTB, borderLR, mat) {
+    const THREE = this.THREE;
+      const meioH = Math.max(0.001, h - borderTB * 2);
+      return [
+        { mesh: new THREE.Mesh(new THREE.BoxGeometry(w, borderTB, depth), mat), lx: 0, ly: h / 2 - borderTB / 2, lz: 0 }, // barra de cima
+        { mesh: new THREE.Mesh(new THREE.BoxGeometry(w, borderTB, depth), mat), lx: 0, ly: -(h / 2 - borderTB / 2), lz: 0 }, // barra de baixo
+        { mesh: new THREE.Mesh(new THREE.BoxGeometry(borderLR, meioH, depth), mat), lx: -(w / 2 - borderLR / 2), ly: 0, lz: 0 }, // barra da esquerda
+        { mesh: new THREE.Mesh(new THREE.BoxGeometry(borderLR, meioH, depth), mat), lx: (w / 2 - borderLR / 2), ly: 0, lz: 0 }, // barra da direita
+      ];
+  }
+  _buildFrameRingParts(w, h, depth, borderT, mat) { return this._buildFrameRingPartsTB_LR(w, h, depth, borderT, borderT, mat); }
+
+    /** Janela de correr, 2 folhas — pedido do usuário (24/08/2026): "deve
+     *  haver mais um tipo de janela", com medidas de CATÁLOGO reais (não são
+     *  um "padrão sugerido" livre — o painel de propriedades, mapview.js
+     *  _openWindowPanel, já preenche largura/altura/peitoril com estes MESMOS
+     *  valores ao escolher `tipo: 'correr_2folhas'`, mas o desenho 3D usa as
+     *  constantes fixas abaixo direto, não os campos largura/altura do
+     *  elemento — pra o formato da armadura/folhas nunca ficar torto se
+     *  alguém editar largura/altura na mão depois de escolher este tipo):
+     *   - Armadura (moldura externa, com 2 trilhos p/ 2 folhas): limite de
+     *     204,5×108cm, "espessura" (perfil de alumínio) de 0,8mm, profundidade
+     *     (o quanto ocupa da parede) de 8,5cm.
+     *   - Cada folha (o caixilho que desliza, com o vidro): 112×97cm, com
+     *     4cm de borda de metal (feito uma moldura de quadro, por DENTRO
+     *     desses 112×97 — vidro visível de 104×89cm), profundidade de 3cm.
+     *   - As DUAS folhas ficam cada uma no seu trilho da MESMA armadura —
+     *     como a armadura (204,5cm) é bem mais larga que UMA folha (112cm),
+     *     as duas se sobrepõem no meio (2×112−204,5 = 19,5cm) — representadas
+     *     aqui na posição "fechada" (uma encostada em cada lateral da
+     *     armadura, se encontrando no meio), cada uma no seu Z (profundidade)
+     *     pra não conflitar com a outra (dois trilhos de verdade, um um
+     *     pouco mais pra fora que o outro). Sem animação de abrir puxando
+     *     uma folha por cima da outra (fora do escopo pedido — a caixa
+     *     "Aberta (3D)" do painel continua só controlando o buraco cortado
+     *     na parede, ver `openings` acima, igual pros outros tipos).
+     *  O vidro de cada folha usa o MESMO tratamento "Minecraft" (pedido do
+     *  usuário: "todo vidro no projeto deve ser representado como no
+     *  Minecraft") de qualquer outra janela — ver _buildGlassPane; só a
+     *  moldura de metal (armadura + armadura interna + folhas) é geometria
+     *  de verdade.
+     *
+     *  Rodada seguinte (pedido do usuário) — acrescentada uma SEGUNDA
+     *  armadura, mais interna (198,5×108cm... 198,5×101cm — dentro da
+     *  primeira, 204,5×108cm), profundidade também de 8,5cm, que é onde as
+     *  folhas correm de verdade (a armadura externa, de 0,8mm, é só o
+     *  acabamento/moldura da parede em volta):
+     *   - Moldura de quadro DESIGUAL: 4cm em cima e embaixo, 1,5cm nas
+     *     laterais (medidos pra DENTRO dos 198,5×101cm).
+     *   - A barra de CIMA é maciça, extrudada ponta a ponta dos 8,5cm de
+     *     profundidade (igual a qualquer barra "normal" deste arquivo).
+     *   - A barra de BAIXO é OCA — "como no metrô de um trem": em vez de
+     *     uma caixa maciça, dois trilhos finos (um pra cada folha/trilho de
+     *     profundidade, ver `folhaZ` abaixo), com vão entre eles — é ali que
+     *     as folhas se encaixam pra deslizar.
+     *   - As duas armaduras (externa e interna) não podem "ficar voando"
+     *     desconectadas — uma TERCEIRA peça, um anel bem mais FINO na
+     *     profundidade (`CONECTOR_D`, bem menor que 8,5cm — "uma extrusão
+     *     mais fina"), preenche exatamente o vão entre elas (a mesma conta
+     *     de moldura-de-quadro, com bordas TB/LR = a metade da diferença
+     *     entre os dois tamanhos de armadura), soldando as duas numa peça só. */
+  _buildJanelaCorrer2Folhas(el, mapData) {
+    const THREE = this.THREE;
+    const wireframe = this.mode === 'wireframe';
+    const colWireframe = 0x78c8ff; // MESMA constante de `setScene`
+    const WINDOW_TYPES3D = window.WINDOW_TYPES || {};
+    const colorFromHex = (hex, fallback) => this._colorFromHex3D(hex, fallback);
+      const pos = (typeof Mapping !== 'undefined') ? Mapping.resolveDoorWindowPos(mapData, el) : { x: el.x, y: el.y, angulo: el.angulo || 0 };
+      const FRAME_W = 2.045, FRAME_H = 1.08, FRAME_D = 0.085, FRAME_T = 0.0008;
+      const ARM2_W = 1.985, ARM2_H = 1.01, ARM2_D = 0.085; // armadura interna — mesma profundidade da externa (correm as folhas nela)
+      const ARM2_BORDA_TB = 0.04, ARM2_BORDA_LR = 0.015; // 4cm cima/baixo, 1,5cm laterais
+      const CONECTOR_D = 0.02; // "extrusão mais fina" — só uma solda visual entre as duas armaduras, não estrutural de verdade
+      const FOLHA_W = 1.12, FOLHA_H = 0.97, FOLHA_D = 0.03, FOLHA_BORDA = 0.04;
+      // 92cm (pedido do usuário) — MESMO valor que o painel já preenche em
+      // `alturaPeitoril` ao escolher este tipo; `!= null` (não `||`) porque
+      // 0 é um peitoril válido (janela batendo no chão), não "sem valor".
+      // [18/09/2026 UTC] NOVO (RODADA 145) — soma `elevacaoBase` (altura do
+      // TOPO do objeto sob o qual esta janela foi posicionada, ex. um
+      // 'piso' elevado — ver Mapping.doorWindowAlturaEfetiva/mapview.js
+      // `_hitTestBaseObjectForAttach`), mesma correção do baseY em
+      // `buildDoorOrWindowMesh` logo abaixo.
+      const baseY = (el.alturaPeitoril != null ? el.alturaPeitoril : 0.92) + (el.elevacaoBase || 0);
+      const corMoldura = colorFromHex(WINDOW_TYPES3D[el.tipo]?.frameColor, 0xc7ccd4);
+      const matMetal = wireframe
+        ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+        : new THREE.MeshLambertMaterial({ color: corMoldura });
+      const partsLocal = [];
+      partsLocal.push(...this._buildFrameRingParts(FRAME_W, FRAME_H, FRAME_D, FRAME_T, matMetal)); // armadura EXTERNA — um anel só, ao redor do vão inteiro
+
+      // Conector — preenche exatamente o vão entre a armadura externa
+      // (204,5×108) e a interna (198,5×101): as bordas TB/LR abaixo são a
+      // metade da diferença entre os dois tamanhos, então o anel resultante
+      // encosta nas duas ao mesmo tempo, sem sobra nem vão — ver conta no
+      // comentário grande acima. `CONECTOR_D` bem menor que 8,5cm ("extrusão
+      // mais fina", pedido do usuário) — centrado na mesma profundidade das
+      // armaduras (lz=0 em todas), só mais fino.
+      const conectorBordaTB = (FRAME_H - ARM2_H) / 2, conectorBordaLR = (FRAME_W - ARM2_W) / 2;
+      partsLocal.push(...this._buildFrameRingPartsTB_LR(FRAME_W, FRAME_H, CONECTOR_D, conectorBordaTB, conectorBordaLR, matMetal));
+
+      // Armadura INTERNA — cima e laterais maciças (parte de cima "ponta a
+      // ponta da profundidade", pedido do usuário); base tratada à parte
+      // logo abaixo (oca, os trilhos).
+      const meioArm2H = Math.max(0.001, ARM2_H - ARM2_BORDA_TB * 2);
+      partsLocal.push({ mesh: new THREE.Mesh(new THREE.BoxGeometry(ARM2_W, ARM2_BORDA_TB, ARM2_D), matMetal), lx: 0, ly: ARM2_H / 2 - ARM2_BORDA_TB / 2, lz: 0 }); // barra de cima — maciça
+      partsLocal.push({ mesh: new THREE.Mesh(new THREE.BoxGeometry(ARM2_BORDA_LR, meioArm2H, ARM2_D), matMetal), lx: -(ARM2_W / 2 - ARM2_BORDA_LR / 2), ly: 0, lz: 0 }); // lateral esquerda
+      partsLocal.push({ mesh: new THREE.Mesh(new THREE.BoxGeometry(ARM2_BORDA_LR, meioArm2H, ARM2_D), matMetal), lx: (ARM2_W / 2 - ARM2_BORDA_LR / 2), ly: 0, lz: 0 }); // lateral direita
+
+      // Deslocamento lateral de cada folha (ver conta no comentário grande
+      // acima) — encostada na lateral da armadura INTERNA do seu lado (é
+      // nela que as folhas correm — "é onde as duas folhas de janela
+      // correm", pedido do usuário — não mais na externa). `folhaZ` deixa
+      // uma folha um pouco mais pra fora e a outra um pouco mais pra dentro
+      // (dois trilhos de verdade), sem furar pra fora da profundidade da
+      // armadura (ARM2_D/2 = 4,25cm é bem maior que FOLHA_D/2+0,005 = 2cm).
+      const folhaOffsetX = ARM2_W / 2 - FOLHA_W / 2;
+      const folhaZ = FOLHA_D / 2 + 0.005;
+      // Base da armadura interna — OCA ("como no metrô de um trem"): em vez
+      // da barra maciça de baixo (que a armadura externa e o topo desta
+      // interna têm), DOIS trilhos finos, um bem no MESMO Z de cada folha
+      // (`folhaZ` acima) — é literalmente ali que a base de cada folha se
+      // encaixa pra deslizar, com vão (oco) entre os dois trilhos e entre
+      // eles e as bordas da profundidade (ARM2_D), em vez de uma caixa só.
+      const trilhoAltura = 0.01, trilhoProfundidade = 0.012;
+      const baseLy = -(ARM2_H / 2 - ARM2_BORDA_TB / 2); // mesma altura em que ficaria a barra de baixo, se fosse maciça
+      [-1, 1].forEach((lado) => {
+        partsLocal.push({ mesh: new THREE.Mesh(new THREE.BoxGeometry(ARM2_W, trilhoAltura, trilhoProfundidade), matMetal), lx: 0, ly: baseLy, lz: lado * folhaZ });
+      });
+
+      [-1, 1].forEach((lado) => {
+        partsLocal.push(...this._buildFrameRingParts(FOLHA_W, FOLHA_H, FOLHA_D, FOLHA_BORDA, matMetal)
+          .map((p) => ({ ...p, lx: p.lx + lado * folhaOffsetX, lz: p.lz + lado * folhaZ })));
+        const glassW = FOLHA_W - FOLHA_BORDA * 2, glassH = FOLHA_H - FOLHA_BORDA * 2;
+        partsLocal.push({ mesh: this._buildGlassPane(glassW, glassH), lx: lado * folhaOffsetX, ly: 0, lz: lado * folhaZ });
+      });
+      const rotY = objAnguloToRotY(pos.angulo || 0);
+      const cosR = Math.cos(rotY), sinR = Math.sin(rotY);
+      const meshesAdded = [];
+      partsLocal.forEach(({ mesh, lx, ly, lz }) => {
+        mesh.position.set(pos.x + lx * cosR + lz * sinR, baseY + FRAME_H / 2 + ly, pos.y - lx * sinR + lz * cosR);
+        mesh.rotation.y = rotY;
+        this._group.add(mesh);
+        meshesAdded.push(mesh);
+      });
+      const half = { x: FRAME_W / 2, y: FRAME_H / 2, z: FRAME_D / 2 };
+      const posPick = { x: pos.x, y: baseY + FRAME_H / 2, z: pos.y };
+      const pick = { id: el.id, type: 'janela', ref: el, pos: posPick, center: posPick, radius: Math.max(FRAME_W, FRAME_H) / 2, obb: { half, rotY } };
+      this.pickables.push(pick);
+      meshesAdded.forEach((m) => { m.userData.pick = pick; this._pickMeshes.push(m); });
+  }
+
+  _buildDoorOrWindowMesh(el, kind, mapData) {
+    const THREE = this.THREE;
+    const wireframe = this.mode === 'wireframe';
+    const colWireframe = 0x78c8ff; // MESMA constante de `setScene`
+    const wallThickness = WALL_THICKNESS_3D;
+    const DOOR_TYPES3D = window.DOOR_TYPES || {};
+    const WINDOW_TYPES3D = window.WINDOW_TYPES || {};
+    const colorFromHex = (hex, fallback) => this._colorFromHex3D(hex, fallback);
+      if (!mapData) return;
+      // Pedido do usuário: "deve haver mais um tipo de janela" — a de correr
+      // de 2 folhas tem geometria BEM diferente da caixa única genérica
+      // abaixo (armadura + 2 folhas com trilhos, não uma placa só) —
+      // delegada inteira pra buildJanelaCorrer2Folhas, acima.
+      if (kind === 'janela' && el.tipo === 'correr_2folhas') { this._buildJanelaCorrer2Folhas(el, mapData); return; }
+      const pos = (typeof Mapping !== 'undefined') ? Mapping.resolveDoorWindowPos(mapData, el) : { x: el.x, y: el.y, angulo: el.angulo || 0 };
+      const largura = el.largura || (kind === 'porta' ? 0.8 : 1.2);
+      const altura = el.altura || (kind === 'porta' ? 2.1 : 1.2);
+      // NOVO (01/09/2026), item GRANDE #9 — "andares de verdade" (ver
+      // comentário grande em Mapping.addWall/addDoor/addWindow, js/
+      // mapping.js). PRESA numa parede (parentWallId): usa o piso DA PAREDE
+      // (nunca o próprio `el.piso`) — a porta/janela deve sempre ficar no
+      // mesmo andar físico da parede que ela corta, mesmo que `el.piso`
+      // tenha ficado desatualizado (ex.: a parede foi movida pra outro piso
+      // depois). SOLTA (parentWallId null): usa o próprio `el.piso`, igual a
+      // qualquer objeto solto no mapa.
+      const parentWallPD = el.parentWallId ? (mapData.walls || []).find((w) => w.id === el.parentWallId) : null;
+      const pisoY = ((parentWallPD ? parentWallPD.piso : el.piso) || 0) * (mapData.alturaPiso || 2.8);
+      // [18/09/2026 UTC] NOVO (RODADA 145) — pedido verbatim: "a 'altura em
+      // relação ao chão' da janela deve somar/basear-se nessa elevação do
+      // piso [objeto embaixo], não no chão absoluto do mundo/nível 0" — ver
+      // Mapping.doorWindowAlturaEfetiva/mapview.js
+      // `_hitTestBaseObjectForAttach` (onde `elevacaoBase` é gravada na
+      // hora de posicionar em cima de outro objeto). Porta continua
+      // nascendo no chão (não soma `alturaPeitoril`), mas ainda soma
+      // `elevacaoBase` — uma porta apoiada em cima de um piso elevado deve
+      // nascer no TOPO desse piso.
+      const baseY = (kind === 'porta' ? 0 : (el.alturaPeitoril || 0)) + pisoY + (el.elevacaoBase || 0);
+      const tipos = kind === 'porta' ? DOOR_TYPES3D : WINDOW_TYPES3D;
+      const corHex = el.colorRGB
+        ? (el.colorRGB[0] << 16) | (el.colorRGB[1] << 8) | el.colorRGB[2]
+        : colorFromHex(tipos[el.tipo]?.color, kind === 'porta' ? 0x8a5a34 : 0xbfe3ff);
+      // Espessura da malha: fina (encostada na parede) — "folha" da porta ou
+      // vidro da janela, não a parede em si. Aberta encolhe pra ficar quase
+      // rente à lateral do vão (só uma pista visual, ver comentário acima).
+      const espMesh = el.aberta ? wallThickness * 0.3 : wallThickness * 0.85;
+      // Pedido do usuário: "todo vidro no projeto deve ser representado como
+      // no Minecraft". PORTA continua sendo sempre uma placa única sólida
+      // (nunca teve vidro — só madeira/metal, ver DOOR_TYPES). JANELA
+      // genérica (qualquer tipo que não seja a de correr detalhada acima)
+      // passa a ser uma MOLDURA fina (4 barras, cor de `frameColor`) + um
+      // painel de vidro "Minecraft" (_buildGlassPane) no meio, em vez de uma
+      // única placa opaca cobrindo o vão inteiro — mais parecido com uma
+      // janela de verdade (não é um bloco maciço) e mais barato (o vidro não
+      // pinta quase nada da própria área, ver _buildGlassShineTexture).
+      const partsLocal = []; // { mesh, lx, ly, lz } — mesma convenção de buildFrameRingParts/buildJanelaCorrer2Folhas acima
+      if (kind === 'porta') {
+        const geo = new THREE.BoxGeometry(largura, altura, espMesh);
+        const mat = wireframe
+          ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+          : new THREE.MeshLambertMaterial({ color: corHex });
+        partsLocal.push({ mesh: new THREE.Mesh(geo, mat), lx: 0, ly: 0, lz: 0 });
+      } else {
+        // 5cm de moldura (ou menos, se a janela for pequena o bastante pra
+        // isso não caber — min() de segurança) — tipos genéricos não têm
+        // medida própria de moldura (só a de correr detalhada, acima, tem
+        // catálogo real com 4cm por folha); 5cm é um valor razoável de
+        // esquadria comum, só pra dar a mesma "moldura fina + vidro" que
+        // toda janela agora tem.
+        const bordaFrame = Math.min(0.05, Math.min(largura, altura) * 0.3);
+        const corMoldura = colorFromHex(tipos[el.tipo]?.frameColor, 0xe8ecf2);
+        const matFrame = wireframe
+          ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+          : new THREE.MeshLambertMaterial({ color: corMoldura });
+        partsLocal.push(...this._buildFrameRingParts(largura, altura, espMesh, bordaFrame, matFrame));
+        const glassW = Math.max(0.02, largura - bordaFrame * 2), glassH = Math.max(0.02, altura - bordaFrame * 2);
+        partsLocal.push({ mesh: this._buildGlassPane(glassW, glassH), lx: 0, ly: 0, lz: 0 });
+      }
+      // Ângulo — bug relatado pelo usuário: "a orientação da rotação do 2D
+      // não está correspondendo no 3D... aparece 90 graus de diferença...
+      // as janelas, no 3D, ainda estão ficando 90 graus diferente do 2D", e
+      // também "a porta fica afastada da parede no 3D" (a folha não batia
+      // com a dobradiça no canto — ver mais abaixo por que os dois sintomas
+      // têm a MESMA causa).
+      //
+      // Fórmula ANTIGA (errada): `rotY = π/2 - angulo`, herdada por engano
+      // da convenção da PAREDE (`wRotY = atan2(dx,dz)`, ver addWallBox
+      // acima) — mas porta/janela NÃO usa a mesma geometria da parede: a
+      // BoxGeometry da parede tem a espessura no eixo local X e o
+      // COMPRIMENTO no eixo local Z (`BoxGeometry(wallThickness, segH,
+      // segLen)`), enquanto a de porta/janela (logo abaixo,
+      // `BoxGeometry(largura, altura, espMesh)`) tem a LARGURA no eixo
+      // local X e a espessura no Z — exatamente a mesma convenção de
+      // mesa/objeto/luminária (`BoxGeometry(perfil.w, perfil.h, perfil.d)`,
+      // ver OBJECT3D_PROFILES/setScene no topo do arquivo), não a da
+      // parede. E no 2D (`Map2DRenderer._drawDoorShape`/`_drawWindowShape`,
+      // ver mapview.js) porta/janela são desenhadas do MESMO jeito que um
+      // objeto (`ctx.rotate(pos.angulo)`, `largura` ao longo do eixo local
+      // X) — não do jeito que uma parede é desenhada. Ou seja, porta/janela
+      // precisa da MESMA fórmula já corrigida para objetos nesta rodada
+      // anterior (ver `objAnguloToRotY` no topo do arquivo: `rotY =
+      // -angulo`), não da fórmula da parede.
+      //
+      // Os dois bugs relatados eram o MESMO: com a fórmula errada, a folha
+      // da porta/janela (fechada) ficava girada 90° a mais — pra quem olha,
+      // parece "girada" (o sintoma da janela) e, ao mesmo tempo, como a
+      // malha é um retângulo fino centralizado no MEIO do vão, girado 90°
+      // ele passa a se estender pra FORA da parede em vez de ao LONGO dela
+      // — o que parece "afastado"/destacado da parede (o sintoma da porta).
+      // Corrigindo a rotação de base, os dois somem juntos.
+      const rotY = objAnguloToRotY(pos.angulo || 0);
+      let meshX = pos.x, meshZ = pos.y, meshRotY = rotY;
+      // [14/09/2026] NOVO — `el.anguloAbertura` (0..90°, campo NOVO,
+      // independente do booleano `el.aberta`): quando definido, tem
+      // PRIORIDADE sobre `el.aberta` pra decidir o ângulo de abertura da
+      // folha — permite um Script (js/components.js) animar a porta em
+      // qualquer ângulo intermediário, não só aberta/fechada. `el.aberta`
+      // sozinho (sem `anguloAbertura`) continua se comportando exatamente
+      // como antes (0° fechada / 90° aberta) — ZERO mudança de
+      // comportamento padrão pra porta sem Script.
+      if (kind === 'porta') {
+        const openDeg = (el.anguloAbertura !== undefined && el.anguloAbertura !== null)
+          ? Math.max(0, Math.min(90, el.anguloAbertura))
+          : (el.aberta ? 90 : 0);
+        const phi = openDeg * Math.PI / 180;
+        // Porta ABERTA (phi>0): a folha gira a partir da DOBRADIÇA, igual ao
+        // símbolo arquitetônico do 2D (_drawDoorShape — hinge num CANTO do
+        // vão + arco de até 90°, `el.abertura`: 'esquerda'|'direita' escolhe
+        // qual ponta é fixa). Fórmula generalizada (era só phi=90° fixo,
+        // antes de `anguloAbertura` existir): o centro da folha percorre um
+        // arco de raio `largura/2` em torno da dobradiça — `v0` é o vetor
+        // dobradiça->centro quando FECHADA (ao longo do vão) e `v1` o mesmo
+        // vetor quando TOTALMENTE ABERTA (perpendicular ao vão); como os
+        // dois são perpendiculares entre si e de mesmo módulo, interpolar
+        // com cos(phi)/sin(phi) (em vez de lerp linear de x/z) traça o arco
+        // certo pra qualquer phi intermediário — em phi=0 dá exatamente
+        // `pos.x/pos.y` (fechada, sem essa conta) e em phi=90° dá
+        // exatamente a fórmula antiga (aberta).
+        const ang = pos.angulo || 0;
+        const alongX = Math.cos(ang), alongY = Math.sin(ang); // ao longo da parede/vão
+        const perpX = -Math.sin(ang), perpY = Math.cos(ang); // perpendicular — direção do giro ao abrir
+        const hingeSign = el.abertura === 'esquerda' ? -1 : 1;
+        const hingeX = pos.x + alongX * hingeSign * (largura / 2);
+        const hingeZ = pos.y + alongY * hingeSign * (largura / 2);
+        const v0x = -hingeSign * alongX * (largura / 2), v0z = -hingeSign * alongY * (largura / 2);
+        const v1x = perpX * (largura / 2), v1z = perpY * (largura / 2);
+        meshX = hingeX + Math.cos(phi) * v0x + Math.sin(phi) * v1x;
+        meshZ = hingeZ + Math.cos(phi) * v0z + Math.sin(phi) * v1z;
+        meshRotY = rotY + phi;
+      }
+      // `partsLocal` — UMA peça (porta) ou VÁRIAS (moldura+vidro da janela,
+      // ver acima): cada uma em coordenadas LOCAIS (lx/lz giram junto com
+      // meshRotY, ly só soma direto na altura) — mesma técnica de
+      // _buildMesaMesh/buildJanelaCorrer2Folhas (local->mundo via cos/sin).
+      // Pra porta (só 1 peça, lx=ly=lz=0) dá exatamente a mesma posição de
+      // antes desta rodada — nada muda pra ela.
+      const cosR = Math.cos(meshRotY), sinR = Math.sin(meshRotY);
+      const meshesAdded = [];
+      partsLocal.forEach(({ mesh, lx, ly, lz }) => {
+        mesh.position.set(meshX + lx * cosR + lz * sinR, baseY + altura / 2 + ly, meshZ - lx * sinR + lz * cosR);
+        mesh.rotation.y = meshRotY;
+        this._group.add(mesh);
+        meshesAdded.push(mesh);
+      });
+      const half = { x: largura / 2, y: altura / 2, z: espMesh / 2 };
+      // `pos` (além de `center`, valor idêntico): hoverPick/pickFromRay leem
+      // `p.pos` pra QUALQUER pickable (item/câmera/objeto já tinham os dois
+      // campos) — faltando aqui, todo quadro em que existisse uma porta/
+      // janela no ambiente quebrava `_raySphereT` (`.x` de `undefined`),
+      // travando o loop de render inteiro (bug real: "tela 3D preta", já com
+      // o motor carregando certo — o erro só aparecia DEPOIS do carregamento
+      // funcionar, por isso não tinha aparecido nas rodadas anteriores).
+      // Usa meshX/meshZ/meshRotY (não pos.x/pos.y/rotY) — o pick precisa
+      // coincidir com a malha DE VERDADE, inclusive quando ela pivotou pro
+      // canto da dobradiça acima.
+      const posPick = { x: meshX, y: baseY + altura / 2, z: meshZ };
+      const pick = { id: el.id, type: kind, ref: el, pos: posPick, center: posPick, radius: Math.max(largura, altura) / 2, obb: { half, rotY: meshRotY } };
+      this.pickables.push(pick);
+      // Mesma peça de `pick` em TODAS as malhas do elemento (moldura+vidro
+      // da janela, ou só a peça única da porta) — mesmo padrão já usado por
+      // qualquer pickable de várias malhas neste arquivo (ver _buildMesaMesh/
+      // _buildLuminariaMesh: câmera, mesa, luminária) — hover/seleção/remover
+      // funcionam mirando em QUALQUER pedaço, e o modo 'pixelperfect'
+      // (_hoverPickPixelPerfect) também acerta a malha de verdade certinho.
+      meshesAdded.forEach((m) => { m.userData.pick = pick; this._pickMeshes.push(m); });
+      // [14/09/2026] NOVO — guarda a malha da folha + os dados pra
+      // recalcular o arco de abertura (mesmo `pos`/`largura`/`altura`/
+      // `baseY`/`rotY` usados acima) em `el._doorLeafMesh`/
+      // `el._doorPivotInfo` — só pra porta (1 peça única, `meshesAdded[0]`).
+      // Usado por `_updateDoorAnimations` (chamado a cada quadro por
+      // `view3d.js` `_updateScriptLifecycle`) pra animar `el.anguloAbertura`
+      // suavemente SEM precisar reconstruir a cena inteira a cada mudança —
+      // ver `Components`/exemplo de Script "Porta Automática".
+      if (kind === 'porta') {
+        // [correção 13/09/2026] guardado em `this._doorRuntime` (Map por
+        // id), NÃO em `el` — ver comentário grande em `setScene` sobre por
+        // que anexar um THREE.Mesh direto na entidade persistida quebrava
+        // o salvamento no IndexedDB.
+        const rt = { leafMesh: meshesAdded[0] || null, pivotInfo: { pos, largura, altura, baseY, rotY }, manetaMesh: null };
+        this._doorRuntime.set(el.id, rt);
+        // [13/09/2026] NOVO — variante "porta com maçaneta" (pedido do
+        // usuário: "faça uma porta com maçaneta e deve ter um script para
+        // fazer a animação de movimento da maçaneta quando se dá dois
+        // cliques..."). `el.comManeneta:true` é um campo NOVO e opcional —
+        // sem ele, a porta continua exatamente como sempre (placa lisa sem
+        // maçaneta), ZERO mudança de comportamento padrão.
+        //
+        // Construída como um GRUPO (cilindro fino "espelho"/rosca + alavanca
+        // em L) e adicionada como FILHO de `el._doorLeafMesh` (`mesh.add`,
+        // não `this._group.add`) — assim ela HERDA automaticamente toda
+        // posição/rotação que `_updateDoorAnimations` já aplica na folha a
+        // cada quadro (abrir/fechar), sem precisar recalcular nada aqui: o
+        // grupo da maçaneta só faz sua PRÓPRIA rotação extra (eixo local Z,
+        // perpendicular à face da porta) em cima disso, cuidado por
+        // `_updateDoorAnimations` (ver mais abaixo, junto da animação da
+        // folha) quando `anguloAbertura` muda de alvo.
+        //
+        // Posição local (relativa ao CENTRO da folha, já que a geometria da
+        // porta é uma BoxGeometry centrada em 0,0,0): lado OPOSTO à
+        // dobradiça (`hingeSign` já calculado acima pro arco de abertura),
+        // altura ~1m absoluto (convertido pra offset local subtraindo
+        // `altura/2`, já que o eixo Y local da folha tem origem no centro
+        // dela), levemente à frente da face (metade da espessura da folha +
+        // uma folga pequena) — posição típica de maçaneta real.
+        const doorMesh = meshesAdded[0];
+        if (el.comManeneta && doorMesh) {
+          // [correção 13/09/2026] `hingeSign` foi calculado num bloco
+          // `if (kind === 'porta')` ANTERIOR (linha ~3730), com escopo de
+          // `const` só daquele bloco — reusá-lo aqui (bloco `if` separado)
+          // dava `ReferenceError: hingeSign is not defined` e quebrava o
+          // motor 3D inteiro. Mesma fórmula de lá, recalculada aqui.
+          const hingeSign = el.abertura === 'esquerda' ? -1 : 1;
+          const corManeta = el.colorManeta
+            ? colorFromHex(el.colorManeta, 0xc9c9c9)
+            : 0xc9c9c9; // metálico padrão (dourado: passar `el.colorManeta = 0xd4af37`)
+          const matManeta = wireframe
+            ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+            : new THREE.MeshLambertMaterial({ color: corManeta });
+          // [15/09/2026 UTC] ALTERADO — pedido verbatim: "O modelo 3D da
+          // porta deve ter a maçaneta voltada para o lado certo." Antes só
+          // havia UM grupo de maçaneta, montado inteiro no lado +Z local da
+          // folha — uma porta de verdade tem maçaneta/puxador nas DUAS
+          // faces (cada lado do ambiente que a porta separa precisa abrir
+          // pelo seu próprio lado); com só uma face montada, olhando a
+          // porta do lado sem maçaneta ela aparecia "sem nada"/errada — o
+          // sintoma batido de "voltada pro lado errado". CORRIGIDO: a
+          // montagem da maçaneta virou uma função local (`montarManeta`),
+          // chamada 2x — uma pro lado +Z, outra pro lado -Z (espelhada em Z
+          // e também em X, já que uma maçaneta vista pelo lado de trás é a
+          // imagem espelhada da vista pela frente) — cada face agora tem seu
+          // próprio grupo, sempre do lado OPOSTO à dobradiça (`hingeSign`,
+          // mesma lógica de antes, inalterada) em X. `rt.manetaMesh` vira um
+          // array com os 2 grupos (`_updateDoorAnimations`, mais abaixo, só
+          // precisa girar TODOS eles do mesmo jeito ao animar).
+          const montarManeta = (ladoZ) => {
+            // [18/09/2026 UTC] REESCRITO (RODADA 160) — pedido verbatim:
+            // "Se você fez a maçaneta e depois a girou 180 graus, refaça
+            // ela do jeito que está agora, mas ficando com 0 graus. Deste
+            // modo, ela já ficará na posição certa sem precisar girar os
+            // 180 graus." As RODADAS 156/157 chegaram a esta geometria em
+            // 2 passos (construir + depois inverter um sinal pra "girar
+            // 180°") — esta versão já nasce direto na orientação final
+            // certa, sem nenhuma correção de sinal por cima; o resultado
+            // geométrico é idêntico ao de antes, só o código ficou direto.
+            const manetaGrupo = new THREE.Group();
+            // Offsets em Z: quanto cada peça (rosca/haste/ponta) protunde
+            // além da face da folha (`espMesh/2` já é a própria superfície
+            // da face) — rente/junto à porta, não flutuando afastada dela.
+            const ROSCA_Z_OFF = 0.01, HASTE_Z_OFF = 0.02, PONTA_Z_OFF = 0.03;
+            // Rosca/espelho: cilindro curto, eixo alinhado ao Z local
+            // (protunde pra fora da face da porta) — `CylinderGeometry`
+            // nasce com eixo Y, por isso o `rotation.x = π/2` (deita o
+            // cilindro pro eixo Z). Fica em X=0 (centro da alavanca).
+            const rosca = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.04, 12), matManeta);
+            rosca.rotation.x = Math.PI / 2;
+            rosca.position.set(0, 0, ladoZ * (espMesh / 2 + ROSCA_Z_OFF));
+            manetaGrupo.add(rosca);
+            // Alavanca em L: barra fina saindo da rosca (a "haste",
+            // horizontal, comprida o bastante pra cobrir a rosca inteira) +
+            // a "ponta" (menor, encostada rente à lateral externa da
+            // haste). As duas se estendem no sentido `+hingeSign` em X —
+            // formato "L" simples, ambas filhas do MESMO grupo, então giram
+            // juntas na animação de "girar a maçaneta". `ladoZ` espelha a
+            // profundidade (Z) pra cada face olhar pro lado certo.
+            const HASTE_HALF_X = 0.08; // meia-largura — comprimento total 0,16
+            const hasteCenterX = hingeSign * 0.05;
+            const haste = new THREE.Mesh(new THREE.BoxGeometry(HASTE_HALF_X * 2, 0.02, 0.02), matManeta);
+            haste.position.set(hasteCenterX, 0, ladoZ * (espMesh / 2 + HASTE_Z_OFF));
+            manetaGrupo.add(haste);
+            const PONTA_HALF_X = 0.01; // meia-largura — comprimento total 0,02
+            const hasteOuterEdgeX = hasteCenterX + hingeSign * HASTE_HALF_X;
+            const pontaCenterX = hasteOuterEdgeX + hingeSign * PONTA_HALF_X;
+            const ponta = new THREE.Mesh(new THREE.BoxGeometry(PONTA_HALF_X * 2, 0.02, 0.03), matManeta);
+            ponta.position.set(pontaCenterX, 0, ladoZ * (espMesh / 2 + PONTA_Z_OFF));
+            manetaGrupo.add(ponta);
+            // Posição do GRUPO inteiro: lado oposto à dobradiça, ~1m de
+            // altura absoluta (offset local = altura alvo - metade da
+            // altura da folha, já que a folha é centrada em seu próprio
+            // meio) — mesma fórmula de X/Y de antes, só Z passa a depender
+            // de `ladoZ`.
+            manetaGrupo.position.set(-hingeSign * (largura / 2 - 0.06), 1.0 - altura / 2, 0);
+            doorMesh.add(manetaGrupo);
+            return manetaGrupo;
+          };
+          rt.manetaMesh = [montarManeta(1), montarManeta(-1)];
+        }
+      }
+  }
+
   /** [13/09/2026] NOVO — marca `mesh` com o deslocamento LOCAL dela em
    *  relação à base "de mundo" do objeto (`obj.x`/`baseY`/`obj.y`) — ver
    *  comentário grande em `_syncScriptedObjectTransforms`. Extraído do
@@ -5666,8 +5490,20 @@ class Engine3D {
   _updateDoorAnimations(dt) {
     const portas = this.mapData?.portas;
     if (!portas || !portas.length) return;
-    const DEG_PER_SEC = 90 / 0.5; // curso inteiro (0..90°) em ~500ms
+    const DEG_PER_SEC_PADRAO = 90 / 0.5; // curso inteiro (0..90°) em ~500ms — usado quando a porta não define uma velocidade própria
     for (const el of portas) {
+      // [18/09/2026 UTC] NOVO (RODADA 155) — pedido verbatim: "A velocidade
+      // com que se dá os dois cliques deve influenciar na velocidade com
+      // que a porta abre." Campo TRANSIENTE (não salvo no mapa, mesmo
+      // espírito de `rt.manetaLastTargetDeg` etc.) que um Script (ver
+      // `assets/exemplos/_exemplo-script-porta-*.txt`) pode setar em
+      // `el._velocidadeGrausPorSeg` logo antes de mudar `anguloAbertura`,
+      // pra esta rodada de animação usar uma velocidade diferente da
+      // padrão só desta vez. Ausente/inválido → cai no valor padrão de
+      // sempre (curso inteiro em ~500ms).
+      const DEG_PER_SEC = (typeof el._velocidadeGrausPorSeg === 'number' && el._velocidadeGrausPorSeg > 0)
+        ? el._velocidadeGrausPorSeg
+        : DEG_PER_SEC_PADRAO;
       // [correção 13/09/2026] estado/malhas agora vêm de `this._doorRuntime`
       // (Map por `el.id`), não de propriedades em `el` — ver comentário
       // grande em `setScene`.
@@ -5696,18 +5532,49 @@ class Engine3D {
       // `montarManeta`, mais acima) em vez de um `THREE.Group` único — as 2
       // giram sempre JUNTAS (mesmo `rotation.z`, mesma animação), só o
       // ALVO (`rt.manetaMesh.rotation.z = ...`) virou um `forEach`.
-      if (el.comManeneta && rt.manetaMesh && rt.manetaMesh.length) {
+      // [18/09/2026 UTC] ALTERADO (RODADA 162) — pedido verbatim: "Quando a
+      // porta estiver fechada, o giro de 45º da maçaneta deve ser feito de
+      // imediato ao dar dois cliques. Quando a porta estiver aberta, ao dar
+      // duplo clique, o giro de 45º da maçaneta deve ser feito logo antes
+      // de a porta fechar completamente (faltando 1/3 dos 90º de abertura
+      // da porta para fechar)." Antes, o giro da maçaneta disparava sempre
+      // no INSTANTE em que `anguloAbertura` mudava de alvo, tanto pra abrir
+      // quanto pra fechar — agora o disparo depende da DIREÇÃO da mudança:
+      // abrindo (alvo sobe, 0→90) continua imediato; fechando (alvo desce,
+      // 90→0) fica PENDENTE (`rt.manetaAoFecharPendente`) até a folha, já
+      // em movimento de fechamento, chegar aos 30° (= 90°/3, "faltando 1/3
+      // dos 90° para fechar") — só então o giro da maçaneta é de fato
+      // disparado, no bloco logo depois de `rt.anguloAtualAnim` ser
+      // recalculado abaixo (precisa do ângulo JÁ atualizado desta rodada
+      // pra comparar contra o limiar de 30°).
+      const temManeta = !!(el.comManeneta && rt.manetaMesh && rt.manetaMesh.length);
+      if (temManeta) {
         if (rt.manetaLastTargetDeg === undefined) rt.manetaLastTargetDeg = targetDeg;
         if (targetDeg !== rt.manetaLastTargetDeg) {
+          const abrindo = targetDeg > rt.manetaLastTargetDeg;
           rt.manetaLastTargetDeg = targetDeg;
-          rt.manetaAnimDur = 0.25; // ~250ms, independente dos ~500ms da folha
-          rt.manetaAnimT = rt.manetaAnimDur;
+          if (abrindo) {
+            rt.manetaAoFecharPendente = false; // troca de direção cancela um "fechar" pendente anterior
+            rt.manetaAnimDur = 0.25; // ~250ms, independente dos ~500ms da folha
+            rt.manetaAnimT = rt.manetaAnimDur;
+          } else {
+            rt.manetaAoFecharPendente = true; // dispara mais abaixo, só quando a folha chegar a 30°
+          }
         }
         if (rt.manetaAnimT > 0) {
           rt.manetaAnimT = Math.max(0, rt.manetaAnimT - Math.max(0, dt || 0));
           const p = 1 - rt.manetaAnimT / rt.manetaAnimDur;
-          const MAX_MANETA_RAD = 35 * Math.PI / 180; // ~35° de giro no cabo
-          const rotZ = Math.sin(Math.min(1, p) * Math.PI) * MAX_MANETA_RAD;
+          // [18/09/2026 UTC] ALTERADO (RODADA 155) — pedido verbatim: "uma
+          // animação simples da maçaneta girando 45º". Era 35°.
+          const MAX_MANETA_RAD = 45 * Math.PI / 180; // ~45° de giro no cabo
+          // [18/09/2026 UTC] ALTERADO (RODADA 161) — pedido verbatim: "A
+          // girada de 45º da maçaneta está indo para cima, deveria ir para
+          // baixo." Sinal de `rotZ` invertido (era positivo, girando as
+          // pontas pra cima em torno do eixo Z local) — pedido original
+          // (RODADA 155/156) já dizia "no sentido de as pontas da maçaneta
+          // desçam", então o sinal errado era um bug de implementação, não
+          // uma mudança de pedido.
+          const rotZ = -Math.sin(Math.min(1, p) * Math.PI) * MAX_MANETA_RAD;
           rt.manetaMesh.forEach((m) => { m.rotation.z = rotZ; });
         } else {
           rt.manetaMesh.forEach((m) => { if (m.rotation.z !== 0) m.rotation.z = 0; }); // garante neutro exato ao fim da animação
@@ -5721,6 +5588,17 @@ class Engine3D {
       } else {
         const step = DEG_PER_SEC * Math.max(0, dt || 0);
         rt.anguloAtualAnim += Math.sign(diff) * Math.min(Math.abs(diff), step);
+      }
+      // [18/09/2026 UTC] NOVO (RODADA 162) — dispara o giro "pendente" da
+      // maçaneta (ver bloco grande acima) assim que a folha, fechando,
+      // atinge 30° (90°/3 — "faltando 1/3 dos 90° para fechar"). Usa
+      // `rt.anguloAtualAnim` JÁ recalculado nesta mesma rodada (linhas
+      // acima), então o disparo acontece no quadro exato em que a folha
+      // cruza o limiar, não 1 quadro atrasado.
+      if (temManeta && rt.manetaAoFecharPendente && rt.anguloAtualAnim <= 30) {
+        rt.manetaAoFecharPendente = false;
+        rt.manetaAnimDur = 0.25;
+        rt.manetaAnimT = rt.manetaAnimDur;
       }
       const phi = rt.anguloAtualAnim * Math.PI / 180;
       const { pos, largura, altura, baseY, rotY } = info;
@@ -6324,6 +6202,7 @@ class Engine3D {
     if (wireframe) this._addWireframeOcclusion();
     if (this.mode === 'hibrido') this._setupHybridMeshes();
     this._setupCullMeshes();
+    if (window.RedeEquip && window.RedeEquip.ehEquipRede(obj.tipo)) this.rebuildCabos(); // RODADA 166/167
     return true;
   }
 
@@ -6368,7 +6247,31 @@ class Engine3D {
     topoParaRemover.forEach((node) => {
       this._group.remove(node);
       node.traverse?.((n) => {
+        // [18/09/2026 UTC] RODADA 164 — vidro de porta de Rack (`_buildGlassPane`
+        // registra em `_glassMeshesAtivos`): sai da lista junto, senão o passe do
+        // vidro ficaria desenhando malhas descartadas.
+        if (n.isMesh && this._glassMeshesAtivos) { const gi = this._glassMeshesAtivos.indexOf(n); if (gi >= 0) this._glassMeshesAtivos.splice(gi, 1); }
+        // [19/09/2026 UTC] NOVO (RODADA 170) -- CAUSA RAIZ do bug relatado pelo usuário: "ao mudar a
+        // rotação [em Propriedades, Modo Navegação do Ver em 3D], ela não está sendo aplicada
+        // imediatamente [...] Só aparece se entra em 'Modelar em 3D' e depois 'Sair do Modelador'".
+        // Objetos do mesmo tipo/piso acima do LIMIAR (4) são desenhados via UM InstancedMesh
+        // compartilhado (`_instancedPools`); a malha individual fica com `visible=false` e uma
+        // matriz de instância CONGELADA em `userData._inst.matrix`. Este loop de limpeza remove/
+        // reconstrói a malha individual (com a nova rotação correta), mas nunca avisava o pool —
+        // então a instância ANTIGA (desatualizada) continuava sendo desenhada por cima, até que o
+        // próximo `setScene()` completo (ex.: entrar/sair do Modelador) reconstruísse
+        // `_instancedPools` do zero. Corrigido zerando a escala da instância antiga no pool aqui,
+        // no mesmo instante em que a malha individual é descartada — sem esperar o próximo frame.
+        if (n.userData?._inst) {
+          const pool = this._instancedPools?.[n.userData._inst.poolKey];
+          if (pool) {
+            if (!this._zeroInstMatrix) this._zeroInstMatrix = new this.THREE.Matrix4().makeScale(0, 0, 0);
+            pool.mesh.setMatrixAt(n.userData._inst.index, this._zeroInstMatrix);
+            pool.mesh.instanceMatrix.needsUpdate = true;
+          }
+        }
         if (!n.isMesh) return;
+        if (n.material && n.material.map && n.material.map.isCanvasTexture) n.material.map.dispose();   // serigrafia dos equipamentos de rede
         n.geometry?.dispose?.();
         if (Array.isArray(n.material)) n.material.forEach((mt) => mt?.dispose?.());
         else n.material?.dispose?.();
@@ -6384,6 +6287,11 @@ class Engine3D {
     if (wireframe) this._addWireframeOcclusion();
     if (this.mode === 'hibrido') this._setupHybridMeshes();
     this._setupCullMeshes();
+    // [18/09/2026 UTC] RODADA 166 -- rack reconstruido: quem esta instalado nele reposiciona; cabos sempre refeitos.
+    if (window.RedeEquip) {
+      if (obj.tipo === 'rack') (this.mapData.objects || []).filter((o) => o.rackId === obj.id && window.RedeEquip.ehEquipRede(o.tipo)).forEach((e) => this.rebuildObjectIncremental(e));
+      if (obj.tipo === 'rack' || window.RedeEquip.ehEquipRede(obj.tipo)) this.rebuildCabos();
+    }
     return true;
   }
 
@@ -7510,6 +7418,68 @@ class Engine3D {
     this._rebuildTijolos(mapData);
   }
 
+  /** Malha de VIDRO de faces editadas: mesma textura/material do vidro do cenário (`_buildGlassPane`). */
+  _buildGlassFacesMesh(verts, faces) {
+    const THREE = this.THREE;
+    const gg = buildGlassFaceGeometry(THREE, verts, faces);
+    if (!gg.attributes.position) return null;
+    const mat = new THREE.MeshBasicMaterial({ map: this._glassShineTexture, transparent: true, side: THREE.DoubleSide, depthWrite: false });
+    const glass = new THREE.Mesh(gg, mat);
+    glass.renderOrder = 2;
+    if (!this._glassMeshesAtivos) this._glassMeshesAtivos = [];
+    this._glassMeshesAtivos.push(glass);
+    return glass;
+  }
+
+  /** Portas ARTICULADAS de um Rack que já foi editado no Modelador: os vértices marcados `v[5] = 'porta:<lado>'`
+   *  viram grupos próprios (girando na dobradiça, com duplo clique e vidro do cenário), como no Rack original.
+   *  `doorFaces`: { 'porta:frente': { solid: [faces], glass: [faces] } }. */
+  _buildRackDoorsFromCustomMesh(obj, mesh, verts, doorFaces, objPick, wireframe, colWireframe) {
+    const THREE = this.THREE, K = 0.001;
+    let rack;
+    try { rack = window.RackModular.fromObjeto(obj); } catch (e) { return; }
+    if (!this._rackRuntime) this._rackRuntime = new Map();
+    const rt = { obj, rotY: mesh.rotation.y, doors: {} };
+    mesh.updateMatrixWorld(true);
+    Object.keys(doorFaces).forEach((tag) => {
+      const lado = tag.slice(6);
+      const spec = rack.portas && rack.portas[lado];
+      if (!spec) return;
+      const px = spec.pivo.x * K, pz = spec.pivo.z * K;
+      const sh = verts.map((v) => { const c = v.slice(); c[0] -= px; c[2] -= pz; return c; });
+      const parts = doorFaces[tag];
+      const pg = new THREE.Group();
+      pg.position.set(px, 0, pz).applyMatrix4(mesh.matrixWorld);
+      pg.scale.copy(mesh.scale);
+      const meshes = [];
+      if (parts.solid.length) {
+        const cor = { __default: [1, 1, 1] };
+        parts.solid.forEach((f, i) => { const v0 = verts[f[0]]; if (v0 && v0.length > 3 && v0[3] != null) { const c = new THREE.Color(v0[3]); cor[i] = [c.r, c.g, c.b]; } });
+        const geo = buildSmoothedTriGeometry(THREE, sh, parts.solid, cor);
+        if (geo.attributes.position) {
+          const mat = wireframe ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true }) : this._buildStandardMaterialForObj(0xffffff, obj, undefined, true);
+          const m = new THREE.Mesh(geo, mat); m.castShadow = m.receiveShadow = true;
+          pg.add(m); meshes.push(m);
+        }
+      }
+      if (parts.glass.length && !wireframe) {
+        const gl = this._buildGlassFacesMesh(sh, parts.glass);
+        if (gl) { pg.add(gl); meshes.push(gl); }
+      }
+      pg.userData.pick = objPick; pg.userData.rackParte = tag;
+      meshes.forEach((m) => { m.userData.pick = objPick; m.userData.rackParte = tag; this._pickMeshes.push(m); });
+      this._group.add(pg);
+      const dp = { id: obj.id, type: 'object', pos: { x: 0, y: 0, z: 0 }, center: { x: 0, y: 0, z: 0 }, radius: Math.max(spec.w, spec.h) * K * 0.5, ref: obj, rackPorta: lado,
+        obb: { half: { x: spec.w * K / 2, y: spec.h * K / 2, z: spec.esp * K / 2 + 0.01 }, rotY: rt.rotY, shape: 'box', segments: 14 } };
+      this.pickables.push(dp);
+      const ang0 = Math.max(0, Math.min(110, Number(obj[spec.campoAngulo]) || 0));
+      const door = { pg, spec, pick: dp, ang: ang0 };
+      rt.doors[lado] = door;
+      this._rackAplicarAngulo(rt, door);
+    });
+    this._rackRuntime.set(obj.id, rt);
+  }
+
   _buildCustomMeshObject(obj, baseY, wireframe, colWireframe) {
     const THREE = this.THREE;
     const cm = obj.customMesh;
@@ -7541,7 +7511,32 @@ class Engine3D {
         faceColorsRGB[idx] = [c.r, c.g, c.b];
       });
     }
-    let geo = buildSmoothedTriGeometry(THREE, verts, cm.faces || [], faceColorsRGB);
+    // Cor por peça (vértice[3] = 0xRRGGBB) e vidro translúcido (vértice[4] < 1), gravados pelo
+    // Modelador ao converter objetos compostos (Rack, Switch, Patch panel...).
+    let facesDesenho = cm.faces || [];
+    let facesVidro = null;
+    let temCorVertice = false;
+    const ehRack = obj.tipo === 'rack' && !!window.RackModular && !wireframe;
+    const doorFaces = {};
+    for (let i = 0; i < verts.length; i++) { const v = verts[i]; if (v && v.length > 3 && v[3] != null) { temCorVertice = true; break; } }
+    if (temCorVertice) {
+      const base = new THREE.Color(_hexToThreeColor(obj.cor) ?? 0x8a92a3);
+      faceColorsRGB = { __default: [base.r, base.g, base.b] };
+      facesDesenho = []; facesVidro = [];
+      (cm.faces || []).forEach((f) => {
+        const v0 = f && verts[f[0]];
+        // Rack editado: faces das PORTAS (v[5] = 'porta:<lado>') vão para grupos articulados (ver abaixo).
+        if (ehRack && v0 && typeof v0[5] === 'string' && v0[5].startsWith('porta:')) {
+          const d = doorFaces[v0[5]] || (doorFaces[v0[5]] = { solid: [], glass: [] });
+          if (v0.length > 4 && v0[4] != null && v0[4] < 1) d.glass.push(f); else d.solid.push(f);
+          return;
+        }
+        if (v0 && v0.length > 4 && v0[4] != null && v0[4] < 1) { facesVidro.push(f); return; }
+        if (v0 && v0.length > 3 && v0[3] != null) { const c = new THREE.Color(v0[3]); faceColorsRGB[facesDesenho.length] = [c.r, c.g, c.b]; }
+        facesDesenho.push(f);
+      });
+    }
+    let geo = buildSmoothedTriGeometry(THREE, verts, facesDesenho, faceColorsRGB);
     if (!geo.attributes.position) {
       // Malha sem nenhuma face (só vértices/arestas soltos, ex.: no meio de
       // uma edição) — evita BufferGeometry vazia (Three.js não gosta) sem
@@ -7552,8 +7547,12 @@ class Engine3D {
     const color = _hexToThreeColor(obj.cor) ?? 0x8a92a3;
     const mat = wireframe
       ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : this._buildStandardMaterialForObj(color, obj, undefined, !!faceColorsRGB);
+      : this._buildStandardMaterialForObj(temCorVertice ? 0xffffff : color, obj, undefined, !!faceColorsRGB);
     const mesh = new THREE.Mesh(geo, mat);
+    if (facesVidro && facesVidro.length && !wireframe) {
+      const glass = this._buildGlassFacesMesh(verts, facesVidro); // MESMA textura de vidro do cenário
+      if (glass) mesh.add(glass);
+    }
     // `obj.elevacao`/`baseY` é sempre a altura da BASE do objeto — mas a
     // ORIGEM local (0,0,0) do `customMesh` pode estar no MEIO do cubo agora
     // (opção "Origem no centro do cubo", pedido do usuário — ver
@@ -7618,6 +7617,7 @@ class Engine3D {
     this.pickables.push(objPick);
     mesh.userData.pick = objPick;
     this._pickMeshes.push(mesh);
+    if (ehRack && Object.keys(doorFaces).length && !wireframe) this._buildRackDoorsFromCustomMesh(obj, mesh, verts, doorFaces, objPick, wireframe, colWireframe);
   }
 
   /** NOVO (01/09/2026), item GRANDE #5 do pedido de 12 itens — monta um
@@ -7909,128 +7909,6 @@ class Engine3D {
     return { meshes, w, d, h };
   }
 
-  _buildMesaMesh(obj, perfil, baseY, wireframe, colWireframe) {
-    const THREE = this.THREE;
-    const mat = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: perfil.color });
-    const rotY = objAnguloToRotY(obj.angulo);
-    const { meshes, w, d, h } = this._makeMesaMeshes(obj, perfil, baseY, mat);
-    meshes.forEach((m) => this._group.add(m));
-    const objPos = { x: obj.x, y: baseY + h / 2, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.6, ref: obj, obb: { half: { x: w / 2, y: h / 2, z: d / 2 }, rotY, shape: 'box', segments: 14 } };
-    this.pickables.push(objPick);
-    // [13/09/2026] NOVO — mesa animada por Script (pedido do usuário, Task 3
-    // do prédio de 40 andares: "algumas mesas... também devem ter scripts de
-    // animação") — ver `_tagScriptBase`/`_syncScriptedObjectTransforms`.
-    const temScriptAtivo = Array.isArray(obj.components) && obj.components.some((c) => c.type === 'Script' && c.enabled !== false);
-    meshes.forEach((m) => {
-      m.userData.pick = objPick;
-      this._pickMeshes.push(m);
-      if (temScriptAtivo) this._tagScriptBase(m, obj, baseY);
-    });
-  }
-
-  /** [15/09/2026 UTC] NOVO — "Pilar", objeto comum de catálogo (pedido
-   *  verbatim: "faça dois novos objetos: 'Mesa' e 'Pilar' [...] O objeto
-   *  'Pilar' deve ter a altura que define a distância entre um andar e
-   *  outro e dimensões de 120cmx60cm [...] é só um objeto comum" — sem
-   *  gizmo/forma especial, um `THREE.BoxGeometry` só, do chão até o teto
-   *  do andar onde foi colocado. `w`/`d` vêm de `perfil` (1.2×0.6m, ver
-   *  `OBJECT3D_PROFILES.pilar`); `h` NUNCA vem de `perfil.h` (que é só um
-   *  valor de fábrica pro ghost/footprint) — sempre `this.mapData?.
-   *  alturaPiso` (a distância real entre andares deste mapa), igual
-   *  `_buildEscadaMesh` já faz pra escada. */
-  _buildPilarMesh(obj, perfil, baseY, wireframe, colWireframe) {
-    const THREE = this.THREE;
-    const w = perfil.w || 1.2, d = perfil.d || 0.6;
-    const h = this.mapData?.alturaPiso || 2.8;
-    const mat = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: perfil.color });
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    const centerY = baseY + h / 2;
-    mesh.position.set(obj.x, centerY, obj.y);
-    mesh.rotation.y = objAnguloToRotY(obj.angulo);
-    this._group.add(mesh);
-    const objPos = { x: obj.x, y: centerY, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.6, ref: obj, obb: { half: { x: w / 2, y: h / 2, z: d / 2 }, rotY: mesh.rotation.y, shape: 'box', segments: 14 } };
-    this.pickables.push(objPick);
-    mesh.userData.pick = objPick;
-    this._pickMeshes.push(mesh);
-  }
-
-  /** [15/09/2026 UTC] NOVO — "Cadeira de verdade" (pedido verbatim: "Faça
-   *  um modelo 3D diferente para a cadeira (substituindo-o), faça uma
-   *  'cadeira de verdade' com pernas e encosto. Não uma caixa genérica como
-   *  é atualmente."). Mesmo padrão de `_makeMesaMeshes`/`_buildMesaMesh`
-   *  (várias `Mesh` soltas — assento + 4 pernas + encosto — compartilhando
-   *  1 pickable/obb aproximado pela caixa delimitadora total): assento fino
-   *  na altura real de uma cadeira (~metade da altura total), 4 pernas
-   *  finas recuadas pra DENTRO do assento (não nas quinas — mesmo cuidado
-   *  já pedido pra mesa), e um encosto — painel vertical fino — na borda de
-   *  TRÁS do assento (local Z negativo, antes de girar por `obj.angulo`).
-   */
-  _buildCadeiraMesh(obj, perfil, baseY, wireframe, colWireframe) {
-    const THREE = this.THREE;
-    const w = perfil.w || 0.45, d = perfil.d || 0.45;
-    const h = (perfil.y0 || 0) + (perfil.h != null ? perfil.h : 0.9); // altura total chão -> topo do encosto
-    const mat = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: perfil.color });
-    const rotY = objAnguloToRotY(obj.angulo);
-    const cos = Math.cos(rotY), sin = Math.sin(rotY);
-    const assentoEsp = 0.04;
-    const assentoAltura = Math.min(0.46, h * 0.5); // altura real de assento de cadeira (~45cm do chão)
-    const pernaEsp = Math.max(0.025, Math.min(0.04, Math.min(w, d) * 0.08));
-    const margem = pernaEsp * 1.3; // perna recuada pra DENTRO do assento, não na quina (mesmo pedido já feito pra mesa)
-    const pernaAltura = Math.max(0.05, assentoAltura - assentoEsp / 2);
-    const encostoEsp = 0.035;
-    const encostoAltura = Math.max(0.1, h - assentoAltura);
-    const meshes = [];
-
-    const assento = new THREE.Mesh(new THREE.BoxGeometry(w, assentoEsp, d), mat);
-    assento.position.set(obj.x, baseY + assentoAltura - assentoEsp / 2, obj.y);
-    assento.rotation.y = rotY;
-    meshes.push(assento);
-
-    // 4 cantos em coordenadas LOCAIS (antes de girar) — mesma técnica
-    // local->mundo de `_makeMesaMeshes` (cos/sin de `objAnguloToRotY`).
-    const cornersLocal = [
-      [w / 2 - margem, d / 2 - margem], [-(w / 2 - margem), d / 2 - margem],
-      [w / 2 - margem, -(d / 2 - margem)], [-(w / 2 - margem), -(d / 2 - margem)],
-    ];
-    const pernaGeo = new THREE.BoxGeometry(pernaEsp, pernaAltura, pernaEsp);
-    cornersLocal.forEach(([lx, lz]) => {
-      const wx = obj.x + lx * cos + lz * sin;
-      const wz = obj.y - lx * sin + lz * cos;
-      const perna = new THREE.Mesh(pernaGeo, mat);
-      perna.position.set(wx, baseY + pernaAltura / 2, wz);
-      perna.rotation.y = rotY;
-      meshes.push(perna);
-    });
-
-    // Encosto: painel fino vertical na borda TRASEIRA do assento (local
-    // Z negativo — "trás" da cadeira, oposto de onde alguém senta de frente).
-    const encostoLocalZ = -(d / 2 - margem);
-    const ex = obj.x + encostoLocalZ * sin;
-    const ez = obj.y + encostoLocalZ * cos;
-    const encosto = new THREE.Mesh(new THREE.BoxGeometry(w - margem * 2, encostoAltura, encostoEsp), mat);
-    encosto.position.set(ex, baseY + assentoAltura + encostoAltura / 2, ez);
-    encosto.rotation.y = rotY;
-    meshes.push(encosto);
-
-    meshes.forEach((m) => this._group.add(m));
-    const objPos = { x: obj.x, y: baseY + h / 2, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.65, ref: obj, obb: { half: { x: w / 2, y: h / 2, z: d / 2 }, rotY, shape: 'box', segments: 14 } };
-    this.pickables.push(objPick);
-    const temScriptAtivo = Array.isArray(obj.components) && obj.components.some((c) => c.type === 'Script' && c.enabled !== false);
-    meshes.forEach((m) => {
-      m.userData.pick = objPick;
-      this._pickMeshes.push(m);
-      if (temScriptAtivo) this._tagScriptBase(m, obj, baseY);
-    });
-  }
 
   /** [15/09/2026 UTC] NOVO — "Vaso de verdade" (pedido verbatim: "Faça o
    *  mesmo para o vaso" — mesmo tratamento dado à cadeira acima). Antes, o
@@ -8041,49 +7919,6 @@ class Engine3D {
    *  (o mesmo cone verde de antes, só reposicionado) sentada em CIMA da
    *  boca do vaso, não saindo do chão.
    */
-  _buildPlantaMesh(obj, perfil, baseY, wireframe, colWireframe) {
-    const THREE = this.THREE;
-    const r = perfil.r || 0.3;
-    const hTotal = perfil.h || 0.7;
-    const rotY = objAnguloToRotY(obj.angulo);
-    const potR = r * 0.6, potRTopo = potR * 1.15;
-    const potH = Math.min(0.3, hTotal * 0.35);
-    const folhaR = r;
-    const folhaH = Math.max(0.1, hTotal - potH);
-    const matVaso = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: 0xb5651d }); // terracota
-    const matFolha = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: perfil.color });
-    const meshes = [];
-
-    // Vaso: tronco de cone (CylinderGeometry aceita raioTopo != raioBase —
-    // topo mais largo que a base, formato clássico de vaso de planta).
-    const vaso = new THREE.Mesh(new THREE.CylinderGeometry(potRTopo, potR, potH, 12), matVaso);
-    vaso.position.set(obj.x, baseY + potH / 2, obj.y);
-    vaso.rotation.y = rotY;
-    meshes.push(vaso);
-
-    // Folhagem: cone verde (mesma forma de antes), agora sentada em cima
-    // da boca do vaso em vez de flutuar desde o chão.
-    const folha = new THREE.Mesh(new THREE.ConeGeometry(folhaR, folhaH, 12), matFolha);
-    folha.position.set(obj.x, baseY + potH + folhaH / 2, obj.y);
-    folha.rotation.y = rotY;
-    meshes.push(folha);
-
-    meshes.forEach((m) => this._group.add(m));
-    const hFull = potH + folhaH;
-    const objPos = { x: obj.x, y: baseY + hFull / 2, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(potRTopo, folhaR) * 1.1, ref: obj, obb: { half: { x: folhaR, y: hFull / 2, z: folhaR }, rotY, shape: 'cylinder', segments: 12 } };
-    this.pickables.push(objPick);
-    const temScriptAtivo = Array.isArray(obj.components) && obj.components.some((c) => c.type === 'Script' && c.enabled !== false);
-    meshes.forEach((m) => {
-      m.userData.pick = objPick;
-      this._pickMeshes.push(m);
-      if (temScriptAtivo) this._tagScriptBase(m, obj, baseY);
-    });
-  }
 
   /** Escada 3D paramétrica — NOVO (01/09/2026), pedido verbatim do usuário
    *  (arquivo "prompts para o Claude.txt", um dos "itens grandes" adiados
@@ -8125,173 +7960,7 @@ class Engine3D {
    *  usuário fixar uma altura diferente de propósito (ex.: um lance curto
    *  decorativo que não vai o andar inteiro) — quando ausente, o padrão é
    *  sempre a altura do andar. */
-  _buildEscadaMesh(obj, perfil, baseY, wireframe, colWireframe) {
-    const THREE = this.THREE;
-    const largura = Math.max(0.05, obj.largura || perfil.w || 1.3);
-    const profundidadeTotal = Math.max(0.05, obj.profundidade || perfil.d || 3.0);
-    const alturaTotal = obj.alturaEscada || this.mapData?.alturaPiso || 2.8;
-    // Degraus: se `obj.escadaDegraus` não foi configurado pelo usuário, o
-    // padrão agora ESCALA com `alturaTotal` visando ~18cm por degrau (medida
-    // realista de escada de verdade — ~17-19cm é o padrão de construção).
-    // Pra um andar de 4m isso dá `4/0.18 ≈ 22` degraus, bem mais realista
-    // que o antigo padrão fixo de 11 (que, aplicado a 4m em vez dos 2m
-    // originais, resultaria em degraus de ~36cm de altura — quase o dobro do
-    // realista, e beirando o limite de STEP_MAX=0.6m em view3d.js que
-    // permite ao jogador "subir andando" sem pular; degraus muito mais altos
-    // que isso travariam a subida). Um valor CUSTOMIZADO pelo usuário
-    // (`obj.escadaDegraus`) sempre tem prioridade — nunca sobrescrito aqui.
-    const degraus = Math.max(1, Math.round(obj.escadaDegraus) || Math.round(alturaTotal / 0.18) || 11);
-    const stepDepth = profundidadeTotal / degraus;
-    const stepHeight = alturaTotal / degraus;
-    const mat = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: perfil.color });
-    const rotY = objAnguloToRotY(obj.angulo); // ver objAnguloToRotY — bate com a rotação do 2D
-    const cos = Math.cos(rotY), sin = Math.sin(rotY);
-    const meshes = [];
-    for (let i = 0; i < degraus; i++) {
-      const h = stepHeight * (i + 1);
-      const geo = new THREE.BoxGeometry(largura, h, stepDepth);
-      const m = new THREE.Mesh(geo, mat);
-      // Desloca cada degrau ao longo da profundidade LOCAL (eixo Z antes de
-      // girar), a partir do início do lance — MESMA convenção local->mundo
-      // de `_buildMesaMesh` (wx = x + lx·cos + lz·sin; wz = y - lx·sin + lz·cos).
-      const lx = 0, lz = -profundidadeTotal / 2 + stepDepth * (i + 0.5);
-      const wx = obj.x + lx * cos + lz * sin;
-      const wz = obj.y - lx * sin + lz * cos;
-      m.position.set(wx, baseY + h / 2, wz);
-      m.rotation.y = rotY;
-      meshes.push(m);
-    }
-    meshes.forEach((m) => this._group.add(m));
-    const objPos = { x: obj.x, y: baseY + alturaTotal / 2, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(largura, profundidadeTotal) * 0.6, ref: obj, obb: { half: { x: largura / 2, y: alturaTotal / 2, z: profundidadeTotal / 2 }, rotY, shape: 'box', segments: 14 } };
-    this.pickables.push(objPick);
-    meshes.forEach((m) => { m.userData.pick = objPick; this._pickMeshes.push(m); });
-  }
 
-  /** "Imagem" colada/carregada no mapa 2D (mapview.js, `obj.forma:'imagem'`,
-   *  `obj.src` = dataURL, `obj.largura`/`obj.profundidade` = tamanho
-   *  esticado em metros — MESMOS campos que o 2D desenha, ver
-   *  Map2DRenderer._drawFormaShape) — pedido do usuário (25/08/2026): "o
-   *  objeto imagem deve aparecer também [no 3D]". Desenhada como uma folha
-   *  DEITADA no chão (PlaneGeometry + rotateX(-90°), MESMO padrão já usado
-   *  pro destaque de raycasting no chão — ver _initHoverHighlight/
-   *  `_hoverTile` — "deitar" primeiro na GEOMETRIA, não no `mesh.rotation`,
-   *  pra dar pra girar por CIMA disso com `mesh.rotation.y` normalmente,
-   *  igual a qualquer outro objeto), com a textura carregada do dataURL —
-   *  sem cache entre uma reconstrução de cena e outra (ao contrário do
-   *  cache por `src` do 2D, `_getFormaImage` em mapview.js): `_disposeGroupContents`
-   *  (chamado a cada `setScene`) já descarta a textura de QUALQUER material
-   *  solto na cena pra não vazar memória de GPU trocando de mapa/modo
-   *  repetidas vezes — cachear aqui só reintroduziria esse vazamento (ou um
-   *  "usar depois de descartado"); recarregar de um dataURL já em memória é
-   *  praticamente instantâneo, sem round-trip de rede. Respeita a
-   *  OPACIDADE DA CAMADA (0-255, "Propriedades da camada") — pedido do
-   *  usuário, mesmo teste que motivou este pedido: "apliquei transparência
-   *  na camada onde ela está". */
-  _buildImagemMesh(obj, baseY) {
-    const THREE = this.THREE;
-    const w = Math.max(0.05, obj.largura || 0.5), d = Math.max(0.05, obj.profundidade || 0.5);
-    const layer = (this.mapData?.layers || []).find((l) => l.id === obj.layerId);
-    const opacidade = layer?.opacidade != null ? Utils.clamp(layer.opacidade, 0, 255) / 255 : 1;
-    const texture = obj.src ? new THREE.TextureLoader().load(obj.src) : null;
-    const mat = new THREE.MeshBasicMaterial({
-      map: texture,
-      color: texture ? 0xffffff : _hexToThreeColor(obj.cor || '#8a92a3'), // sem `src` válido (não deveria acontecer) — cai numa placa lisa da cor do objeto, em vez de ficar invisível
-      transparent: true, opacity: opacidade, side: THREE.DoubleSide, depthWrite: false,
-    });
-    const geo = new THREE.PlaneGeometry(w, d);
-    geo.rotateX(-Math.PI / 2); // deita na horizontal, virada pra CIMA
-    const mesh = new THREE.Mesh(geo, mat);
-    // Levemente ACIMA do chão (poucos mm) — evita "brigar" com o piso
-    // xadrez por baixo (z-fight) quando elevacao=0 (deitada bem em cima
-    // dele, o caso mais comum — um "tapete"/decalque no chão).
-    mesh.position.set(obj.x, baseY + 0.004, obj.y);
-    mesh.rotation.y = objAnguloToRotY(obj.angulo); // ver objAnguloToRotY — bate com a rotação do 2D
-    this._group.add(mesh);
-    const objPos = { x: obj.x, y: baseY, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.6, ref: obj, obb: { half: { x: w / 2, y: 0.05, z: d / 2 }, rotY: mesh.rotation.y, shape: 'box', segments: 14 } };
-    this.pickables.push(objPick);
-    mesh.userData.pick = objPick;
-    this._pickMeshes.push(mesh);
-  }
-
-  /** Malha de um objeto importado de arquivo .obj (rodada 51 — ver
-   *  js/objimport.js). `ObjImport.getGeometryData(key)` devolve os vértices
-   *  já triangulados (posições, normais quando o próprio .obj trouxe, e a
-   *  caixa delimitadora bruta do arquivo) SEM depender de Three.js — é este
-   *  método que monta a `THREE.BufferGeometry` de verdade, igual a
-   *  qualquer outra malha do motor. Recentraliza no eixo horizontal (X/Z)
-   *  pelo CENTRO da caixa delimitadora do arquivo, e assenta a BASE (Y
-   *  mínimo do arquivo) no chão (`baseY`) — um .obj comum, modelado em
-   *  qualquer editor externo, raramente já nasce com a origem exatamente
-   *  no meio da base, então sem isso a peça apareceria flutuando ou
-   *  enterrada, ou fora do centro do "quadrado" onde foi clicada. Devolve
-   *  `false` (sem adicionar nada) se o arquivo não está mais em memória
-   *  (RAM apagada por um refresh de página, ver comentário no dispatcher
-   *  acima) ou não tem geometria válida, pra quem chama cair no perfil
-   *  genérico em vez de travar. */
-  _buildObjImportMesh(obj, baseY, wireframe, colWireframe) {
-    const data = window.ObjImport?.getGeometryData(obj.tipo);
-    if (!data) return false;
-    const THREE = this.THREE;
-    // NOVO (07/09/2026), pedido verbatim: "Mesmo que seja um arquivo com
-    // apenas um grupo de vértices, sem definição de faces [...] renderizar
-    // a forma mesmo assim." — `data.positions === null` (ver objimport.js
-    // `_parseObjText`) é exatamente esse caso: .obj só com linhas "v", sem
-    // nenhum "f". Antes isso fazia esta função devolver `false` (nada
-    // aparecia — caía no perfil genérico do dispatcher). Agora vira uma
-    // NUVEM DE PONTOS (THREE.Points) com os vértices crus (`data.points`,
-    // já achatado por `_parseObjText`), recentralizada pela mesma caixa
-    // delimitadora usada pro caminho normal (mesh triangulada) logo abaixo
-    // — mesmo posicionamento/rotação, só a geometria/material que mudam.
-    if (!data.positions) {
-      if (!data.points || data.points.length < 3) return false; // nada mesmo (nem 1 vértice) — cai no perfil genérico
-      const pgeo = new THREE.BufferGeometry();
-      pgeo.setAttribute('position', new THREE.Float32BufferAttribute(data.points, 3));
-      const bb = data.bbox;
-      pgeo.translate(-(bb.minX + bb.maxX) / 2, -bb.minY, -(bb.minZ + bb.maxZ) / 2);
-      const pmat = new THREE.PointsMaterial({ color: _hexToThreeColor(obj.cor || '#9aa4b2'), size: 0.05, sizeAttenuation: true });
-      const points = new THREE.Points(pgeo, pmat);
-      points.position.set(obj.x, baseY, obj.y);
-      points.rotation.y = objAnguloToRotY(obj.angulo);
-      this._group.add(points);
-      const objPos = { x: obj.x, y: baseY, z: obj.y };
-      const w = Math.max(0.05, bb.maxX - bb.minX), d = Math.max(0.05, bb.maxZ - bb.minZ);
-      const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.6, ref: obj, obb: { half: { x: w / 2, y: 0.05, z: d / 2 }, rotY: points.rotation.y, shape: 'box', segments: 14 } };
-      this.pickables.push(objPick);
-      points.userData.pick = objPick;
-      this._pickMeshes.push(points);
-      return true;
-    }
-    if (data.positions.length < 9) return false;
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(data.positions, 3));
-    if (data.normals) geo.setAttribute('normal', new THREE.Float32BufferAttribute(data.normals, 3));
-    else geo.computeVertexNormals();
-    // Recentraliza X/Z no meio da caixa delimitadora do arquivo e desloca Y
-    // pra a base (mínimo) ficar em 0 — feito na PRÓPRIA geometria (não só
-    // na posição da malha), pra a rotação (`mesh.rotation.y`, aplicada
-    // depois) girar em torno do centro de verdade da peça, não de um canto
-    // qualquer do arquivo original.
-    const bb = data.bbox;
-    geo.translate(-(bb.minX + bb.maxX) / 2, -bb.minY, -(bb.minZ + bb.maxZ) / 2);
-    const mat = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: _hexToThreeColor(obj.cor || '#9aa4b2') });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(obj.x, baseY, obj.y);
-    mesh.rotation.y = objAnguloToRotY(obj.angulo); // ver objAnguloToRotY — bate com a rotação do 2D
-    this._group.add(mesh);
-    const w = bb.maxX - bb.minX, d = bb.maxZ - bb.minZ, h = bb.maxY - bb.minY;
-    const objPos = { x: obj.x, y: baseY + h / 2, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.6 || 0.3, ref: obj, obb: { half: { x: w / 2 || 0.2, y: h / 2 || 0.2, z: d / 2 || 0.2 }, rotY: mesh.rotation.y, shape: 'box', segments: 14 } };
-    this.pickables.push(objPick);
-    mesh.userData.pick = objPick;
-    this._pickMeshes.push(mesh);
-    return true;
-  }
 
   /** Luminária de teto (2 lâmpadas fluorescentes compridas) — pedido do
    *  usuário: "faça uma luminária... uma luminária que vem com duas dessas
@@ -8302,84 +7971,6 @@ class Engine3D {
    *  rotação/local->mundo de _buildMesaMesh acima. Termina adicionando uma
    *  luz de verdade (ver comentário dentro) — "ela deve deixar o que está
    *  próximo mais claro". */
-  _buildLuminariaMesh(obj, perfil, baseY, wireframe, colWireframe) {
-    const THREE = this.THREE;
-    const w = perfil.w || 1.2, d = perfil.d || 0.16, h = perfil.h || 0.09;
-    const rotY = objAnguloToRotY(obj.angulo); // ver objAnguloToRotY — bate com a rotação do 2D
-    const cos = Math.cos(rotY), sin = Math.sin(rotY);
-    const matCarcaca = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: perfil.color || 0xf2f3f5 });
-    // Tubo "aceso" — cor PRÓPRIA (MeshBasicMaterial, não reage à luz da
-    // cena), senão pareceria uma lâmpada apagada num ambiente escuro (o
-    // motivo de existir a luminária, ver a luz de verdade lá embaixo).
-    const matTubo = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshBasicMaterial({ color: 0xf5faff });
-    const meshes = [];
-    // Folha de metal branco envolvendo a parte de cima da peça.
-    const topo = new THREE.Mesh(new THREE.BoxGeometry(w * 0.94, Math.max(0.015, h * 0.3), d), matCarcaca);
-    topo.position.set(obj.x, baseY + h * 0.85, obj.y);
-    topo.rotation.y = rotY;
-    meshes.push(topo);
-    // 2 lâmpadas compridas, lado a lado, quase do comprimento total da peça.
-    const raioTubo = Math.max(0.014, d * 0.11);
-    const tuboGeo = new THREE.CylinderGeometry(raioTubo, raioTubo, w * 0.88, 10);
-    [-1, 1].forEach((lado) => {
-      const lz = lado * d * 0.24; // offset local (perpendicular ao comprimento)
-      const wx = obj.x + 0 * cos + lz * sin;
-      const wz = obj.y - 0 * sin + lz * cos;
-      const tubo = new THREE.Mesh(tuboGeo, matTubo);
-      tubo.position.set(wx, baseY + h * 0.35, wz);
-      // Eixo do cilindro (Y local) precisa ficar DEITADO ao longo do
-      // comprimento da peça — gira 90° em Z antes de aplicar rotY (mesma
-      // ordem de composição do Three.js: local primeiro, depois mundo).
-      tubo.rotation.z = Math.PI / 2;
-      tubo.rotation.y = rotY;
-      meshes.push(tubo);
-    });
-    // Caixas retangulares nas duas extremidades.
-    const capGeo = new THREE.BoxGeometry(w * 0.07, h, d * 1.08);
-    [-1, 1].forEach((lado) => {
-      const lx = lado * (w / 2 - w * 0.035);
-      const wx = obj.x + lx * cos + 0 * sin;
-      const wz = obj.y - lx * sin + 0 * cos;
-      const cap = new THREE.Mesh(capGeo, matCarcaca);
-      cap.position.set(wx, baseY + h / 2, wz);
-      cap.rotation.y = rotY;
-      meshes.push(cap);
-    });
-    meshes.forEach((m) => this._group.add(m));
-    const objPos = { x: obj.x, y: baseY + h / 2, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.6, ref: obj, obb: { half: { x: w / 2, y: h / 2, z: d / 2 }, rotY, shape: 'box', segments: 14 } };
-    this.pickables.push(objPick);
-    meshes.forEach((m) => { m.userData.pick = objPick; this._pickMeshes.push(m); });
-
-    // Luz de verdade — pedido do usuário: "ela deve deixar o que está
-    // próximo mais claro". `distance` limita o ALCANCE (falloff físico até
-    // zerar ali, não ilumina o mapa inteiro) e a CONTAGEM de luzes de verdade
-    // é limitada por Engine3D.MAX_LUMINARIA_LIGHTS (ver setScene/comentário
-    // na constante) — as duas formas de "limite de atuação" pedidas, pra não
-    // pesar no desempenho. Cor levemente fria (fluorescente). Só no modo
-    // "dinâmico" (ver mapconfig.js modoLuminarias3D) — no modo "leve" a
-    // iluminação é só cor (ver _tintForLight, já aplicado no material dos
-    // objetos vizinhos), sem NENHUMA luz de verdade, de propósito.
-    if (this._config.modoLuminarias3D !== 'leve' && (this._dynamicLights?.length || 0) < this._maxLuzesReais()) {
-      const luz = new THREE.PointLight(0xeaf2ff, Engine3D.LUZ_LUMINARIA_INTENSITY, Engine3D.LUZ_LUMINARIA_DISTANCE, 2);
-      luz.position.set(obj.x, baseY, obj.y);
-      // [14/09/2026] NOVO — marca de quem é essa luz + a intensidade
-      // ORIGINAL (antes de qualquer interruptor apagar/acender) — usado por
-      // assets/modelos/interruptor.model.js pra achar as `PointLight`
-      // reais das luminárias dentro do raio de controle e alternar entre
-      // intensidade 0 (apagada) e este valor guardado (sem precisar
-      // "adivinhar" `Engine3D.LUZ_LUMINARIA_INTENSITY` de novo, caso mude).
-      luz.userData.ownerObjId = obj.id;
-      luz.userData._intensidadeOriginal = Engine3D.LUZ_LUMINARIA_INTENSITY;
-      this.scene.add(luz);
-      this._dynamicLights = this._dynamicLights || [];
-      this._dynamicLights.push(luz);
-    }
-  }
 
   /** NOVO (01/09/2026), item #11 do pedido de 12 itens, verbatim: "Faça um
    *  novo objeto 3D, o poste de iluminação pública." Mesmo espírito de
@@ -8406,87 +7997,6 @@ class Engine3D {
    *  de uma luminária comum — só não desliga sozinho no modo "leve". Se o
    *  usuário preferir o mesmo comportamento da luminária de teto aqui,
    *  é só reportar. */
-  _buildPosteMesh(obj, perfil, baseY, wireframe, colWireframe) {
-    const THREE = this.THREE;
-    const alturaHaste = perfil.h || 4.5;
-    const raioHaste = perfil.r || 0.07;
-    const rotY = objAnguloToRotY(obj.angulo);
-    const cos = Math.cos(rotY), sin = Math.sin(rotY);
-    const matHaste = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: perfil.color || 0x494e57 });
-    // Luminária na ponta — cor PRÓPRIA (MeshBasicMaterial, não reage à luz
-    // da cena), mesmo motivo do tubo da luminária de teto: precisa parecer
-    // "acesa" mesmo no escuro. Tom quente (âmbar, tipo vapor de sódio) —
-    // diferente do branco frio da luminária de teto, pra ficar visualmente
-    // distinto (lâmpada de rua clássica vs. fluorescente de interior).
-    const matLampada = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshBasicMaterial({ color: 0xffd9a0 });
-    const meshes = [];
-
-    // Haste vertical (leve afunilamento pra base — mais grossa embaixo).
-    const hasteGeo = new THREE.CylinderGeometry(raioHaste, raioHaste * 1.3, alturaHaste, 10);
-    const haste = new THREE.Mesh(hasteGeo, matHaste);
-    haste.position.set(obj.x, baseY + alturaHaste / 2, obj.y);
-    meshes.push(haste);
-
-    // Braço: um trecho reto na direção "de frente" do poste (obj.angulo),
-    // saindo de perto do topo da haste — versão simplificada de um braço
-    // curvo (formato real de poste de rua), suficiente pra "ver que ali tem
-    // um poste com luminária apontando pra um lado", igual ao nível de
-    // detalhe já aceito nos outros perfis deste arquivo.
-    const comprimentoBraco = 0.9;
-    const raioBraco = raioHaste * 0.75;
-    const yBraco = baseY + alturaHaste - 0.05;
-    const bracoGeo = new THREE.CylinderGeometry(raioBraco, raioBraco, comprimentoBraco, 8);
-    const braco = new THREE.Mesh(bracoGeo, matHaste);
-    const lx = comprimentoBraco / 2;
-    braco.position.set(obj.x + lx * cos, yBraco, obj.y - lx * sin);
-    braco.rotation.z = Math.PI / 2; // deita o cilindro (eixo Y local -> horizontal)
-    braco.rotation.y = rotY;
-    meshes.push(braco);
-
-    // Luminária: cone virado pra baixo na ponta do braço (silhueta clássica
-    // de poste de rua, vista de baixo).
-    const lampGeo = new THREE.ConeGeometry(0.16, 0.22, 10);
-    const lamp = new THREE.Mesh(lampGeo, matLampada);
-    const wx = obj.x + comprimentoBraco * cos, wz = obj.y - comprimentoBraco * sin;
-    const lampY = yBraco - 0.16;
-    lamp.position.set(wx, lampY, wz);
-    lamp.rotation.x = Math.PI; // ponta do cone pra baixo
-    meshes.push(lamp);
-
-    meshes.forEach((m) => this._group.add(m));
-    const objPos = { x: obj.x, y: baseY + alturaHaste / 2, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(alturaHaste / 2, comprimentoBraco), ref: obj, obb: { half: { x: raioHaste * 3, y: alturaHaste / 2, z: raioHaste * 3 }, rotY, shape: 'cylinder', segments: 10 } };
-    this.pickables.push(objPick);
-    meshes.forEach((m) => { m.userData.pick = objPick; this._pickMeshes.push(m); });
-
-    // Luz de verdade — SEMPRE (ver decisão de design documentada acima),
-    // cor quente (mesmo tom da lâmpada, sódio). Mesmo orçamento
-    // compartilhado das luminárias (`_maxLuzesReais`). AJUSTADO
-    // (02/09/2026) — intensidade/alcance agora são `LUZ_LUMINARIA_*` × 3
-    // (ver constantes/comentário grande logo acima de `_maxLuzesReais`),
-    // pedido verbatim: "O poste de luz deve iluminar 3 vezes o que a
-    // luminária ilumina."
-    if ((this._dynamicLights?.length || 0) < this._maxLuzesReais()) {
-      const luz = new THREE.PointLight(0xffcf8c, Engine3D.LUZ_POSTE_INTENSITY, Engine3D.LUZ_POSTE_DISTANCE, 2);
-      luz.position.set(wx, lampY, wz);
-      // [13/09/2026] NOVO — `ownerObjId` (mesmo campo já usado pela luz da
-      // luminária, ver `_buildLuminariaMesh`/linha com
-      // `luz.userData.ownerObjId = obj.id`, ~10 linhas acima na função
-      // irmã): faltava aqui, o que impedia qualquer código (ex.: um
-      // interruptor) de achar "a luz de verdade DESTE poste" por id —
-      // necessário pro `interruptor-remoto.model.js` novo (TAREFA 5 do
-      // backlog: painel de controle remoto que liga/desliga uma LISTA
-      // de postes por id, de longe, sem raio físico).
-      luz.userData.ownerObjId = obj.id;
-      this.scene.add(luz);
-      this._dynamicLights = this._dynamicLights || [];
-      this._dynamicLights.push(luz);
-    }
-  }
 
   /** [15/09/2026] NOVO — corrige a orientação do relógio (bug confirmado
    *  pelo usuário: "os relógios... ficam deitados... é só girar o relógio
@@ -8557,91 +8067,6 @@ class Engine3D {
    *  COMPRIMENTO continua proporcional a `r` (hora mais curto, minuto mais
    *  longo, segundo o mais longo, convenção universal já usada no desenho
    *  2D do relógio, ver mapview.js `_drawFormaShape`/drawHand). */
-  _buildRelogioMesh(obj, perfil, baseY, wireframe, colWireframe) {
-    const THREE = this.THREE;
-    const r = perfil.r || 0.15;
-    const h = perfil.h || 0.04;
-    const rotY = objAnguloToRotY(obj.angulo);
-    const geo = new THREE.CylinderGeometry(r, r, h, perfil.segments || 14);
-    // Marcações de hora — textura procedural (canvas 2D, gerada/cacheada
-    // UMA vez, ver `_getProceduralMostradorTexture` acima) aplicada como
-    // `map` do disco do mostrador. `color: 0xffffff` é OBRIGATÓRIO junto
-    // com `map`: `MeshLambertMaterial.color` MULTIPLICA a textura — deixar
-    // a cor do perfil (creme) aqui escureceria/tingiria os traços desenhados
-    // no canvas; a cor de fundo do mostrador já está pintada DENTRO do
-    // próprio canvas (mesma cor do perfil, ver função), então o resultado
-    // final bate com o visual de sempre, só que com os tracinhos por cima.
-    // Wireframe não ganha textura (não faz sentido/não aparece mesmo).
-    const mat = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: 0xffffff, map: this._getProceduralMostradorTexture(perfil.color) });
-    const mesh = new THREE.Mesh(geo, mat);
-    const centerY = baseY + perfil.y0 + r; // r, não h/2: de pé, a "altura" ocupada é o DIÂMETRO do mostrador, não a espessura do disco
-    mesh.position.set(obj.x, centerY, obj.y);
-    // Ver comentário grande acima pro porquê de X-antes-de-Y (Euler 'XYZ' padrão).
-    mesh.rotation.set(Math.PI / 2, rotY, 0);
-    this._group.add(mesh);
-
-    // Ponteiros — caixas finas e curtas, cor escura (contraste com o
-    // mostrador claro do perfil). São FILHOS de `mesh`: herdam
-    // automaticamente a posição/rotação de "de pé + virado pro ângulo
-    // certo" dele, então só precisam girar em `rotation.y` (ver comentário
-    // grande acima e o de `_updateRelogiosParede`) pra apontar a hora —
-    // nenhuma conta de mundo precisa ser refeita a cada quadro.
-    const matPonteiro = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: 0x2c313a });
-    const fazPonteiro = (comprimento, largura, espessura) => {
-      // Geometria com o PIVÔ na base (não no centro): X=largura (visível de
-      // frente), Y=espessura (fininho, no sentido que sai da parede),
-      // Z=comprimento (eixo em que o ponteiro se estende) — desloca a
-      // geometria em -comprimento/2 no eixo Z LOCAL, então a ORIGEM do mesh
-      // (em torno de onde `rotation.y` gira, ver comentário grande da
-      // função) fica no "eixo" do relógio, e o ponteiro nasce apontando
-      // pro -Z local, que cai em "12 horas" (+Y mundo, pra cima) antes de
-      // qualquer rotação de hora — exatamente como um ponteiro parado no
-      // 12 antes do relógio começar a andar.
-      const g = new THREE.BoxGeometry(largura, espessura, comprimento);
-      g.translate(0, 0, -comprimento / 2);
-      const m = new THREE.Mesh(g, matPonteiro);
-      // Levemente à frente do mostrador (eixo Y LOCAL do `mesh` — depois da
-      // rotação X acima, é ele quem cai na normal que sai da parede, +Z
-      // mundo — ver comentário grande da função) — evita z-fighting/
-      // "ponteiro sumindo dentro do disco".
-      m.position.y = h / 2 + 0.002;
-      mesh.add(m);
-      return m;
-    };
-    const ponteiroHora = fazPonteiro(r * 0.5, 0.012, 0.003);
-    const ponteiroMinuto = fazPonteiro(r * 0.72, 0.008, 0.0025);
-    const ponteiroSegundo = fazPonteiro(r * 0.8, 0.003, 0.002);
-
-    const raioPick = r * 1.3;
-    const objPos = { x: obj.x, y: centerY, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: raioPick, ref: obj, obb: { half: { x: r, y: r, z: h }, rotY, shape: 'box', segments: perfil.segments || 14 } };
-    this.pickables.push(objPick);
-    mesh.userData.pick = objPick;
-    this._pickMeshes.push(mesh);
-
-    // Registra pra `_updateRelogiosParede` (chamado todo quadro por
-    // view3d.js) girar os ponteiros conforme a hora do MUNDO
-    // (`window.RelogioMundo`, ver js/relogio-mundo.js) — não a hora do
-    // aparelho do usuário (`new Date()`), decisão consistente com o resto
-    // da infraestrutura do prédio (robôs de copa/limpeza/recepcionista já
-    // usam `RelogioMundo` pra saber se é hora do almoço etc.).
-    // [15/09/2026 UTC] BUG CORRIGIDO — pedido verbatim do usuário: "Acrescentei
-    // um script [fixando horaPonteiro/minutoPonteiro/segundoPonteiro], porém
-    // o relógio seguiu funcionando normalmente [ignorando o script]." CAUSA
-    // RAIZ: este `push` nunca guardava `obj` (só os 3 meshes de ponteiro) —
-    // `_updateRelogiosParede` já lia `r.obj?.horaPonteiro` etc. (ver
-    // comentário grande lá, RODADA anterior), mas `r.obj` era SEMPRE
-    // `undefined` porque a referência nunca tinha sido incluída aqui, então
-    // o `Number.isFinite(obj?.horaPonteiro)` sempre falhava e o relógio
-    // caía no fallback (hora do `RelogioMundo`) mesmo com um Script válido
-    // escrevendo os 3 campos todo quadro. Corrigido incluindo `obj` no
-    // objeto registrado.
-    this._relogiosParede.push({ obj, ponteiroHora, ponteiroMinuto, ponteiroSegundo });
-  }
 
   /** [15/09/2026] NOVO — "quadro-mesa" (porta-retrato pequeno de mesa/
    *  estante, ver `OBJECT3D_PROFILES['quadro-mesa']` em engine3d-
@@ -8654,32 +8079,6 @@ class Engine3D {
    *  (rotação composta X+Y), só que aqui a inclinação em X é FIXA (não
    *  depende de nenhuma hora/estado ao vivo) — nasce inclinado e nunca mais
    *  muda, sem precisar de nenhum tick/`_update*` novo. */
-  _buildQuadroMesaMesh(obj, perfil, baseY, wireframe, colWireframe) {
-    const THREE = this.THREE;
-    const INCLINACAO = 12 * Math.PI / 180; // ~12°, pedido do usuário
-    const geo = new THREE.BoxGeometry(perfil.w, perfil.h, perfil.d);
-    const mat = wireframe
-      ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-      : new THREE.MeshLambertMaterial({ color: perfil.color });
-    const mesh = new THREE.Mesh(geo, mat);
-    // Pivô na base (não no centro) — inclinar em torno do CENTRO faria o
-    // porta-retrato "afundar" na mesa de um lado; deslocando a geometria
-    // em +h/2 antes de qualquer rotação, a origem do mesh fica na BASE, e
-    // a inclinação em X gira o porta-retrato em torno dela mesma (igual um
-    // porta-retrato de verdade balançando sobre o pé de apoio).
-    geo.translate(0, perfil.h / 2, 0);
-    const centerY = baseY + perfil.y0;
-    mesh.position.set(obj.x, centerY, obj.y);
-    const rotY = objAnguloToRotY(obj.angulo);
-    mesh.rotation.set(INCLINACAO, rotY, 0);
-    this._group.add(mesh);
-    const raioPick = Math.max(perfil.w, perfil.d) * 0.6;
-    const objPos = { x: obj.x, y: centerY + perfil.h / 2, z: obj.y };
-    const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: raioPick, ref: obj, obb: { half: { x: perfil.w / 2, y: perfil.h / 2, z: perfil.d / 2 }, rotY, shape: 'box', segments: 14 } };
-    this.pickables.push(objPick);
-    mesh.userData.pick = objPick;
-    this._pickMeshes.push(mesh);
-  }
 
   /** Remove e descarta (geometria/material — NÃO a textura do chão nem a do
    *  vidro "Minecraft", reutilizadas entre reconstruções, ver
@@ -8701,6 +8100,17 @@ class Engine3D {
       // as DUAS malhas de dentro dele, vazando geometria/material de GPU a
       // cada troca de mapa/modo. `return` aqui pula o resto do loop pra este
       // `obj` (já tratado por completo).
+      // [18/09/2026 UTC] RODADA 164 — porta de Rack = Group de topo com filhos
+      // (moldura/vidro): descarta os descendentes também (a textura do vidro é
+      // compartilhada, `_glassShineTexture`, e fica).
+      if (obj.isGroup && obj.userData?.rackParte) {
+        obj.traverse((n) => {
+          if (!n.isMesh) return;
+          n.geometry?.dispose?.();
+          (Array.isArray(n.material) ? n.material : [n.material]).forEach((m) => { if (m) m.dispose?.(); });
+        });
+        return;
+      }
       if (obj.isLOD) {
         obj.levels.forEach((lvl) => {
           lvl.object.geometry?.dispose?.();
@@ -10169,7 +9579,22 @@ class Engine3D {
         const t = pick?.type;
         // 'fotoPin' incluído (03/09/2026) — ver o retângulo texturizado da
         // foto no bloco "fotos vinculadas ao mapa" de setScene, acima.
-        if (t !== 'item' && t !== 'camera' && t !== 'object' && t !== 'fotoPin') return false;
+        // [18/09/2026 UTC] CORRIGIDO (RODADA 159) — pedido verbatim:
+        // "verifique se há algum problema com o Gatilho 'Ao Clicar Duas
+        // Vezes'." CAUSA RAIZ ENCONTRADA: 'porta'/'janela' NUNCA estiveram
+        // nesta lista — com `raycastPrecision:'pixelperfect'` configurado
+        // (Configurações 3D), `pickFromRay` simplesmente não considerava
+        // NENHUMA porta/janela como alvo possível, então `hit` vinha
+        // sempre `null` pra elas e `_dispatchMouseHit3D('DoubleClick')`
+        // (view3d.js) saía cedo sem disparar nada — reproduzindo
+        // exatamente "aponto pra porta e dou duplo clique, nada acontece",
+        // independente de qualquer componente/script estar certo. Só no
+        // modo 'hitbox' (o outro valor de `raycastPrecision`, que usa
+        // `this.pickables`/OBB em vez desta lista) portas já funcionavam.
+        // CORRIGIDO: 'porta' e 'janela' adicionados à lista de tipos
+        // aceitos — mesmo critério de "clicável de verdade" que
+        // item/câmera/objeto/fotoPin já tinham.
+        if (t !== 'item' && t !== 'camera' && t !== 'object' && t !== 'fotoPin' && t !== 'porta' && t !== 'janela') return false;
         // [10/09/2026] NOVO — pula o próprio orb/câmera sendo visto
         // através (ver this._pickExclude/setPickExclude) — pedido
         // verbatim: "o clique está pegando a própria câmera [...] deve

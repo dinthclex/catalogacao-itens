@@ -99,22 +99,104 @@ const Modeler3D = {
    *  engine3d.js) em vez da malha estática do arquivo. Usada tanto aqui
    *  (`ensureCustomMesh`) quanto pela flag "gerado por código" na UI. */
   _escadaFoiModificada(obj) {
-    const perfil = window.OBJECT3D_PROFILES?.escada || {};
-    const larguraPadrao = perfil.w ?? 1.3;
-    const profundidadePadrao = perfil.d ?? 3.0;
-    if (obj.largura && Math.abs(obj.largura - larguraPadrao) > 1e-6) return true;
-    if (obj.profundidade && Math.abs(obj.profundidade - profundidadePadrao) > 1e-6) return true;
-    if (obj.escadaDegraus != null && obj.escadaDegraus !== '') {
-      const alturaTotal = obj.alturaEscada || perfil.h || 2.8;
-      const degrausPadrao = Math.round(alturaTotal / 0.18) || 11;
-      if (Math.round(obj.escadaDegraus) !== degrausPadrao) return true;
-    }
-    if (obj.alturaEscada && perfil.h && Math.abs(obj.alturaEscada - perfil.h) > 1e-6) return true;
-    return false;
+    return obj.tipo === 'escada'; // sempre gerada por código a partir das propriedades do objeto
   },
 
-  ensureCustomMesh(obj) {
+  /** Todos os nós de topo de `engine._group` que pertencem ao objeto (ele
+   *  mesmo ou algum descendente com `userData.pick.ref.id === obj.id`) —
+   *  cobre objetos compostos (Switch, Patch panel, Rack: caixa, conectores,
+   *  portas, tampas, etc.), não só as malhas com raycast. */
+  _engineRootsOf(obj, engine) {
+    const out = [];
+    const grp = engine && engine._group;
+    if (!grp) return out;
+    grp.children.forEach((c) => {
+      let achou = c.userData?.pick?.ref?.id === obj.id;
+      if (!achou) c.traverse((n) => { if (!achou && n.userData?.pick?.ref?.id === obj.id) achou = true; });
+      if (achou) out.push(c);
+    });
+    return out;
+  },
+
+  /** Malha REAL que o motor 3D já desenhou pra este objeto (mesma que se vê
+   *  no "Ver em 3D"), convertida pro espaço local do Modelador (origem no
+   *  objeto, sem a rotação do mapa, base em y=0). Devolve
+   *  `{ mesh, minWorldY }` ou null. Vértices ficam com o valor EXATO da
+   *  malha (sem arredondar) — só coincidentes idênticos são soldados. */
+  _captureRenderedMesh(obj, view3d) {
+    try {
+      const engine = view3d && view3d._engine;
+      if (!engine || !engine._ready || !engine.THREE) return null;
+      const roots = this._engineRootsOf(obj, engine);
+      if (!roots.length) return null;
+      // Instâncias em excesso (ex.: milhares de furos de rack) ficam de fora pra não travar a edição.
+      // Detalhes finos repetidos (conectores/furos = muitas instâncias) ficam de fora por padrão; opção em Configurações 3D.
+      const incluir = !!(window.MapConfig && MapConfig._cache && MapConfig._cache.modeladorIncluirDetalhes);
+      const limite = incluir ? 3000 : 48;
+      const skipNode = (n) => n.isInstancedMesh && n.count > limite;
+      const parts = [];
+      roots.forEach((r) => {
+        const m = ModelerMesh.fromThreeGroup(r, { skipNode });
+        if (m && m.vertices.length) parts.push(m);
+      });
+      if (!parts.length) return null;
+      const mesh = parts.length === 1 ? parts[0] : ModelerMesh.mergeMeshes(...parts);
+      const th = (typeof objAnguloToRotY === 'function') ? objAnguloToRotY(obj.angulo || 0) : 0;
+      const c = Math.cos(th), sn = Math.sin(th);
+      let minY = Infinity;
+      mesh.vertices.forEach((v) => {
+        const px = v[0] - obj.x, pz = v[2] - obj.y;
+        v[0] = px * c - pz * sn;
+        v[2] = px * sn + pz * c;
+        if (v[1] < minY) minY = v[1];
+      });
+      if (!isFinite(minY)) return null;
+      // Rack: portas abertas entram FECHADAS no Modelador (giram de volta em torno da dobradiça).
+      if (obj.tipo === 'rack' && window.RackModular) {
+        try {
+          const rack = window.RackModular.fromObjeto(obj);
+          mesh.vertices.forEach((v) => {
+            if (typeof v[5] !== 'string' || !v[5].startsWith('porta:')) return;
+            const spec = rack.portas && rack.portas[v[5].slice(6)];
+            if (!spec) return;
+            const ang = Math.max(0, Math.min(110, Number(obj[spec.campoAngulo]) || 0));
+            if (!ang) return;
+            const th = ang * Math.PI / 180, cs = Math.cos(th), sn2 = Math.sin(th);
+            const px = spec.pivo.x * 0.001, pz = spec.pivo.z * 0.001, dx = v[0] - px, dz = v[2] - pz;
+            v[0] = px + dx * cs + dz * sn2;
+            v[2] = pz - dx * sn2 + dz * cs;
+          });
+        } catch (e) { /* segue sem fechar */ }
+      }
+      mesh.vertices.forEach((v) => { v[1] -= minY; });
+      return { mesh, minWorldY: minY };
+    } catch (e) { return null; }
+  },
+
+  /** Objeto de uma cor só: remove as cores por vértice (vale `obj.cor`). Só objetos
+   *  com várias cores/vidro guardam cor por peça. */
+  _descartarCorUniforme(mesh) {
+    const set = new Set();
+    mesh.vertices.forEach((v) => set.add(v.length > 3 ? v[3] + '/' + v[4] : 'x'));
+    if (set.size <= 1 && !mesh.vertices.some((v) => (v.length > 4 && v[4] < 1) || v.length > 5)) mesh.vertices.forEach((v) => { v.length = 3; });
+  },
+
+  ensureCustomMesh(obj, view3d) {
     if (obj.customMesh) return;
+    const cap = view3d ? this._captureRenderedMesh(obj, view3d) : null;
+    if (cap) {
+      this._descartarCorUniforme(cap.mesh);
+      obj.customMesh = cap.mesh;
+      obj.customMeshXform = { rotX: 0, rotY: 0, rotZ: 0, scaleX: 1, scaleY: 1, scaleZ: 1 };
+      obj.elevacao = cap.minWorldY - (obj.piso || 0) * 2.8;
+      if (obj.forma !== 'retangulo' && obj.forma !== 'poligono') {
+        obj.forma = 'retangulo';
+        const bb = ModelerMesh.localBBox(cap.mesh.vertices);
+        obj.largura = bb.maxX - bb.minX; obj.profundidade = bb.maxZ - bb.minZ; obj.altura = bb.maxY - bb.minY;
+        if (!obj.cor) obj.cor = '#8a92a3';
+      }
+      return;
+    }
     // Pedido do usuário (rodada 47) tentou fazer o objeto virar "à parte" do
     // catálogo zerando `obj.tipo` aqui — REVERTIDO na rodada 48: "Se era um
     // objeto padrão e foi editado pelo modo Modelador, então, deve continuar
@@ -212,9 +294,10 @@ const Modeler3D = {
       } catch (e) { arquivoMesh = null; }
     }
     if (arquivoMesh && arquivoMesh.vertices && arquivoMesh.vertices.length) {
+      this._descartarCorUniforme(arquivoMesh);
       obj.customMesh = arquivoMesh;
     } else if (tipo === 'escada') {
-      obj.customMesh = ModelerMesh.stairsMesh(w, d, obj.escadaDegraus);
+      obj.customMesh = ModelerMesh.stairsMesh(w, d, obj.escadaDegraus, obj.alturaEscada || obj.altura || 2.0);
     } else if (tipo === 'mesa') {
       obj.customMesh = ModelerMesh.mesaMesh(w, d, h);
     } else if (tipo === 'luminaria') {
@@ -294,12 +377,12 @@ const Modeler3D = {
     // retrato) se `state.actionLog` continuar vazio ao sair (nenhuma edição
     // de verdade aconteceu — ver `ModelerMesh._logAction`/`pushUndo`, só
     // chamadas por ações reais de edição/inserção/transformação).
-    const hadCustomMesh = !!obj.customMesh;
-    const seedBackup = hadCustomMesh ? null : {
-      customMesh: obj.customMesh, customMeshXform: obj.customMeshXform,
-      forma: obj.forma, largura: obj.largura, profundidade: obj.profundidade, altura: obj.altura, cor: obj.cor,
-    };
-    this.ensureCustomMesh(obj);
+    // Retrato COMPLETO do objeto antes de qualquer alteração (o seed/captura
+    // de `ensureCustomMesh` muta o objeto em memória). Nada é gravado no
+    // banco até "Aplicar alterações"/saída com "Aplicar"; "Descartar" (ou
+    // sair sem mudanças) restaura este retrato.
+    const objBackup = this._backupObj(obj);
+    this.ensureCustomMesh(obj, view3d);
     const engine = view3d._engine;
     if (!engine || !engine._ready || !engine.THREE) {
       Utils.toast?.('O motor 3D ainda não terminou de carregar — tente de novo em instantes.', { type: 'warn' });
@@ -320,7 +403,9 @@ const Modeler3D = {
       active: true,
       view3d,
       obj, // MESMA referência do início ao fim — NUNCA clonada (ver item 4)
-      seedBackup, // ver comentário grande acima — usado por `_commit()` pra desfazer o seed de `ensureCustomMesh` se nada foi editado de verdade
+      objBackupEntrada: objBackup, // retrato do objeto ANTES da sessão (nunca trocado) — usado pelo Ctrl+Z depois de sair
+      objBackup, // retrato do objeto antes da sessão — restaurado ao descartar/sair sem mudanças
+      snap: null, // retrato EXATO da malha logo após carregar — base do `_isDirty`
       THREE: engine.THREE,
       scene: engine.scene,
       camera: engine.camera3,
@@ -413,6 +498,10 @@ const Modeler3D = {
     // recriado o objeto com o mesmo id) e restaurado sozinho na próxima vez
     // que `view3d._rebuildScene()` rodar (ver `exit`, que sempre reconstrói
     // a cena inteira do zero — não precisa reverter isto aqui).
+    // Esconde TODAS as peças do objeto (caixa, conectores, portas...) — todas passam a fazer
+    // parte da malha editada; sem isso as peças soltas ficariam para trás e interagíveis.
+    state._hiddenRoots = this._engineRootsOf(obj, engine);
+    state._hiddenRoots.forEach((r) => { r.visible = false; });
     (engine._pickMeshes || []).forEach((m) => { if (m.userData?.pick?.ref?.id === obj.id) m.visible = false; });
 
     // [10/09/2026] CORRIGIDO — pedido verbatim: "a perspectiva da câmera
@@ -600,12 +689,114 @@ const Modeler3D = {
     // aberto (ex.: o usuário clicou numa primitiva da aba "Criar" da tela
     // base, que já entra direto editando).
     ModelerUI.refreshSharedSidebar?.(view3d);
+    this._takeSnapshot(state);
+  },
+
+  _BACKUP_KEYS: ['customMesh', 'customMeshXform', 'forma', 'largura', 'profundidade', 'altura', 'cor', 'elevacao', 'x', 'y'],
+  /** Ctrl+Z depois de sair do Modelador: volta o objeto ao que era ANTES de entrar (e Ctrl+Y reaplica). */
+  _pushUndoEntrada(state) {
+    try {
+      if (!state._committed || !window.History || !state.objBackupEntrada) return;
+      const view3d = state.view3d, obj = state.obj, mapId = view3d?._map?.id, objId = obj?.id;
+      if (mapId == null || objId == null) return;
+      const antes = state.objBackupEntrada, depois = this._backupObj(obj);
+      const aplicar = async (b) => {
+        const m = (view3d?._map && view3d._map.id === mapId) ? view3d._map : await DB.getMap(mapId);
+        const o = ((m && m.objects) || []).find((x) => x.id === objId);
+        if (!o) return;
+        this._BACKUP_KEYS.forEach((k) => { if (b[k] === undefined) delete o[k]; else o[k] = JSON.parse(JSON.stringify(b[k])); });
+        Mapping.recalcBounds(m);
+        await DB.saveMap(m);
+        if (view3d && view3d._map === m) view3d._rebuildScene?.();
+      };
+      History.push({ label: 'Modelador (' + (obj.nome || obj.tipo || 'objeto') + ')', undo: () => aplicar(antes), redo: () => aplicar(depois) });
+    } catch (e) { /* histórico é opcional */ }
+  },
+  _backupObj(obj) {
+    const b = {};
+    this._BACKUP_KEYS.forEach((k) => { b[k] = obj[k] === undefined ? undefined : JSON.parse(JSON.stringify(obj[k])); });
+    return b;
+  },
+  _restoreBackup(state) {
+    const obj = state.obj, b = state.objBackup;
+    if (!obj || !b) return;
+    this._BACKUP_KEYS.forEach((k) => { if (b[k] === undefined) delete obj[k]; else obj[k] = JSON.parse(JSON.stringify(b[k])); });
+  },
+  _takeSnapshot(state) {
+    const g = state.group;
+    state.snap = {
+      vertices: state.cm.vertices.map((v) => v.slice()),
+      edges: state.cm.edges.map((e) => e.slice()),
+      faces: state.cm.faces.map((f) => f.slice()),
+      xform: { ...state.xform },
+      pos: g ? [g.position.x, g.position.y, g.position.z] : null,
+    };
+  },
+  /** Compara valor a valor, SEM arredondar — só é "sujo" se algum número mudou de verdade. */
+  _isDirty(state) {
+    const s = state && state.snap;
+    if (!s) return false;
+    const eq = (a, b) => {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        const x = a[i], y = b[i];
+        if (x.length !== y.length) return false;
+        for (let j = 0; j < x.length; j++) if (x[j] !== y[j]) return false;
+      }
+      return true;
+    };
+    if (!eq(state.cm.vertices, s.vertices) || !eq(state.cm.edges, s.edges) || !eq(state.cm.faces, s.faces)) return true;
+    for (const k of Object.keys(s.xform)) if (state.xform[k] !== s.xform[k]) return true;
+    const g = state.group;
+    if (g && s.pos && (g.position.x !== s.pos[0] || g.position.y !== s.pos[1] || g.position.z !== s.pos[2])) return true;
+    return false;
+  },
+
+  /** Botão "Aplicar alterações": grava no objeto/banco e continua no Modelador. */
+  applyChanges() {
+    const state = this._state;
+    if (!state?.active) return false;
+    if (!state.cm.vertices.length && !state.cm.edges.length && !state.cm.faces.length) {
+      Utils.toast?.('A malha está vazia — nada a aplicar.', { type: 'warn' });
+      return false;
+    }
+    this._commit(state);
+    const map = state.view3d?._map;
+    if (map) DB.saveMap(map);
+    state.objBackup = this._backupObj(state.obj);
+    this._takeSnapshot(state);
+    Utils.toast?.('Alterações aplicadas ✓', { type: 'ok' });
+    return true;
+  },
+
+  /** "Sair do Modelador" do botão: se há alterações não aplicadas, pergunta. */
+  requestExit() {
+    const state = this._state;
+    if (!state?.active) return;
+    if (!this._isDirty(state)) { this.exit(); return; }
+    if (state._exitPromptOpen) return;
+    state._exitPromptOpen = true;
+    window.CardSystem.mount(state.view3d._container, 'confirm', {
+      title: 'Alterações não aplicadas',
+      message: 'Você fez alterações no modelo 3D deste objeto que ainda não foram aplicadas. Deseja aplicá-las ou descartá-las?',
+      buttons: [
+        { id: 'aplicar', label: '✔ Aplicar alterações', variant: 'primary' },
+        { id: 'descartar', label: '🗑 Descartar alterações', variant: 'secondary' },
+        { id: 'cancelar', label: 'Continuar editando', variant: 'secondary' },
+      ],
+      onChoose: (id) => {
+        state._exitPromptOpen = false;
+        if (this._state !== state || !state.active) return;
+        if (id === 'aplicar') this.exit();
+        else if (id === 'descartar') this.exit({ discard: true });
+      },
+    }, {});
   },
 
   /** Encerra a sessão: grava a malha/transform de volta no objeto de
    *  VERDADE (por ID — ver `_commit`), salva o mapa e reconstrói a cena
    *  "normal" do View3D (que volta a assumir loop/controles/hover). */
-  exit({ skipRebuild = false } = {}) {
+  exit({ skipRebuild = false, discard = false } = {}) {
     const state = this._state;
     if (!state?.active) return;
     // [14/09/2026] CORRIGIDO — desfaz o alargamento de `near`/`far`
@@ -671,7 +862,15 @@ const Modeler3D = {
         dur: 350,
       };
     }
-    this._commit(state);
+    // Só grava se houve alteração de verdade (comparação exata) e não foi
+    // descartada; caso contrário o objeto volta exatamente ao que era.
+    if (!discard && this._isDirty(state)) this._commit(state);
+    else {
+      this._restoreBackup(state);
+      // Nada foi gravado: as peças originais voltam a aparecer (o rebuild, se houver, as recria).
+      (state._hiddenRoots || []).forEach((r) => { r.visible = true; });
+      (state.view3d?._engine?._pickMeshes || []).forEach((m) => { if (m.userData?.pick?.ref?.id === state.obj.id) m.visible = true; });
+    }
     ModelerInput.unbind(state);
     // [11/09/2026] Limpa o `cursor:none` inline que `ModelerInput.
     // _updateFakeCursor` pode ter deixado no canvas (ver correção do
@@ -726,6 +925,7 @@ const Modeler3D = {
     ModelerGizmo.dispose(state);
     ModelerRender.disposeSceneObjects(state);
     ModelerUI.dispose(state);
+    this._pushUndoEntrada(state);
     const view3d = state.view3d;
     this._state = null;
     if (!skipRebuild && view3d && view3d._map) {
@@ -756,31 +956,6 @@ const Modeler3D = {
     const obj = state.obj;
     if (!obj) return;
     // NOVO (03/09/2026) — ver comentário grande em `enter()` sobre
-    // `state.seedBackup`. Se o objeto NÃO tinha `customMesh` antes de abrir
-    // esta sessão (`seedBackup` não é null) e nenhuma edição de verdade
-    // aconteceu (`state.actionLog` vazio — só ações reais de
-    // edição/inserção/transformação chamam `ModelerMesh.pushUndo`, que
-    // grava ali), desfaz o seed em vez de gravá-lo: restaura os campos
-    // originais (sem `customMesh`/`customMeshXform` nenhum) e sai sem tocar
-    // em posição/tamanho/DB — "entrar e sair sem editar" fica 100%
-    // transparente, a escada (ou mesa/luminária/poste) continua exatamente
-    // como estava, com sua renderização especial de sempre.
-    if (state.seedBackup && !(state.actionLog && state.actionLog.length)) {
-      delete obj.customMesh; delete obj.customMeshXform;
-      const b = state.seedBackup;
-      if (b.forma !== undefined) obj.forma = b.forma; else delete obj.forma;
-      if (b.largura !== undefined) obj.largura = b.largura;
-      if (b.profundidade !== undefined) obj.profundidade = b.profundidade;
-      if (b.altura !== undefined) obj.altura = b.altura;
-      if (b.cor !== undefined) obj.cor = b.cor;
-      // `obj` já é a referência VIVA dentro de `view3d._map.objects` (nunca
-      // clonada — ver item 4 no cabeçalho do arquivo), então as mutações
-      // acima já bastam; `exit()` chama `DB.saveMap` logo em seguida
-      // (fora do `skipRebuild`), persistindo esse estado igual a qualquer
-      // outra saída.
-      return;
-    }
-    // BUG CORRIGIDO (03/09/2026), pedido verbatim: "No 'Ver em 3D', no
     // Modelador, ao excluir um objeto ele deve ser excluído. [...] Parece
     // que ele é apagado no Modelador, mas alguma versão do objeto ainda
     // fica no mundo." Causa raiz: "Excluir objeto" (ModelerInput.
@@ -809,6 +984,7 @@ const Modeler3D = {
       }
       return;
     }
+    state._committed = true; // houve gravação nesta sessão (ver _pushUndoEntrada)
     const patch = {
       customMesh: { vertices: state.cm.vertices.map((v) => v.slice()), edges: state.cm.edges.map((e) => e.slice()), faces: state.cm.faces.map((f) => f.slice()) },
       customMeshXform: { ...state.xform },

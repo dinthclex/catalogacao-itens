@@ -11,8 +11,8 @@ const Utils = {
   // `CACHE_VERSION` em sw.js (mesmo número — "v292" aqui é "catalogo-v292"
   // lá): sempre que `CACHE_VERSION` for incrementado numa rodada, atualizar
   // os dois valores abaixo junto, no mesmo commit/rodada.
-  APP_VERSION: 'v311',
-  APP_LAST_UPDATE: '30/08/2026',
+  APP_VERSION: 'v564',
+  APP_LAST_UPDATE: '18/09/2026',
 
   formatDateTime(iso) {
     if (!iso) return '—';
@@ -124,7 +124,7 @@ const Utils = {
   // tamanho normal (`.footernav-btn-swap-in`). Compartilhada entre
   // js/classicmode.js (`<nav class="bottomnav">` do modo Clássico) e
   // js/bsplayout.js (painel 'Botões' do Workspace) — os 2 lugares onde o
-  // rodapé de botões é desenhado (ver RODADA 56, progresso-sessao.md).
+  // rodapé de botões é desenhado.
   // `oldBtn` pode ser `null` (1ª montagem, nada a animar) — nesse caso só
   // cria e devolve o botão novo direto, sem classe/animação nenhuma.
   animateFooterButtonSwap(oldBtn, buildNewBtnFn) {

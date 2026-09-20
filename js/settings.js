@@ -738,7 +738,7 @@ const SettingsView = {
              o comentário grande logo acima (fora deste template, ver
              "REORGANIZADO (07/09/2026)") continua documentando por que o
              card existe separado, só o TEXTO VISÍVEL na tela saiu. -->
-        <div class="settings-section" data-cat="servidor">
+        <div class="settings-section ${semServidor(cfg.cenarioServidor) ? 'hidden' : ''}" data-cat="servidor" id="st-card-armazenamento">
           <h3>💾 Armazenamento no servidor</h3>
           <!-- NOVO (01/09/2026), item GRANDE #3 do pedido de 12 itens,
                verbatim: "Deve ser possível guardar direto em arquivo pelo
@@ -858,7 +858,7 @@ const SettingsView = {
           </div>
         </div>
 
-        <div class="settings-section" data-cat="servidor">
+        <div class="settings-section ${semServidor(cfg.cenarioServidor) ? 'hidden' : ''}" data-cat="servidor" id="st-card-sync">
           <h3>🔗 Sincronização entre aparelhos (vários PCs/celulares ao mesmo tempo)</h3>
           <p style="font-size:12.5px; color:var(--text-dim)">
             Com o servidor local acima configurado, cada aparelho (PC, celular etc.)
@@ -990,8 +990,18 @@ const SettingsView = {
       container.querySelector('#st-serverprefs-status').classList.toggle('hidden', semServidor(e.target.value));
       container.querySelector('#st-pastadados-wrap')?.classList.toggle('hidden', semServidor(e.target.value));
       container.querySelector('#st-serverprefs-actions').classList.toggle('hidden', semServidor(e.target.value));
-      container.querySelector('#st-espelhar-indexeddb-field')?.classList.toggle('hidden', semServidor(e.target.value));
+      container.querySelector('#st-guardar-destinos-field')?.classList.toggle('hidden', semServidor(e.target.value));
       container.querySelector('#st-storage-wrap')?.classList.toggle('hidden', semServidor(e.target.value));
+      // NOVO (RODADA 217) — pedido verbatim: quando "PC, sem servidor" ou
+      // "Celular, sem servidor" estiver marcado, os cards inteiros "💾
+      // Armazenamento no servidor" e "🔗 Sincronização entre aparelhos"
+      // devem deixar de aparecer (antes só sub-blocos internos do 1o card
+      // eram escondidos; o card de sincronização nunca escondia nada).
+      // Reage ao 'change' do próprio select #st-cenario (mesmo handler
+      // acima), então a troca é visível na hora, sem fechar/reabrir as
+      // Configurações.
+      container.querySelector('#st-card-armazenamento')?.classList.toggle('hidden', semServidor(e.target.value));
+      container.querySelector('#st-card-sync')?.classList.toggle('hidden', semServidor(e.target.value));
       const urlInput = container.querySelector('#st-webhook-url');
       const placeholders = {
         'pc-sem-servidor': 'não se aplica neste cenário',

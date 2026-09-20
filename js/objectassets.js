@@ -167,6 +167,13 @@
  * Exemplo completo de arquivo `.model.js` usando isso:
  * `assets/modelos/_exemplo-model-botoes-customizados.txt`.
  */
+/* [20/09/2026 UTC] NOTA — o comentário grande acima (e outros pontos deste
+ * arquivo) fala em `assets/modelos/<chave>.model.js`, mas o NOME DE ARQUIVO
+ * REAL sempre foi `assets/modelos/<chave>.config.js` (ver `ensureModelLoaded`
+ * abaixo, onde isso foi corrigido) — `.model.js` nunca existiu de verdade no
+ * projeto, era só como a prosa dos comentários continuou chamando o arquivo
+ * depois que o nome de verdade virou `.config.js` numa rodada anterior.
+ * Deixado documentado aqui em vez de reescrever cada menção antiga. */
 window.ObjectAssets = {
   _models: {},      // chave (tipo/'camera'/'fotopin'/'_generic') -> def registrada
   _instances: {},    // nome do objeto -> def registrada
@@ -208,8 +215,7 @@ window.ObjectAssets = {
     // string troque o nome do arquivo). Nenhum tipo do catálogo usa isso
     // hoje (nenhum `.model.js` tem `malhaGlb` — precisaria ser adicionado
     // manualmente em luminaria.model.js/poste.model.js/relogio.model.js
-    // pra usar os `.glb` já gerados, ver progresso-sessao.md RODADA 70 pra
-    // por que isso não foi feito automaticamente).
+    // pra usar os `.glb` já gerados; isso não foi feito automaticamente).
     if (def && def.malhaGlb) {
       const nomeGlb = (typeof def.malhaGlb === 'string') ? def.malhaGlb : chave;
       window.GlbMeshSource?.preload(nomeGlb);
@@ -251,15 +257,27 @@ window.ObjectAssets = {
 
   /** Garante que o Modelo de `chave` (tipo de objeto, ou 'camera'/
    *  'fotopin'/'_generic') já foi TENTADO carregar de
-   *  `assets/modelos/<chave>.model.js` — só tenta uma vez por chave (a
+   *  `assets/modelos/js/<chave>.config.js` — só tenta uma vez por chave (a
    *  vida inteira da página); chamadas seguintes devolvem na hora. Devolve
    *  a def registrada (ou `undefined` se nada se registrou — tipo sem
-   *  arquivo próprio, cai no `_generic` de quem chamou). */
+   *  arquivo próprio, cai no `_generic` de quem chamou).
+   *  [20/09/2026 UTC] CORRIGIDO — pedido verbatim (achado numa varredura de
+   *  arquivos órfãos): esta função buscava `assets/modelos/<chave>.model.js`,
+   *  um nome de arquivo que NUNCA existiu neste projeto (os arquivos reais
+   *  sempre se chamaram `<chave>.config.js`, ver `mesa.config.js` etc. —
+   *  `registerModel` abaixo já esperava exatamente esse formato de `def`,
+   *  só o NOME do arquivo buscado estava errado). Resultado: todo carregamento
+   *  de Modelo dava 404 silencioso e caía sempre no fallback `_generic`,
+   *  mesmo quando um `.config.js` de verdade existia pro tipo — os hooks
+   *  onModelSpawn/onModelClick/onModelCardButtons/malhaEstatica/malhaGlb de
+   *  cada `<tipo>.config.js` nunca rodavam. Caminho também atualizado pra
+   *  `assets/modelos/js/` (reorganização de pastas desta rodada — ver
+   *  `js/objmeshsource.js`, que já busca `.malha.js` no mesmo lugar novo). */
   async ensureModelLoaded(chave) {
     if (!chave) return undefined;
     if (!this._modelAttempted[chave]) {
       this._modelAttempted[chave] = true;
-      await this._tryLoadScript(`assets/modelos/${this._slug(chave)}.model.js`);
+      await this._tryLoadScript(`assets/modelos/js/${this._slug(chave)}.config.js`);
     }
     return this._models[chave];
   },

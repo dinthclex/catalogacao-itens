@@ -202,6 +202,67 @@ const Mapping = {
     // defaultShapeForTipo) na primeira vez que o mapa é carregado depois
     // desta versão, sem precisar recriar cada objeto manualmente.
     (map.objects || []).forEach((o) => Mapping.applyDefaultShapeToObject(o));
+    // [18/09/2026 UTC] Racks sem os parametros (rackUs/rackProfundidade) --
+    // ex.: criados por script/importacao -- ganham o padrao 12U x 600mm.
+    (map.objects || []).forEach((o) => {
+      if (o.tipo === 'rack' && o.rackUs == null && window.RackModular) Object.assign(o, window.RackModular.patchParaObjeto(o, 12, 600));
+      // [18/09/2026 UTC] RODADA 164 -- Rack sem componentes (criado antes desta
+      // rodada) ganha o Script de fabrica + gatilho "Ao Clicar Duas Vezes"
+      // (abrir/fechar a porta). Nunca pisa em componentes ja existentes.
+      if (o.tipo === 'rack' && window.RackModular && !(Array.isArray(o.components) && o.components.length)) {
+        o.components = window.RackModular.componentesPadrao((p) => Utils.uid(p));
+      }
+    });
+    // [18/09/2026 UTC] RODADA 166 -- Equipamentos de rede (Switch 24/48, Patch Panel 24/48,
+    // js/rede-equip.js): garante `obj.rede`, forma real, componentes de fabrica (Script +
+    // duplo clique) e a lista `map.cabos`; re-sincroniza a posicao de quem esta num rack.
+    if (window.RedeEquip) {
+      if (!Array.isArray(map.cabos)) map.cabos = [];
+      (map.objects || []).forEach((o) => {
+        if (!window.RedeEquip.ehEquipRede(o.tipo)) return;
+        window.RedeEquip.garantirRede(o);
+        if (o.forma !== 'retangulo') Object.assign(o, window.RedeEquip.patchParaObjeto(o.tipo));
+        if (!(Array.isArray(o.components) && o.components.length)) o.components = window.RedeEquip.componentesPadrao(o.tipo, (p) => Utils.uid(p));
+      });
+      window.RedeEquip.sincronizarNoRack(map);
+    }
+    // [18/09/2026 UTC] NOVO (RODADA 157) — pedido verbatim do usuário, após
+    // testar: "ao dar duplo clique no 'Ver em 3D', apontando para a porta,
+    // nada acontece." CAUSA RAIZ: `ObjectStandard.applyDefaultComponents`
+    // (RODADA 156, o "molde padrão" que dá à toda porta NOVA o Script +
+    // EventTrigger de abrir/fechar por duplo clique) só roda na CRIAÇÃO da
+    // entidade — portas desenhadas ANTES daquela rodada (como a que o
+    // usuário usou pra testar) continuam para sempre sem nenhum
+    // componente, mesmo depois de reabrir o mapa. CORRIGIDO: toda vez que
+    // um mapa é carregado (`ensureNewFields` já roda nesse momento, ver
+    // mapview.js/view3d.js), qualquer porta que ainda não tenha NENHUM
+    // componente (`components` ausente/vazio — nunca mexe numa porta que
+    // já tem algo, seja o molde padrão ou customização manual do usuário)
+    // recebe agora, com atraso zero (síncrono, mesmo caminho de
+    // `applyDefaultComponents`), o mesmo molde padrão do tipo 'porta'.
+    // Idempotente: uma vez aplicado, a porta passa a ter `components`, e
+    // nas próximas vezes que o mapa for carregado esta linha vira NO-OP
+    // silencioso pra ela (mesma guarda de sempre).
+    (map.portas || []).forEach((porta) => window.ObjectStandard?.applyDefaultComponents(porta, 'porta'));
+    // [18/09/2026 UTC] NOVO (RODADA 158) — pedido verbatim do usuário, após
+    // testar com uma porta NOVA (já criada depois da RODADA 156/157):
+    // "No componente o script deveria estar selecionado. E no método,
+    // deveria estar selecionado o método 'aoClicarDuasVezes()'. Porém só
+    // estava '--componente--' e '--método--'." CAUSA RAIZ (corrigida na
+    // fonte em `ObjectStandard.applyDefaultComponents`, ver comentário
+    // grande lá): o `EventTrigger` clonado apontava pro `id` ANTIGO do
+    // Script (do molde), não pro `id` NOVO gerado na clonagem — mas essa
+    // correção só vale pra portas criadas DAQUI PRA FRENTE; a porta que o
+    // usuário já tinha testado ficou salva com a referência quebrada.
+    // `repairOrphanScriptLinks` (auto-cura, só quando há exatamente 1
+    // Script na entidade — caso inequívoco) reconecta isso toda vez que o
+    // mapa é carregado, pras portas (e paredes/janelas/câmeras/objetos,
+    // mesmo mecanismo de componentes) que já ficaram salvas quebradas.
+    (map.portas || []).forEach((porta) => window.ObjectStandard?.repairOrphanScriptLinks(porta));
+    (map.walls || []).forEach((wall) => window.ObjectStandard?.repairOrphanScriptLinks(wall));
+    (map.janelas || []).forEach((janela) => window.ObjectStandard?.repairOrphanScriptLinks(janela));
+    (map.cameras || []).forEach((cam) => window.ObjectStandard?.repairOrphanScriptLinks(cam));
+    (map.objects || []).forEach((obj) => window.ObjectStandard?.repairOrphanScriptLinks(obj));
     // Migração "múltiplos patrimônios por objeto" (pedido do usuário,
     // 26/08/2026: um objeto agora pode ter MAIS DE UM patrimônio associado,
     // não só um) — `obj.itemId` (singular, campo antigo) vira `obj.itemIds`
@@ -631,8 +692,7 @@ const Mapping = {
    *  (mesmo escopo de `getObjectClasses` — "classes só em map.objects",
    *  ver comentário histórico acima). 3D ainda NÃO lê isto nesta rodada
    *  (ocultar/destacar já funcionam nos dois; opacidade fica só no 2D por
-   *  ora — ver progresso-sessao.md, RODADA desta mudança, seção
-   *  "pendências"). */
+   *  ora). */
   getEntityGroupAlpha(entity, map, { isWall = false } = {}) {
     const regras = this.getGrupoRegras(map);
     let alpha = 1;
@@ -993,6 +1053,15 @@ const Mapping = {
       // "flutuando" num andar diferente do da parede que ela corta; este
       // campo só manda de verdade pra uma porta/janela SOLTA.
       piso: 0,
+      // [18/09/2026 UTC] NOVO (RODADA 145) — "elevacaoBase": altura (metros,
+      // absoluta a partir do chão do nível 0) do TOPO do objeto sob o qual
+      // esta porta/janela foi posicionada (ex. um 'piso' a 3m — ver
+      // mapview.js _hitTestBaseObjectForAttach), 0 quando colocada
+      // diretamente no chão/sem nenhum objeto embaixo. Ver
+      // doorWindowAlturaEfetiva logo abaixo — pedido do usuário: "a
+      // propriedade 'Altura em relação ao chão' deve ser em relação a esse
+      // objeto o qual ela ficou em cima".
+      elevacaoBase: 0,
       x, y, angulo: 0, alturaPeitoril: 0, largura: 0.8, altura: 2.1,
       tipo: 'padrao', abertura: 'direita', // 'abertura': lado da dobradiça/sentido do arco de abrir (ver mapview.js render — arco tracejado)
       // 'aberta': só afeta o 3D — FECHADA (padrão) não corta buraco nenhum na
@@ -1001,6 +1070,17 @@ const Mapping = {
       // parede" (pedido do usuário). No 2D não muda nada visualmente (vista
       // de cima não representa isso).
       aberta: false,
+      // [18/09/2026 UTC] NOVO (RODADA 155) — pedido verbatim: "O modelo 3D
+      // da porta deve ter uma maçaneta alavanca simples dos dois lados." A
+      // maçaneta (ver buildDoorOrWindowMesh/engine3d.js) já existia como um
+      // campo opcional/oculto (`comManeneta`) desde uma rodada anterior
+      // (62), sem UI e sem valor padrão em nenhum lugar fora de
+      // engine3d.js — ou seja, NENHUMA porta criada pela ferramenta normal
+      // "Porta" jamais tinha maçaneta. Agora vira o padrão de TODA porta
+      // nova (`true`); ainda pode ser desligado manualmente passando
+      // `{ comManeneta: false }` em `extra` (o `...extra` abaixo sobrescreve
+      // esta linha).
+      comManeneta: true,
       // NOVO (07/09/2026), pedido verbatim: "...'Porta'... devem ter
       // nomes..."
       nome: this._nextObjectName(map, 'Porta'),
@@ -1032,6 +1112,8 @@ const Mapping = {
       // ideia, rotação somada ao ângulo da parede quando presa.
       anguloExtra: 0,
       piso: 0, // NOVO (01/09/2026), item GRANDE #9 — mesmo raciocínio de addDoor acima
+      // 'elevacaoBase' — ver comentário grande equivalente em addDoor, acima.
+      elevacaoBase: 0,
       x, y, angulo: 0, alturaPeitoril: 1.0, largura: 1.2, altura: 1.2,
       tipo: 'padrao', grade: false, bandeira: false, // grade: grelha de proteção (só visual); bandeira: variante com bandeira/transom (só abre o topo)
       aberta: false, // só afeta o 3D — ver comentário em addDoor acima
@@ -1074,6 +1156,26 @@ const Mapping = {
     const ux = dx / len, uy = dy / len;
     const t = Utils.clamp(el.posAoLongoDaParede || 0, 0, len);
     return { x: wall.x1 + ux * t, y: wall.y1 + uy * t, angulo: Math.atan2(dy, dx) + (el.anguloExtra || 0), wall };
+  },
+
+  /** [18/09/2026 UTC] NOVO (RODADA 145) — pedido verbatim: "a propriedade
+   *  'Altura em relação ao chão' deve ser em relação a esse objeto o qual
+   *  ela ficou em cima [...] se colocada em cima de um 'piso' que está a
+   *  3m de altura, a 'altura em relação ao chão' da janela deve
+   *  somar/basear-se nessa elevação do piso, não no chão absoluto do
+   *  mundo/nível 0". `el.alturaPeitoril` continua sendo só o valor
+   *  RELATIVO editável no painel (mapview.js `#janela-peitoril`/
+   *  `#porta-peitoril`) — este é o funil único que soma a base
+   *  (`elevacaoBase`, gravada na hora de posicionar em cima de outro
+   *  objeto, ver mapview.js `_hitTestBaseObjectForAttach`) pra chegar na
+   *  altura ABSOLUTA de verdade, usada tanto pelo 3D (engine3d.js
+   *  `buildDoorOrWindowMesh`, `baseY`) quanto por qualquer exibição no 2D
+   *  (painel de propriedades). Porta sempre nasce no chão (`baseY` do 3D
+   *  ignora `alturaPeitoril` pra porta — ver comentário lá), mas ainda
+   *  soma `elevacaoBase`: uma porta presa em cima de um 'piso' elevado
+   *  também deve nascer no TOPO desse piso, não no chão absoluto. */
+  doorWindowAlturaEfetiva(el) {
+    return (el.elevacaoBase || 0) + (el.alturaPeitoril || 0);
   },
 
   // ---------- Câmeras: posição, direção (ângulo em radianos, 0 = eixo X),
@@ -1247,6 +1349,38 @@ const Mapping = {
       window.Components.addComponent(obj, 'Script', { code: window.Components.DEFAULT_RELOGIO_SCRIPT_CODE });
     }
     this.applyDefaultShapeToObject(obj);
+    // Escada: nasce com as configurações de fábrica do catálogo (materializadas NO OBJETO);
+    // depois disso, o que for alterado vale só para esta escada.
+    if (tipo === 'escada') {
+      if (obj.escadaDegraus == null) obj.escadaDegraus = 11;
+      if (obj.alturaEscada == null) obj.alturaEscada = obj.altura || 2.0;
+    }
+    // [18/09/2026 UTC] NOVO -- "Rack" parametrico (js/rack-modular.js): nasce
+    // 12U x 600mm (ou o que `extra` ja trouxer em rackUs/rackProfundidade) e
+    // ja com forma/largura/profundidade/altura/elevacao DERIVADAS desses 2
+    // parametros -- mesma fonte pro 2D, colisao, empilhamento e 3D. Sem
+    // elevacao explicita, o tipo "parede" nasce a 1,2m do chao (piso = 0).
+    if (tipo === 'rack' && window.RackModular) {
+      Object.assign(obj, window.RackModular.patchParaObjeto(obj, obj.rackUs || 12, obj.rackProfundidade || 600));
+      // [18/09/2026 UTC] RODADA 164 -- Script de fabrica do Rack (adaptado do da
+      // Porta, sem macaneta): duplo clique na PORTA abre/fecha. So entra se o
+      // molde configuravel do tipo ('rack') nao trouxe componentes.
+      if (!(Array.isArray(obj.components) && obj.components.length)) {
+        obj.components = window.RackModular.componentesPadrao((p) => Utils.uid(p));
+      }
+    }
+    // [18/09/2026 UTC] RODADA 166 -- Equipamento de rede (Switch 24/48, Patch Panel 24/48):
+    // nasce com estado de rede + Script de fabrica (duplo clique liga/desliga o switch) e,
+    // se for solto sobre um rack, ENCAIXA na U inteira mais proxima (snap magnetico) --
+    // isso ja define a elevacao, entao o empilhamento automatico abaixo nao entra.
+    if (window.RedeEquip?.ehEquipRede(tipo)) {
+      window.RedeEquip.garantirRede(obj);
+      Object.assign(obj, window.RedeEquip.patchParaObjeto(tipo));
+      if (!(Array.isArray(obj.components) && obj.components.length)) {
+        obj.components = window.RedeEquip.componentesPadrao(tipo, (p) => Utils.uid(p));
+      }
+      if (!obj.rackId) window.RedeEquip.autoSnapAoColocar(map, obj);
+    }
     // Empilhamento automático (pedido do usuário, 25/08/2026): "se a área da
     // forma de um objeto coincidir com a área de outro objeto já inserido no
     // mapa, então o novo objeto é colocado em cima do que já está no mapa
@@ -1374,7 +1508,7 @@ const Mapping = {
     if (o.tipo !== 'escada') return this.objectTopHeight(o);
     const elevacao = o.elevacao || 0;
     const profundidadeTotal = Math.max(0.05, o.profundidade || 3.0);
-    const alturaTotal = o.alturaEscada || alturaPiso || 2.8;
+    const alturaTotal = Math.max(0.05, o.alturaEscada || o.altura || 2.0); // própria de cada escada (janela de propriedades)
     // Degraus: ver `escadaDegraus` — se o usuário não configurou nenhum
     // valor customizado, o padrão agora escala com `alturaTotal` (~18cm por
     // degrau, medida realista de escada de verdade) em vez de um número
@@ -1383,7 +1517,7 @@ const Mapping = {
     // 36cm até funcionava, mas ficava visualmente/fisicamente irreal e perto
     // demais do limite). Ver comentário grande na função irmã
     // `_buildEscadaMesh` (engine3d.js) pra a conta completa.
-    const degraus = Math.max(1, Math.round(o.escadaDegraus) || Math.round(alturaTotal / 0.18) || 11);
+    const degraus = Math.max(1, Math.round(o.escadaDegraus) || 11);
     const stepDepth = profundidadeTotal / degraus;
     const stepHeight = alturaTotal / degraus;
     const ang = o.angulo || 0;
@@ -1515,13 +1649,22 @@ const Mapping = {
     Object.assign(o, shape);
   },
   removeObject(map, id) {
+    const alvo = (map.objects || []).find((o) => o.id === id);
     map.objects = (map.objects || []).filter((o) => o.id !== id);
+    // [18/09/2026 UTC] RODADA 166 -- cabos ligados ao objeto somem junto; equipamentos que
+    // estavam num rack removido ficam soltos (rackId/rackU limpos) onde estavam.
+    if (window.RedeEquip) {
+      if (window.RedeEquip.ehEquipRede(alvo?.tipo)) window.RedeEquip.removerCabosDoObjeto(map, id);
+      if (alvo?.tipo === 'rack') (map.objects || []).forEach((o) => { if (o.rackId === id) { o.rackId = null; o.rackU = null; } });
+    }
     this.recalcBounds(map);
   },
   updateObject(map, id, patch) {
     const obj = (map.objects || []).find((o) => o.id === id);
     if (!obj) return null;
     Object.assign(obj, patch);
+    // [18/09/2026 UTC] RODADA 166 -- mexeu num rack (posicao/angulo/tamanho): quem esta instalado nele acompanha.
+    if (obj.tipo === 'rack' && window.RedeEquip) window.RedeEquip.sincronizarNoRack(map, obj.id);
     this.recalcBounds(map);
     return obj;
   },
@@ -1550,6 +1693,18 @@ const Mapping = {
     if (!obj.itemIds) obj.itemIds = [];
     if (obj.itemIds.some((e) => e.id === itemId)) return false;
     obj.itemIds.push({ id: itemId, em: DB.nowISO(), patrimonio: (patrimonio || '').trim() });
+    return true;
+  },
+
+  /** Troca um patrimônio já associado (`oldItemId`) por outro (`newItemId`), mantendo a posição na lista.
+   *  Devolve `false` se o antigo não existe ou o novo já está associado a este objeto. */
+  replaceItemInObject(map, objId, oldItemId, newItemId, patrimonio) {
+    const obj = (map.objects || []).find((o) => o.id === objId);
+    if (!obj || !obj.itemIds || !newItemId) return false;
+    const idx = obj.itemIds.findIndex((e) => e.id === oldItemId);
+    if (idx < 0) return false;
+    if (newItemId !== oldItemId && obj.itemIds.some((e) => e.id === newItemId)) return false;
+    obj.itemIds[idx] = { id: newItemId, em: DB.nowISO(), patrimonio: (patrimonio || '').trim() };
     return true;
   },
 

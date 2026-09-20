@@ -185,6 +185,9 @@ const ModelerRender = {
     state.outlineMesh?.geometry?.dispose();
     state.outlineMesh?.material?.dispose();
     state.outlineMesh = null;
+    state.glassMesh?.geometry?.dispose();
+    state.glassMesh?.material?.dispose();
+    state.glassMesh = null;
     if (state.group) state.scene.remove(state.group);
     // NOVO (02/09/2026) — ver `state.lights` em modeler-core.js. Cada luz de
     // lâmpada foi adicionada DIRETO em `state.scene` (não dentro de
@@ -313,39 +316,87 @@ const ModelerRender = {
    *  OCULTO. Guardado em `state.occlusion` — usado tanto pro DESENHO
    *  (item 11/12/14) quanto pela SELEÇÃO quando "Limitar a seleção aos
    *  elementos visíveis" está ligado (ver modeler-input.js). */
+  /** Assinatura do ponto de vista + malha: enquanto não muda, nada é recalculado. */
+  _viewKey(state) {
+    const c = state.camera, g = state.group;
+    const q = c.quaternion, p = c.position, gp = g.position, gr = g.rotation, gs = g.scale, pm = c.projectionMatrix.elements;
+    return [p.x, p.y, p.z, q.x, q.y, q.z, q.w, pm[0], pm[5], pm[10], gp.x, gp.y, gp.z, gr.x, gr.y, gr.z, gs.x, gs.y, gs.z, state._meshVersion || 0].join('|');
+  },
+
   computeOcclusion(state) {
     const THREE = state.THREE;
     const ray = state.raycaster;
     const camPos = state.camera.position;
     const EPS = 0.01; // tolerância (m) — evita o próprio ponto testado contar como "bloqueio de si mesmo"
-    const testPoint = (worldPos) => {
-      const dir = new THREE.Vector3().subVectors(worldPos, camPos);
+    const V = state.cm.vertices, E = state.cm.edges, F = state.cm.faces;
+    const nV = V.length, nE = E.length, nF = F.length, total = nV + nE + nF;
+    const key = this._viewKey(state);
+    const occ = state.occlusion;
+    const c = state._occCache || (state._occCache = { key: null, cursor: 0, done: false });
+    // Tamanhos mudaram (malha editada): reinicia com "tudo visível".
+    if (occ.vert.length !== nV || occ.edge.length !== nE || occ.face.length !== nF) {
+      occ.vert = new Array(nV).fill(true); occ.edge = new Array(nE).fill(true); occ.face = new Array(nF).fill(true);
+      c.key = null;
+    }
+    if (c.key === key && c.done) return; // nada mudou: reaproveita o resultado (custo zero)
+    if (c.key !== key) { c.key = key; c.cursor = 0; c.done = false; }
+    state.group.updateMatrixWorld(true);
+    const dir = new THREE.Vector3(), wp = new THREE.Vector3();
+    const testLocal = (x, y, z) => {
+      wp.set(x, y, z).applyMatrix4(state.group.matrixWorld);
+      dir.subVectors(wp, camPos);
       const dist = dir.length();
       if (dist < 1e-5) return true;
-      dir.normalize();
+      dir.multiplyScalar(1 / dist);
       ray.set(camPos, dir);
       ray.near = 0; ray.far = Math.max(0, dist - EPS);
-      const hits = ray.intersectObject(state.meshObj, false);
-      return hits.length === 0;
+      return ray.intersectObject(state.meshObj, false).length === 0;
     };
-    state.occlusion.vert = state.cm.vertices.map((v) => testPoint(this._localToWorld(state, v)));
-    state.occlusion.edge = state.cm.edges.map(([a, b]) => {
-      const pa = state.cm.vertices[a], pb = state.cm.vertices[b];
-      if (!pa || !pb) return true;
-      const mid = [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2, (pa[2] + pb[2]) / 2];
-      return testPoint(this._localToWorld(state, mid));
-    });
-    state.occlusion.face = state.cm.faces.map((f) => {
-      if (!f || !f.length) return true;
-      const c = f.reduce((acc, vi) => { const p = state.cm.vertices[vi]; return p ? [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]] : acc; }, [0, 0, 0]).map((v) => v / f.length);
-      return testPoint(this._localToWorld(state, c));
-    });
+    // Orçamento por quadro: malhas grandes são resolvidas aos poucos (mantendo o
+    // resultado anterior enquanto isso) em vez de travar o quadro.
+    const triCount = Math.max(1, (state.triFaceMap || []).length);
+    const budget = total <= 400 ? total : Math.max(24, Math.min(400, Math.floor(60000 / triCount)));
+    let feitos = 0;
+    while (c.cursor < total && feitos < budget) {
+      const i = c.cursor++;
+      feitos++;
+      if (i < nV) {
+        const v = V[i]; occ.vert[i] = v ? testLocal(v[0], v[1], v[2]) : true;
+      } else if (i < nV + nE) {
+        const ei = i - nV, e = E[ei], pa = V[e[0]], pb = V[e[1]];
+        occ.edge[ei] = (!pa || !pb) ? true : testLocal((pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2, (pa[2] + pb[2]) / 2);
+      } else {
+        const fi = i - nV - nE, f = F[fi];
+        if (!f || !f.length) { occ.face[fi] = true; continue; }
+        let sx = 0, sy = 0, sz = 0;
+        for (let k = 0; k < f.length; k++) { const p = V[f[k]]; if (p) { sx += p[0]; sy += p[1]; sz += p[2]; } }
+        occ.face[fi] = testLocal(sx / f.length, sy / f.length, sz / f.length);
+      }
+    }
+    if (c.cursor >= total) c.done = true;
   },
 
   // ==================== ponto-em-tela auxiliares pra picking (modeler-input.js) ====================
 
   screenPositions(state, cssW, cssH) {
-    const verts = state.cm.vertices.map((v) => this._projectWorld(state, this._localToWorld(state, v), cssW, cssH));
+    const key = this._viewKey(state) + '|' + cssW + 'x' + cssH + '|' + state.cm.vertices.length;
+    const c = state._spCache;
+    if (c && c.key === key) return c.verts;
+    const THREE = state.THREE;
+    state.group.updateMatrixWorld(true);
+    state.camera.updateMatrixWorld(true);
+    const m = new THREE.Matrix4().multiplyMatrices(state.camera.projectionMatrix, state.camera.matrixWorldInverse).multiply(state.group.matrixWorld);
+    const e = m.elements;
+    const verts = state.cm.vertices.map((v) => {
+      const x = v[0], y = v[1], z = v[2];
+      const w = 1 / (e[3] * x + e[7] * y + e[11] * z + e[15]);
+      const nx = (e[0] * x + e[4] * y + e[8] * z + e[12]) * w;
+      const ny = (e[1] * x + e[5] * y + e[9] * z + e[13]) * w;
+      const nz = (e[2] * x + e[6] * y + e[10] * z + e[14]) * w;
+      if (nz > 1 || nz < -1) return null;
+      return { x: (nx + 1) / 2 * cssW, y: (1 - ny) / 2 * cssH };
+    });
+    state._spCache = { key, verts };
     return verts;
   },
 

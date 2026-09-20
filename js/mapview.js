@@ -1253,6 +1253,7 @@ class Map2DRenderer {
     ctx.restore();
   }
 
+
   /** Desenha uma forma 'retangulo'/'poligono' (objeto JÁ colocado OU o
    *  rascunho/molde em progresso da ferramenta Formas — ver opts.formaDraft
    *  abaixo) — extraído à parte pra ser usado nos dois casos com o mesmo
@@ -1636,110 +1637,16 @@ class Map2DRenderer {
     // usuário: "pode ser colocado em cima de um objeto ou na lateral dele,
     // em qualquer parte... se o snap estiver habilitado... também é
     // afetado" — nada aqui distingue o relógio na hora de posicionar).
-    if (obj.tipo === 'relogio') {
-      const rMin = Math.min(iconBoxPx.w, iconBoxPx.h) / 2;
-      ctx.save();
-      ctx.lineCap = 'round';
-      for (let i = 0; i < 12; i++) {
-        const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
-        const marcaLonga = i % 3 === 0; // 12/3/6/9 — traço mais grosso/longo
-        const r0 = rMin * (marcaLonga ? 0.7 : 0.8), r1 = rMin * 0.92;
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = Math.max(1, rMin * (marcaLonga ? 0.08 : 0.05));
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
-        ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
-        ctx.stroke();
-      }
-      // [15/09/2026 UTC] CORRIGIDO — pedido verbatim: "O script do relógio
-      // deve ser usado também na versão do mapa 2D [...] A versão do 2D
-      // deve seguir o script também." Antes lia SEMPRE `new Date()` (hora
-      // do aparelho do usuário) — nem a hora do mundo (`RelogioMundo`) nem
-      // um Script conseguiam influenciar o desenho aqui. Agora usa a MESMA
-      // fonte de 3 números que `Engine3D._updateRelogiosParede`
-      // (js/engine3d.js): `obj.horaPonteiro`/`minutoPonteiro`/
-      // `segundoPonteiro` quando um Script os escreveu (ver `_loop()`
-      // acima, que agora ticka o Script deste objeto TODO quadro mesmo no
-      // Mapa 2D), com fallback pra `window.RelogioMundo.getHoraAtual()` —
-      // mesmo comportamento "de fábrica" de sempre quando não há Script
-      // nenhum sobrescrevendo.
-      const hMundo = window.RelogioMundo?.getHoraAtual?.();
-      const horas = (Number.isFinite(obj.horaPonteiro) ? obj.horaPonteiro : (hMundo?.horas ?? new Date().getHours())) % 12;
-      const minutos = Number.isFinite(obj.minutoPonteiro) ? obj.minutoPonteiro : (hMundo?.minutos ?? new Date().getMinutes());
-      const segundos = Number.isFinite(obj.segundoPonteiro) ? obj.segundoPonteiro : (hMundo?.segundos ?? new Date().getSeconds());
-      const drawHand = (ang, lenFactor, widthFactor, color) => {
-        ctx.strokeStyle = color || strokeColor;
-        ctx.lineWidth = Math.max(1, rMin * widthFactor);
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(Math.cos(ang) * rMin * lenFactor, Math.sin(ang) * rMin * lenFactor);
-        ctx.stroke();
-      };
-      drawHand(((horas + minutos / 60) / 12) * Math.PI * 2 - Math.PI / 2, 0.5, 0.09); // ponteiro das horas
-      drawHand(((minutos + segundos / 60) / 60) * Math.PI * 2 - Math.PI / 2, 0.72, 0.06); // ponteiro dos minutos
-      drawHand((segundos / 60) * Math.PI * 2 - Math.PI / 2, 0.8, 0.02, '#e35b5b'); // ponteiro dos segundos, sempre vermelho (contraste, independe da cor do objeto)
-      ctx.beginPath(); ctx.arc(0, 0, Math.max(1.5, rMin * 0.07), 0, Math.PI * 2);
-      ctx.fillStyle = strokeColor; ctx.fill();
-      ctx.restore();
+    if (window.ObjectTypes.tryDraw2D(this, ctx, obj, iconBoxPx, strokeColor, strokeW)) {
+      // [20/09/2026 UTC] MIGRADO pro registro (`js/objecttypes/relogio.js`
+      // e `js/objecttypes/escada.js`) -- pedido verbatim: "Relógio e escada
+      // devem ficar no mesmo 'formato' que os demais objetos". `tryDraw2D`
+      // já desenhou tudo (mostrador com ponteiros pro relógio; linhas dos
+      // degraus + ícone pra escada) -- mesmo hook `matchesDraw2D`/`draw2D`
+      // usado por qualquer outro tipo com desenho 2D próprio, sem
+      // mecanismo separado de overlay (removido: cada tipo agora se vira
+      // sozinho, ícone incluso quando precisa dele).
     } else if (obj.tipo) {
-      // NOVO (01/09/2026), pedido verbatim: "No 2D, os degraus devem
-      // aparecer desenhados no modelo padrão" — antes só o ÍCONE pequeno do
-      // catálogo (icons.js) tinha degraus desenhados; o retângulo de
-      // verdade no mapa (tamanho real, largura×profundidade configurados)
-      // ficava liso, sem nada indicando "escada" além do ícone central.
-      // Desenha linhas paralelas à LARGURA (perpendiculares à direção de
-      // subida — mesmo eixo local `profundidade`/`ly` usado por
-      // `_buildEscadaMesh` no 3D e por `Mapping.objectTopHeightAt` na
-      // física), uma a cada degrau (`obj.escadaDegraus`, padrão 11, MESMO
-      // campo/padrão do 3D) — divide o retângulo já desenhado acima
-      // (fill+stroke) em "faixas", pelo mesmo espírito visual de uma planta
-      // baixa de verdade. Desenhado ANTES do ícone (por baixo dele), sem
-      // mexer no ícone em si (mantido, mesmo padrão de mesa/outros tipos).
-      if (obj.tipo === 'escada') {
-        // CORRIGIDO (01/09/2026), pedido verbatim (item 13 da rodada de 13
-        // itens): "No mapa 2D, só o ghost da escada está com os degraus
-        // desenhado, deve ficar desenhado também quando estiver na grade."
-        // Causa raiz achada com Playwright (instrumentando `ctx.moveTo`
-        // dentro de `_drawFormaShape`, depois comparando screenshots): as
-        // linhas dos degraus JÁ eram desenhadas (mesmo `moveTo`/`stroke`,
-        // mesma função, tanto pro ghost quanto pro objeto de verdade — nunca
-        // houve dois caminhos de código diferentes) — o problema era só
-        // CONTRASTE. `strokeColor` (acima) usa a MESMA cor do preenchimento
-        // do objeto (`obj.cor`, ex. cinza #8a92a3 padrão da escada) quando
-        // não selecionado/sem item vinculado; com o preenchimento SÓLIDO
-        // (alfa 1, ver o fix de 31/08/2026 logo acima, "objetos padrão...
-        // deveria desenhar como sólido"), uma linha da MESMA cor por cima
-        // fica 100% invisível (0% de contraste, cor idêntica sobre cor
-        // idêntica). Só aparecia no ghost porque ali o preview inteiro (fill
-        // E stroke) é desenhado com `ctx.globalAlpha = 0.68` (ver
-        // "objectGhost" mais abaixo) — duas camadas semi-transparentes da
-        // MESMA cor, uma sobre a outra (fill, depois stroke por cima),
-        // compõem uma cor final MAIS ESCURA que só o fill sozinho, criando
-        // contraste "por acidente"; testado também com o toggle "Desenhar
-        // objetos com transparência" ligado — mesma composição, linhas
-        // reaparecem, confirmando a causa raiz. Corrigido: as linhas dos
-        // degraus agora usam uma cor de contraste FIXA (preto ou branco
-        // translúcido, escolhido pela luminância de `obj.cor` — claro ganha
-        // linha escura, escuro ganha linha clara), independente da cor/alfa
-        // do preenchimento — sempre visível, com ou sem o toggle de
-        // transparência, selecionado ou não, em qualquer cor de escada.
-        const degraus = Math.max(1, Math.round(obj.escadaDegraus) || 11);
-        const [dr, dg, db] = _hexToRgbArr(obj.cor || '#8a92a3');
-        const luminanciaFill = (0.299 * dr + 0.587 * dg + 0.114 * db) / 255;
-        const corDegrau = luminanciaFill > 0.55 ? 'rgba(0,0,0,0.42)' : 'rgba(255,255,255,0.5)';
-        ctx.save();
-        ctx.strokeStyle = corDegrau;
-        ctx.lineWidth = Math.max(1, strokeW * 0.6);
-        ctx.setLineDash([]);
-        ctx.beginPath();
-        for (let i = 1; i < degraus; i++) {
-          const ly = -iconBoxPx.h / 2 + (iconBoxPx.h / degraus) * i;
-          ctx.moveTo(-iconBoxPx.w / 2, ly);
-          ctx.lineTo(iconBoxPx.w / 2, ly);
-        }
-        ctx.stroke();
-        ctx.restore();
-      }
       const img = this._getIconImage(obj.tipo);
       if (img && img.complete && img.naturalWidth) {
         const iconSize = Math.min(iconBoxPx.w, iconBoxPx.h) * 0.6;
@@ -2454,6 +2361,8 @@ class Map2DRenderer {
       ctx.globalAlpha = this._layerOpacity(obj.layerId) * (this.objetoTransparencia2DAtivo && obj.forma !== 'imagem' ? 0.55 : 1) * Mapping.getEntityGroupAlpha(obj, this.mapData);
       const s = this.worldToScreen(obj.x, obj.y);
       const selected = obj.id === this.selectedObjectId;
+      const toolSelAtivo = !!opts.toolSelection?.has(`object:${obj.id}`);
+      const hoverAtivo = this._isHovered(opts, 'object', obj.id);
       const badgeAnchor = this._drawFormaShape(ctx, obj, s.x, s.y, selected);
       this._drawItemBadges(ctx, obj, badgeAnchor);
       this._drawHistoricoBadge2D(ctx, obj, badgeAnchor);
@@ -2465,13 +2374,15 @@ class Map2DRenderer {
       // '🏷️ Grupos'), independente do destaque de patrimônio associado
       // acima — reaproveita o mesmo anel dourado (`_drawDestaqueExtraObj`).
       if (Mapping.isEntityGroupHighlighted(obj, this.mapData)) this._drawDestaqueExtraObj(ctx, obj, s.x, s.y);
-      if (opts.toolSelection?.has(`object:${obj.id}`)) {
-        this._drawObjectSelHoverRing(ctx, obj, s.x, s.y, 6, false);
-      } else if (this._isHovered(opts, 'object', obj.id)) {
-        this._drawObjectSelHoverRing(ctx, obj, s.x, s.y, 6, true);
-      }
+      if (toolSelAtivo) this._drawObjectSelHoverRing(ctx, obj, s.x, s.y, 6, false);
+      else if (hoverAtivo) this._drawObjectSelHoverRing(ctx, obj, s.x, s.y, 6, true);
       ctx.restore();
     });
+
+    // [19/09/2026 UTC] NOVO (RODADA 190) -- cabos de rede (ligações porta-a-porta), colapsados em Y
+    // (projeção de topo) -- ver comentário grande em `_drawCabosRede2D`. Desenhado DEPOIS dos objetos
+    // (por cima), mesmo espírito visual de um cabo passando por cima do chão/mobiliário no mapa.
+    this._drawCabosRede2D(ctx, opts.hoverEl);
 
     // Forma DE VERDADE do rascunho em progresso da ferramenta Formas (ver
     // comentário grande no topo desta função, "formaDraftIsFloorImage") — só
@@ -4701,43 +4612,7 @@ const MapView = {
     const unsorted = await PhotoGrid.getUnsorted();
     if (this._rootEl !== container) return; // saiu da tela Mapa enquanto carregava — ver comentário acima
     this._map = map;
-    container.innerHTML = `
-      <div class="mapa-entry-wrap view-pad">
-        <button type="button" class="btn secondary sm mapa-entry-switch" id="mapa-entry-switch" title="Trocar de mapa, criar um novo, renomear ou excluir">
-          🗺️ ${Utils.escapeHtml(this._displayName(this._map))} <span aria-hidden="true">▾</span>
-          <!-- Pedido do usuário (rodada 52): "Enquanto os arquivos estão
-               sendo processados (os que vieram pelo botão de importação),
-               no botão de lista de mapas em 'Mapa' deve aparecer um ícone
-               com mensagem avisando que está carregando ainda." — objetos
-               .obj importados (ver js/objimport.js: isBusy/onBusyChange);
-               começa escondido, _wireObjImportBusyBadge abaixo liga/
-               desliga a classe .visible ao vivo. -->
-          <span class="mapa-entry-importing" id="mapa-entry-importing" title="Importando objeto(s) .obj em segundo plano...">⏳ importando objetos…</span>
-        </button>
-        <!-- "🗂️ Organizar" mudou pra cá (pedido do usuário, rodada 51:
-             "Remova o botão 'Organizar' dali [Planta baixa] e coloque em
-             'Mapa', ao lado do botão de seleção do mapa.") — antes vivia
-             dentro da Planta baixa (ver #tbm-organize-btn/#map-organize,
-             removidos de lá). MESMO método de sempre (_openOrganizeView). -->
-        <button type="button" class="btn secondary sm" id="mapa-entry-organize" title="Ver como patrimônios/mapas/fotos/vínculos se relacionam, num desenho único">🗂️ Organizar</button>
-        <button type="button" class="mapa-entry-caixa" id="mapa-entry-caixa" title="Itens e fotos ainda sem lugar definido no mapa">
-          📦 Caixa <span class="badge mapa-entry-caixa-badge" id="mapa-entry-caixa-badge">${unsorted.total}</span>
-        </button>
-        <div class="mapa-entry-btns">
-          <button type="button" class="mapa-entry-btn" id="mapa-entry-planta" title="Editar a planta baixa 2D: paredes, câmeras, objetos e itens posicionados">
-            ${this._floorplanIconSvg()}
-            <span>Planta baixa</span>
-          </button>
-          <!-- [15/09/2026 UTC] MUDADO — pedido verbatim: "Mudar nome do
-               botão 'Foto' ('Mapa'->'Foto') para 'Fotos'. Preserve o
-               ícone." Ícone (_photoIconSvg) intocado, só o texto. -->
-          <button type="button" class="mapa-entry-btn" id="mapa-entry-foto" title="Ver todas as fotos do ambiente numa grade, com os orbs já marcados em cada uma">
-            ${this._photoIconSvg()}
-            <span>Fotos</span>
-          </button>
-        </div>
-      </div>
-    `;
+    container.innerHTML = window.MapDynamicCards.mountEntryScreen.call(this, unsorted);
     container.querySelector('#mapa-entry-switch').onclick = () => this._openMapSwitcherModal();
     container.querySelector('#mapa-entry-organize').onclick = () => this._openOrganizeView();
     container.querySelector('#mapa-entry-planta').onclick = () => this._showScreen('planta');
@@ -4938,198 +4813,7 @@ const MapView = {
     // ver Perf.setTopRightCorner). Desfeito em _unmountPlanta, senão o HUD
     // continuaria "preso" no canto ao sair pra qualquer outra tela do app.
     if (typeof Perf !== 'undefined') Perf.setTopRightCorner(true);
-    container.innerHTML = `
-      <div class="map2d-wrap">
-        <canvas id="map-canvas"></canvas>
-        <div class="map2d-toolsidebar" id="map-toolsidebar" title="Ferramentas de edição (estilo Paint.NET)">
-          <div class="map-panel-head" id="map-toolsidebar-head">
-            <span>🧰 Ferramentas</span>
-            <button type="button" class="icon-btn sm map-panel-close" id="map-toolsidebar-close" title="Fechar barra de ferramentas">✕</button>
-          </div>
-          <div class="map2d-toolsidebar-grid">
-            ${this.PTOOLS.map((t) => `<button class="icon-btn map2d-ptool-btn" id="ptool-${t.id}" data-ptool="${t.id}" title="${t.title}">${t.icon}<span>${t.label}</span></button>`).join('')}
-            <!-- [14/09/2026 UTC] REMOVIDO — botões próprios de
-                 "Adicionar orb"/"Objetos" (#map-mode-itens/#map-mode-objects).
-                 Pedido verbatim: "Unifique os sistemas (sem considerar
-                 compatibilidade com código legado) na janela 'Ferramenta'."
-                 Agora 'itens'/'objects' são entradas de verdade em PTOOLS
-                 (ver comentário grande lá) e já saem renderizadas pela linha
-                 'this.PTOOLS.map(...)' logo acima — manter os <button>
-                 hand-coded aqui criaria ids duplicados ('#ptool-itens'
-                 convivendo com '#map-mode-itens', ambos representando a
-                 mesma ferramenta). "🧊 Novo Cubo 3D" e "🔍 Buscar" também
-                 saíram daqui (pedido verbatim: "retire... e coloque em
-                 algum lugar no cabeçalho") — são ações de disparo único,
-                 nunca deixam nenhum modo "selecionado" pra trás, então não
-                 fazem sentido numa barra de FERRAMENTAS (ver
-                 _currentToolInfo, que já os excluía do indicador por este
-                 mesmo motivo) — movidos pro cabeçalho, cluster de botões
-                 de #tbm-history/#map-cores/#map-layers/#map-grupos, ver
-                 _mountTopbarMapa. -->
-          </div>
-        </div>
-        <div class="map2d-modelabel" id="map-modelabel" title="Modo/ferramenta ativa no mapa agora"></div>
-        <!-- NOVO (03/09/2026) — Pedido do usuário: "Coloque no mapa 2D, no
-             canto inferior do mapa 2D, dois botões para poder girar toda a
-             grade e o que está nela. Um botão... antihorário e o outro...
-             horário. Um terceiro botão em cima dos dois deve fazer voltar a
-             se orientar para o norte (deve ter o ícone de bússola com o
-             norte destacado)." Canto inferior DIREITO (o esquerdo já é
-             ocupado pelo .map2d-modelabel acima) — bússola em cima, os dois
-             botões de giro lado a lado embaixo dela. Handlers em
-             _giroMapa2DAntihorario/_giroMapa2DHorario/
-             _giroMapa2DResetarNorte (mapview.js), só mutam
-             Map2DRenderer.view.rot (o "funil" worldToScreen/screenToWorld
-             cuida do resto — ver comentário grande no construtor de
-             Map2DRenderer). -->
-        <div class="map2d-rotatewidget" id="map-rotatewidget">
-          <!-- NOVO (07/09/2026), pedido verbatim: "Deve ter um botão
-               habilitador de snap para a rotação da grade do mapa 2D. Deve
-               ficar no lado do botão 'norte' [...] (ficando 5 botões ali. O
-               botão 'norte' continua no centro daquela bandeja na parte de
-               cima dela. O novo botão deve ficar a sua direita)." Norte +
-               este novo toggle agora formam a linha DE CIMA da bandeja
-               (mesma classe '.map2d-rotate-row' da linha ↺/↻/arrastar logo
-               abaixo, reaproveitada — os dois ficam centralizados como um
-               par, "Norte" continua sendo o botão da esquerda/referência
-               central de sempre). Ver _toggleMapRotationSnap/
-               _mapRotationSnapAtivo. -->
-          <div class="map2d-rotate-row">
-            <button type="button" class="icon-btn sm map2d-rotate-north" id="map-rotate-north" title="Orientar para o norte (0°)">
-              <!-- NOVO (07/09/2026), pedido verbatim: "Faça o desenho do
-                   ícone de 'norte' ser maior na bandeja no canto inferior
-                   direito da grade de modo que o círculo do seu ícone seja
-                   quase todo o tamanho do botão." — só o width/height de
-                   renderização do svg aumentado (18px -> 26px, o botão em
-                   si tem 30px, ou 26px em telas menores — ver
-                   .map2d-rotatewidget .icon-btn.sm no style.css); viewBox e
-                   os paths internos (círculo já ocupa 20 dos 24 units do
-                   viewBox) continuam intactos, só a escala final na tela. -->
-              <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.3" opacity="0.55"/>
-                <path d="M12 4 L15 12 L12 12 Z" fill="#ff5a5f"/>
-                <path d="M12 4 L9 12 L12 12 Z" fill="#ff5a5f"/>
-                <path d="M12 12 L15 12 L12 20 Z" fill="currentColor" opacity="0.55"/>
-                <path d="M12 12 L9 12 L12 20 Z" fill="currentColor" opacity="0.55"/>
-                <circle cx="12" cy="12" r="1.3" fill="currentColor"/>
-              </svg>
-            </button>
-            <button type="button" class="icon-btn sm" id="map-rotate-snap-toggle" title="Snap de rotação: liga/desliga o encaixe da rotação (botões ↺/↻ e 'Girar arrastando') no múltiplo de graus configurado — desligado, a rotação fica livre">🧲</button>
-          </div>
-          <div class="map2d-rotate-row">
-            <button type="button" class="icon-btn sm" id="map-rotate-ccw" title="Girar a grade no sentido anti-horário">↺</button>
-            <button type="button" class="icon-btn sm" id="map-rotate-cw" title="Girar a grade no sentido horário">↻</button>
-            <!-- NOVO (07/09/2026), pedido verbatim: "Um outro botão deve ser
-                 acrescentado ali. Quando clicado é possível girar o mapa com
-                 o 'clicar e arrastar' orientado ao centro do mapa 2D." —
-                 toggle (ver _toggleMapDragRotate/_mapDragRotateAtivo); os 2
-                 botões ↺/↻ acima continuam preservados/inalterados. -->
-            <button type="button" class="icon-btn sm" id="map-rotate-drag" title="Girar arrastando: ative e depois clique-e-arraste na grade — o mapa gira pela variação do arrasto em relação ao centro (uma cruz marca o centro de rotação enquanto ativo)">
-              <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 3 a9 9 0 1 1 -7.79 4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                <path d="M3.2 3.2 v6 h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-                <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <!-- NOVO (07/09/2026) — cruz fixa no CENTRO da tela, só visível
-             enquanto "🔄 Girar arrastando" (#map-rotate-drag acima) estiver
-             ativo, pra identificar visualmente o centro de rotação (pedido
-             verbatim: "A cruz pode aparecer no centro de rotação para
-             melhor identificação"). Mesma técnica/posicionamento da cruz de
-             vincular foto (ver _showPhotoPlacementCrosshair/
-             .map-photo-placement-crosshair), cor própria pra não se
-             confundir visualmente com aquela (não coexistem na prática, mas
-             mantidas como elementos/classes distintos por clareza). Escondida
-             por padrão (atributo "hidden") — ver _toggleMapDragRotate. -->
-        <div class="map-rotate-center-crosshair" id="map-rotate-center-crosshair" hidden>
-          <div class="map-rotate-center-crosshair-v"></div>
-          <div class="map-rotate-center-crosshair-h"></div>
-        </div>
-        <!-- BUG CORRIGIDO (07/09/2026), pedido verbatim: "ao clicar em
-             'Buscar', a retângulo azul claro da cena da minatura fica
-             aparecendo na posição na tela do navegador em que a janelinha
-             foi deixada. A miniatura fica ativa independente de qual aba do
-             app está [...] O botão 'fechar' dela servirá para fechá-la,
-             caso esteja em outra aba." — o painel "Miniatura 3D" NÃO nasce
-             mais aqui dentro do HTML da Planta baixa (que é substituído por
-             container.innerHTML='' toda vez que se sai do Mapa, ver
-             App.navigate/_unmountPlanta) — ele virou um elemento PERSISTENTE
-             de nível de app, criado 1 única vez em document.body por
-             _ensureMinimap3DPanel() (ver mais abaixo), pra sobreviver a
-             trocas de aba por padrão (comportamento agora INTENCIONAL, não
-             mais um vazamento — ver _startMinimap3DLoop/_unmountPlanta
-             e a nova opção "Fechar a miniatura 3D ao sair do Mapa" em
-             Configurações do mapa, DESLIGADA por padrão). -->
-        <!-- NOVO (03/09/2026) — Bandeja lateral expansível, pedido do
-             usuário, EXPLICITAMENTE no mesmo modelo da bandeja de
-             "Mapa"->"Foto" (ver ambientephotos.js .ambphotos-sidemenu-
-             toggle/.ambphotos-sidemenu): botão transparente com seta no
-             meio da lateral direita, expande um painel com as ferramentas
-             que devem continuar acessíveis MESMO em "🧭 Modo Navegação" —
-             "Retículo métrico" (3 botões: liga/desliga + os 2 modos de
-             desenho), "Régua" e "Traço guia". Ver
-             _toggleMap2DDrawer/_syncMap2DDrawerUI.
-             REMOVIDO (03/09/2026), pedido verbatim: "No mapa 2D, no botão
-             lateral direito expansível, sobre o botão 'Adicionar orb (de
-             foto)', remova-o." — o botão "📍 Adicionar orb (de foto)" desta
-             bandeja (atalho pra abrir 'Mapa'->'Foto') foi removido daqui; a
-             ferramenta de orb de ITEM continua acessível normalmente pela
-             janela "Ferramentas" (id="map-mode-itens", ver PTOOLS acima), e
-             o fluxo de vincular FOTO ao mapa continua acessível de dentro de
-             'Mapa'->'Foto' (botão "🗺️" de cada foto) — nada foi perdido,
-             só este atalho específico da bandeja. -->
-        <button type="button" class="ambphotos-sidemenu-toggle map2d-drawer-toggle" id="map2d-drawer-toggle" title="Mais ferramentas (disponíveis também em Modo Navegação)">◀</button>
-        <!-- ATUALIZADO (05/09/2026), pedido verbatim: na bandeja do botão
-             lateral direito expansível, todas as ferramentas devem estar
-             ali para poderem ser marcadas ou não (também os botões do
-             cabeçalho)... Os dois botões ('Réguas' e 'Exibir a grade')
-             devem aparecer no botão lateral direito expansível. Gerada
-             dinamicamente a partir de this.PTOOLS (grupo Ferramentas) e
-             MapConfig.NAV_HEADER_BUTTONS (grupo Botões do cabeçalho),
-             separados por um traço (.map2d-drawer-sep-groups) —
-             visibilidade de cada botão controlada em
-             _applyFerramentasNavVisiveis (⚙️ Configurações do mapa › 2D ›
-             'Ferramentas visíveis em Modo Navegação'). 'Retículo métrico'
-             continua um caso especial (3 botões: liga/desliga + os 2 modos
-             de desenho, pedido explícito do usuário de rodada anterior). -->
-        <div class="ambphotos-sidemenu map2d-drawer" id="map2d-drawer">
-          <!-- "Retículo métrico": pedido explícito do usuário — "na verdade
-               três botões: um quadrado maior... ativa e desativa a
-               ferramenta, e os outros dois... uma segunda maneira de fazer
-               o desenho" — o botão grande fica em cima, os 2 pequenos
-               (arrastar/clique) embaixo, mesmo grupo visual. -->
-          <button type="button" class="icon-btn map2d-drawer-btn" id="map2d-drawer-reticulo-toggle" title="Retículo métrico: liga/desliga a ferramenta — desenha um retângulo com grade de 1m x 1m, a partir do 1º ponto tocado (origem da grade). Funciona mesmo em Modo Navegação.">📐</button>
-          <div class="map2d-drawer-subrow">
-            <button type="button" class="icon-btn sm map2d-drawer-btn" id="map2d-drawer-reticulo-arrastar" title="Modo Arrastar: clica na origem, arrasta até o tamanho e solta">🖐️</button>
-            <button type="button" class="icon-btn sm map2d-drawer-btn" id="map2d-drawer-reticulo-clique" title="Modo Clique/toque (2 toques): útil quando o arrastar por toque não estiver respondendo bem no celular">👆</button>
-          </div>
-          ${this.PTOOLS.filter((t) => t.id !== 'reticulo').map((t) => `
-          <button type="button" class="icon-btn sm2 map2d-drawer-btn" id="map2d-drawer-tool-${t.id}" title="${(t.title || t.label).replace(/"/g, '&quot;')} Funciona mesmo em Modo Navegação.">${t.icon}</button>`).join('')}
-          <div class="map2d-drawer-sep-groups"></div>
-          ${(typeof MapConfig !== 'undefined' ? MapConfig.NAV_HEADER_BUTTONS : []).map((b) => b.chave === 'encaixar' ? `
-          <!-- NOVO (05/09/2026), pedido verbatim: "sobre o 'encaixar', deve
-               ser possível definir o seu valor de snap por ali também...
-               expandir para a direita este botão para aparecer a entrada
-               do valor de snap. Assim não fica ocupando mais espaço na
-               bandeja e aparece só quando for selecionado." O campo
-               (.map2d-drawer-encaixar-field) só aparece (max-width
-               animado) enquanto "Encaixar" estiver LIGADO — ver
-               _syncMap2DDrawerUI/_syncGridSnapField, que agora também
-               sincroniza este campo (além do #tbm-gridsnap-val do
-               cabeçalho). -->
-          <div class="map2d-drawer-encaixar-wrap">
-            <button type="button" class="icon-btn sm2 map2d-drawer-btn" id="map2d-drawer-hdr-encaixar" title="Encaixar (snap) na grade — toque pra ligar/desligar. Enquanto ligado, expande pra digitar a distância do encaixe.">🧲</button>
-            <label class="map2d-drawer-encaixar-field" id="map2d-drawer-encaixar-field" title="Distância do snap na grade">
-              <input type="number" id="map2d-drawer-gridsnap-val" step="0.5" min="0.1">
-              <span id="map2d-drawer-gridsnap-unit">cm</span>
-            </label>
-          </div>` : `
-          <button type="button" class="icon-btn sm2 map2d-drawer-btn" id="map2d-drawer-hdr-${b.chave}" title="${b.label} (mesmo botão do cabeçalho de cima).">${b.icon}</button>`).join('')}
-        </div>
-      </div>
-    `;
+    container.innerHTML = window.MapDynamicCards.mountPlanta.call(this);
     // NOVO (08/09/2026), pedido verbatim: "No 'Mapa 2D', [...] fica dentro
     // dela [da divisão de tela]." Embutido numa divisão do Workspace,
     // envolve o `.map2d-wrap` recém-criado (via manipulação de DOM — não
@@ -5700,50 +5384,129 @@ const MapView = {
     if (!_mapAutoFitDoneThisPageLoad) {
       _mapAutoFitDoneThisPageLoad = true;
       this._fitViewToMapContent();
-    } else if (this._forceFitAfterView3D) {
-      // Pedido do usuário (rodada 49): "a opção 'Centrada no personagem' não
-      // está funcionando [...] fui para o 3D, andei por lá, depois sai do 3D
-      // e o mapa 2D fica na origem, mesmo estando marcado [...] 'Centrada no
-      // personagem'." Causa raiz: o `if` acima só roda a PRIMEIRA vez que o
-      // Mapa é aberto na sessão — voltar do 3D (que roda de novo por AQUI,
-      // `mountAfterView3D` -> `_showScreen('planta')` -> este método) caía
-      // sempre no `else`, sem refit nenhum, deixando a view "congelada" no
-      // valor de quando o Mapa foi aberto pela 1ª vez. Este flag (setado por
-      // `View3D.unmount()` ao sair do 3D, ver view3d.js) força UM refit extra
-      // só nesse caso específico — sem reabrir o "toda vez que entra no
-      // Mapa" que o comentário acima explicitamente NÃO quer.
-      this._forceFitAfterView3D = false;
-      // [09/09/2026] Ajuste solicitado pelo usuário (reincidência do bug da
-      // rodada 49): "Mesmo deixando marcada a opção 'Centrada no
-      // personagem', ao voltar do 'Ver em 3D' para o mapa 2D, está voltando
-      // 'Centrada na origem'. Parece que, mesmo a opção estando marcada, ela
-      // não está surtindo efeito." A cadeia lógica (flag `_forceFitAfterView3D`
-      // -> `_fitViewToMapContent` -> `MapConfig._cache.centralizacao2DVolta`)
-      // já existia e está correta em si, mas `_fitViewToMapContent` roda
-      // NUMA CHAMADA SÍNCRONA logo após `container.innerHTML` ser trocado
-      // (ver início de `_mountPlanta`) — o canvas acabou de nascer no DOM e,
-      // em alguns navegadores/situações (ex.: troca de tela ainda no meio de
-      // um reflow disparado pela troca de `body.view-mapa-planta`/remontagem
-      // de #topbar-mapa/#bottombar-mapa logo depois), `canvas.clientWidth/
-      // clientHeight` podem não estar com o tamanho FINAL ainda nesse exato
-      // instante — o que faz o zoom/pan calculado aqui sair errado (ou, no
-      // pior caso, o early-return de `_fitViewToMapContent` p/ canvas 0×0
-      // sequer aplicar o cx/cy calculado, deixando a view "congelada" em
-      // qualquer valor de antes, que normalmente é o (0,0) da toda primeira
-      // vez que o Mapa foi montado). Também é possível `MapConfig._cache`
-      // ainda não ter sido carregado nesta sessão (ninguém abriu
-      // "Configurações 2D" ainda) — `await this.get()` garante o valor
-      // salvo de verdade em vez de arriscar o `_cache` ainda `null`. Correção:
-      // 1) garante a config carregada (`await MapConfig.get()`) antes de
-      // decidir o modo; 2) roda o fit de novo num `requestAnimationFrame`
-      // (depois do layout assentar) além da chamada imediata — reforça sem
-      // remover o comportamento síncrono já existente, cobrindo o caso de
-      // layout ainda não assentado sem introduzir nenhum "pisca" visível.
+      // [19/09/2026 UTC] NOVO (RODADA 193) -- pedido verbatim: "deve ter uma opção para guardar a
+      // posição e zoom [...] para que, após recarregar a página, persistam os valores." Só faz sentido
+      // aplicar aqui, na 1ª entrada na Planta baixa desde que a página carregou de verdade (um F5) — ver
+      // `MapConfig.mapa2DPersistirPosicaoRecarga`/`...ZoomRecarga` e a gravação em `_unmountPlanta`
+      // acima. Roda DEPOIS do `_fitViewToMapContent()` de sempre (que continua sendo a base pro que NÃO
+      // estiver marcado pra persistir), sobrescrevendo só o(s) eixo(s) marcado(s).
       if (typeof MapConfig !== 'undefined' && MapConfig.get) { try { await MapConfig.get(); } catch (e) { /* segue com o _cache que já tiver */ } }
-      this._fitViewToMapContent();
-      requestAnimationFrame(() => { if (this._screen === 'planta' && this._renderer) this._fitViewToMapContent(); });
+      const cfgReload = (typeof MapConfig !== 'undefined' && MapConfig._cache) ? MapConfig._cache : (typeof MapConfig !== 'undefined' ? MapConfig.DEFAULTS : {});
+      let mudouReload = false;
+      // [20/09/2026 UTC] REESTRUTURADO (RODADA 223) -- lê o trio replicado `mapa2DVoltarRecarga*` em vez
+      // das 2 checkboxes soltas antigas (ver comentário grande em `_unmountPlanta`, mesma rodada).
+      const modoR = cfgReload.mapa2DVoltarRecargaModo || 'anterior';
+      const personagemR = modoR === 'personagem';
+      const origemR = modoR === 'origem';
+      const preservarPosR = origemR ? false : (personagemR ? (cfgReload.mapa2DVoltarRecargaPersonagemPos !== false) : (cfgReload.mapa2DVoltarRecargaAnteriorPos !== false));
+      const preservarZoomR = origemR ? (cfgReload.mapa2DVoltarRecargaOrigemZoom === true) : (personagemR ? (cfgReload.mapa2DVoltarRecargaPersonagemZoom !== false) : (cfgReload.mapa2DVoltarRecargaAnteriorZoom !== false));
+      if (origemR) { this._renderer.view.cx = 0; this._renderer.view.cy = 0; mudouReload = true; }
+      else if (preservarPosR && Number.isFinite(cfgReload.mapa2DPosRecarregaCx) && Number.isFinite(cfgReload.mapa2DPosRecarregaCy)) {
+        this._renderer.view.cx = cfgReload.mapa2DPosRecarregaCx;
+        this._renderer.view.cy = cfgReload.mapa2DPosRecarregaCy;
+        mudouReload = true;
+      }
+      if (preservarZoomR && Number.isFinite(cfgReload.mapa2DZoomRecarrega)) {
+        this._renderer.view.zoom = cfgReload.mapa2DZoomRecarrega;
+        mudouReload = true;
+      }
+      // [20/09/2026 UTC] NOVO (RODADA 223) -- "guardar apontamento da câmera do personagem": restaura
+      // `_personagem2D.angulo` (só faz sentido no modo 'personagem', é o apontamento DO PERSONAGEM).
+      if (personagemR && cfgReload.mapa2DPersistirApontamentoPersonagem === true && Number.isFinite(cfgReload.mapa2DApontamentoRecargaAngulo)) {
+        if (!this._personagem2D) this._personagem2D = { x: 0, y: 0, angulo: 0 };
+        this._personagem2D.angulo = cfgReload.mapa2DApontamentoRecargaAngulo;
+      }
+      if (mudouReload) { this._syncZoomSliderPosition(); this._updateBottombarMapa(); }
+    } else {
+      // [19/09/2026 UTC] REESCRITO (RODADA 192) -- pedido verbatim: "No mapa 2D, ao ir para o 'Ver em
+      // 3D' e, depois, voltar para o mapa 2D [...] o mapa deve voltar no mesmo nível de zoom que
+      // estava e na mesma posição da câmera [...] Deve ser preservado também, ao trocar entre os
+      // botões de rodapé do app." Antes, só a volta do 3D (`_forceFitAfterView3D`, setado por
+      // `View3D.unmount()`) disparava um refit — trocar de aba do rodapé e voltar não fazia NADA (o que
+      // por acaso preservava posição/zoom, já que `this.view` sobrevive na instância singleton de
+      // `MapView`, mas ignorava por completo o modo configurado em "configurações 2D" e as opções
+      // 'personagem'/'origem'). Agora `_restaurarCamera2DAoEntrar()` roda em TODA reentrada na Planta
+      // baixa (exceto a 1ª desde o carregamento da página, tratada acima), venha de onde vier (3D,
+      // troca de aba do rodapé, ou até entry/foto/caixa dentro do próprio Mapa) -- lê o modo/checkboxes
+      // configurados (`MapConfig.mapa2DVoltar*`, ver nova seção "🔭 Voltar ao mapa 2D" em
+      // js/mapconfig.js) e decide sozinho. `_forceFitAfterView3D` (campo antigo) não é mais lido, mas
+      // continua sendo setado por view3d.js sem problema nenhum (só fica sem uso).
+      this._forceFitAfterView3D = false;
+      if (typeof MapConfig !== 'undefined' && MapConfig.get) { try { await MapConfig.get(); } catch (e) { /* segue com o _cache que já tiver */ } }
+      this._restaurarCamera2DAoEntrar();
+      // Mesma razão do comentário antigo aqui (preservada): o canvas acabou de nascer no DOM e pode
+      // não ter o tamanho FINAL ainda na chamada síncrona acima -- reforça num requestAnimationFrame.
+      requestAnimationFrame(() => { if (this._screen === 'planta' && this._renderer) this._restaurarCamera2DAoEntrar(); });
     }
     this._loop();
+  },
+
+  /** [19/09/2026 UTC] NOVO (RODADA 192) -- decide a posição/zoom da câmera 2D ao (re)entrar na Planta
+   *  baixa, conforme o modo escolhido em "configurações 2D" (`MapConfig.mapa2DVoltarModo`, ver seção
+   *  "🔭 Voltar ao mapa 2D"):
+   *   - 'anterior' (NOVO, padrão do app) -- volta exatamente onde a câmera estava ao SAIR da Planta
+   *     baixa da última vez (posição e zoom capturados em `_unmountPlanta`, `MapView._camSalva2D`),
+   *     configurável por 2 checkboxes independentes (`mapa2DVoltarAnteriorPos`/`...Zoom`, ambos `true`
+   *     por padrão). O que NÃO estiver marcado cai no "caber tudo na tela" de sempre
+   *     (`_fitViewToMapContent`) só naquele eixo.
+   *   - 'personagem' (padrão ANTIGO desta função) -- centraliza no boneco do Modo Navegação
+   *     (`_personagem2D`), também com posição/zoom configuráveis separadamente
+   *     (`mapa2DVoltarPersonagemPos`/`...Zoom`).
+   *   - 'origem' -- sempre x=0/y=0 (centro do mapa); o zoom só é preservado se
+   *     `mapa2DVoltarOrigemZoom` estiver marcado (opt-in, pedido verbatim: "O nível de zoom pode ser
+   *     habilitado por um checkbox para ser preservado também").
+   *  `MapView._camSalva2D` é um campo de MÓDULO (não instância — ver `_unmountPlanta`), então sobrevive
+   *  a remontagens de `MapView` mas NUNCA é salvo no banco (mapData) nem persistido entre reloads —
+   *  "só deve ser atualizado [...] no recarregar da página" (pedido verbatim) já é garantido de graça:
+   *  um F5 de verdade recarrega o script inteiro, zerando este campo junto com `_mapAutoFitDoneThisPageLoad`. */
+  _restaurarCamera2DAoEntrar() {
+    if (!this._renderer || !this._map) return;
+    const cfg = (typeof MapConfig !== 'undefined' && MapConfig._cache) ? MapConfig._cache
+      : (typeof MapConfig !== 'undefined' ? MapConfig.DEFAULTS : {});
+    const modo = cfg.mapa2DVoltarModo || 'anterior';
+    const salvo = (MapView._camSalva2D && MapView._camSalva2D.mapaId === this._map.id) ? MapView._camSalva2D : null;
+    if (modo === 'origem') {
+      // 'voltar na origem do mapa' -- z=0/x=0 sempre; zoom só preservado com o checkbox
+      // `mapa2DVoltarOrigemZoom` marcado (opt-in — pedido verbatim: "pode ser habilitado por um
+      // checkbox pra ser preservado também").
+      const preservarZoom = cfg.mapa2DVoltarOrigemZoom === true;
+      if (preservarZoom && salvo) {
+        this._renderer.view.cx = 0; this._renderer.view.cy = 0; this._renderer.view.zoom = salvo.zoom;
+        this._syncZoomSliderPosition(); this._updateBottombarMapa();
+      } else {
+        this._renderer.view.cx = 0; this._renderer.view.cy = 0;
+        this._fitViewToMapContent({ soZoom: true }); // zoom "de caber tudo" -- não há posição salva pra usar aqui, já que a origem é fixa
+      }
+      return;
+    }
+    // 'anterior' e 'personagem' seguem a mesma forma (só muda de ONDE vem a posição "não
+    // preservada" quando marcada -- `salvo` pra 'anterior', `_personagem2D` pra 'personagem') --
+    // helper comum evita duplicar a combinatória dos 4 casos (pos/zoom × preservado/não) 2×.
+    const personagem = modo === 'personagem';
+    const preservarPos = personagem ? (cfg.mapa2DVoltarPersonagemPos !== false) : (cfg.mapa2DVoltarAnteriorPos !== false);
+    const preservarZoom = personagem ? (cfg.mapa2DVoltarPersonagemZoom !== false) : (cfg.mapa2DVoltarAnteriorZoom !== false);
+    const posAlvo = personagem ? this._personagem2D : (salvo ? { x: salvo.cx, y: salvo.cy } : null);
+    if (!preservarPos && !preservarZoom) {
+      this._fitViewToMapContent(); // nada preservado -- comportamento de sempre, caber tudo na tela
+      return;
+    }
+    if (!preservarPos) {
+      // zoom preservado (se houver valor salvo), posição volta a "caber tudo".
+      if (salvo && preservarZoom) this._renderer.view.zoom = salvo.zoom;
+      this._fitViewToMapContent({ soPosicao: true });
+      return;
+    }
+    if (!preservarZoom) {
+      // posição preservada (personagem ou a salva), zoom volta a "caber tudo".
+      if (posAlvo) { this._renderer.view.cx = posAlvo.x; this._renderer.view.cy = posAlvo.y; }
+      this._fitViewToMapContent({ soZoom: true });
+      return;
+    }
+    // os dois preservados.
+    if (posAlvo) { this._renderer.view.cx = posAlvo.x; this._renderer.view.cy = posAlvo.y; }
+    if (salvo) this._renderer.view.zoom = salvo.zoom;
+    this._syncZoomSliderPosition();
+    this._updateBottombarMapa();
   },
 
   /** Desmonta o editor de planta baixa (canvas/topbar-mapa de 4 linhas) —
@@ -5755,6 +5518,53 @@ const MapView = {
    *  planta baixa deixa de estar visível — ver _loop(), que já checava essa
    *  flag antes de agendar o próximo quadro. */
   _unmountPlanta() {
+    // [19/09/2026 UTC] NOVO (RODADA 192) -- pedido verbatim: "No mapa 2D, ao ir para o 'Ver em 3D' e,
+    // depois, voltar para o mapa 2D [...] o mapa deve voltar no mesmo nível de zoom que estava e na
+    // mesma posição da câmera [...] Deve ser preservado também, ao trocar entre os botões de rodapé do
+    // app." `_unmountPlanta` já roda em TODOS esses casos (chamada por `_unmountCurrentScreen`, por sua
+    // vez chamada tanto por `App.openView3D`/`closeView3D` quanto pela troca de aba do rodapé do app --
+    // `App.navigate`/`unmount()` acima -- e também ao trocar de sub-tela DENTRO do Mapa, entry/foto/
+    // caixa), então capturar aqui cobre o pedido inteiro de uma vez só. Guardado num campo de instância
+    // (NUNCA salvo no banco/mapData -- "só deve ser atualizado [...] no recarregar da página", e um
+    // reload sempre recria `MapView` do zero, zerando este campo sozinho). Ver `_mountPlanta` pra a
+    // restauração (3 modos configuráveis em "configurações 2D", `MapConfig.mapa2DVoltar*`).
+    // [19/09/2026 UTC] CORRIGIDO (RODADA 192) -- `this.view` NÃO existe em `MapView` (pertence à
+    // classe `Map2DRenderer`, instanciada em `this._renderer` -- ver `Map2DRenderer.constructor`); o
+    // campo certo aqui é `this._renderer.view`.
+    if (this._renderer && this._renderer.view && this._map) {
+      MapView._camSalva2D = { mapaId: this._map.id, cx: this._renderer.view.cx, cy: this._renderer.view.cy, zoom: this._renderer.view.zoom };
+      // [19/09/2026 UTC] NOVO (RODADA 193) -- pedido verbatim: "deve ter uma opção para guardar a
+      // posição e zoom (configuráveis individualmente) para que, após recarregar a página, persistam os
+      // valores (por padrão desativada esta opção)." Diferente de `_camSalva2D` acima (campo de módulo,
+      // NUNCA sobrevive a um F5) -- isto aqui grava DE VERDADE no banco (`MapConfig.set`), só quando o
+      // checkbox correspondente está ligado (ambos `false` por padrão -- nada é gravado nesse caso, e o
+      // que já estava salvo de uma sessão anterior com a opção ligada fica intocado até a próxima vez que
+      // a opção estiver ligada de novo). Lido de volta só na 1ª entrada na Planta baixa desde que a
+      // página carregou (ver `_mountPlanta`) -- a ÚNICA situação em que "sobreviver a um F5" importa.
+      // [20/09/2026 UTC] REESTRUTURADO (RODADA 223) -- antes lia `mapa2DPersistirPosicaoRecarga`/
+      // `...ZoomRecarga` (2 checkboxes soltas, RODADA 193, eliminadas a pedido do usuário); agora segue
+      // o mesmo trio de modos replicado em "💾 Manter entre recarregamentos da página"
+      // (`mapa2DVoltarRecargaModo` + sub-checkboxes), igual à lógica de `_restaurarCamera2DAoEntrar` pro
+      // grupo `mapa2DVoltarModo` de cima -- só que decidindo O QUE GRAVAR, não o que restaurar.
+      if (typeof MapConfig !== 'undefined' && MapConfig.set) {
+        const cfgP = MapConfig._cache || MapConfig.DEFAULTS || {};
+        const modoR = cfgP.mapa2DVoltarRecargaModo || 'anterior';
+        const personagemR = modoR === 'personagem';
+        const origemR = modoR === 'origem';
+        const preservarPosR = origemR ? false : (personagemR ? (cfgP.mapa2DVoltarRecargaPersonagemPos !== false) : (cfgP.mapa2DVoltarRecargaAnteriorPos !== false));
+        const preservarZoomR = origemR ? (cfgP.mapa2DVoltarRecargaOrigemZoom === true) : (personagemR ? (cfgP.mapa2DVoltarRecargaPersonagemZoom !== false) : (cfgP.mapa2DVoltarRecargaAnteriorZoom !== false));
+        const patch = {};
+        if (preservarPosR) { patch.mapa2DPosRecarregaCx = this._renderer.view.cx; patch.mapa2DPosRecarregaCy = this._renderer.view.cy; }
+        if (preservarZoomR) { patch.mapa2DZoomRecarrega = this._renderer.view.zoom; }
+        // [20/09/2026 UTC] NOVO (RODADA 223) -- "guardar apontamento da câmera do personagem": só faz
+        // sentido junto do modo 'personagem' (é o apontamento DO PERSONAGEM). `_personagem2D.angulo` é o
+        // único "apontamento" rastreado pro boneco do Modo Navegação (sem pitch separado nesse campo).
+        if (personagemR && cfgP.mapa2DPersistirApontamentoPersonagem === true && this._personagem2D && Number.isFinite(this._personagem2D.angulo)) {
+          patch.mapa2DApontamentoRecargaAngulo = this._personagem2D.angulo;
+        }
+        if (Object.keys(patch).length) MapConfig.set(patch).catch((e) => console.warn('Falha ao persistir posição/zoom/apontamento do mapa 2D pra sobreviver ao F5:', e));
+      }
+    }
     // NOVO (08/09/2026): se a Planta baixa saiu de cena ANTES do container
     // ganhar tamanho de verdade (ver o guard de container 0×0 no início de
     // _mountPlanta), desliga o ResizeObserver pendente — senão ele ficaria
@@ -6270,148 +6080,7 @@ const MapView = {
       + '<rect x="6.5" y="6.5" width="11" height="11" rx="2.2" fill="currentColor" fill-opacity="0.8" stroke="currentColor" stroke-opacity="0.9" stroke-width="1"/>'
       + '<rect x="2" y="11" width="11" height="11" rx="2.2" fill="currentColor" fill-opacity="0.8" stroke="currentColor" stroke-opacity="0.9" stroke-width="1"/>'
       + '</svg>';
-    root.innerHTML = `
-      <div class="topbar-mapa-row-wrap">
-        <div class="topbar-mapa-row" id="tbm-row0">
-          <button class="icon-btn sm" id="tbm-voltar-planta" title="Voltar para a tela inicial do Mapa (Planta baixa/Foto/Caixa)">← Voltar</button>
-          <!-- Pedido do usuário (27/08/2026): "No mapa 2D, o nome do mapa deve
-               ficar sendo exibido em algum lugar" — não aparecia em nenhum
-               lugar DENTRO da Planta baixa (só na tela de entrada, ver
-               _mountEntryScreen "🗺️ {nome} ▾"). Clicável, de propósito: abre
-               o mesmo seletor de mapas da tela de entrada (_openMapSwitcherModal),
-               então também dá pra trocar/renomear/criar sem precisar voltar. -->
-          <button type="button" class="icon-btn sm" id="tbm-map-nome" title="Nome deste mapa — toque para trocar, renomear, excluir ou criar outro">🗺️ ${Utils.escapeHtml(this._displayName(this._map))}</button>
-          <!-- Pedido do usuário (rodada 51): "O botão 'configurações 2D'
-               deve ficar maior, do mesmo tamanho que o botão 'configurações
-               3D'." — 3D usa só "icon-btn icon-btn-corner" (sem ".sm", ver
-               view3d.js #v3d-config); tirado o "sm" daqui pra igualar. -->
-          <button class="icon-btn icon-btn-corner" id="map-config" title="Configurações do mapa 2D">⚙️<span class="icon-btn-corner-badge">2D</span></button>
-          <!-- "Ver em 3D" ao lado de "Configurações 2D" (pedido do usuário,
-               rodada 51: "O botão 'Ver em 3D' deve ficar do lado do botão
-               'configurações 2D'.") — antes existiam DUAS instâncias
-               diferentes (uma no conjunto Navegação, outra no conjunto
-               Desenho); consolidado numa única, aqui em #tbm-row0 (sempre
-               visível, igual "Configurações 2D"), em vez de duplicado
-               dentro de cada conjunto. -->
-          <!-- BUG corrigido (pedido do usuário, rodada 52: "Os botões
-               'configurações 2D' e 'Ver em 3D' devem ficar maiores. Não
-               ficaram desde a última atualização.") — #map-config já tinha
-               perdido a classe "sm" na rodada 51 (mesmo tamanho do 3D
-               desde então), mas este botão, movido pra cá na MESMA rodada,
-               nasceu já com "sm" por descuido — nunca tinha ficado do
-               tamanho normal. Corrigido tirando o "sm" (mesma classe base
-               "icon-btn" dos outros dois, sem herdar nada de menor). -->
-          <button class="icon-btn" id="tbm-view3d-btn" title="Ver este ambiente em 3D, em primeira pessoa">🧊 Ver em 3D</button>
-          <!-- [14/09/2026 UTC] REMOVIDO — pedido verbatim: "Parece que o
-               botão 'Andar', agora, se chama 'Piso' (id='tbm-piso-select'),
-               ele deve ser removido do projeto. Pois o botão 'Grupos' já
-               cumpre esta função." O seletor "Piso: [Todos ▾]" (13/09/2026)
-               filtrava o desenho da grade por andar (this._pisoFiltro, ver
-               Map2DRenderer._pisoVisible); o painel "🏷️ Grupos" (ver
-               _openGruposPanel) já tem sua PRÓPRIA filtragem por andar
-               (map.andaresOcultos, checada em Mapping.isEntityGroupHidden)
-               — as duas faziam essencialmente a mesma coisa por caminhos
-               diferentes. O span do seletor e sua montagem
-               (Map2DRenderer._syncPisoSeletor, chamada logo abaixo)
-               removidos; this._pisoFiltro fica sempre null pra sempre
-               (nunca mais setado por ninguém), então _pisoVisible continua
-               funcionando normalmente — só a filtragem "Piso" (a antiga,
-               redundante) nunca mais filtra nada, ficando só com a
-               filtragem de andaresOcultos do "Grupos". -->
-          <!-- (span removido — ver comentário acima) -->
-          <!-- Alternador Desenho/Navegação (pedido do usuário: à direita de
-               "Configurações 2D") — mora aqui em #tbm-row0, FORA dos dois
-               conjuntos (Navegação/Desenho, ver logo abaixo), pra ficar
-               visível o tempo todo em QUALQUER modo — senão, estando dentro
-               de um dos dois conjuntos, ficaria inacessível sempre que o
-               outro conjunto estivesse ativo (era exatamente esse o problema
-               antes, quando morava só dentro do conjunto Desenho). -->
-          <button class="icon-btn sm" id="map-navtoggle" title="Alterna entre modo Desenho (editar/mover/selecionar tudo no mapa) e modo Navegação (só mover e dar zoom na grade — nada no mapa responde a toque, útil pra só olhar em volta sem risco de mexer em algo sem querer)">🧭 Modo Navegação</button>
-        </div>
-      </div>
-      <div class="topbar-mapa-set topbar-mapa-set-nav" id="tbm-set-nav">
-        <div class="topbar-mapa-row-wrap">
-        <div class="topbar-mapa-row topbar-mapa-row-lg">
-          <!-- "🖼️ Fotos" removido daqui (pedido do usuário, rodada 51: "Em
-               'Mapa'->'Planta baixa', remova o botão 'Fotos'."). "🧊 Ver em
-               3D" mudou pra #tbm-row0, ao lado de "Configurações 2D" (ver
-               comentário lá). "🗂️ Organizar" mudou pra tela "Mapa" (a de
-               entrada, antes da Planta baixa — ver _mountEntryScreen),
-               ao lado do seletor de mapas. -->
-        </div>
-        </div>
-      </div>
-      <div class="topbar-mapa-set topbar-mapa-set-desenho" id="tbm-set-desenho">
-        <div class="topbar-mapa-row-wrap">
-        <div class="topbar-mapa-row" id="tbm-row1">
-          <!-- "🧊 Ver em 3D"/"🖼️ Fotos"/"🗂️ Organizar" removidos daqui
-               (rodada 51) — ver comentário equivalente no conjunto
-               Navegação, acima. -->
-          <div class="topbar-mapa-sep"></div>
-          <!-- Botões que moravam na linha 3 (recortar/copiar/colar/imagem/
-               anular seleção, desfazer/refazer, grade/réguas/snap) — pedido
-               do usuário: subiram pra esta linha, logo à direita da barra
-               vertical que já separava "Organizar" do trio Histórico/
-               Camadas/Ferramentas. A linha 3 (id="tbm-row3") deixou de
-               existir; a barra de contexto da ferramenta atual (ex-linha 4)
-               agora é a última linha do cabeçalho. -->
-          <button class="icon-btn sm" id="tbm-cut" title="Recortar seleção (Ctrl+X)">✂️</button>
-          <button class="icon-btn sm" id="tbm-copy" title="Copiar seleção (Ctrl+C)">📋</button>
-          <button class="icon-btn sm" id="tbm-paste" title="Colar (Ctrl+V)">📄</button>
-          <button class="icon-btn sm" id="tbm-image" title="Colar (Ctrl+V) ou carregar uma imagem do dispositivo — vira uma forma editável (alças de redimensionar/girar) na camada ativa. Também dá pra soltar/arrastar um arquivo de imagem direto na grade.">🖼️➕</button>
-          <button class="icon-btn sm" id="tbm-deselect" title="Anular seleção">🚫</button>
-          <div class="topbar-mapa-sep"></div>
-          <button class="icon-btn sm" id="tbm-undo" title="Desfazer (Ctrl+Z)">↶</button>
-          <button class="icon-btn sm" id="tbm-redo" title="Refazer (Ctrl+Y)">↷</button>
-          <div class="topbar-mapa-sep"></div>
-          <button class="icon-btn sm" id="tbm-grid" title="Exibir a grade (linhas de 1m tracejadas + subgrade de pontos de 10cm — sempre visível, se ajusta em passos de 10x conforme o zoom)">▦</button>
-          <button class="icon-btn sm" id="tbm-rulers" title="Réguas">📐</button>
-          <div class="topbar-mapa-sep"></div>
-          <button class="icon-btn sm" id="tbm-gridsnap" title="Encaixar (snap) na grade: ao desenhar ou mover qualquer coisa na grade (parede, câmera, objeto, texto, forma...), a posição encaixa no múltiplo mais próximo da distância ao lado, em vez de ficar livre">🧲</button>
-          <label class="tbm-gridsnap-field" title="Distância do snap na grade — distância real do mundo, mostrada na unidade escolhida ao lado do mapa (cm/m, polegadas ou pixels) — quanto maior, mais grosso o encaixe">
-            <input type="number" id="tbm-gridsnap-val" step="0.5" min="0.1">
-            <span id="tbm-gridsnap-unit">cm</span>
-          </label>
-          <div class="topbar-mapa-sep"></div>
-          <!-- Histórico/Camadas/barra-de-ferramentas agrupados no canto
-               superior direito (pedido do usuário) — margin-left:auto no
-               grupo inteiro empurra tudo pra direita, ver
-               _updateTopbarMapaState pro estado .active de cada um.
-               O alternador Desenho/Navegação NÃO mora mais aqui embaixo do
-               trio (pedido anterior) — mudou pra #tbm-row0, à direita de
-               "Configurações 2D" (pedido do usuário mais recente, ver lá).
-               "Ajuda" (❓) NÃO mora mais aqui (pedido do usuário, 31/08/2026)
-               — mudou pro cabeçalho GLOBAL do app (#btn-ajuda-top, ao lado
-               de "⚙️ Configurações"), já que seu conteúdo (Log de
-               alterações/Sobre) não é específico do Mapa — ver index.html
-               e app.js _wireNav. -->
-          <div class="tbm-toggle-cluster" style="margin-left:auto">
-            <div class="tbm-toggle-cluster-row">
-              <button class="icon-btn sm" id="tbm-history" title="Histórico: lista de ações — desfazer/refazer ou pular direto pra um ponto dela">🕘</button>
-              <button class="icon-btn sm" id="map-cores" title="Cores: contorno/preenchimento do(s) item(ns) selecionado(s) na grade, pelo seletor de cor padrão do navegador">${this._coresBtnIconSvg()}</button>
-              <button class="icon-btn sm" id="map-layers" title="Camadas: organize paredes/câmeras/objetos/textos em grupos, com visibilidade e bloqueio próprios (itens do catálogo ficam de fora, sempre visíveis)">${layersIcon}</button>
-              <button class="icon-btn sm" id="map-grupos" title="Grupos: ative/desative a renderização ou destaque visualmente todo objeto de uma mesma 'classe' de uma vez (igual ao atributo 'class' do HTML) — inclui também uma opção pra ocultar todas as paredes/piso de uma vez e um toggle por andar">🏷️</button>
-              <!-- [14/09/2026 UTC] "🧊 Novo Cubo 3D"/"🔍 Buscar" mudaram pra
-                   cá (cabeçalho) — pedido verbatim: "Como não são uma
-                   ferramenta/modo de verdade, retire... de 'Ferramentas' e
-                   coloque em algum lugar no cabeçalho." Onclick idêntico ao
-                   de antes, só o id/local mudaram — ver wiring em mount(). -->
-              <button class="icon-btn sm" id="tbm-newcube3d" title="Cria um cubo novo (editável no Modelador 3D — vértices/arestas/faces) direto no mapa e já abre a Visualização 3D pra esculpi-lo">🧊</button>
-              <button class="icon-btn sm" id="tbm-search2d" title="Buscar patrimônio, objeto ou coordenada (x,y) e viajar até lá no mapa">🔍</button>
-              <button class="icon-btn sm" id="tbm-toolsidebar" title="Mostrar/ocultar a barra lateral de ferramentas">🔨</button>
-            </div>
-          </div>
-        </div>
-        </div>
-        <div class="topbar-mapa-row-wrap">
-        <div class="topbar-mapa-row" id="tbm-row4">
-          <button class="icon-btn sm" id="tbm-tool" title="Ferramenta atual — toque pra trocar">🖱️</button>
-          <div class="topbar-mapa-sep"></div>
-          <div class="map2d-toolctx in-topbar" id="map-toolctx"></div>
-        </div>
-        </div>
-      </div>
-    `;
+    root.innerHTML = window.MapDynamicCards.mountTopbarMapa.call(this, layersIcon);
     // Cada linha (.topbar-mapa-row) fica dentro de um wrapper que NÃO rola
     // (.topbar-mapa-row-wrap) — necessário pro indicador de "tem mais botão
     // pra esse lado" ficar de fato fixo no canto da tela (ver CSS e
@@ -6623,115 +6292,7 @@ const MapView = {
     if (this._renderer) this._renderer.displayUnit = this._displayUnit; // ver Map2DRenderer._drawRulers (números da régua só em 'pixels')
     this._bottombarMouseCss = null; // {x,y} em px CSS relativos ao canto superior-esquerdo do canvas — ver listener de pointermove abaixo
     this._bbmNavIndex = null; // índice atual na lista de elementos navegáveis — ver #bbm-nav-prev/next/_buildNavElementsList
-    root.innerHTML = `
-      <div class="bottombar-mapa-row" id="bbm-row-main">
-        <div class="bbm-row-left" id="bbm-row-left">
-          <div class="bbm-unit-wrap" id="bbm-unit-wrap">
-            <button type="button" class="bbm-field bbm-unit-btn" id="bbm-unit-btn" title="Unidade usada para exibir coordenadas/comprimento abaixo — clique para alternar entre pixels, polegadas e centímetros/metros"></button>
-            <button type="button" class="bbm-unit-arrow" id="bbm-unit-arrow" title="Escolher a unidade diretamente numa lista">▾</button>
-            <div class="bbm-unit-dropdown hidden" id="bbm-unit-dropdown"></div>
-          </div>
-          <span class="bbm-field bbm-coords-readout" id="bbm-coords-readout" title="Posição do cursor sobre a planta, na unidade escolhida ao lado">X: — Y: —</span>
-          <!-- [13/09/2026 UTC] NOVO — pedido verbatim: "No mapa 2D, ao
-               clicar com o 'Selecionar' em um objeto, na barra de rodapé da
-               grade, ao lado de onde aparece 'X: [valor] Y: [valor]', deve
-               aparecer o tipo de objeto e o seu nome." Escondido (mesmo
-               padrão de #bbm-length-readout ao lado) quando não há NADA
-               selecionado com a ferramenta "Selecionar" — ver
-               _updateBottombarMapa, mais abaixo, quem escreve o texto e
-               alterna o hidden. -->
-          <span class="bbm-field bbm-selection-readout hidden" id="bbm-selection-readout" title="Tipo e nome do objeto selecionado com a ferramenta Selecionar">—</span>
-          <span class="bbm-field bbm-length-readout hidden" id="bbm-length-readout" title="Comprimento do que está sendo desenhado agora (Lápis: comprimento total do traço; Reta/Curva: distância entre as pontas) — só aparece enquanto cabível">Comprimento: —</span>
-        </div>
-        <!-- NOVO (03/09/2026), pedido verbatim: reflow em 2 estágios por largura de tela
-             (ver CSS @media em torno de #bbm-row-main/.bbm-row-nav) — "Ajustar a tela",
-             "anterior"/"próximo" e "Itens:" separados do resto de .bbm-row-right (que fica só
-             com os controles de zoom) num grupo PRÓPRIO (.bbm-row-nav), pra poder virar uma
-             linha à parte no 2º estágio (tela ainda mais estreita) sem arrastar o zoom junto. -->
-        <div class="bbm-row-nav" id="bbm-row-nav">
-          <!-- [14/09/2026] MOVIDO — pedido verbatim: "No mapa 2D, coloque
-               os botões 'Enquadrar mapa' e 'Ir para o personagem' à
-               esquerda do botão de 100% (com id='bbm-zoom-100')." Os 2
-               botões (#bbm-fit-elements/"⛶ Enquadrar mapa" e
-               #bbm-goto-personagem/"🧍 Ir para o personagem") SAÍRAM deste
-               grupo (.bbm-row-nav) e foram pra dentro de .bbm-row-right,
-               logo antes de #bbm-zoom-100 — ver os 2 comentários grandes
-               de cada um, agora lá embaixo, com o histórico completo. -->
-          <button type="button" class="icon-btn sm" id="bbm-nav-prev" title="Ir para o elemento anterior da grade (centraliza a tela nele, sem mudar o zoom)">◀</button>
-          <button type="button" class="icon-btn sm" id="bbm-nav-next" title="Ir para o próximo elemento da grade (centraliza a tela nele, sem mudar o zoom)">▶</button>
-          <span class="bbm-field bbm-itemcount-readout" id="bbm-itemcount-readout" title="Quantidade de elementos navegáveis nesta planta baixa (parede/reta, câmera, objeto, texto, item do catálogo, foto) — a MESMA lista que ◀/▶ percorrem">Itens: <span id="bbm-itemcount-value">—</span></span>
-          <!-- NOVO (06/09/2026), pedido verbatim: "Crie um botão de debug
-               para o mapa 2D separado em sessão expansíveis, tudo deve
-               aparecer ali, janelas, objetos, fotos, itens, tudo." — ver
-               _toggleDebugWindow/_renderDebugWindow. Posicionado neste
-               grupo (.bbm-row-nav, junto de ◀/▶/"Itens:") por ser o
-               canto do rodapé com mais espaço sobrando e menos risco de
-               atrapalhar botões existentes. -->
-          <!-- NOVO (07/09/2026), pedido verbatim: "Coloque um botão, do lado
-               esquerdo do botão de debug no rodapé da grade do mapa 2D, para
-               dar toggle na miniatura 3D." — atalho rápido pra ligar/
-               desligar a Miniatura 3D sem abrir "⚙️ Configurações do mapa"
-               (checkbox #mc-miniatura3d, mapconfig.js, continua existindo e
-               sincronizado com este botão nos dois sentidos — mesmo padrão
-               já usado por #bbm-hud-btn/#st-hud, ver comentário grande no
-               botão logo abaixo). Classe 'active' reflete o estado atual
-               (!!this._minimapEngine, ver '_updateBottombarMapa', que já
-               roda com frequência e agora também sincroniza este botão). -->
-          <button type="button" class="icon-btn sm" id="bbm-minimap3d-btn" title="🧊 Mostrar/ocultar a miniatura 3D sobre a grade — mesma opção de '⚙️ Configurações do mapa › Miniatura 3D'. A janelinha pode ser arrastada clicando e segurando no título dela.">🧊</button>
-          <button type="button" class="icon-btn sm" id="bbm-debug-btn" title="🐞 Depuração do mapa 2D — lista janelas/painéis, objetos, fotos e itens ativos agora, com posição de cada janela flutuante (útil pra achar uma janela 'perdida' fora da tela)">🐞</button>
-          <!-- NOVO (07/09/2026), pedido verbatim: "Deve ter um botão de
-               toggle para ele [o HUD] no rodapé, ao lado do 'debug'." — o
-               HUD de performance (FPS/CPU~/RAM, ver js/perf.js) já tinha um
-               liga/desliga em "⚙️ Configurações do app › 🗺️ Mapa, 3D e
-               aparelho" (checkbox #st-hud, settings.js), mas nada aqui no
-               rodapé do mapa — atalho mais rápido pra ligar/desligar sem
-               sair da tela do mapa. Classe 'active' reflete o estado atual
-               (ver função '_updateBottombarMapa', que já roda com
-               frequência e agora também sincroniza este botão) — mesmo
-               padrão visual de "ligado" já usado noutros toggles do app
-               (ver CSS '.icon-btn.active'). -->
-          <button type="button" class="icon-btn sm" id="bbm-hud-btn" title="📊 Mostrar/ocultar o HUD de performance (FPS/CPU~/RAM) — mesma opção de '⚙️ Configurações do app › 🗺️ Mapa, 3D e aparelho'. O HUD pode ser arrastado clicando e segurando nele.">📊</button>
-        </div>
-        <div class="bbm-row-right" id="bbm-row-right">
-          <span class="bbm-field bbm-zoom-readout" id="bbm-zoom-readout" title="A que fração do tamanho físico real os objetos aparecem na tela neste zoom — 100% = uma régua encostada na tela mediria do mesmo tanto. Assume 96px/polegada (padrão da web, ≈38px/cm — mesma referência que o Paint.NET usa).">Zoom: <span id="bbm-zoom-value" title="Clique pra digitar um valor exato (número inteiro)">—</span></span>
-          <!-- [13/09/2026] NOVO, [14/09/2026] CORRIGIDO (title + o próprio
-               botão era outro, ver comentário no HTML de #bbm-fit-elements
-               MOVIDO daqui em cima, .bbm-row-nav), [14/09/2026, RODADA
-               SEGUINTE] MOVIDO — pedido verbatim: "No mapa 2D, coloque os
-               botões 'Enquadrar mapa' e 'Ir para o personagem' à esquerda
-               do botão de 100% (com id='bbm-zoom-100')." — este é o MESMO
-               botão de sempre (#bbm-fit-elements, "⛶ Ajustar a
-               tela"/"Enquadrar mapa" — ver _fitViewToAllElements), só
-               reposicionado: antes ficava em .bbm-row-nav (junto de
-               ◀/▶), agora entra em .bbm-row-right (junto do zoom),
-               imediatamente antes de #bbm-zoom-100. -->
-          <button type="button" class="icon-btn sm" id="bbm-fit-elements" title="Enquadrar mapa: ajusta a tela para cobrir do elemento mais distante de um lado até o mais distante do outro (cima/baixo e esquerda/direita) — útil quando há elementos pequenos difíceis de achar">⛶</button>
-          <!-- [13/09/2026] NOVO, [14/09/2026] CORRIGIDO (zoom), [14/09/2026,
-               RODADA SEGUINTE] MOVIDO — pedido verbatim (13/09): "Botão de
-               'Ir para o personagem', centra na posição do personagem na
-               grade com nível de zoom 0.8%."; pedido verbatim (14/09,
-               esclarecendo o valor): "No botão 'Ir para o personagem', o
-               zoom deve ser de 0,5% (meio por cento)."; pedido verbatim
-               (14/09, rodada seguinte, reposicionando): "coloque os botões
-               'Enquadrar mapa' e 'Ir para o personagem' à esquerda do
-               botão de 100%." — zoom fixo em 0,5% de verdade (valor exato
-               via zoomPctToViewZoom, mesmo padrão de
-               _setZoomToPercentValue), centralizado na posição atual de
-               this._personagem2D (o mesmo boneco sincronizado com a 1ª
-               pessoa do 3D — ver comentário grande em _personagem2D,
-               início do arquivo). Sem personagem ainda posicionado nesta
-               grade (Modo Navegação nunca usado), não faz nada além de
-               avisar — não existe posição nenhuma pra ir. Movido de
-               .bbm-row-nav pra .bbm-row-right, logo antes de
-               #bbm-zoom-100, junto com #bbm-fit-elements acima. -->
-          <button type="button" class="icon-btn sm" id="bbm-goto-personagem" title="Ir para o personagem: centraliza a tela na posição atual do personagem, com zoom de 0,5%">🧍</button>
-          <button type="button" class="icon-btn sm bbm-zoom-match" id="bbm-zoom-100" title="Ir para 100% de zoom (tamanho real)"></button>
-          <button type="button" class="icon-btn sm" id="bbm-zoom-minus" title="Diminuir zoom (degrau anterior)">−</button>
-          <input type="range" id="bbm-zoom-slider" min="0" max="${ZOOM_STEPS_PCT.length - 1}" step="1" value="15" title="Zoom (degraus fixos: ${ZOOM_STEPS_PCT.map((p) => `${p}%`).join(', ')})">
-          <button type="button" class="icon-btn sm" id="bbm-zoom-plus" title="Aumentar zoom (próximo degrau)">+</button>
-        </div>
-      </div>
-    `;
+    root.innerHTML = window.MapDynamicCards.mountBottombarMapa.call(this, ZOOM_STEPS_PCT);
     const canvas = this._container?.querySelector('#map-canvas');
     // Pedido do usuário: "deve ser possível só clicar em cima do botão de
     // seleção da 'unidade' e ela ir alternando entre as 3 possibilidades
@@ -7056,7 +6617,13 @@ const MapView = {
    *  origem. Com desenho, calcula o maior zoom (dentro dos limites de `ZOOM_STEPS_PCT`) que
    *  ainda cabe o retângulo delimitador inteiro no canvas, com uma margem de 10% de cada lado
    *  pra nada ficar colado na borda da tela. */
-  _fitViewToMapContent() {
+  // [19/09/2026 UTC] RODADA 192 -- `opts.soPosicao`/`opts.soZoom` (NOVOS, ambos default `false` =
+  // comportamento de sempre, mexe nos dois) deixam este método mexer só num dos dois eixos --
+  // usado por `_restaurarCamera2DAoEntrar` quando SÓ posição OU SÓ zoom devem "resetar pro padrão"
+  // (caber tudo na tela), preservando o outro do jeito que o usuário deixou (ver seção nova
+  // "🔭 Voltar ao mapa 2D" em MapConfig).
+  _fitViewToMapContent(opts) {
+    const soPosicao = !!(opts && opts.soPosicao), soZoom = !!(opts && opts.soZoom);
     if (!this._renderer || !this._map) return;
     this._renderer.resize(); // garante canvas.width/height (device px) atualizados ANTES de calcular
     const canvas = this._renderer.canvas;
@@ -7064,9 +6631,8 @@ const MapView = {
     const hasContent = ['walls', 'points', 'trilha', 'cameras', 'objects', 'textos']
       .some((campo) => (this._map[campo] || []).length > 0);
     if (!hasContent) {
-      this._setZoomToStepIndex(this._nearestZoomStepIndex(100));
-      this._renderer.view.cx = 0;
-      this._renderer.view.cy = 0;
+      if (!soPosicao) this._setZoomToStepIndex(this._nearestZoomStepIndex(100));
+      if (!soZoom) { this._renderer.view.cx = 0; this._renderer.view.cy = 0; }
       this._syncZoomSliderPosition();
       this._updateBottombarMapa();
       return;
@@ -7080,7 +6646,8 @@ const MapView = {
     const minZoom = zoomPctToViewZoom(ZOOM_STEPS_PCT[0], dpr);
     const maxZoom = zoomPctToViewZoom(ZOOM_STEPS_PCT[ZOOM_STEPS_PCT.length - 1], dpr);
     zoom = Utils.clamp(zoom, minZoom, maxZoom);
-    this._renderer.view.zoom = zoom;
+    if (!soPosicao) this._renderer.view.zoom = zoom;
+    if (soZoom) { this._syncZoomSliderPosition(); this._updateBottombarMapa(); return; }
     // Pedido do usuário (rodada 48): "A câmera 2D, no mapa 2D, deve voltar
     // centralizada no personagem [...] ou sempre 'volta centrada na origem'
     // ou volta 'centrada no personagem'" — ver MapConfig.DEFAULTS
@@ -7535,39 +7102,7 @@ const MapView = {
     // (e os `<details>`) nunca são tocados, então o navegador preserva o
     // scroll de cada um sozinho, do mesmo jeito que preservaria numa
     // tabela HTML comum sendo só editada.
-    panel.innerHTML = `
-      <div class="map-panel-head"><b>🐞 Depuração do Mapa 2D</b><button type="button" class="icon-btn sm map-panel-close" title="Fechar">✕</button></div>
-      <div class="map-debug-body" id="map-debug-body">
-        <details data-sec="win" open>
-          <summary>Janelas/painéis (<span id="map-debug-win-count">0</span>)</summary>
-          <div class="map-debug-tablewrap" id="map-debug-win-wrap"><table class="map-debug-table">
-            <thead><tr><th>Nome</th><th>Existe</th><th>Estado</th><th>Posição X</th><th>Posição Y</th><th>Visibilidade</th></tr></thead>
-            <tbody id="map-debug-win-body"></tbody>
-          </table></div>
-        </details>
-        <details data-sec="obj">
-          <summary>Objetos (<span id="map-debug-obj-count">0</span>)</summary>
-          <div class="map-debug-tablewrap" id="map-debug-obj-wrap"><table class="map-debug-table">
-            <thead><tr><th>id</th><th>Tipo</th><th>x, y</th></tr></thead>
-            <tbody id="map-debug-obj-body"></tbody>
-          </table></div>
-        </details>
-        <details data-sec="foto">
-          <summary>Fotos (<span id="map-debug-foto-count">0</span>)</summary>
-          <div class="map-debug-tablewrap" id="map-debug-foto-wrap"><table class="map-debug-table">
-            <thead><tr><th>id</th><th>Nome</th><th>x, y</th></tr></thead>
-            <tbody id="map-debug-foto-body"></tbody>
-          </table></div>
-        </details>
-        <details data-sec="item">
-          <summary>Itens (<span id="map-debug-item-count">0</span>)</summary>
-          <div class="map-debug-tablewrap" id="map-debug-item-wrap"><table class="map-debug-table">
-            <thead><tr><th>id</th><th>Rótulo</th><th>x, y</th></tr></thead>
-            <tbody id="map-debug-item-body"></tbody>
-          </table></div>
-        </details>
-      </div>
-    `;
+    panel.innerHTML = window.MapPanelCards.debugWindow();
     this._container.querySelector('.map2d-wrap')?.appendChild(panel);
     this._debugWindowEl = panel;
     // Sem posição lembrada ainda (1ª vez nesta sessão): nasce no canto
@@ -10802,8 +10337,7 @@ const MapView = {
    *  condição SEMPRE VERDADEIRA em todo lugar do gizmo — só ruído morto,
    *  sugerindo (erradamente) que o gizmo ainda dependia de um "modo"
    *  separado de `_ptool`. Removida de todos os pontos que testam/desenham/
-   *  reabrem o gizmo de Formas/Retículo/objeto-forma (ver grep desta rodada
-   *  em progresso-sessao.md) — a partir de agora a ÚNICA fonte de verdade
+   *  reabrem o gizmo de Formas/Retículo/objeto-forma — a partir de agora a ÚNICA fonte de verdade
    *  pra "este ptool usa o gizmo?" é esta função. Reutilizável por
    *  construção: qualquer `_ptool` FUTURO que reuse a mesma mecânica (mesmo
    *  padrão de Mesa/Coluna) só precisa entrar nesta lista de retorno —
@@ -11118,22 +10652,7 @@ const MapView = {
       // desligada e só o snap da parede está ativo (pedido do usuário:
       // "deve haver uma posição de alinhar os snaps... pra quando acaba
       // ficando desalinhado").
-      el.innerHTML = `
-        <span class="map2d-toolctx-label">🧱 Parede</span>
-        <span class="map2d-toolctx-info">${this._paredeStart ? `clique no 2º ponto para criar a parede — ângulo livre${this._shiftDown ? ', travado em 15° (Shift)' : ' (segure Shift pra travar em passos de 15°)'} (Esc cancela)` : 'clique no 1º ponto — encoste numa ponta ou no corpo de outra parede (✕) pra começar já conectada'}</span>
-        <div class="topbar-mapa-sep"></div>
-        <label class="map2d-toolctx-numfield" title="Espessura da parede sendo desenhada, em metros (afeta só paredes NOVAS — editar uma já colocada continua sendo pelo painel dela)">
-          <span>Espessura (m)</span>
-          <input type="number" step="0.01" min="0.02" max="0.6" id="toolctx-parede-esp" value="${this._paredeEspessura.toFixed(2)}">
-        </label>
-        <div class="topbar-mapa-sep"></div>
-        <button type="button" class="icon-btn sm ${this._wallSnapEnabled ? 'active' : ''}" id="toolctx-parede-snap" title="Snap PRÓPRIO da parede: encaixa o ponto sendo posicionado na linha de centro de qualquer parede próxima (útil pra continuar alinhado numa parede transversal ao desenho)">🧲 Snap de parede</button>
-        <label class="map2d-toolctx-numfield" title="Distância do snap de parede — distância real do mundo, na unidade escolhida ao lado do mapa (cm/m, polegadas ou pixels), igual ao 🧲 Snap na grade">
-          <input type="number" id="toolctx-parede-snap-val" min="${this._gridSnapUnitInfo().min}" step="${this._gridSnapUnitInfo().step}" value="${this._gridSnapUnitInfo().toDisplay(this._wallSnapMeters)}">
-          <span>${this._gridSnapUnitInfo().suffix}</span>
-        </label>
-        <button type="button" class="icon-btn sm" id="toolctx-parede-snap-align" title="Iguala a distância do snap de parede à do snap da grade (🧲 na linha 1) — útil quando a grade está desligada e só o snap de parede fica ativo, pra não ficarem desalinhados entre si">🔗 Alinhar</button>
-      `;
+      el.innerHTML = window.MapDynamicCards.wallToolCtx.call(this);
       const espInput = el.querySelector('#toolctx-parede-esp');
       espInput.addEventListener('change', (e) => {
         const v = Utils.clamp(parseFloat(e.target.value) || 0.12, 0.02, 0.6);
@@ -12562,6 +12081,16 @@ const MapView = {
         this._map.medidas2d = (this._map.medidas2d || []).filter((m) => m.id !== hitDraw.id);
         Utils.toast('Medida da Trena apagada.', { type: 'ok' });
         label = 'apagar medida da Trena';
+      } else if (hitDraw.kind === 'cabo') {
+        // [19/09/2026 UTC] NOVO (RODADA 194) -- ver comentário grande em `_hitTestDrawable`/
+        // `_hitTestCaboRede2D`. `RedeEquip.desconectar` é a MESMA função usada pelo botão "Desligar"
+        // do menu de rede (3D) -- remove o cabo da lista e notifica (RedeEquip.aoMudar, que o View3D
+        // liga pra reconstruir a cena 3D também, quando estiver montado). O snapshot mapaAntes/
+        // mapaDepois já cobre `this._map.cabos` (campo comum do mapa) -- Desfazer/Refazer funcionam
+        // de graça, mesmo padrão dos outros ramos acima.
+        (window.RedeEquip?.desconectar || (() => { this._map.cabos = (this._map.cabos || []).filter((c) => c.id !== hitDraw.id); }))(this._map, hitDraw.id);
+        Utils.toast('🔌 Cabo apagado.', { type: 'ok' });
+        label = 'apagar cabo';
       }
       await this._saveMap();
       const mapaDepois = JSON.parse(JSON.stringify(this._map));
@@ -12632,6 +12161,9 @@ const MapView = {
     if (this._ptool === 'itens') { // [14/09/2026 UTC] unificado — 'itens' agora é _ptool de verdade
       const hitPin = this._hitTestItemPin(sx, sy);
       if (hitPin) { this._openItemPinPanel(hitPin); return; }
+      // Clique em cima de um objeto: pergunta se quer vincular um patrimônio a ele (em vez de soltar um orb).
+      const hitObjItem = this._hitTestObject(sx, sy);
+      if (hitObjItem) { await this._vincularPatrimonioAoObjeto(hitObjItem); return; }
       await this._placeItemPinAt(sx, sy);
       return;
     }
@@ -12714,7 +12246,7 @@ const MapView = {
           // [...] Não vai ser por 2 cliques, nem por tempo (os 280ms), vai
           // ser por um botão de ativação." O mecanismo de duplo-clique (e
           // o atraso que ele exigia pra não sumir com o objeto no meio do
-          // gesto — ver histórico completo em progresso-sessao.md, RODADAS
+          // gesto — RODADAS
           // 12 e 14) foi substituído de vez por um BOTÃO flutuante que
           // aparece junto do gizmo (ver `_syncFormaDraftPropBtn`, chamado a
           // cada quadro em `_loop`) — sem concorrência nenhuma com o clique
@@ -12886,11 +12418,21 @@ const MapView = {
       const attach = this._hitTestWallForAttach(sx, sy);
       const extra = { layerId: this._activeLayerId };
       if (attach) { extra.parentWallId = attach.wall.id; extra.posAoLongoDaParede = attach.t; }
+      // [18/09/2026 UTC] NOVO (RODADA 145) — sem encaixe em parede: testa se
+      // o clique caiu em cima de outro objeto (ex. 'piso'), ver
+      // _hitTestBaseObjectForAttach acima. `elevacaoBase` guarda a altura do
+      // TOPO desse objeto (Mapping.objectTopHeight) — a "Altura em relação
+      // ao chão" (alturaPeitoril) da porta/janela passa a somar com esta
+      // base em vez de sempre partir do chão absoluto do nível 0 (ver
+      // Mapping.doorWindowAlturaEfetiva e uso em engine3d.js
+      // buildDoorOrWindowMesh, baseY).
+      const baseObj = attach ? null : this._hitTestBaseObjectForAttach(sx, sy);
+      if (baseObj) extra.elevacaoBase = Mapping.objectTopHeight(baseObj);
       const world = this._renderer.screenToWorld(sx, sy);
       const el = isDoor ? Mapping.addDoor(this._map, world.x, world.y, extra) : Mapping.addWindow(this._map, world.x, world.y, extra);
       this._saveMap();
       Utils.toast(
-        `${isDoor ? 'Porta' : 'Janela'} ${attach ? 'encaixada na parede' : 'colocada solta'} — toque nela pra editar.`,
+        `${isDoor ? 'Porta' : 'Janela'} ${attach ? 'encaixada na parede' : (baseObj ? `apoiada em cima de ${baseObj.nome || baseObj.tipo}` : 'colocada solta')} — toque nela pra editar.`,
         { type: 'ok' },
       );
       History.push({
@@ -13214,7 +12756,9 @@ const MapView = {
     }
     if (this._ptool === 'itens') {
       const hit = this._hitTestItemPin(sx, sy);
-      return hit ? { kind: 'itemPin', id: hit.id } : null;
+      if (hit) return { kind: 'itemPin', id: hit.id };
+      const hitObj = this._hitTestObject(sx, sy);
+      return hitObj ? { kind: 'object', id: hitObj.id } : null;
     }
     if (this._ptool === 'apagar') return this._hitTestDrawable(sx, sy, 16, true); // NOVO (03/09/2026) -- hover tambem restrito a camada ativa, mesma correcao do clique de apagar de verdade (ver comentario grande la)
     if (this._ptool === 'select') {
@@ -14057,6 +13601,11 @@ const MapView = {
       this._draggingObject = hitObj;
       this._dragMoved = false;
       this._dragStartScreen = { x: sx, y: sy };
+      // [21/09/2026 UTC] NOVO (RODADA 214) — guarda a posição ORIGINAL (antes do arraste) pra poder
+      // reverter caso o usuário recuse o gate de confirmação de união (ver bloco `_draggingObject` em
+      // _onObjectsPointerUp, mesmo espírito do gate já existente pro arraste de EXTREMIDADE isolada,
+      // RODADA 211 — aqui é o arraste do OBJETO INTEIRO, ver comentário grande lá).
+      this._draggingObjectOrig = { x: hitObj.x, y: hitObj.y };
       // NOVO (04/09/2026), pedido verbatim: "ao reposicionar o 'Retículo
       // métrico', a grade que é desenhada nele deve ser a partir do canto
       // do retículo... deve ser a sua origem." — este arraste (diferente do
@@ -15677,8 +15226,13 @@ const MapView = {
       const moved = this._dragMoved;
       this._draggingObject = null;
       this._draggingObjectOrigemOffset = null;
+      this._draggingObjectOrig = null;
       this._dragMoved = false;
       if (!moved) return; // "clique parado" — deixa o evento click cuidar (abre o painel)
+      // [20/09/2026 UTC] RODADA 226 (revertendo RODADA 214) — soltar o objeto inteiro em cima da
+      // extremidade de outro objeto volta a ser um reposicionamento simples e silencioso, sem
+      // nenhum `confirm()` de união/fusão — mesmo que as pontas fiquem visualmente coincidentes,
+      // isso é só coincidência geométrica, sem consequência nenhuma no modelo de dados.
       this._suppressNextClick = true;
       await this._saveMap();
       Utils.toast('Objeto reposicionado ✓', { type: 'ok' });
@@ -15962,8 +15516,27 @@ const MapView = {
       if (hitMedida) best = { kind: 'medida2d', id: hitMedida.id };
     }
 
+    // [19/09/2026 UTC] NOVO (RODADA 194) -- pedido verbatim: "No mapa 2D, ao selecionar a ferramenta
+    // 'Apagar' [...] deve ser possível clicar em um cabo na grade do mapa 2D e excluí-lo [...] nem o
+    // ícone que identifica que está sobre um objeto excluível aparece. Use um jeito para poder
+    // identificar se está em cima do cabo ou não (a equação de construção do cabo para ver se há ponto
+    // coincidente. Deve haver alguma tolerância...)." Os cabos (`this._map.cabos`) nunca entravam neste
+    // hit-test (só eram DESENHADOS no 2D, ver `Map2DRenderer._drawCabosRede2D`, RODADA 190 -- nunca
+    // clicáveis) -- mesmo caso de 'traco2d'/'medida2d' acima (lista solta do mapa, sem `layerId`
+    // próprio, então `onActiveLayer` não se aplica). Reaproveita a MESMA equação de construção da rota
+    // 2D que o desenho usa (`RedePassiva.amostrarRotaComRetas` sobre `pa`/`pontosExtras`/`pb`, com a
+    // altura Y colapsada em 0, idêntico a `_drawCabosRede2D`) -- não duplica a fórmula, só o
+    // "levantamento" dos pontos --, testando a TOLERÂNCIA pedida (`thresholdPx`, mesmo raio usado pelos
+    // outros tipos) contra cada TRECHO da polilinha resultante via `_distToSegment` (mesma função já
+    // usada pra parede).
+    if (!best) {
+      const hitCabo = this._hitTestCaboRede2D(sx, sy, thresholdPx);
+      if (hitCabo) best = { kind: 'cabo', id: hitCabo.id };
+    }
+
     return best;
   },
+
 
   /** Ponto/vértice de uma parede tocado exatamente (usado pelo modo "Inserir
    *  retas" pra encaixar/encadear) já é coberto por _findSnapPoint; este aqui
@@ -16115,6 +15688,33 @@ const MapView = {
     const lx = dx * cos - dy * sin, ly = dx * sin + dy * cos;
     const hw = largura / 2 + thresholdPx, hh = esp / 2 + thresholdPx;
     return Math.abs(lx) <= hw && Math.abs(ly) <= hh;
+  },
+
+  /** Pergunta (card) se quer vincular um patrimônio ao objeto clicado com a ferramenta "Adicionar orb"; se sim, escolhe o item e associa (`obj.itemIds`). */
+  async _vincularPatrimonioAoObjeto(obj) {
+    if (!obj) return;
+    const escolha = await new Promise((resolve) => {
+      window.CardSystem.mount(this._container, 'confirm', {
+        title: 'Vincular patrimônio',
+        message: 'Deseja vincular um número de patrimônio a este objeto?',
+        buttons: [
+          { id: 'sim', label: '🔗 Sim, vincular', variant: 'primary' },
+          { id: 'nao', label: '✕ Não', variant: 'secondary' },
+        ],
+        onChoose: (id) => resolve(id),
+      }, {});
+    });
+    if (escolha !== 'sim') return;
+    const itemId = await Utils.pickItem({ ambienteId: this._map.id, title: 'Vincular patrimônio a este objeto' });
+    if (!itemId) return;
+    const item = await DB.getItem(itemId);
+    const alvo = (this._map.objects || []).find((o) => o.id === obj.id) || obj;
+    if (!Mapping.addItemToObject(this._map, alvo.id, itemId, item?.patrimonio)) {
+      Utils.toast('Este patrimônio já está vinculado a este objeto.', { type: 'warn' });
+      return;
+    }
+    this._saveMap();
+    Utils.toast('Patrimônio vinculado ✓', { type: 'ok' });
   },
 
   _hitTestObject(sx, sy, thresholdPx = 16) {
@@ -16863,7 +16463,7 @@ const MapView = {
    *  'Retículo métrico' também."
    *
    *  SUBSTITUI de vez o mecanismo de duplo-clique/temporização (RODADA 12
-   *  e 14, ver progresso-sessao.md) pra estes dois tipos: o clique único
+   *  e 14) pra estes dois tipos: o clique único
    *  volta a chamar `_startFormaReedit` NA HORA (sem nenhum atraso —
    *  `_formaGizmoClickTimer` foi removido, ver _onCanvasClick), e é ESTE
    *  botão — não mais o duplo-clique — quem abre a janela de propriedades
@@ -17612,6 +17212,48 @@ const MapView = {
     return best;
   },
 
+  /** [18/09/2026 UTC] NOVO (RODADA 145) — pedido verbatim: "Deve ser
+   *  possível colocar o objeto janela/porta/parede em cima de outro
+   *  objeto. Fiz um teste, tentei colocar uma janela em cima de um objeto
+   *  piso, porém o raycaster passou direto, sem bater no piso para poder
+   *  colocar a janela." CAUSA RAIZ: `_hitTestWallForAttach` (logo acima)
+   *  só testa contra `map.walls` — não existia NENHUM hit-test contra
+   *  `map.objects` (onde 'piso' vive, ver Mapping.addObject) no fluxo de
+   *  colocar porta/janela; um clique em cima de um 'piso' já colocado caía
+   *  sempre no ramo "solta" (posição própria, sem nenhuma base), ignorando
+   *  o piso por baixo por completo — batendo exatamente com o relato ("o
+   *  raycaster passou direto"). Este NÃO é um raycaster 3D (Three.js) — o
+   *  mapa 2D inteiro é um hit-test manual contra as formas desenhadas no
+   *  canvas (ver cabeçalho do arquivo, seção "_hitTestDrawable/
+   *  _hitTestWallBody/..."), então a correção segue o MESMO padrão: testar
+   *  a área (footprint, em metros) do objeto sob o cursor, reaproveitando
+   *  `Mapping.pointInObjectFootprint`/`Mapping.objectTopHeight` — as MESMAS
+   *  funções que já resolvem o empilhamento automático de objeto-sobre-
+   *  objeto em `Mapping.addObject` (ver comentário grande lá, mapping.js)
+   *  — para não ter DOIS jeitos de decidir "isso serve de apoio" que
+   *  pudessem divergir. Devolve o objeto de TOPO mais alto cuja área
+   *  contém o cursor (igual ao critério de `_findTopObjectAt`), ou `null`
+   *  se não há nenhum objeto ali. Não se restringe a `tipo:'piso'` — QUALQUER
+   *  objeto do mapa serve de base (parede também vale como base pra
+   *  porta/janela/outra parede, além do encaixe já existente em CORPO de
+   *  parede via `_hitTestWallForAttach`), seguindo o pedido do usuário
+   *  ("piso" e "qualquer outro tipo de objeto que deva servir de base,
+   *  como parede"). */
+  _hitTestBaseObjectForAttach(sx, sy) {
+    if (!this._map || !this._renderer) return null;
+    const wp = this._renderer.screenToWorld(sx, sy);
+    const activeLayerId = this._activeLayerId;
+    const onActiveLayer = (layerId) => this._renderer._layerVisible(layerId) && (!layerId || layerId === activeLayerId);
+    let best = null, bestTop = -Infinity;
+    (this._map.objects || []).forEach((o) => {
+      if (!onActiveLayer(o.layerId)) return;
+      if (!Mapping.pointInObjectFootprint(o, wp.x, wp.y)) return;
+      const top = Mapping.objectTopHeight(o);
+      if (top > bestTop) { bestTop = top; best = o; }
+    });
+    return best;
+  },
+
   /** Prévia ("ghost") da ferramenta Porta/Janela — pedido do usuário: "deve
    *  ir sendo mostrada do mesmo jeito que ficaria caso se clicasse naquele
    *  ponto". Monta um objeto porta/janela FALSO (nunca inserido no mapa —
@@ -17635,12 +17277,17 @@ const MapView = {
       : (this._map.janelas || []).find((j) => this._pointInDoorWindowShape(j, false, sx, sy, 16));
     if (hitExisting) return null;
     const attach = this._hitTestWallForAttach(sx, sy);
+    // [18/09/2026 UTC] NOVO (RODADA 145) — mesmo `elevacaoBase` calculado em
+    // _onCanvasClick, ver comentário grande lá — o ghost precisa refletir a
+    // mesma base (piso etc.) que o clique de verdade usaria, senão a prévia
+    // desalinharia do resultado real (motivo de existir este ghost).
+    const baseObj = attach ? null : this._hitTestBaseObjectForAttach(sx, sy);
     const world = this._renderer.screenToWorld(sx, sy);
     const fake = isDoor
-      ? { parentWallId: attach ? attach.wall.id : null, posAoLongoDaParede: attach ? attach.t : 0, anguloExtra: 0, x: world.x, y: world.y, angulo: 0, largura: 0.8, altura: 2.1, tipo: 'padrao', abertura: 'direita', colorRGB: null }
-      : { parentWallId: attach ? attach.wall.id : null, posAoLongoDaParede: attach ? attach.t : 0, anguloExtra: 0, x: world.x, y: world.y, angulo: 0, largura: 1.2, altura: 1.2, tipo: 'padrao', grade: false, bandeira: false, colorRGB: null };
+      ? { parentWallId: attach ? attach.wall.id : null, posAoLongoDaParede: attach ? attach.t : 0, anguloExtra: 0, x: world.x, y: world.y, angulo: 0, largura: 0.8, altura: 2.1, tipo: 'padrao', abertura: 'direita', colorRGB: null, elevacaoBase: baseObj ? Mapping.objectTopHeight(baseObj) : 0 }
+      : { parentWallId: attach ? attach.wall.id : null, posAoLongoDaParede: attach ? attach.t : 0, anguloExtra: 0, x: world.x, y: world.y, angulo: 0, largura: 1.2, altura: 1.2, tipo: 'padrao', grade: false, bandeira: false, colorRGB: null, elevacaoBase: baseObj ? Mapping.objectTopHeight(baseObj) : 0 };
     const pos = Mapping.resolveDoorWindowPos(this._map, fake);
-    return { isDoor, attached: !!attach, pos, ...fake };
+    return { isDoor, attached: !!attach, baseObj, pos, ...fake };
   },
 
   /** Prévia ("ghost") da ferramenta Câmeras — mesmo espírito de
@@ -18653,8 +18300,7 @@ const MapView = {
   // Componentes (Add Component)." Substitui o antigo bloco FIXO (1
   // textarea + 2 checkboxes) por um renderizador GENÉRICO de painel de
   // componentes (ver js/components.js — window.Components/
-  // window.SceneEventBus, implementando claude/spec-component-inspector-
-  // architecture.md do projeto na íntegra). Chamado pelos MESMOS 6 lugares
+  // window.SceneEventBus). Chamado pelos MESMOS 6 lugares
   // de sempre (parede/porta/janela/câmera/texto via este helper — objeto
   // via seu próprio bloco inline, ver `_openObjectPanel` mais abaixo, que
   // passou a chamar estas duas mesmas funções) — nenhum tipo de objeto
@@ -18790,8 +18436,8 @@ const MapView = {
     const linhasHtml = pts.map((p, i) => `
       <div class="map-panel-comp-row" data-trajeto-idx="${i}" style="display:flex; align-items:center; gap:4px; flex-wrap:wrap; padding:4px 0">
         <span style="opacity:.6; width:18px; text-align:right; font-size:11px">${i + 1}</span>
-        <input type="number" step="0.1" class="trajeto-x" data-idx="${i}" value="${Number(p?.x || 0).toFixed(2)}" title="Posição X (m)" style="width:64px">
-        <input type="number" step="0.1" class="trajeto-y" data-idx="${i}" value="${Number(p?.y || 0).toFixed(2)}" title="Posição Y (m)" style="width:64px">
+        <input type="number" step="0.1" class="trajeto-x" data-idx="${i}" value="${Number(p?.x || 0).toFixed(2)}" title="Posição X (m) — → aumenta seus valores para a direita" style="width:64px">
+        <input type="number" step="0.1" class="trajeto-y" data-idx="${i}" value="${Number(p?.y || 0).toFixed(2)}" title="Posição Z (m) — ↓ aumenta seus valores para baixo" style="width:64px">
         <input type="number" step="100" min="0" class="trajeto-espera" data-idx="${i}" value="${Number(p?.esperaMs || 0)}" title="Espera neste ponto (ms) — 0 = não espera" style="width:64px">
         <button type="button" class="icon-btn sm trajeto-subir" data-idx="${i}" title="Mover para cima" ${i === 0 ? 'disabled' : ''}>↑</button>
         <button type="button" class="icon-btn sm trajeto-descer" data-idx="${i}" title="Mover para baixo" ${i === pts.length - 1 ? 'disabled' : ''}>↓</button>
@@ -18967,10 +18613,43 @@ const MapView = {
    *  acima de `_scriptFieldsetHtml`). Só um editor por vez (mesma guarda
    *  `if (this._componentsEditorOverlay) return` do "Acessar modelos"). */
   _openComponentsEditorFullscreen(entity, salvar, onAfterClose) {
-    if (!this._container || this._componentsEditorOverlay) return;
+    if (!this._container) return;
+    // [18/09/2026 UTC] NOVO (RODADA 158) — pedido verbatim: "a tela dos
+    // scripts e componentes deve sempre assumir a frente [...] às vezes,
+    // abrindo ela, fechando, indo no 'Ver em 3D', voltando e tentando abrir
+    // de novo. Não funciona." CAUSA RAIZ: `this._componentsEditorOverlay`
+    // é propriedade do MÓDULO MapView (sobrevive entre montagens/
+    // desmontagens do painel 2D, não é recriada do zero a cada vez) — se o
+    // usuário navegar pra "Ver em 3D" (ou qualquer outra tela) com o editor
+    // ainda ABERTO, sem passar por `_closeComponentsEditorFullscreen`
+    // primeiro, o `this._container` antigo (com o overlay dentro) é
+    // descartado/recriado por trás, mas a referência velha em
+    // `this._componentsEditorOverlay` continua apontando pra um elemento
+    // JÁ DESANEXADO do DOM — o guard `if (this._componentsEditorOverlay)
+    // return` da linha antiga barrava QUALQUER abertura futura pra sempre
+    // (mesma classe de bug já corrigida pro botão de debug flutuante do
+    // 3D, RODADA 154). CORRIGIDO: só trata como "já aberto" se a
+    // referência salva ainda estiver de fato conectada ao DOM
+    // (`.isConnected`); caso contrário, esquece a referência velha (e para
+    // o polling de erro órfão associado a ela) e segue criando um overlay
+    // novo normalmente.
+    if (this._componentsEditorOverlay && !this._componentsEditorOverlay.isConnected) {
+      if (this._componentsEditorErrorPoll) { clearInterval(this._componentsEditorErrorPoll); this._componentsEditorErrorPoll = null; }
+      this._componentsEditorOverlay = null;
+    }
+    if (this._componentsEditorOverlay) return;
     const overlay = document.createElement('div');
     overlay.className = 'map2d-componentpanel-confinado';
-    overlay.style.cssText = 'position:absolute; inset:0; z-index:80; background:#0a0d11; overflow-y:auto;';
+    // [18/09/2026 UTC] ALTERADO (RODADA 158) — pedido verbatim: "a tela [...]
+    // deve sempre assumir a frente (z-index)." `z-index:80` (valor antigo,
+    // pensado só em relação aos elementos internos do próprio Mapa 2D)
+    // podia perder de QUALQUER outro overlay/painel com z-index maior que
+    // viesse a existir por cima de `this._container` — trocado por um
+    // valor propositalmente altíssimo (`2147483000`, perto do teto de
+    // 32 bits que o CSS aceita pra z-index) pra garantir, por construção,
+    // que este overlay sempre fique acima de qualquer outro elemento da
+    // página, não só dos vizinhos dentro do Mapa 2D.
+    overlay.style.cssText = 'position:absolute; inset:0; z-index:2147483000; background:#0a0d11; overflow-y:auto;';
     this._container.appendChild(overlay);
     this._componentsEditorOverlay = overlay;
     this._componentsEditorOnClose = onAfterClose || null;
@@ -19181,22 +18860,7 @@ const MapView = {
     // fácil, só por um único botão agora.
     const templateOptionsHtml = window.Components.SCRIPT_TEMPLATES.map((t) => `<option value="${Utils.escapeHtml(t.id)}">${Utils.escapeHtml(t.label)}</option>`).join('');
 
-    overlay.innerHTML = `
-      <div class="map-panel-head" style="position:sticky; top:0; background:#0a0d11; padding:10px 12px; z-index:1">
-        <b>🧩 Componentes — ${Utils.escapeHtml(entity.nome || '')}</b>
-        <button type="button" class="icon-btn sm" id="comp-editor-close" title="Fechar">✕</button>
-      </div>
-      <div style="padding:12px; max-width:640px; margin:0 auto; display:flex; flex-direction:column; gap:12px">
-        ${comps.map((c) => c.type === 'Script' ? scriptBlockHtml(c) : (c.type === 'EventTrigger' ? eventTriggerBlockHtml(c) : '')).join('')}
-        <div class="map-panel-actions" style="position:relative; flex-wrap:wrap">
-          <label style="display:flex; align-items:center; gap:4px; font-size:12px">
-            <span>Modelo:</span>
-            <select id="comp-add-script-template">${templateOptionsHtml}</select>
-          </label>
-          <button type="button" class="btn sm" id="comp-add-script" title="Cria um Script com o modelo escolhido acima, fica na lista">➕ Adicionar componente Script</button>
-          <button type="button" class="btn sm" id="comp-add-trigger">➕ Adicionar Gatilho de Evento</button>
-        </div>
-      </div>`;
+    overlay.innerHTML = window.MapDynamicCards.componentsEditor.call(this, entity, { comps, scriptBlockHtml, eventTriggerBlockHtml });
 
     overlay.querySelector('#comp-editor-close').onclick = () => this._closeComponentsEditorFullscreen();
     overlay.querySelector('#comp-add-script').onclick = () => {
@@ -19352,19 +19016,7 @@ const MapView = {
 
   _renderScriptCodeEditor(overlay, entity, comp, salvar) {
     const fns = window.Components.extractFunctionNames(comp.code || '');
-    overlay.innerHTML = `
-      <div class="comp-code-head-sticky" style="position:sticky; top:0; z-index:1; background:#0a0d11">
-        <div class="map-panel-head" style="padding:10px 12px">
-          <b>📄 Código do Script — ${Utils.escapeHtml(entity.nome || '')}</b>
-          <button type="button" class="icon-btn sm" id="comp-code-back" title="Voltar para a lista de componentes">⬅️</button>
-        </div>
-        <div class="comp-code-error-banner" id="comp-code-error-banner" data-comp-id="${comp.id}">${Utils.escapeHtml(this._scriptErrorBannerText(comp))}</div>
-      </div>
-      <div style="padding:12px; max-width:820px; margin:0 auto; display:flex; flex-direction:column; gap:8px">
-        <textarea id="comp-code-textarea" class="comp-code-textarea" spellcheck="false" rows="26">${Utils.escapeHtml(comp.code || '')}</textarea>
-        <div class="map2d-toolctx-info" id="comp-code-fns">${fns.length ? `Funções detectadas nesta folha: ${fns.map((f) => Utils.escapeHtml(f) + '()').join(', ')} — qualquer uma pode ser chamada por uma ação de Gatilho de Evento.` : 'Nenhuma função de nível superior detectada ainda (escreva "function NomeQualquer() { ... }").'}</div>
-        <div class="map2d-toolctx-info">Variáveis já prontas no escopo: <code>obj</code> (o próprio objeto — aceita tanto <code>obj.color</code>/<code>obj.rotation</code>/<code>obj.width</code>/<code>obj.depth</code>/<code>obj.height</code>/<code>obj.name</code> em inglês quanto <code>obj.cor</code>/<code>obj.angulo</code>/<code>obj.largura</code>/<code>obj.profundidade</code>/<code>obj.altura</code>/<code>obj.nome</code> em português — são o MESMO campo), <code>SceneObjects</code>, <code>Scripting</code>, <code>map</code>, <code>THREE</code>, <code>Utils</code>, <code>view3d</code>. <code>Start()</code> roda uma vez antes do primeiro quadro; <code>Update()</code> roda a cada quadro — ambas automáticas, sem precisar de Gatilho de Evento.</div>
-      </div>`;
+    overlay.innerHTML = window.MapDynamicCards.scriptCodeEditor.call(this, entity, comp);
     const ta = overlay.querySelector('#comp-code-textarea');
     const fnsEl = overlay.querySelector('#comp-code-fns');
     const updateFnsInfo = (code) => {
@@ -19417,7 +19069,7 @@ const MapView = {
   // [14/09/2026 UTC] NOVO — pedido verbatim (item 3): "Comece a
   // refatoração de todas as janelas de propriedade 2D para 'cards'." Este
   // é o painel ESCOLHIDO como piloto do padrão "card persistente" nesta
-  // rodada (ver justificativa detalhada em progresso-sessao.md — resumo:
+  // rodada (resumo:
   // `_openObjectPanel`/`_openFotoPinPopover`, os dois candidatos sugeridos
   // pelo pedido, têm HTML/wiring MUITO maiores e dependentes do tipo de
   // objeto/estado assíncrono, arriscado de generalizar sem navegador pra
@@ -19441,15 +19093,14 @@ const MapView = {
   // mais um painel de parede. `_closePanel()` continua REMOVENDO o
   // elemento do DOM de verdade (não virou display:none permanente) — a
   // "persistência" aqui é entre REABERTURAS enquanto o painel já está na
-  // tela (trocar de parede sem fechar), não através de um fechar/reabrir;
-  // ver progresso-sessao.md pra as limitações e o que falta pra ser um
+  // tela (trocar de parede sem fechar), não através de um fechar/reabrir; falta ainda
+  // ser um
   // card "de verdade" na pasta cards/.
   // [14/09/2026 UTC] ATUALIZADO — pedido verbatim: "continue a
   // refatoração." Na RODADA 45 este piloto atualizava só os CAMPOS de
   // espessura/cor diretamente no DOM (`refresh` mexia em `input.value`),
   // deixando os fieldsets de Script/Histórico presos aos dados da parede
-  // ANTIGA até um fechar/reabrir de verdade (limitação nº2 documentada em
-  // progresso-sessao.md). Agora o padrão foi trocado pra "reconstrução
+  // ANTIGA até um fechar/reabrir de verdade (limitação nº2 documentada). Agora o padrão foi trocado pra "reconstrução
   // completa do CONTEÚDO, mas reaproveitando o MESMO elemento externo
   // (`panel`)": `refresh()` faz `panel.innerHTML = buildHtml(novaParede)`
   // e religa todo mundo de novo (`wire(novaParede)`) — mais simples e
@@ -19461,7 +19112,7 @@ const MapView = {
   // de parede com o painel já aberto — só o conteúdo interno muda — então
   // posição arrastada/z-index não pulam. Limitação nº1 (sobreviver a um
   // fechar/reabrir DE VERDADE, via `_closePanel()`) continua NÃO resolvida
-  // nesta rodada — ver progresso-sessao.md.
+  // nesta rodada.
   // [14/09/2026 UTC] RESOLVIDO (RODADA 47) — pedido verbatim: "continue a
   // refatoração até concluí-la desta vez." A limitação nº1 citada logo
   // acima FOI resolvida nesta rodada: `_closePanel()` não remove mais o
@@ -19469,8 +19120,8 @@ const MapView = {
   // e o guard logo abaixo passou a checar `this._wallPanelEl?.isConnected`
   // (elemento próprio deste tipo, sobrevive a um fechar de verdade) em vez
   // de `this._panelEl?.dataset.panelType==='wall'` (que só sobrevivia
-  // enquanto o painel nunca tivesse sido fechado). Ver progresso-sessao.md,
-  // RODADA 47, pra os outros 6 tipos migrados no mesmo espírito.
+  // enquanto o painel nunca tivesse sido fechado). RODADA 47:
+  // os outros 6 tipos migraram no mesmo espírito.
   _openWallPanel(wall) {
     this._selectedWallId = wall.id;
     this._renderer.selectedWallId = wall.id;
@@ -19622,10 +19273,11 @@ const MapView = {
           ? `<label class="map-panel-field"><span>Posição na parede (m)</span><input type="number" step="0.05" id="porta-pos" value="${(d.posAoLongoDaParede || 0).toFixed(2)}"></label>
              <div class="map2d-toolctx-info" style="display:block;margin:4px 0;">🔗 presa à parede — se move junto com ela</div>
              <label class="map-panel-field" title="Rotação adicional em relação ao alinhamento com a parede — 0° = alinhada à parede (padrão)."><span>Rotação (°, relativa à parede)</span><input type="number" step="1" id="porta-rotacao" value="${Math.round((d.anguloExtra || 0) * 180 / Math.PI)}"></label>`
-          : `<label class="map-panel-field"><span>Posição X (m)</span><input type="number" step="0.1" id="porta-x" value="${(d.x || 0).toFixed(2)}"></label>
-             <label class="map-panel-field"><span>Posição Y (m)</span><input type="number" step="0.1" id="porta-y" value="${(d.y || 0).toFixed(2)}"></label>
+          : `<label class="map-panel-field"><span>Posição X (m) <span class="map-panel-axis-arrow" title="Sentido em que o eixo X aumenta seus valores">→</span></span><input type="number" step="0.1" id="porta-x" value="${(d.x || 0).toFixed(2)}"></label>
+             <label class="map-panel-field"><span>Posição Z (m) <span class="map-panel-axis-arrow" title="Sentido em que este eixo aumenta seus valores (para baixo no mapa 2D)">↓</span></span><input type="number" step="0.1" id="porta-y" value="${(d.y || 0).toFixed(2)}"></label>
              <label class="map-panel-field"><span>Rotação (°)</span><input type="number" step="1" id="porta-rotacao-solta" value="${Math.round((d.angulo || 0) * 180 / Math.PI)}"></label>`}
         <label class="map-panel-field"><span>Altura em relação ao chão (m)</span><input type="number" step="0.05" min="0" max="3" id="porta-peitoril" value="${(d.alturaPeitoril || 0).toFixed(2)}"></label>
+        ${(d.elevacaoBase || 0) > 0 ? `<div class="map2d-toolctx-info" style="display:block;margin:4px 0;">🧱 apoiada em cima de outro objeto a ${(d.elevacaoBase || 0).toFixed(2)}m do chão — altura ABSOLUTA final: ${Mapping.doorWindowAlturaEfetiva(d).toFixed(2)}m</div>` : ''}
         <label class="map-panel-field" title="Só afeta a representação 3D — aberta corta um buraco de verdade na parede; fechada (padrão) não mexe na parede, só mostra a porta encostada nela. No 2D (vista de cima) não muda nada."><span>Aberta (3D)</span><input type="checkbox" id="porta-aberta" ${d.aberta ? 'checked' : ''}></label>
         <label class="map-panel-field"><span>Cor</span><input type="color" id="porta-cor" value="${hex}"></label>
         ${this._scriptFieldsetHtml('porta', d)}
@@ -19739,16 +19391,30 @@ const MapView = {
         <label class="map-panel-field"><span>Tipo</span>
           <select id="janela-tipo">${Object.entries(WINDOW_TYPES).map(([k, v]) => `<option value="${k}" ${k === (j.tipo || 'padrao') ? 'selected' : ''}>${Utils.escapeHtml(v.label)}</option>`).join('')}</select>
         </label>
-        <label class="map-panel-field"><span>Largura (m)</span><input type="number" step="0.05" min="0.3" max="4" id="janela-largura" value="${(j.largura || 1.2).toFixed(2)}"></label>
-        <label class="map-panel-field"><span>Altura (m)</span><input type="number" step="0.05" min="0.3" max="3" id="janela-altura" value="${(j.altura || 1.2).toFixed(2)}"></label>
+        <!-- [18/09/2026 UTC] MUDANÇA (RODADA 144) — pedido verbatim: limite
+             de LARGURA e ALTURA do vão da janela (tamanho físico) ajustado
+             de 4m/3m pra 10m cada (ver comentário grande abaixo, no campo
+             "Altura em relação ao chão — peitoril", sobre a distinção entre
+             este limite — dimensão do vão — e o limite de instalação). -->
+        <label class="map-panel-field"><span>Largura (m)</span><input type="number" step="0.05" min="0.3" max="10" id="janela-largura" value="${(j.largura || 1.2).toFixed(2)}"></label>
+        <label class="map-panel-field"><span>Altura (m)</span><input type="number" step="0.05" min="0.3" max="10" id="janela-altura" value="${(j.altura || 1.2).toFixed(2)}"></label>
         ${presa
           ? `<label class="map-panel-field"><span>Posição na parede (m)</span><input type="number" step="0.05" id="janela-pos" value="${(j.posAoLongoDaParede || 0).toFixed(2)}"></label>
              <div class="map2d-toolctx-info" style="display:block;margin:4px 0;">🔗 presa à parede — se move junto com ela</div>
              <label class="map-panel-field" title="Rotação adicional em relação ao alinhamento com a parede — 0° = alinhada à parede (padrão)."><span>Rotação (°, relativa à parede)</span><input type="number" step="1" id="janela-rotacao" value="${Math.round((j.anguloExtra || 0) * 180 / Math.PI)}"></label>`
-          : `<label class="map-panel-field"><span>Posição X (m)</span><input type="number" step="0.1" id="janela-x" value="${(j.x || 0).toFixed(2)}"></label>
-             <label class="map-panel-field"><span>Posição Y (m)</span><input type="number" step="0.1" id="janela-y" value="${(j.y || 0).toFixed(2)}"></label>
+          : `<label class="map-panel-field"><span>Posição X (m) <span class="map-panel-axis-arrow" title="Sentido em que o eixo X aumenta seus valores">→</span></span><input type="number" step="0.1" id="janela-x" value="${(j.x || 0).toFixed(2)}"></label>
+             <label class="map-panel-field"><span>Posição Z (m) <span class="map-panel-axis-arrow" title="Sentido em que este eixo aumenta seus valores (para baixo no mapa 2D)">↓</span></span><input type="number" step="0.1" id="janela-y" value="${(j.y || 0).toFixed(2)}"></label>
              <label class="map-panel-field"><span>Rotação (°)</span><input type="number" step="1" id="janela-rotacao-solta" value="${Math.round((j.angulo || 0) * 180 / Math.PI)}"></label>`}
-        <label class="map-panel-field"><span>Altura em relação ao chão — peitoril (m)</span><input type="number" step="0.05" min="0" max="3" id="janela-peitoril" value="${(j.alturaPeitoril || 1).toFixed(2)}"></label>
+        <!-- [18/09/2026 UTC] MUDANÇA (RODADA 144) — pedido verbatim: "a
+             altura do objeto janela está limitado a 3m, não deve haver este
+             limite, coloque 1000m." Este campo (peitoril = altura de
+             INSTALAÇÃO da janela em relação ao chão/parede, "alturaPeitoril")
+             é o parâmetro certo pra isso — não o campo "Altura (m)" acima
+             (esse é o tamanho FÍSICO do vão da janela, que passou a ter
+             limite de 10m em vez disso, ver comentário grande acima). Limite
+             de 3m removido, virou 1000m (permite paredes/prédios altos). -->
+        <label class="map-panel-field"><span>Altura em relação ao chão — peitoril (m)</span><input type="number" step="0.05" min="0" max="1000" id="janela-peitoril" value="${(j.alturaPeitoril || 1).toFixed(2)}"></label>
+        ${(j.elevacaoBase || 0) > 0 ? `<div class="map2d-toolctx-info" style="display:block;margin:4px 0;">🧱 apoiada em cima de outro objeto a ${(j.elevacaoBase || 0).toFixed(2)}m do chão — altura ABSOLUTA final: ${Mapping.doorWindowAlturaEfetiva(j).toFixed(2)}m</div>` : ''}
         <label class="map-panel-field"><span>Grade de proteção</span><input type="checkbox" id="janela-grade" ${j.grade ? 'checked' : ''}></label>
         <label class="map-panel-field"><span>Bandeira (abre só o topo)</span><input type="checkbox" id="janela-bandeira" ${j.bandeira ? 'checked' : ''}></label>
         <label class="map-panel-field" title="Só afeta a representação 3D — aberta corta um buraco de verdade na parede; fechada (padrão) não mexe na parede, só mostra a janela encostada nela. No 2D (vista de cima) não muda nada."><span>Aberta (3D)</span><input type="checkbox" id="janela-aberta" ${j.aberta ? 'checked' : ''}></label>
@@ -19796,9 +19462,13 @@ const MapView = {
         const fresh = (this._map.janelas || []).find((x) => x.id === j.id);
         this._windowPanelApi.refresh(fresh || { ...j, ...patch });
       };
-      panel.querySelector('#janela-largura').oninput = (e) => salvar({ largura: Utils.clamp(parseFloat(e.target.value) || 1.2, 0.3, 4) });
-      panel.querySelector('#janela-altura').oninput = (e) => salvar({ altura: Utils.clamp(parseFloat(e.target.value) || 1.2, 0.3, 3) });
-      panel.querySelector('#janela-peitoril').oninput = (e) => salvar({ alturaPeitoril: Utils.clamp(parseFloat(e.target.value) || 1, 0, 3) });
+      // [18/09/2026 UTC] MUDANÇA (RODADA 144) — clamps em JS espelhando os
+      // novos limites dos atributos min/max acima: largura/altura do vão
+      // até 10m; peitoril (instalação) sem o limite antigo de 3m, agora até
+      // 1000m.
+      panel.querySelector('#janela-largura').oninput = (e) => salvar({ largura: Utils.clamp(parseFloat(e.target.value) || 1.2, 0.3, 10) });
+      panel.querySelector('#janela-altura').oninput = (e) => salvar({ altura: Utils.clamp(parseFloat(e.target.value) || 1.2, 0.3, 10) });
+      panel.querySelector('#janela-peitoril').oninput = (e) => salvar({ alturaPeitoril: Utils.clamp(parseFloat(e.target.value) || 1, 0, 1000) });
       panel.querySelector('#janela-grade').onchange = (e) => salvar({ grade: e.target.checked });
       panel.querySelector('#janela-bandeira').onchange = (e) => salvar({ bandeira: e.target.checked });
       panel.querySelector('#janela-aberta').onchange = (e) => salvar({ aberta: e.target.checked });
@@ -19888,8 +19558,8 @@ const MapView = {
       <div class="map-panel-head"><b>📷 Câmera</b><button type="button" class="icon-btn sm map-panel-close" title="Fechar">✕</button></div>
       <label class="map-panel-field"><span>Nome</span><input type="text" id="cam-nome" value="${Utils.escapeHtml(cam.nome || '')}"></label>
       <label class="map-panel-field"><span>Direção (° em relação ao eixo X)</span><input type="number" step="1" id="cam-angulo" value="${grausAngulo}"></label>
-      <label class="map-panel-field"><span>Posição X (m)</span><input type="number" step="0.1" id="cam-x" value="${cam.x.toFixed(2)}"></label>
-      <label class="map-panel-field"><span>Posição Y (m)</span><input type="number" step="0.1" id="cam-y" value="${cam.y.toFixed(2)}"></label>
+      <label class="map-panel-field"><span>Posição X (m) <span class="map-panel-axis-arrow" title="Sentido em que o eixo X aumenta seus valores">→</span></span><input type="number" step="0.1" id="cam-x" value="${cam.x.toFixed(2)}"></label>
+      <label class="map-panel-field"><span>Posição Z (m) <span class="map-panel-axis-arrow" title="Sentido em que este eixo aumenta seus valores (para baixo no mapa 2D)">↓</span></span><input type="number" step="0.1" id="cam-y" value="${cam.y.toFixed(2)}"></label>
       <label class="map-panel-field"><span>Andar / piso</span><input type="number" step="1" id="cam-piso" value="${cam.piso || 0}"></label>
       <div class="map-panel-photo" id="cam-foto-preview">${cam.fotoId ? 'Carregando prévia…' : 'Nenhuma foto associada.'}</div>
       ${this._camPropsFieldsetHtml('cam', cam)}
@@ -20871,6 +20541,7 @@ const MapView = {
     backBtn.onclick = () => {
       el.classList.add('hidden');
       cameraRoot.classList.remove('hidden');
+      cameraPanel.classList.remove('hidden');
     };
     // ATUALIZADO (06/09/2026) — id do toggle renomeado pra
     // `-snap-top` (ele vive no `.toprow` de novo, ver comentário grande no
@@ -21002,7 +20673,7 @@ const MapView = {
           mirrorZ: destino.mirrorZ,
           tiltArrow: destino.tiltArrow,
         };
-        if (previewCanvas) this._drawFotoPinPreview(previewCanvas, fotoCache?.mapaDirAngulo || 0, fotoCache?.mapaRotPerp || 0, pose);
+        if (previewCanvas) this._drawFotoPinPreview(previewCanvas, -(fotoCache?.mapaDirAngulo || 0), fotoCache?.mapaRotPerp || 0, pose);
         if (t < 1) { _wheelOrbitAnimRAF = requestAnimationFrame(passo); }
         else {
           _wheelOrbitAnimRAF = null;
@@ -21217,7 +20888,7 @@ const MapView = {
       // este campo nunca é tocado por ele.
       // [15/09/2026 UTC] Sinal de dirAngulo invertido para giro horario (pedido: sentido
       // horario ao aumentar os graus, igual ao preview 3D e ao icone 2D).
-      if (this._fotoPinWheelMode === 'tilt') return { yaw: Math.PI / 2 + dirAngulo, pitch: 0, tiltArrow: true };
+      if (this._fotoPinWheelMode === 'tilt') return { yaw: Math.PI / 2 - dirAngulo, pitch: 0, tiltArrow: true };
       // `mirrorZ: true` — ver auditoria grande acima: reflexão do eixo Z do
       // MUNDO, necessária pra esta câmera fixa de topo (pitch=-90°) mostrar
       // "norte=cima" com o sentido de giro certo — não é um ajuste "extra" em
@@ -21275,7 +20946,7 @@ const MapView = {
       // real, mesma do modo Direção), que reage de verdade a QUALQUER
       // direção de arrasto.
       if (orbitAtual) orbitAtual.tiltArrow = !modoOrbitLivre && this._fotoPinWheelMode === 'tilt';
-      if (previewCanvas) this._drawFotoPinPreview(previewCanvas, fotoCache?.mapaDirAngulo || 0, fotoCache?.mapaRotPerp || 0, orbitAtual);
+      if (previewCanvas) this._drawFotoPinPreview(previewCanvas, -(fotoCache?.mapaDirAngulo || 0), fotoCache?.mapaRotPerp || 0, orbitAtual);
       // [14/09/2026 UTC] NOVO — pedido verbatim: "a perspectiva que a
       // bolinha e a seta estavam no momento do clique deve ser o ponto de
       // partida para a renderização ali [...] Não de outras rotações (o que
@@ -21358,6 +21029,7 @@ const MapView = {
       // inversão de sentido, e o `+90` cosmético já compensava certo.
       // [15/09/2026 UTC] Sinal invertido: marcador do dial deve girar em sentido horario
       // conforme os graus aumentam.
+      // O valor gravado é o ângulo físico (horário a partir do topo): o marcador azul gira no mesmo sentido do arrasto.
       markerDir.style.transform = `rotate(${grausDir}deg)`;
       markerTilt.style.transform = `rotate(${grausTilt + 90}deg)`;
       label.textContent = `${this._fotoPinWheelMode === 'tilt' ? grausTilt : grausDir}°`;
@@ -21591,7 +21263,7 @@ const MapView = {
       // (ver comentário grande lá): o modo 'dir' precisa negar `graus` pro
       // marcador girar no MESMO sentido do arrasto/seta real, o modo 'tilt'
       // continua só com o deslocamento cosmético de sempre.
-      marker.style.transform = `rotate(${tilt ? graus + 90 : -graus}deg)`;
+      marker.style.transform = `rotate(${tilt ? graus + 90 : graus}deg)`;
       label.textContent = `${graus}°`;
       // Só grava no banco quando o valor ENCAIXADO realmente muda (senão
       // `pointermove` dispararia dezenas de gravações por segundo à toa).
@@ -22195,8 +21867,8 @@ const MapView = {
     // indicava sentido horário SEM negar `dirAngulo` aqui — mas o usuário
     // reporta visualmente o oposto ao vivo no navegador, então esta rodada
     // prioriza o teste pedido explicitamente (negar o sinal) sobre a análise
-    // estática. Ver `progresso-sessao.md` (RODADA 40) para o resultado deste
-    // teste assim que confirmado.
+    // estática. O resultado deste teste (RODADA 40)
+    // fica pendente de confirmação.
     dir = rotX(dir, -(rotPerp || 0));
     dir = rotY(dir, -(dirAngulo || 0));
     if (orbit.tiltArrow) {
@@ -22467,8 +22139,8 @@ const MapView = {
       <label class="map-panel-field"><span>Conteúdo</span><textarea id="txt-conteudo" rows="2" style="resize:vertical">${Utils.escapeHtml(t.content || '')}</textarea></label>
       <label class="map-panel-field"><span>Cor</span><input type="color" id="txt-cor" value="${t.cor || '#ffffff'}"></label>
       <label class="map-panel-field"><span>Tamanho (px)</span><input type="number" step="1" min="8" max="72" id="txt-tamanho" value="${t.tamanho || 14}"></label>
-      <label class="map-panel-field"><span>Posição X (m)</span><input type="number" step="0.1" id="txt-x" value="${t.x.toFixed(2)}"></label>
-      <label class="map-panel-field"><span>Posição Y (m)</span><input type="number" step="0.1" id="txt-y" value="${t.y.toFixed(2)}"></label>
+      <label class="map-panel-field"><span>Posição X (m) <span class="map-panel-axis-arrow" title="Sentido em que o eixo X aumenta seus valores">→</span></span><input type="number" step="0.1" id="txt-x" value="${t.x.toFixed(2)}"></label>
+      <label class="map-panel-field"><span>Posição Z (m) <span class="map-panel-axis-arrow" title="Sentido em que este eixo aumenta seus valores (para baixo no mapa 2D)">↓</span></span><input type="number" step="0.1" id="txt-y" value="${t.y.toFixed(2)}"></label>
       <label class="map-panel-field"><span>Rotação (°)</span><input type="number" step="1" id="txt-angulo" value="${Math.round((t.angulo || 0) * 180 / Math.PI)}"></label>
       ${this._scriptFieldsetHtml('txt', t)}
       ${this._historicoFieldsetHtml('txt', t)}
@@ -22989,7 +22661,20 @@ const MapView = {
    *     como no modo 'alfabetica' (mesmos botões, mesmo grid, sem nenhum
    *     rótulo/separador visual entre grupos — ver `_openObjectPickerPanel`,
    *     removido na RODADA 129 por pedido explícito do usuário). */
-  _organizarCatalogoObjetos(catalogo, modo, ordemLivre) {
+  _organizarCatalogoObjetos(catalogo, modo, ordemLivre, cfg) {
+    // 'porCategoria' usa a MESMA sequência do antigo 'porTipo' (mesma base lado a lado);
+    // quem desenha (renderGrid) separa por categoria com subtítulos. `cfg.objetoNovoPosicao`
+    // ('misturado' padrão | 'inicio' | 'fim') move os objetos importados ainda "novos".
+    const base = this._organizarCatalogoObjetosBase(catalogo, modo === 'porCategoria' ? 'porTipo' : modo, ordemLivre);
+    const pos = cfg?.objetoNovoPosicao || 'misturado';
+    if (modo === 'livre' || pos === 'misturado' || !window.NovosObjetos) return base;
+    const novos = base.filter((o) => window.NovosObjetos.ehNovo(o.key, cfg));
+    if (!novos.length) return base;
+    const resto = base.filter((o) => !novos.includes(o));
+    return pos === 'inicio' ? novos.concat(resto) : resto.concat(novos);
+  },
+
+  _organizarCatalogoObjetosBase(catalogo, modo, ordemLivre) {
     if (modo === 'alfabetica') {
       return catalogo.slice().sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
     }
@@ -23028,14 +22713,19 @@ const MapView = {
     // sendo usada por `_pickObjectType` (modal "Trocar tipo" de um objeto
     // já colocado) e por `_openFormsPickerPanel` (ferramenta Formas) — só a
     // injeção delas NESTE painel específico foi removida.
+    // Garante tipos customizados/importados e a lista de objetos excluídos carregados antes de montar a grade.
+    try { await window.Modelos3DView?.ensureCustomTypesRegistered?.(); } catch (e) { /* segue */ }
     const catalogoBase = window.Icons?.mapObjectCatalog?.() || [];
     // [RODADA 128] Modo de organização da grade + ordem "Livre" salva —
     // pedido do usuário verbatim (dropdown "Organizar:" logo abaixo do
     // título, com 3 opções, persistido pra carregar igual da próxima vez).
     // Lidos ANTES de montar o HTML pra já abrir na ordem certa (sem
     // "piscar" reordenando 1 frame depois).
-    let organizeMode = await DB.getSetting('mapa2dObjPickerOrganizeMode', 'porTipo');
-    if (!['alfabetica', 'porTipo', 'livre'].includes(organizeMode)) organizeMode = 'porTipo';
+    // [20/09/2026 UTC] "Por tipo" virou "Por categoria" (novo padrão); 'porTipo' salvo antes migra sozinho.
+    let organizeMode = await DB.getSetting('mapa2dObjPickerOrganizeMode', 'porCategoria');
+    if (organizeMode === 'porTipo') organizeMode = 'porCategoria';
+    if (!['alfabetica', 'porCategoria', 'livre'].includes(organizeMode)) organizeMode = 'porCategoria';
+    const cfgObj = (typeof MapConfig !== 'undefined') ? await MapConfig.get() : {};
     let ordemLivre = (await DB.getSetting('mapa2dObjPickerOrdemLivre', null)) || [];
     if (!this._container) return; // painel fechado enquanto esperava os awaits acima
     const panel = document.createElement('div');
@@ -23049,39 +22739,7 @@ const MapView = {
     // (necessário pras alças de redimensionar poderem "transbordar" pra
     // fora, ver comentário grande em `.map-layers-panel`, css/style.css).
     panel.className = 'map-obj-picker-panel map-obj-picker-panel-resizable';
-    panel.innerHTML = `
-      <div class="map-panel-clip">
-        <div class="map-obj-picker-head map-panel-head">
-          <b>🪑 Objetos — escolha o tipo</b>
-          <!-- NOVO (01/09/2026), item GRANDE #5 do pedido de 12 itens, verbatim:
-               "Para isso deve ter um botão de 'acessar modelos', então, abre-se
-               uma janela que cobre toda a tela (como nas 'configurações do
-               app')." + decisão do usuário (AskUserQuestion): "No painel de
-               Objetos do mapa (Recomendado)" — não em Configurações do app.
-               Abre a tela cheia nova Modelos3DView (ver js/modelos3d.js,
-               registrada em App.views), mesmo padrão de rota (App.navigate) já
-               usado por Configurações — botão de "espaço restante" (.map-panel-
-               head > b) já suporta 2+ botões à direita, ver comentário grande
-               logo acima em css/style.css. -->
-          <button type="button" class="icon-btn sm" id="map-obj-picker-modelos3d" title="🛠️ Acessar modelos — editar o modelo 3D (detalhado/low poly) de cada tipo de objeto padrão">🛠️</button>
-          <button type="button" class="icon-btn sm" id="map-obj-picker-close" title="Fechar (o mesmo que apertar o botão Objetos de novo)">✕</button>
-        </div>
-        <!-- [RODADA 128] NOVO — dropdown "Organizar:", pedido do usuário
-             verbatim: "no topo da janela, em baixo da barra de título e
-             acima dos objetos representados, coloque um botão dropdown com
-             3 opções". Ver a função _organizarCatalogoObjetos acima pro
-             detalhamento de cada modo. -->
-        <div class="map-obj-picker-organize-row" style="padding:6px 10px 0 10px; display:flex; align-items:center; gap:6px">
-          <label for="map-obj-picker-organize" style="font-size:11px; color:var(--text-dim); white-space:nowrap">Organizar:</label>
-          <select id="map-obj-picker-organize" style="flex:1; font-size:12px">
-            <option value="alfabetica">Ordem alfabética</option>
-            <option value="porTipo">Por tipo</option>
-            <option value="livre">Livre (arraste para reordenar)</option>
-          </select>
-        </div>
-        <div class="map-obj-picker-grid" id="map-obj-picker-grid"></div>
-      </div>
-    `;
+    panel.innerHTML = window.MapPanelCards.objectPickerPanel();
     panel.querySelector('#map-obj-picker-organize').value = organizeMode;
     this._container.querySelector('.map2d-wrap')?.appendChild(panel);
     this._objectPickerEl = panel;
@@ -23167,13 +22825,40 @@ const MapView = {
     // só com a SEQUÊNCIA reordenada (agrupada por tipo) — mesmo grid/CSS,
     // sem wrapper extra nenhum por grupo.
     const renderGrid = () => {
-      const catalogo = this._organizarCatalogoObjetos(catalogoBase, organizeMode, ordemLivre);
-      grid.innerHTML = catalogo.map((o) => (
-        `<button type="button" class="map-obj-pick-item" data-key="${o.key}" title="${Utils.escapeHtml(o.label)}">
+      const catalogo = this._organizarCatalogoObjetos(catalogoBase, organizeMode, ordemLivre, cfgObj);
+      const agora = Date.now();
+      const botao = (o) => {
+        const selo = window.NovosObjetos ? window.NovosObjetos.seloHtml(o.key, cfgObj, agora) : '';
+        return `<button type="button" class="map-obj-pick-item${selo ? ' map-obj-pick-novo' : ''}" data-key="${o.key}" title="${Utils.escapeHtml(o.label)}">
               <span class="ic">${o.svg}</span>
-              <span class="t">${Utils.escapeHtml(o.label)}</span>
-            </button>`
-      )).join('');
+              <span class="t">${Utils.escapeHtml(o.label)}</span>${selo}
+            </button>`;
+      };
+      const rotulo = (txt, cor, icone) => `<div class="map-obj-pick-group-label" style="--cat-cor:${cor}"><span class="cat-ic">${icone}</span><span>${Utils.escapeHtml(txt)}</span></div>`;
+      if (organizeMode === 'porCategoria' && window.ObjCategorias) {
+        const pos = cfgObj?.objetoNovoPosicao || 'misturado';
+        const novosSep = pos !== 'misturado' && window.NovosObjetos ? catalogo.filter((o) => window.NovosObjetos.ehNovo(o.key, cfgObj, agora)) : [];
+        const grupos = new Map();
+        catalogo.forEach((o) => {
+          if (novosSep.includes(o)) return;
+          const id = window.ObjCategorias.idDe(o.key);
+          if (!grupos.has(id)) grupos.set(id, []);
+          grupos.get(id).push(o);
+        });
+        const partes = [];
+        const blocoNovos = () => { if (novosSep.length) { partes.push(rotulo('Objetos novos importados', '#ffd166', '✦')); novosSep.forEach((o) => partes.push(botao(o))); } };
+        if (pos === 'inicio') blocoNovos();
+        window.ObjCategorias.CATEGORIAS.forEach((c) => {
+          const itens = grupos.get(c.id);
+          if (!itens || !itens.length) return;
+          partes.push(rotulo(c.label, c.cor, c.icone));
+          itens.forEach((o) => partes.push(botao(o)));
+        });
+        if (pos === 'fim') blocoNovos();
+        grid.innerHTML = partes.join('');
+      } else {
+        grid.innerHTML = catalogo.map(botao).join('');
+      }
       grid.querySelectorAll('.map-obj-pick-item[data-key]').forEach((b) => {
         if (organizeMode === 'livre') objSortable.attach(b);
         else b.onclick = () => escolherTipo(b.dataset.key);
@@ -24127,6 +23812,7 @@ const MapView = {
     }
     return null;
   },
+
 
   /** NOVO (04/09/2026), pedido verbatim: "A ferramenta 'Traço guia',
    *  também, deve ter o seu habilitador para poder reposicionar os que já
@@ -25509,16 +25195,7 @@ const MapView = {
     const primeiraForma = refs.find((r) => r.kind === 'object' && (r.ref.forma === 'retangulo' || r.ref.forma === 'poligono' || r.ref.forma === 'imagem'));
     const fillHex = temSelecao ? this._coresRefColorHex(refs[0].ref) : (this._coresLastFill || '#8a92a3');
     const strokeHex = primeiraForma ? (primeiraForma.ref.corContorno || primeiraForma.ref.cor || '#8a92a3') : (this._coresLastStroke || '#8a92a3');
-    panel.innerHTML = `
-      <div class="map-obj-picker-head map-panel-head map-colors-head"><b>🎨 Cores</b><button type="button" class="icon-btn sm map-panel-close map-colors-close" title="Fechar">✕</button></div>
-      <div class="map-colors-body">
-        ${!temSelecao ? `<p class="map-colors-empty">Nada selecionado — as cores abaixo valem só como padrão pras PRÓXIMAS formas desenhadas. Selecione algo (ferramenta 🖱️ Selecionar) pra editar a cor de itens já colocados.</p>` : ''}
-        <label class="map-panel-field"><span>Preenchimento</span><input type="color" id="cores-fill" value="${fillHex}"></label>
-        <label class="map-panel-field" title="${desabilitaContorno ? 'Nenhum item desenhável (retângulo/polígono/imagem — ex.: mesa/pilar/Formas) está selecionado, então o contorno não tem o que afetar na seleção — mas ainda vale como padrão pra próxima forma desenhada' : 'Cor do contorno — na seleção, só afeta formas desenháveis (retângulo/polígono/imagem: mesa, pilar, Formas); sempre vale também como padrão pra próxima forma desenhada'}">
-          <span>Contorno</span><input type="color" id="cores-stroke" value="${strokeHex}">
-        </label>
-      </div>
-    `;
+    panel.innerHTML = window.MapDynamicCards.coresPanel.call(this);
     panel.querySelector('.map-colors-close').onclick = () => this._closeCoresPanel();
     panel.querySelector('#cores-fill').oninput = (e) => this._coresOnColorInput('cor', e.target.value);
     panel.querySelector('#cores-stroke').oninput = (e) => this._coresOnColorInput('corContorno', e.target.value);
@@ -25593,179 +25270,10 @@ const MapView = {
    *  como recursos já implementados, pra não inventar datas que não se sabe
    *  ao certo. */
   _openChangelogModal() {
-    const modal = document.createElement('div');
-    modal.className = 'modal-backdrop';
-    modal.innerHTML = `
-      <div class="modal-sheet" style="max-width:560px; text-align:left">
-        <div class="handle"></div>
-        <h3 style="margin-top:0">🗒️ Log de alterações</h3>
-        <div style="font-size:13px; color:var(--text-dim); line-height:1.6">
-          <!-- NOVO (02/09/2026), pedido verbatim (mensagem única, gigante, rodada D) —
-               resumo em português simples dos itens com efeito visível pro usuário final
-               (o changelog TÉCNICO detalhado, item a item, continua no comentário do
-               CACHE_VERSION em sw.js). Bloco novo INSERIDO ACIMA do bloco "02/09/2026"
-               já existente (da rodada C, mesmo dia) — mesmo padrão já usado antes pra
-               2 rodadas no mesmo dia: 2 blocos "02/09/2026" seguidos, mais recente
-               primeiro, igual qualquer changelog cronológico. -->
-          <!-- NOVO (12/09/2026), pedido verbatim: "Atualize o 'Log de alterações'
-               presente em '?' (Ajuda do app). Mencionando o 'depth buffer/shader,
-               sem plano 3D'. E todo o processo para chegar até ele de forma
-               resumida." — bloco novo cobrindo TODA a jornada de correção do
-               backdrop 'Trás' (foto atrás dos objetos 3D) desta sessão, do
-               primeiro bug relatado (chão cobrindo a foto inteira) até a última
-               correção (retângulo preto ao arrastar a vista), resumida em
-               linguagem simples — o detalhamento técnico item a item continua em
-               claude/progresso-sessao.md (Project) e no comentário do
-               CACHE_VERSION em sw.js. Inserido ACIMA de tudo, igual o padrão já
-               usado (mais recente primeiro). -->
-          <p style="font-weight:600; color:var(--text); margin-bottom:4px">12/09/2026</p>
-          <ul style="margin:0 0 14px; padding-left:18px">
-            <li><b>Ver em 3D — foto marcada como "Trás" (atrás dos objetos):</b> esta rodada arrumou uma sequência de bugs que foram aparecendo um atrás do outro, nesta ordem: <br>
-            (1) <i>Problema:</i> o chão ficava escondido na TELA INTEIRA em vez de só na região da foto. <i>Solução:</i> o material do chão passou a "decidir sozinho", pixel a pixel, se aquele ponto está dentro do retângulo da foto — só ali ele desaparece; no resto da tela continua aparecendo normal. <br>
-            (2) <i>Problema:</i> o vidro das janelas ficava ROSA CHOQUE por cima da foto. <i>Solução:</i> o vidro passou a ser desenhado À PARTE, num "desenho" separado que reaproveita o depth buffer/z-buffer que a cena já calcula (pra continuar ficando escondido atrás de paredes/móveis de verdade) e um shader próprio — sem precisar adicionar nenhum plano 3D novo à cena — e só DEPOIS esse resultado é "colado" por cima da imagem final. <br>
-            (3) <i>Problema:</i> depois da correção acima, o vidro passou a ficar meio ACINZENTADO. <i>Solução:</i> a cor do vidro nesse "desenho à parte" estava sendo escurecida em dobro ao ser colada por cima da foto (um detalhe de como a transparência é calculada); corrigido revertendo esse escurecimento antes de colar, deixando o vidro de volta branco/claro, igual ao modo normal. <br>
-            (4) <i>Problema:</i> ao segurar Shift + botão do meio do mouse e arrastar bastante a vista pra cima, um RETÂNGULO PRETO aparecia atrás da foto. <i>Solução:</i> o cálculo que decide ONDE "furar" a tela pra foto aparecer estava travando numa posição errada assim que a foto saía bastante da área visível; corrigido pra sempre recalcular esse recorte corretamente em qualquer nível de arrasto, inclusive quando a foto sai 100% da tela (aí simplesmente não há nada pra "furar").</li>
-          </ul>
-          <p style="font-weight:600; color:var(--text); margin-bottom:4px">09/09/2026</p>
-          <ul style="margin:0 0 14px; padding-left:18px">
-            <li><b>Tela "Info":</b> corrigido um bug em que trocar de tela e voltar pra "Info" fazia os botões "Ver lista simples", "⚙️ Configurações do app", "❓ Ajuda" e o botão de nome do layout (o "quádruplo") sumirem — a causa era um mecanismo antigo ("modo Info", ligado a um seletor que também foi removido) que ficou desatualizado depois da tela "Info" virar parte permanente da divisão de telas.</li>
-            <li><b>Tela "Info":</b> removido o seletor (dropdown) de trocar de tela que ficava dentro dela — era redundante com o seletor próprio de cada divisão da tela.</li>
-            <li><b>Configurações do app:</b> o botão "⚙️" agora abre a tela de Configurações OCUPANDO A TELA INTEIRA (antes só revelava/redimensionava uma divisão pequena, que às vezes passava despercebida).</li>
-            <li><b>Planta baixa:</b> corrigido um bug que fazia a barra de cabeçalho inteira (Copiar/Colar/Recortar/Ferramentas/Camadas/Histórico) sumir ao trocar de tela e voltar — a causa raiz era mais geral (afetava qualquer tela que "empresta" elementos fixos do topo do app) e foi corrigida na raiz.</li>
-            <li><b>"Ver em 3D" — aglomerado de tijolos:</b> agora é um objeto que pode ser modelado (fundido numa malha editável, vértice a vértice) ou excluído — apontando com "Mirar" e clicando nele, abre um cartão com as opções "🔧 Modelar em 3D" e "🗑️ Excluir".</li>
-            <li><b>Info — nome do layout:</b> a caixinha que guarda o nome agora tem tamanho fixo (não estica/encolhe mais) e o texto fica alinhado à esquerda, em vez de centralizado.</li>
-            <li><b>Info — excluir layout:</b> corrigido um "piscar" da tela "Botões" ao excluir vários layouts com a mesma configuração em sequência rápida.</li>
-            <li><b>Botão "Workflow" removido</b> — não fazia mais sentido dentro da tela "Botões".</li>
-            <li><b>Layout padrão do app mudou:</b> "Info" em cima (largura toda), "Tabela" e "Ver em 3D" lado a lado no meio (largura toda), "Botões" embaixo (largura toda).</li>
-            <li><b>Novo: layout "Clássico"</b> — um jeito ALTERNATIVO de usar o app, igual era antes do "Workspace" (blocos redimensionáveis) existir: uma tela por vez, em tela cheia, com barra de navegação fixa embaixo (Tabela/Cartões/Fotos/Mapa/Buscar). Liga/desliga a qualquer momento pelo botão "🔀" no cabeçalho (ao lado de "⚙️ Configurações"/"❓ Ajuda") ou em "⚙️ Configurações do app → 📦 Catálogo → 🖥️ Layout do app" — a escolha fica salva para a próxima vez que o app abrir.</li>
-            <li><b>Workspace — divisões empilhadas:</b> corrigido um bug em que arrastar a barra de uma divisão que tinha 2 ou mais outras empilhadas por dentro dela conseguia espremer o espaço além do que essas divisões internas suportavam — as barras internas ficavam "furando" umas às outras (se sobrepondo) em vez de se travarem no limite umas das outras. Essa checagem de colisão agora acontece EM TEMPO REAL, a cada movimento do mouse durante o arrasto — antes só era corrigida no instante de soltar o botão do mouse, então dava pra ver as divisões se sobrepondo por uma fração de segundo até o ajuste final.</li>
-            <li><b>Workspace — divisões lado a lado:</b> corrigido um bug parecido, na direção horizontal: um limite de segurança que eu tinha colocado no cálculo estava, sem querer, deixando o arrasto ir ALÉM do que era seguro em telas com painéis bem largos travados de um dos lados — o conteúdo desses painéis transbordava e dava a impressão de "várias divisões encolhendo" ao mesmo tempo. Agora o limite usa sempre o valor calculado de verdade, sem esse piso artificial.</li>
-          </ul>
-          <p style="font-weight:600; color:var(--text); margin-bottom:4px">02/09/2026</p>
-          <ul style="margin:0 0 14px; padding-left:18px">
-            <li><b>Organizar — arrastar e soltar dentro do mesmo mapa (Grade):</b> agora dá pra arrastar uma plaquinha de patrimônio ou uma foto pra reordenar a lista, com animação de "flipagem" nos vizinhos (mesmo efeito visual do "Ver lista simples") e uma caixa tracejada azul marcando o lugar — a foto continua carregando as vinculações dela junto.</li>
-            <li><b>Organizar — arrastar entre mapas diferentes:</b> corrigido um bug em que clicar numa plaquinha destacava TODAS as vinculadas à mesma foto — agora só a plaquinha clicada é destacada, e a foto/os outros patrimônios só se juntam ao grupo quando o arrasto realmente cruza pra outro mapa. O fantasma que segue o cursor também ficou fiel ao tamanho de fonte/cantos/contorno originais em qualquer zoom da grade, e aparecem caixas tracejadas mostrando onde cada item vai ser acomodado no mapa de destino. Arrastar uma foto agora funciona clicando direto em cima da miniatura, não só ao redor dela.</li>
-            <li><b>Organizar — miniatura ao vivo da planta:</b> corrigido um deslocamento errado ("paralax") ao clicar e arrastar dentro da miniatura pra navegar.</li>
-            <li><b>Organizar — menu "Ver todas as opções de ordem":</b> fundo mais escuro, com mais contraste em relação às plaquinhas claras.</li>
-            <li><b>Organizar:</b> a lista expansível de objetos do mapa agora usa o mesmo visual/animação das outras listas de vinculação, com botão de tesoura pra desvincular.</li>
-            <li><b>Ver em 3D:</b> o botão "+" do lado esquerdo (atalho pro Modelador) agora fica sempre visível, mirando o objeto na frente da câmera — não só dentro do próprio Modelador.</li>
-            <li><b>Modelador — escada:</b> corrigido um bug em que só entrar e sair do Modelador (mesmo sem editar nada) trocava a escada por uma caixa genérica no 3D.</li>
-            <li><b>Iluminação — poste de luz:</b> ilumina ainda mais forte agora (9x o valor de uma luminária comum, no total).</li>
-          </ul>
-          <p style="font-weight:600; color:var(--text); margin-bottom:4px">02/09/2026</p>
-          <ul style="margin:0 0 14px; padding-left:18px">
-            <li><b>Organizar — arrastar e soltar (Grade):</b> agora dá pra clicar e arrastar uma foto ou um patrimônio (plaquinha) pra outro mapa — os dois vão sempre juntos quando a foto tem patrimônios vinculados. Enquanto arrasta, aparece um "cartão fantasma" seguindo o cursor e uma caixa tracejada no lugar de origem; soltar em cima do mesmo mapa (ou numa área vazia) cancela e tudo volta pro lugar; ao concluir uma transferência, uma seta animada mostra o caminho percorrido. Também dá pra arrastar um patrimônio pra reordenar a lista dentro do mesmo mapa (no modo de ordem "Personalizado").</li>
-            <li><b>Iluminação — poste de luz:</b> agora ilumina 3x mais forte (intensidade e alcance) do que uma luminária comum.</li>
-            <li><b>Iluminação — mais luminárias acesas ao mesmo tempo:</b> corrigido um limite baixo demais que fazia algumas luminárias não acenderem quando várias eram colocadas perto umas das outras — o limite agora acompanha a qualidade 3D escolhida nas configurações.</li>
-            <li><b>Modelador — botão do meio do mouse:</b> não dispara mais a rolagem automática do navegador (que travava a movimentação da câmera) dentro do "Editar" de um modelo 3D.</li>
-            <li><b>Organizar — exclusões mais rápidas:</b> a primeira marcação de exclusão de uma sequência não fica mais lenta em mapas com muitas fotos.</li>
-            <li><b>Organizar:</b> nova lista expansível com os objetos do mapa (móveis, luminárias etc.) embaixo da miniatura da planta, nos dois modos (Cartões e Grade); e, na Grade, a foto ganhou o mesmo ícone "📏" com a quantidade de medidas que já existia no modo Cartões.</li>
-          </ul>
-          <p style="font-weight:600; color:var(--text); margin-bottom:4px">02/09/2026</p>
-          <ul style="margin:0 0 14px; padding-left:18px">
-            <li><b>Modelador — silhueta dourada corrigida:</b> o contorno do objeto selecionado (Modo Objeto) usa agora a técnica de "casco invertido" — corrigido um bug em que a silhueta aparecia como um bloco dourado sólido em vez de um contorno fino.</li>
-            <li><b>Modelador — lâmpadas geram luz de verdade:</b> ao criar uma lâmpada (Ponto, Sol, Spot, Hemisfério ou Área) em "Criar", ela agora ilumina a cena de acordo com o tipo escolhido, e acompanha o objeto ao mover/girar/escalar o grupo.</li>
-            <li><b>Modelador — divisória redimensionável</b> entre "Adicionar primitiva" e as propriedades do objeto criado, no menu lateral "Criar" (clique e arraste pra ajustar).</li>
-            <li><b>Modelos 3D — botão "+"</b> (acesso rápido ao Modelador) agora também aparece no visualizador "Ver em 3D" avulso, não só dentro do próprio Modelador.</li>
-            <li><b>Visualizador 3D — botão do meio do mouse:</b> não dispara mais o ícone de "arrastar página" do navegador ao orbitar a câmera.</li>
-            <li><b>Escada:</b> os degraus agora aparecem desenhados também no objeto já colocado na grade (2D), não só na pré-visualização antes de posicionar.</li>
-            <li><b>Organizar:</b> medidas marcadas para exclusão ganham botão "reverter"; fotos marcadas para exclusão continuam mostrando a miniatura por baixo do aviso vermelho.</li>
-          </ul>
-          <p style="font-weight:600; color:var(--text); margin-bottom:4px">01/09/2026</p>
-          <ul style="margin:0 0 14px; padding-left:18px">
-            <li><b>Escada 3D:</b> o objeto "Escada" ganhou representação de verdade no 3D (antes era uma caixa simples) — degraus empilhados, com quantidade configurável no painel do objeto (padrão 11, campo "Degraus"); tamanho de cada degrau se ajusta automaticamente à profundidade (medida no 2D) e à largura (padrão 130cm, também configurável) da escada; altura fixa de 2 metros no 3D.</li>
-            <li><b>Modelos 3D — "Ver em 3D" liberado sem customizar:</b> agora dá pra visualizar o 3D de qualquer um dos dois modelos (Formal/Informal) mesmo sem ter editado nenhum ainda — antes aparecia sempre "Só disponível depois de customizar este nível".</li>
-            <li><b>Modelos 3D — resolução do editor:</b> corrigida a baixa resolução do preenchimento e do gizmo ao "Editar" um modelo — a pré-visualização isolada não estava lendo as configurações reais de qualidade 3D do usuário (caía sempre no padrão de fábrica); gizmos de mover/girar/escalar ganharam mais segmentos (menos "poligonais"); e todo objeto modelado (no Modelador e nos Modelos 3D) agora tem as normais suavizadas por ângulo de dobra — superfícies curvas (esferas, cilindros) ficam lisas, e cantos de verdade (cubo) continuam nítidos.</li>
-            <li><b>Modelos 3D — clique/arraste na barra de topo do "Ver em 3D":</b> corrigido: clicar e arrastar na faixa onde ficam os botões (bem no topo do canvas) estava sendo interpretado como seleção de texto do navegador em vez de manipular o objeto pelo gizmo do Modelador.</li>
-            <li><b>Modelador — Shift+D duplica a seleção</b> (mesmo atalho do Blender), além do botão "Duplicar" já existente no menu "Adicionar".</li>
-            <li><b>Modelador — nova barra lateral estilo Blender</b> (botão "+" do lado esquerdo do canvas, dentro do Modelador): abas verticais "Ferramentas" (Editar: Duplicar/Deletar; Histórico: Desfazer/Refazer + "Histórico do Desfazer", com todas as ações da sessão) e "Criar" (Adicionar Primitiva: Plano, Cubo, Círculo, Esfera UV, Icoesfera, Cilindro, Cone, Torus e Grade em "Mesh"; Ponto, Sol, Spot, Hemi e Area em "Lâmpada"; Texto, Armature, Lattice, Empty, Speaker e Câmera em "Outros" — estes últimos entram como marcadores/formas representativas, já que o Modelador edita uma única malha por sessão, sem luzes/câmeras funcionais de verdade). Cada primitiva recém-criada fica com seus parâmetros (raio, vértices, segmentos etc.) editáveis numa região com rolagem, na parte de baixo do submenu, até a próxima ação — mesmo espírito do "Adjust Last Operation" do Blender.</li>
-            <li>Este log de alterações ("Ajuda") passou a ser atualizado junto com o changelog técnico do app.</li>
-          </ul>
-          <p style="font-weight:600; color:var(--text); margin-bottom:4px">28/08/2026</p>
-          <ul style="margin:0 0 14px; padding-left:18px">
-            <li><b>Modelador 3D</b> — corrigida a classificação de frente/costas das faces usada pra desenhar a silhueta (contorno amarelo) do objeto modelado, no Modo Objeto: agora cada normal de face é forçada a apontar "pra fora" comparando com o centro do objeto, antes de decidir o que é silhueta — evita que arestas internas do objeto entrem por engano no contorno.</li>
-          </ul>
-          <p style="font-weight:600; color:var(--text); margin-bottom:4px">22/08/2026</p>
-          <ul style="margin:0 0 14px; padding-left:18px">
-            <li><b>"Miniatura 3D":</b> uma janelinha opcional sobre a grade (canto superior direito por padrão, arrastável) mostrando o mesmo "Ver em 3D" em resolução bem menor, acompanhando ao vivo a posição/direção do boneco no "🧭 Modo Navegação" — liga em "⚙️ Configurações do mapa".</li>
-            <li>Nova opção nas configurações 3D: itens construídos DENTRO do 3D podem ir pra uma camada separada ("Adicionados no 3D") ou pra camada que estava ativa no 2D quando "Ver em 3D" foi clicado.</li>
-            <li>Camadas ocultadas na janela "Camadas" agora também ficam escondidas no 3D (antes só sumiam do 2D).</li>
-            <li>Campo "Foto" agora aparece com o rótulo certo na ficha de um patrimônio já criado (antes só existia visualmente na tela de "+ Novo").</li>
-            <li>Corrigido o cursor da mão do cabeçalho do Mapa (aparecia parado, mesmo sem arrastar) e trocado pra aparecer certo na GRADE durante o "🧭 Modo Navegação".</li>
-            <li>Configurações Node.js reorganizadas em sub-abas, com botão de baixar o pacote do servidor.</li>
-            <li>Janela de exportar reorganizada em seções expansíveis por categoria, cada uma com sua própria opção de "um arquivo por item".</li>
-            <li>Corrigido: importar dados duplicava datas de modificação/última consulta em vez de preservar as originais.</li>
-            <li>Posição/direção do boneco agora fica sincronizada entre o 2D (Modo Navegação) e o 3D nos dois sentidos, ao entrar e ao sair.</li>
-            <li>Barra de ferramentas lateral do Mapa 2D com rolagem vertical corrigida (botões de baixo não ficavam mais inacessíveis).</li>
-            <li>Novas opções de desempenho do 2D: redesenho "sob demanda" (só redesenha quando algo muda, em vez de todo quadro) e um "buffer secundário" opcional.</li>
-            <li>Ícone de "Configurações do 3D" ganhou o mesmo selo "3D" no canto que o de "Configurações do 2D" já tinha (com "2D").</li>
-            <li>Corrigida a transparência do preenchimento das três ferramentas de seleção (Retângulo/Laço/Elipse) — tinha ficado opaco, escondendo o que estava embaixo.</li>
-            <li>Tela "Organizar": nova coluna com TODOS os patrimônios (antes só aparecia a coluna dos que não têm orb em nenhuma foto); e agora fica de verdade por cima de tudo do Mapa ao abrir — nenhuma interação feita nela (mouse ou teclado), inclusive a barra de Ferramentas e a Miniatura 3D por baixo, afeta mais o que está atrás.</li>
-            <li>Textos de botões e controles (cabeçalhos de painel, rótulos, abas etc.) não ficam mais "selecionáveis" — atrapalhava arrastar janelas e desenhar seleções no mapa.</li>
-            <li>Card "⚡ Desempenho do 2D" mudou das Configurações do app pras Configurações 2D; opção de camada dos itens construídos no 3D mudou pras Configurações 3D — cada configuração agora mora no lugar certo (App/2D/3D).</li>
-            <li>Corrigido: a janela "Camadas" voltava sozinha pro topo do scroll ao clicar numa camada mais abaixo na lista.</li>
-            <li>Corrigidas as ferramentas de seleção "Laço" e "Elipse" (não selecionavam nada) e os 5 botões de modo de combinação de seleção (Substituir/Adicionar/Subtrair/Interseção/Invertido) — a causa raiz era a mesma: a seleção tinha ficado restrita à camada ativa. Agora a seleção (marcar itens) volta a ser independente de camada; só a ferramenta "Mover selecionados" (mover de verdade) continua restrita à camada ativa.</li>
-            <li>Corrigida a Miniatura 3D com tela preta (não desenhava nada até o "🧭 Modo Navegação" ser usado pela 1ª vez).</li>
-            <li>O contorno de seleção/hover de um objeto desenhado (mesa/pilar/formas) agora acompanha a forma real dele (retângulo/polígono) em vez de um círculo genérico fixo.</li>
-            <li>Escolher "Mesa" no painel de Objetos volta a se comportar como um objeto próprio: continua desenhável como um retângulo (com alças/rotação), mas a ferramenta não fica mais "presa" em Formas depois de colocada — volta pro painel de Objetos.</li>
-            <li>Janela "Cores" voltou a ser o editor de cores padrão do navegador (ícone de retângulo, em vez da roda de cores/paleta/RGB/HSV): edita direto o Contorno e o Preenchimento do(s) item(ns) selecionado(s) na grade (ferramenta Selecionar) E também arma a cor pra próxima forma desenhada — Contorno é um campo novo, independente do Preenchimento, disponível também no painel de propriedades de formas (retângulo/polígono/mesa/pilar).</li>
-            <li>A camada "Adicionados no 3D" (Configurações 3D › itens construídos dentro do 3D) agora já aparece na janela "Camadas" assim que ela é aberta, em vez de só nascer na primeira vez que algo é de fato construído lá dentro.</li>
-            <li>Ferramenta "Mover selecionados": a área de seleção (preenchimento azul transparente) volta a aparecer enquanto ela está ativa, e agora dá pra clicar em qualquer ponto dessa área (não só na caixa reta do gizmo) pra arrastar o grupo inteiro. O destaque tracejado por item passa a aparecer só nas ferramentas Selecionar/Laço/Elipse (marcar) — não mais em "Mover selecionados".</li>
-            <li>Miniatura 3D: mais uma correção pra tela preta — agora desenha um quadro assim que é ligada (sem esperar o próximo quadro do 2D) e continua acompanhando o boneco mesmo com o modo "sob demanda" de Desempenho do 2D ligado.</li>
-            <li>Mesa/Coluna (painel de Objetos) ganharam um método de desenho PRÓPRIO — continuam reaproveitando o mesmo jeito de arrastar/redimensionar/girar da ferramenta Formas, mas com identidade própria: não aparecem mais como "Formas" na barra de ferramentas nem no rótulo do modo atual.</li>
-            <li><b>Novo: "🗑️ Remover" no 3D</b> — mesmo estilo Minecraft da hotbar de construção: mire em algo e clique pra remover da cena. Item/câmera/objeto somem com uma animação de "caixa recolhedora" (entram na caixa, ela fecha e esmaece); parede/porta/janela se despedaçam em cacos, como uma pequena demolição.</li>
-            <li>Corrigido: a janela "Camadas" podia abrir DUPLICADA (duas janelas por cima uma da outra) — condição de corrida introduzida pela correção da camada "Adicionados no 3D" acima, quando o painel era pedido pra abrir duas vezes bem próximas.</li>
-            <li>Dois cliques numa camada da janela "Camadas" agora selecionam ela e já abrem "⚙️ Propriedades da camada" — mesmo efeito de selecionar e depois clicar em ⚙️, num só gesto.</li>
-            <li>Corrigido: o botão "OK" das Propriedades da camada esperava a gravação no banco de dados terminar pra fechar o painel (uma pequena demora perceptível) — agora fecha na hora, e a gravação continua em segundo plano.</li>
-            <li>Corrigido: importar um arquivo que só tinha a planta de um mapa (sem patrimônios) mostrava "Nenhum item encontrado nos arquivos selecionados", mesmo tendo encontrado a planta. Agora oferece substituir a planta do mapa atual pela do arquivo (com confirmação — não mexe nos patrimônios já cadastrados).</li>
-            <li>Corrigido: o botão "Substituir planta do mapa atual" (item acima) não funcionava — clicar nele mostrava "Importação cancelada" mesmo assim.</li>
-            <li>Excluir uma camada agora EXCLUI tudo que estava nela (paredes, portas, janelas, câmeras, objetos, textos e os patrimônios que estavam posicionados nela — estes só saem da grade, o cadastro continua existindo) — antes os elementos eram só reatribuídos pra outra camada. Dá pra desfazer com Ctrl+Z.</li>
-            <li>Corrigido: patrimônios posicionados na grade DE DENTRO do 3D não ficavam associados a nenhuma camada (diferente de quando posicionados no 2D) — agora entram na mesma camada configurada em "Configurações 3D" para itens construídos lá dentro.</li>
-            <li>Corrigido: elementos (ou patrimônios) sem camada associada — de mapas salvos antes das correções acima — continuavam aparecendo na grade mesmo com TODAS as camadas ocultadas/excluídas. Agora, ao abrir o mapa, todo elemento sem camada válida é migrado automaticamente, então os toggles de camada passam a valer pra ele também.</li>
-            <li>A migração acima manda o que for recuperado pra uma camada própria ("Recuperados (camada original perdida)", criada só se precisar), em vez da primeira camada da lista — evita misturar com o que já estava lá de propósito.</li>
-            <li>Corrigido: ao excluir uma camada, a seleção sempre pulava pra primeira da lista. Agora vai pra camada que ficou logo ABAIXO da excluída — ou, se a excluída era a última (mais embaixo), pra que ficou acima dela.</li>
-            <li>Excluir uma camada agora é IMEDIATO (a lista, a seleção e o que some da grade reagem na hora) — a gravação no banco de dados roda em segundo plano, sem travar a interface.</li>
-            <li>A janela "🗂️ Camadas" e suas interações (abrir/fechar, arrastar pra reordenar, botões da barra, Propriedades da camada) agora ficam isoladas do resto do app — um erro inesperado ali é contido (avisa com um alerta) em vez de arriscar travar outras partes da tela Mapa.</li>
-            <li>O comprimento do trecho de parede sendo desenhado agora aparece ao lado do X/Y na barra inferior, junto do lápis/reta/curva que já mostravam isso.</li>
-            <li>A distância do "🔗 Snap de parede" agora também é exibida/editada na unidade escolhida (pixels/polegadas/cm-m), em vez de sempre em pixels de tela — e passa a ser um valor real do mundo, independente do zoom.</li>
-            <li>Corrigido: a lista de unidades (setinha ao lado do botão de unidade, na barra inferior) abria escondida atrás da barra de ferramentas. Agora aparece na frente de tudo e já vem com o foco, dá pra fechar com Esc.</li>
-            <li>Corrigido: a orientação de objetos (retângulo/polígono/mesa/pilar/luminária) girados no 2D aparecia 90° torta no 3D. Agora a rotação do 3D bate exatamente com a do 2D.</li>
-          </ul>
-          <p style="font-weight:600; color:var(--text); margin-bottom:4px">19/08/2026</p>
-          <ul style="margin:0 0 14px; padding-left:18px">
-            <li>Seleções (retângulo/laço/elipse) sobrepostas agora aparecem como um único contorno tracejado "andando" (marching ants), em vez de vários contornos distintos.</li>
-            <li>Texto do mapa agora pode ser girado, e ganhou um retângulo de molde com alças (redimensionar/girar), além da janela de edição (que também ganhou campos de posição X/Y e rotação).</li>
-            <li><b>Ferramenta "Selecionar" unificada:</b> um clique simples continua selecionando/desmarcando; clicar e arrastar a partir de uma área vazia da grade desenha a seleção (como sempre); clicar e arrastar a partir de CIMA de um item agora MOVE esse item — e, com Ctrl pressionado (havendo mais de um item selecionado no momento do clique), move todos os selecionados juntos.</li>
-            <li>Novo botão de Ajuda (❓) no cabeçalho do Mapa, com este log de alterações e a janela "Sobre".</li>
-            <li>Corrigido: o preenchimento azulado da seleção não sumia mais em certos níveis de zoom; e o contorno de seleções curvas (elipse/laço) não fica mais "serrilhado" quando é só uma seleção sozinha.</li>
-            <li>A unificação visual de seleções sobrepostas agora só acontece ao SOLTAR o mouse (finalizar) — enquanto ainda está arrastando, a seleção em andamento aparece como forma própria, separada das já feitas. Um clique (dentro ou fora de uma seleção já feita) sem Ctrl sempre zera as seleções anteriores.</li>
-            <li>Tela "Organizar": o cabeçalho com todos os botões agora começa recolhido (como uma cortina) — toque no botão "▾ Controles" pra abrir/fechar, liberando a tela no celular.</li>
-            <li>Barras de botões que rolam na horizontal (cabeçalho do Mapa) agora mostram um gradiente nas bordas indicando que há mais botões pra rolar naquele sentido.</li>
-            <li>Os painéis "Ferramentas", "Histórico" e "Camadas" agora preservam a posição em que foram arrastados ao fechar/reabrir (ajustando automaticamente se parte ficar fora da tela).</li>
-            <li>Ícone do botão "Camadas" redesenhado: três quadrados sobrepostos em cascata.</li>
-          </ul>
-          <p style="font-weight:600; color:var(--text); margin-bottom:4px">Também já implementado (rodadas anteriores)</p>
-          <ul style="margin:0; padding-left:18px">
-            <li>Atualização automática do app: o Service Worker busca a versão mais nova na rede antes de usar o cache, e recarrega sozinho quando detecta uma versão nova.</li>
-            <li>Ferramenta "Formas": desenhar retângulos/polígonos na grade via retângulo de molde (clicar, arrastar, soltar — com alças de redimensionar/girar/mover), reeditar uma forma já colocada do mesmo jeito que uma recém-criada, e um painel de valores com mostrar/ocultar.</li>
-            <li>Colar (Ctrl+V) ou carregar (botão 🖼️➕) uma imagem em qualquer camada da grade — vira uma forma editável com o mesmo gizmo de alças/rotação da ferramenta Formas; segurar Shift ao redimensionar mantém a proporção original. Também dá pra soltar/arrastar um arquivo de imagem direto na grade.</li>
-            <li>Ferramenta "Reta/Curva": pontos de controle preservados ao reeditar, quadrado de mover corrigido.</li>
-            <li>Camadas: organizar paredes/câmeras/objetos/textos em grupos, com visibilidade e bloqueio próprios.</li>
-            <li>Histórico, Camadas e mostrar/ocultar barra de ferramentas agrupados no canto superior direito da tela.</li>
-            <li>Ambiente único: não existe mais troca/criação/renomeação/exclusão de "ambientes" separados — todo o catálogo (fotos, orbs, câmeras, itens marcados no mapa) vive num único ambiente, sempre.</li>
-            <li>Tela "Organizar": nível de detalhe por zoom, organização automática, exportar como PNG, atalhos de teclado, legenda dos símbolos, e vários ajustes de layout/espaçamento.</li>
-            <li>Mapa 2D: câmeras, objetos, itens marcados na planta, texto livre, réguas, grade e encaixe (snap) configurável.</li>
-            <li>Tabela: cabeçalhos redimensionáveis acompanhando as colunas, e a aba "Cartões".</li>
-            <li>Captura de fotos com reconhecimento de texto (OCR) e sugestão de tipo por reconhecimento de objeto — tudo rodando localmente no aparelho, sem precisar de internet.</li>
-            <li>Backup local, sincronização e exportação automática.</li>
-          </ul>
-        </div>
-        <button class="btn secondary block" id="changelog-fechar" style="margin-top:14px">Fechar</button>
-      </div>`;
-    document.body.appendChild(modal);
-    const close = () => modal.remove();
-    modal.querySelector('#changelog-fechar').onclick = close;
-    modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
+    // Conteúdo extraído para js/cards/changelog-card.js (pedido verbatim:
+    // "As inserções de innerHTML devem se tornar Cards"). mapview.js só
+    // pede pro ModalCards montar/abrir o card 'changelog'.
+    window.ModalCards.open('changelog');
   },
 
   /** "Sobre" — pedido do usuário: nome do programa, que foi feito pra
@@ -25780,43 +25288,7 @@ const MapView = {
   _openDownloadAppModal() {
     const modal = document.createElement('div');
     modal.className = 'modal-backdrop';
-    modal.innerHTML = `
-      <div class="modal-sheet" style="text-align:center">
-        <div class="handle"></div>
-        <h3 style="margin-top:0">⬇️ Baixar o app</h3>
-        <p style="font-size:13.5px; color:var(--text-dim); line-height:1.6">
-          O código do app fica disponível no GitHub, neste link:
-        </p>
-        <p style="font-size:13.5px; line-height:1.6; word-break:break-all">
-          <a href="https://github.com/dinthclex/catalogacao-itens" target="_blank" rel="noopener noreferrer">https://github.com/dinthclex/catalogacao-itens</a>
-        </p>
-        <p style="font-size:13.5px; color:var(--text-dim); line-height:1.6">
-          Depois de baixar, procure pelo arquivo <b>index.html</b> e dê duplo clique nele para abrir o app.
-        </p>
-        <!-- Pedido do usuário (03/09/2026): "coloque a informação de que por
-             conta de no celular dar duplo clique no index.html não funciona,
-             pois é necessário ter um servidor local. Também, um botão com
-             métodos para que, no celular, funcione o index.html sem precisar
-             de servidor local." O aviso abaixo é sincero sobre o PORQUÊ (os
-             navegadores de celular bloqueiam recursos carregados de
-             file:///, então o app simplesmente não roda por duplo clique lá)
-             — e o botão abre _openMobileNoServerModal (logo abaixo), que
-             lista os métodos com MENOS fricção pra contornar isso (nenhum é
-             "zero servidor" de verdade — algum programinha precisa SERVIR os
-             arquivos por http:// — mas os listados lá cabem num único toque/
-             comando, bem mais simples que o passo a passo completo do XAMPP/
-             PHP já documentado em server/LEIA-ME-servidor.txt). -->
-        <p style="font-size:13.5px; color:#ffb236; line-height:1.6; background:rgba(255,178,54,.12); border:1px solid rgba(255,178,54,.35); border-radius:8px; padding:8px 10px; text-align:left">
-          ⚠️ <b>No celular, dar duplo clique no index.html NÃO funciona</b> —
-          os navegadores de celular bloqueiam o carregamento de arquivos
-          abertos direto do armazenamento (sem servidor nenhum por trás), por
-          isso a tela fica em branco ou quebrada. É necessário ter algum tipo
-          de servidor local rodando (mesmo que bem simples) pra abrir pelo
-          navegador do celular.
-        </p>
-        <button class="btn secondary block" id="download-app-mobile" style="margin-top:8px">📱 Rodar no celular (sem precisar de servidor "de verdade")</button>
-        <button class="btn secondary block" id="download-app-fechar" style="margin-top:10px">Fechar</button>
-      </div>`;
+    modal.innerHTML = window.ModalCards._cards['download-app']();
     document.body.appendChild(modal);
     const close = () => modal.remove();
     modal.querySelector('#download-app-fechar').onclick = close;
@@ -25835,53 +25307,7 @@ const MapView = {
   _openMobileNoServerModal() {
     const modal = document.createElement('div');
     modal.className = 'modal-backdrop';
-    modal.innerHTML = `
-      <div class="modal-sheet" style="text-align:left">
-        <div class="handle"></div>
-        <h3 style="margin-top:0; text-align:center">📱 App no celular sem montar um servidor "de verdade"</h3>
-        <p style="font-size:13px; color:var(--text-dim); line-height:1.6">
-          Nenhum navegador de celular abre este app direto de um arquivo
-          (duplo clique/toque no index.html) — precisa de ALGUM programinha
-          "servindo" os arquivos por http://, mesmo que bem simples. As
-          opções abaixo, da mais fácil pra mais avançada, pedem só um toque
-          ou um comando — nada perto da configuração completa de XAMPP/PHP
-          (essa continua no arquivo <b>server/LEIA-ME-servidor.txt</b>, útil
-          se você já quer o "modo servidor" com sincronização entre
-          aparelhos).
-        </p>
-        <p style="font-size:13px; line-height:1.7">
-          <b>1) App de servidor local (mais fácil, sem digitar nada):</b><br>
-          Instale um app de "servidor web local"/"servidor HTTP" da loja do
-          seu celular (ex.: buscando por "Servidor Web Local" ou "HTTP
-          Server" na Play Store/App Store), aponte-o pra pasta onde
-          descompactou este app, toque em "Iniciar" e abra o endereço que
-          ele mostrar (algo como http://localhost:8080) no navegador do
-          celular.
-        </p>
-        <p style="font-size:13px; line-height:1.7">
-          <b>2) Termux (Android, um comando só):</b><br>
-          Instale o Termux (F-Droid ou Play Store), rode
-          <code style="background:rgba(255,255,255,.08); padding:1px 5px; border-radius:4px">pkg install python -y</code>,
-          entre na pasta do app (<code style="background:rgba(255,255,255,.08); padding:1px 5px; border-radius:4px">cd</code> até lá) e rode
-          <code style="background:rgba(255,255,255,.08); padding:1px 5px; border-radius:4px">python -m http.server 8080</code>.
-          Depois abra <code style="background:rgba(255,255,255,.08); padding:1px 5px; border-radius:4px">http://localhost:8080</code>
-          no navegador do celular.
-        </p>
-        <p style="font-size:13px; line-height:1.7">
-          <b>3) Modo Servidor do próprio app (recomendado se for usar por um
-          tempo):</b><br>
-          O mesmo "modo servidor" via Termux+PHP já documentado em
-          <b>server/LEIA-ME-servidor.txt</b> (cenário 2, "servidor e câmera
-          no mesmo celular") também resolve isso — e de quebra já vem com
-          salvamento automático e sincronização entre aparelhos.
-        </p>
-        <p style="font-size:12px; color:var(--text-dim); line-height:1.6">
-          Em qualquer uma das opções, os arquivos continuam só no seu
-          celular — nada é enviado pra fora (o "servidor" aqui só serve os
-          arquivos localmente, pro próprio navegador do aparelho).
-        </p>
-        <button class="btn secondary block" id="mobile-noserver-fechar" style="margin-top:6px">Fechar</button>
-      </div>`;
+    modal.innerHTML = window.ModalCards._cards['mobile-noserver']();
     document.body.appendChild(modal);
     const close = () => modal.remove();
     modal.querySelector('#mobile-noserver-fechar').onclick = close;
@@ -26440,22 +25866,7 @@ const MapView = {
     // está aberto") continua igual — vem do próprio fundo `fixed`/`inset:0`
     // capturando todo pointerdown/click (ver abaixo), não da cor dele.
     backdrop.style.cssText = 'position:fixed; inset:0; background:transparent; z-index:99999; display:flex; align-items:center; justify-content:center; touch-action:none;';
-    backdrop.innerHTML = `
-      <div class="map2d-props-panel map-layerprops-modal" style="position:static; max-width:340px; width:90vw; max-height:85vh; overflow:auto;">
-        <div class="map-panel-head"><b>⚙️ Propriedades da camada</b></div>
-        <label class="map-panel-field"><span>Nome</span><input type="text" id="layerprops-nome" class="map-layerprops-nome" value="${Utils.escapeHtml(l.nome)}"></label>
-        <label class="map-panel-field"><span>Visível</span><input type="checkbox" id="layerprops-visivel" ${l.visivel !== false ? 'checked' : ''}></label>
-        <label class="map-panel-field"><span>Bloqueada</span><input type="checkbox" id="layerprops-bloqueada" ${l.bloqueada ? 'checked' : ''}></label>
-        <label class="map-panel-field"><span>Opacidade</span>
-          <input type="range" id="layerprops-opacidade" min="0" max="255" step="1" value="${l.opacidade ?? 255}" style="flex:1">
-          <input type="number" id="layerprops-opacidade-num" min="0" max="255" step="1" value="${l.opacidade ?? 255}" style="width:4.4em">
-        </label>
-        <div class="map-panel-actions" style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px;">
-          <button type="button" class="btn secondary sm" id="layerprops-cancelar">Cancelar</button>
-          <button type="button" class="btn sm" id="layerprops-ok">OK</button>
-        </div>
-      </div>
-    `;
+    backdrop.innerHTML = window.MapDynamicCards.layerPropertiesPanel.call(this, l);
     document.body.appendChild(backdrop);
     this._layerPropsModalEl = backdrop;
     // Prioridade exclusiva: qualquer toque FORA do cartão (no próprio fundo

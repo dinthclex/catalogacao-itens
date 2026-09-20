@@ -18,7 +18,7 @@ maçaneta) — alterna `obj.anguloAbertura` entre 0 e 90 no duplo clique, e
 mais nada. Ele não tem, e NÃO PRECISA TER, nenhuma linha extra de código
 pra fazer a maçaneta girar.
 
-Por quê: a animação da MAÇANETA em si (o giro rápido de ~35° no cabo,
+Por quê: a animação da MAÇANETA em si (o giro rápido de ~45° no cabo,
 "destrancando", que acontece no exato instante do duplo clique e volta
 sozinha à posição neutra em ~250ms) é feita inteiramente pelo MOTOR 3D
 (`Engine3D._updateDoorAnimations`, js/engine3d.js), e não pelo Script —
@@ -43,9 +43,11 @@ MAÇANETA"), não este arquivo.
 
 COMO USAR
 ---------
-1. Crie/selecione uma porta com `comManeneta: true` (variante nova — ver
-   `dados_gerados/gerar_predio_v3.js`, ou marque o campo manualmente numa
-   porta existente pra testar).
+1. [18/09/2026] `comManeneta: true` agora é o PADRÃO de toda porta nova
+   criada pela ferramenta "Porta" (ver `js/mapping.js` `addDoor`) — ou seja,
+   basta criar/selecionar qualquer porta normal. Só é preciso "marcar o
+   campo manualmente" numa porta bem antiga (criada antes desta mudança),
+   que pode ter ficado sem o campo.
 2. Selecione a porta no mapa 2D (ou mire nela no 3D).
 3. Abra "🧩 Editar componentes…" → "➕ Adicionar Componente" → "Script".
 4. Apague o código de exemplo que vier ("Em branco") e cole TUDO daqui pra
@@ -82,22 +84,46 @@ function Update() {
   // de obj.anguloAbertura definido abaixo em aoClicarDuasVezes().
 }
 
-// Debounce simples: evita que um duplo clique durante a animação em curso
-// (~500ms da folha) dispare uma 2ª troca antes da 1ª terminar visualmente
-// — sem isso, cliques duplos "rápidos demais" alternariam o alvo várias
-// vezes antes do usuário ver a porta (e a maçaneta) terminar de se mexer.
+// Debounce: evita que um duplo clique durante a animação em curso dispare
+// uma 2ª troca antes da 1ª terminar visualmente. A duração agora VARIA (ver
+// abaixo), então o debounce é recalculado a cada chamada.
 var _debounceAte = 0;
 
 /**
+ * [18/09/2026] NOVO — "a velocidade com que se dá os dois cliques deve
+ * influenciar na velocidade com que a porta abre" (a MAÇANETA continua com
+ * sua própria animação fixa de ~250ms, independente disso — só a FOLHA da
+ * porta varia de velocidade). `view3d` (5º parâmetro disponível pra todo
+ * Script) expõe `_ultimoIntervaloDuploCliqueMs`: o intervalo real (ms)
+ * entre os 2 cliques do duplo clique mais recente. Cliques bem próximos
+ * (rápidos) → porta abre rápido; mais espaçados → abre mais devagar.
+ */
+function _calcularVelocidadeGrausPorSeg() {
+  var intervaloMs = (typeof view3d !== 'undefined' && view3d && typeof view3d._ultimoIntervaloDuploCliqueMs === 'number')
+    ? view3d._ultimoIntervaloDuploCliqueMs
+    : 300; // fallback (velocidade padrão de sempre, ~90°/0,5s = 180°/s)
+  var MS_MIN = 100, MS_MAX = 600;
+  var t = (Math.max(MS_MIN, Math.min(MS_MAX, intervaloMs)) - MS_MIN) / (MS_MAX - MS_MIN); // 0 (rápido) .. 1 (devagar)
+  var DEG_PER_SEC_RAPIDO = 90 / 0.25; // clique duplo bem rápido (~100ms) -> abre em ~0,25s
+  var DEG_PER_SEC_LENTO = 90 / 0.8;   // clique duplo mais devagar (~600ms) -> abre em ~0,8s
+  return DEG_PER_SEC_RAPIDO + (DEG_PER_SEC_LENTO - DEG_PER_SEC_RAPIDO) * t;
+}
+
+/**
  * Chamada pelo Gatilho de Evento "Ao Clicar Duas Vezes" (onDoubleClick) —
- * alterna a porta entre aberta (90°) e fechada (0°). A maçaneta (se
- * `comManeneta:true`) gira sozinha no exato instante em que esta função
- * muda `obj.anguloAbertura` — nenhuma linha extra necessária aqui.
+ * alterna a porta entre aberta (90°) e fechada (0°), na velocidade
+ * calculada acima (`obj._velocidadeGrausPorSeg`, campo TRANSIENTE que
+ * `Engine3D._updateDoorAnimations` lê, se presente). A maçaneta (se
+ * `comManeneta:true`) continua girando sozinha, no seu próprio ritmo fixo,
+ * no exato instante em que esta função muda `obj.anguloAbertura` — nenhuma
+ * linha extra necessária aqui pra ela.
  */
 function aoClicarDuasVezes() {
   var agora = Date.now();
   if (agora < _debounceAte) return; // animação anterior ainda em curso — ignora
-  _debounceAte = agora + 550; // um pouco mais que os ~500ms da animação da folha
+  var velocidade = _calcularVelocidadeGrausPorSeg();
+  obj._velocidadeGrausPorSeg = velocidade;
+  _debounceAte = agora + Math.round((90 / velocidade) * 1000) + 50; // duração real desta animação + folga
   var estaAberta = (obj.anguloAbertura || 0) > 45;
   obj.anguloAbertura = estaAberta ? 0 : 90;
 }

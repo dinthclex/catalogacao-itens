@@ -130,8 +130,7 @@ const ModelerMesh = {
   /** Escada — degraus empilhados, MESMOS parâmetros/fórmula de
    *  `engine3d.js _buildEscadaMesh` (largura/profundidadeTotal/degraus do
    *  objeto, altura SEMPRE 2m fixos). */
-  stairsMesh(largura, profundidadeTotal, degraus) {
-    const alturaTotal = 2.0; // fixa — mesmo valor/motivo de _buildEscadaMesh
+  stairsMesh(largura, profundidadeTotal, degraus, alturaTotal = 2.8) {
     const nDegraus = Math.max(1, Math.round(degraus) || 11);
     const stepDepth = profundidadeTotal / nDegraus;
     const stepHeight = alturaTotal / nDegraus;
@@ -327,20 +326,53 @@ const ModelerMesh = {
   // por engano — sem isso seria uma regressão visual no único tipo de malha
   // que já existia antes desta rodada.
   _CREASE_ANGLE_COS: Math.cos(40 * Math.PI / 180),
+  /** Passa a cor por vértice (v[3]=hex, v[4]=alpha) de vértices coloridos para os sem cor que dividem
+   *  uma face com eles. Repete poucas vezes pra alcançar vértices só ligados a outros também novos. */
+  _herdarCorDaPeca(cm) {
+    const V = cm.vertices;
+    const semCor = (v) => !v || v.length <= 3 || v[3] == null;
+    for (let passo = 0; passo < 4; passo++) {
+      let mudou = false, faltam = false;
+      cm.faces.forEach((face) => {
+        if (!face || face.length < 3) return;
+        let doador = null;
+        for (let i = 0; i < face.length; i++) { const v = V[face[i]]; if (v && !semCor(v)) { doador = v; break; } }
+        for (let i = 0; i < face.length; i++) {
+          const v = V[face[i]];
+          if (!v || !semCor(v)) continue;
+          if (doador) { v[3] = doador[3]; v[4] = doador.length > 4 && doador[4] != null ? doador[4] : 1; if (doador.length > 5 && doador[5] != null) v[5] = doador[5]; mudou = true; } else faltam = true;
+        }
+      });
+      if (!mudou || !faltam) break;
+    }
+  },
+
   rebuildMeshGeometry(state) {
     const THREE = state.THREE;
     const V = state.cm.vertices;
     const tris = []; // cada item: [ia, ib, ic] (índices em V)
+    const glassFaces = []; // faces de vidro (polígonos inteiros, p/ UV da textura de vidro)
+    const glassTris = []; // faces translúcidas (vidro): malha à parte, não pintam/oclusão/raycast
+    state._meshVersion = (state._meshVersion || 0) + 1;
     state.triFaceMap = [];
+    let hasVC = false;
+    for (let i = 0; i < V.length; i++) { const v = V[i]; if (v && v.length > 3 && v[3] != null) { hasVC = true; break; } }
+    // Vértices novos (extrusão, subdivisão, etc.) herdam a cor/alpha da PEÇA (dos vizinhos na mesma face), não a cor do objeto.
+    if (hasVC) this._herdarCorDaPeca(state.cm);
     state.cm.faces.forEach((face, fi) => {
       if (!face || face.length < 3) return;
+      const v0 = V[face[0]];
+      const vidro = !!(v0 && v0.length > 4 && v0[4] != null && v0[4] < 1);
+      if (vidro) glassFaces.push(face);
       for (let k = 1; k < face.length - 1; k++) {
         const ia = face[0], ib = face[k], ic = face[k + 1];
         if (!V[ia] || !V[ib] || !V[ic]) continue;
+        if (vidro) { glassTris.push([ia, ib, ic]); continue; }
         tris.push([ia, ib, ic]);
         state.triFaceMap.push(fi);
       }
     });
+    const corPadrao = (typeof ModelerRender !== 'undefined' ? ModelerRender._hexToColor(state.obj?.cor) : null) ?? 0x8a92a3;
     const geo = new THREE.BufferGeometry();
     if (tris.length) {
       // Normal "chapada" de cada triângulo (produto vetorial das arestas).
@@ -362,6 +394,8 @@ const ModelerMesh = {
       const limiarCos = this._CREASE_ANGLE_COS;
       const positions = [];
       const normals = [];
+      const colors = hasVC ? [] : null;
+      const tmpC = new THREE.Color();
       tris.forEach((t, ti) => {
         const nEste = triNormals[ti];
         t.forEach((vi) => {
@@ -375,10 +409,12 @@ const ModelerMesh = {
           normals.push(sx / len, sy / len, sz / len);
           const p = V[vi];
           positions.push(p[0], p[1], p[2]);
+          if (colors) { tmpC.set(p.length > 3 && p[3] != null ? p[3] : corPadrao); colors.push(tmpC.r, tmpC.g, tmpC.b); }
         });
       });
       geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
       geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+      if (colors) geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
       // --- 02/09/2026: geometria PRÓPRIA e com "winding" corrigido pra state.outlineMesh (silhueta B6) ---
       // O usuário pediu a silhueta dourada via "casco invertido" (Inverted Hull): uma cópia da malha,
@@ -431,6 +467,35 @@ const ModelerMesh = {
     }
     state.meshObj.geometry.dispose();
     state.meshObj.geometry = geo;
+    // Cores por peça: material branco + cor por vértice (senão, cor única do objeto).
+    const mat = state.meshObj.material;
+    if (mat && mat.color) {
+      if (!!mat.vertexColors !== hasVC) { mat.vertexColors = hasVC; mat.needsUpdate = true; }
+      mat.color.setHex(hasVC ? 0xffffff : corPadrao);
+    }
+    this._updateGlassMesh(state, glassFaces, V);
+  },
+
+  /** Malha à parte para as faces de vidro: usa a MESMA textura de vidro do cenário ("Minecraft": quase tudo
+   *  transparente, contorno e brilho estático), com UV por face. Nunca bloqueia seleção/oclusão. */
+  _updateGlassMesh(state, glassFaces, V) {
+    const THREE = state.THREE;
+    if (!glassFaces.length || typeof buildGlassFaceGeometry !== 'function') { if (state.glassMesh) state.glassMesh.visible = false; return; }
+    const geo = buildGlassFaceGeometry(THREE, V, glassFaces);
+    if (!geo.attributes.position) { if (state.glassMesh) state.glassMesh.visible = false; return; }
+    if (!state.glassMesh) {
+      const tex = state.view3d?._engine?._glassShineTexture || null;
+      state.glassMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial(tex
+        ? { map: tex, transparent: true, side: THREE.DoubleSide, depthWrite: false }
+        : { color: 0xcfeaff, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false }));
+      state.glassMesh.renderOrder = 2;
+      state.glassMesh.raycast = () => {}; // vidro nunca bloqueia seleção/oclusão
+      state.group.add(state.glassMesh);
+    } else {
+      state.glassMesh.geometry.dispose();
+      state.glassMesh.geometry = geo;
+    }
+    state.glassMesh.visible = true;
   },
 
   snapshotForRevert(state) {
@@ -1322,6 +1387,56 @@ const ModelerMesh = {
     });
     return out;
   },
+  /** Une pares de triângulos coplanares (mesma normal) que formam um quadrilátero
+   *  convexo — menos faces/arestas (ex.: caixa = 6 faces, 12 arestas em vez de
+   *  12 e 18), o que deixa a edição mais limpa e o Modelador mais leve. */
+  _mergeCoplanarTris(V, faces) {
+    const n = faces.length;
+    if (n < 2 || n > 30000) return faces;
+    const norm = faces.map((f) => {
+      const a = V[f[0]], b = V[f[1]], c = V[f[2]];
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const l = Math.hypot(nx, ny, nz) || 1;
+      return [nx / l, ny / l, nz / l];
+    });
+    const edgeMap = new Map();
+    faces.forEach((f, i) => { for (let k = 0; k < 3; k++) { const a = f[k], b = f[(k + 1) % 3]; const key = a < b ? a + '_' + b : b + '_' + a; let l = edgeMap.get(key); if (!l) edgeMap.set(key, l = []); l.push(i); } });
+    const used = new Uint8Array(n);
+    const out = [];
+    const convex = (q, nn) => {
+      for (let k = 0; k < 4; k++) {
+        const p = V[q[k]], r = V[q[(k + 1) % 4]], t = V[q[(k + 2) % 4]];
+        const e1x = r[0] - p[0], e1y = r[1] - p[1], e1z = r[2] - p[2], e2x = t[0] - r[0], e2y = t[1] - r[1], e2z = t[2] - r[2];
+        const cx = e1y * e2z - e1z * e2y, cy = e1z * e2x - e1x * e2z, cz = e1x * e2y - e1y * e2x;
+        if (cx * nn[0] + cy * nn[1] + cz * nn[2] <= 1e-12) return false;
+      }
+      return true;
+    };
+    for (let i = 0; i < n; i++) {
+      if (used[i]) continue;
+      const f = faces[i];
+      let feito = false;
+      for (let k = 0; k < 3 && !feito; k++) {
+        const a = f[k], b = f[(k + 1) % 3], c = f[(k + 2) % 3];
+        const key = a < b ? a + '_' + b : b + '_' + a;
+        for (const j of edgeMap.get(key)) {
+          if (j === i || used[j]) continue;
+          const nj = norm[j], ni = norm[i];
+          if (ni[0] * nj[0] + ni[1] * nj[1] + ni[2] * nj[2] < 0.99999) continue;
+          const g = faces[j];
+          const d = g.find((x) => x !== a && x !== b);
+          if (d === undefined || d === c) continue;
+          const q = [a, d, b, c];
+          if (!convex(q, ni)) continue;
+          out.push(q); used[i] = 1; used[j] = 1; feito = true; break;
+        }
+      }
+      if (!feito) { out.push(f); used[i] = 1; }
+    }
+    return out;
+  },
+
   /** Converte um THREE.Group/THREE.Mesh (retornado por
    *  GlbMeshSource.getClone(tipo) / ObjMeshSource.getClone(tipo)) para o
    *  formato editável {vertices,edges,faces} do Modelador. Aplica
@@ -1332,17 +1447,40 @@ const ModelerMesh = {
    *  (`_mergeVF`/`mergeMeshes`). Usada para que o Modelador edite a MALHA
    *  PRÓPRIA do objeto (carregada do arquivo), em vez de uma aproximação
    *  genérica. Retorna null se `group` não tiver nenhuma geometria útil. */
-  fromThreeGroup(group) {
+  fromThreeGroup(group, opts = {}) {
     if (!group || typeof window === 'undefined' || !window.THREE) return null;
     const THREE = window.THREE;
     group.updateMatrixWorld(true);
     const partes = [];
     group.traverse((node) => {
       if (!node.isMesh || !node.geometry) return;
+      if (opts.skipNode && opts.skipNode(node)) return;
       const geom = node.geometry;
       const posAttr = geom.attributes && geom.attributes.position;
       if (!posAttr) return;
-      const mat = node.matrixWorld;
+      // Cor por peça (vértice[3] = 0xRRGGBB, vértice[4] = alfa). Material transparente
+      // (vidro) vira azul-claro translúcido simples — a "textura barata" do vidro.
+      let cor = null;
+      const m0 = Array.isArray(node.material) ? node.material[0] : node.material;
+      if (m0) {
+        if (m0.transparent || (typeof m0.opacity === 'number' && m0.opacity < 1)) cor = { hex: 0xcfeaff, alpha: 0.3 };
+        else if (m0.color && typeof m0.color.getHex === 'function') cor = { hex: m0.color.getHex(), alpha: 1 };
+      }
+      // Peça de PORTA de rack (userData.rackParte = 'porta:frente'|'porta:traseira'): marca os vértices (v[5]) pra
+      // a porta continuar articulada/interativa depois de editada (ver Engine3D._buildRackDoorsFromCustomMesh).
+      let tagPorta = null;
+      for (let an = node; an; an = an.parent) {
+        const rp = an.userData && an.userData.rackParte;
+        if (typeof rp === 'string' && rp.startsWith('porta:')) { tagPorta = rp; break; }
+      }
+      if (tagPorta && cor == null) cor = { hex: 0x8a92a3, alpha: 1 };
+      // InstancedMesh (conectores/furos): uma cópia da geometria por instância.
+      const mats = [];
+      if (node.isInstancedMesh) {
+        const im = new THREE.Matrix4();
+        for (let k = 0; k < node.count; k++) { node.getMatrixAt(k, im); mats.push(new THREE.Matrix4().multiplyMatrices(node.matrixWorld, im)); }
+      } else mats.push(node.matrixWorld);
+      mats.forEach((mat) => {
       // Solda vértices coincidentes (arredondados) desta peça.
       const key2idx = new Map();
       const vertices = [];
@@ -1355,7 +1493,7 @@ const ModelerMesh = {
         let idx = key2idx.get(key);
         if (idx === undefined) {
           idx = vertices.length;
-          vertices.push([v.x, v.y, v.z]);
+          vertices.push(cor == null ? [v.x, v.y, v.z] : (tagPorta ? [v.x, v.y, v.z, cor.hex, cor.alpha, tagPorta] : [v.x, v.y, v.z, cor.hex, cor.alpha]));
           key2idx.set(key, idx);
         }
         remap[i] = idx;
@@ -1376,7 +1514,9 @@ const ModelerMesh = {
         for (let i = 0; i < posAttr.count; i += 3) pushTri(i, i + 1, i + 2);
       }
       if (!faces.length) return;
-      partes.push({ vertices, edges: this._edgesFromFaces(faces), faces });
+      const facesMescladas = this._mergeCoplanarTris(vertices, faces);
+      partes.push({ vertices, edges: this._edgesFromFaces(facesMescladas), faces: facesMescladas });
+      });
     });
     if (!partes.length) return null;
     return this.mergeMeshes(...partes);

@@ -330,7 +330,9 @@ const ClassicMode = {
         // 'conferencia' (comportamento de sempre — fica onde estava).
         if (modoMapeamento) {
           try {
-            if (typeof MapView !== 'undefined') MapView._forcarTelaInicial = 'planta';
+            // [19/09/2026 UTC] RODADA 192 -- pedido verbatim: tela padrao atras da
+            // splash, no modo 'Mapeamento de ambientes', agora e 'Caixa'.
+            if (typeof MapView !== 'undefined') MapView._forcarTelaInicial = 'caixa';
             await window.App?.navigate?.('mapa');
           } catch (e) { console.warn('[ClassicMode] falha ao navegar pra "Planta baixa" após escolher "Mapeamento de ambientes":', e); }
         }
@@ -582,7 +584,40 @@ const ClassicMode = {
     this._active = true;
     document.body.classList.add('classic-mode-active');
     this._syncLSCache('classic'); // síncrono — não espera o DB.setSetting abaixo pra já valer no próximo boot
-    const alvo = (App.currentView && App.views[App.currentView]) ? App.currentView : 'tabela';
+    // [19/09/2026 UTC] CORRIGIDO (RODADA 195) -- pedido verbatim: "A tela do 'Tabela' ainda está
+    // aparecendo atrás logo que o app carrega, sem clicar em nada." CAUSA RAIZ DE VERDADE (a RODADA 194
+    // corrigiu o bug ERRADO -- só existia no ramo `else` de `App._boot()`, usado quando o modo Clássico
+    // NÃO está em cache): a maioria dos boots reais passa pelo atalho `prefereClassico` (ver app.js
+    // `_boot()`, `ClassicMode.readCachedPref() === 'classic'`) -- ESTE `enter()` é chamado direto, SEM
+    // passar pelo bloco que eu corrigi na rodada passada.
+    // [19/09/2026 UTC] CORRIGIDO DE NOVO (RODADA 195, mesmo turno) -- a 1ª tentativa desta MESMA rodada
+    // (linha `if (App.currentView && App.views[App.currentView])`) tinha o MESMO tipo de bug das 2
+    // rodadas anteriores: `App.currentView` é inicializado como a STRING `'tabela'` já de fábrica (ver
+    // `const App = { currentView: 'tabela', ... }` no topo de app.js) -- NUNCA `null`/`undefined`, mesmo
+    // antes do 1º `navigate()` de verdade acontecer. A condição `App.currentView && App.views[...]`
+    // portanto SEMPRE era verdadeira (mesmo num boot do zero, sem nenhuma navegação real ainda) --
+    // `alvo` sempre virava `App.currentView` ('tabela', o valor de fábrica), nunca chegando a ler
+    // `_OPMODE_KEY` nenhuma vez. Confirmado pelo próprio usuário inspecionando o DOM ao vivo (`main#view
+    // div.vscroll-view-wrap` -- a marcação de `js/table.js`, a tela 'Tabela' -- continuava montada mesmo
+    // depois desta "correção"). Corrigido de verdade usando `App._navegouAoMenosUmaVez` (nova flag, ver
+    // `App.navigate()` em app.js -- só fica `true` depois da 1ª chamada de verdade a `navigate()`) em vez
+    // de `App.currentView`, que nunca serviu como esse sinal.
+    let alvo = 'tabela';
+    if (App._navegouAoMenosUmaVez && App.views[App.currentView]) {
+      alvo = App.currentView;
+    } else {
+      try {
+        const [modoJaEscolhido, nomeJaDefinido] = await Promise.all([
+          typeof DB !== 'undefined' ? DB.getSetting(this._OPMODE_KEY, '') : '',
+          typeof DB !== 'undefined' ? DB.getSetting('conferenciaNome', '') : '',
+        ]);
+        const instalacaoNova = !modoJaEscolhido && !(nomeJaDefinido && nomeJaDefinido.trim());
+        if (instalacaoNova || modoJaEscolhido === 'mapeamento') {
+          alvo = 'mapa';
+          if (typeof MapView !== 'undefined') MapView._forcarTelaInicial = 'caixa';
+        }
+      } catch (e) { /* melhor esforço — na dúvida, mantém 'tabela' */ }
+    }
     try { await App.navigate(alvo); } catch (e) { console.warn('[ClassicMode] falha ao montar a tela inicial:', e); }
     if (typeof DB !== 'undefined') {
       try { await DB.setSetting('layoutMode', 'classic'); } catch (e) { /* melhor esforço — não bloqueia a troca de modo */ }

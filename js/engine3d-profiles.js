@@ -73,7 +73,12 @@ const OBJECT3D_PROFILES = {
   // mapData.alturaPiso` espalhado por engine3d.js/view3d.js), nunca um
   // valor fixo — então um pilar sempre vai do chão até o teto do andar
   // onde foi colocado, não importa o pé-direito configurado.
-  pilar: { shape: 'box', w: 1.2, d: 0.6, h: 2.8, y0: 0, color: 0x9aa4b2 },
+  // [20/09/2026 UTC] ALTERADO -- padrão de mercado: pilar de concreto armado 30x30 cm (seção quadrada
+  // mais comum em edificações de pequeno/médio porte); altura = pé-direito padrão 2,80 m.
+  pilar: { shape: 'box', w: 0.3, d: 0.3, h: 2.8, y0: 0, color: 0x9aa4b2 },
+  // [20/09/2026 UTC] NOVO -- "Viga": horizontal. Padrão de mercado: viga de concreto armado 20x40 cm
+  // (largura x altura), vão de 3,00 m, encostada no teto (y0 = 2,80 - 0,40). `w` é o COMPRIMENTO.
+  viga: { shape: 'box', w: 3.0, d: 0.2, h: 0.4, y0: 2.4, color: 0x9aa4b2 },
   // [15/09/2026 UTC] ALTERADO — pedido verbatim: "Faça um modelo 3D
   // diferente para a cadeira (substituindo-o), faça uma 'cadeira de
   // verdade' com pernas e encosto. Não uma caixa genérica como é
@@ -90,6 +95,58 @@ const OBJECT3D_PROFILES = {
   armario: { shape: 'box', w: 0.8, d: 0.45, h: 1.9, y0: 0, color: 0x7c8494 },
   arquivo: { shape: 'box', w: 0.45, d: 0.5, h: 1.3, y0: 0, color: 0x7c8494 },
   estante: { shape: 'box', w: 0.9, d: 0.35, h: 1.8, y0: 0, color: 0x8a7455 },
+  // [18/09/2026 UTC] NOVO -- "Rack" (rack modular de 19"), objeto PARAMETRICO
+  // do catalogo (pedido verbatim: "Integre ao catalogo este novo objeto
+  // modular chamado 'Rack'"). Estes w/d/h sao so o valor de FABRICA (12U x
+  // 600mm, tipo parede: 12*44,45mm + teto 40mm + base 50mm = 0,6234m) usado
+  // pelo ghost de colocacao e por `Mapping.defaultShapeForTipo`. As medidas
+  // REAIS de cada rack vem de `obj.rackUs`/`obj.rackProfundidade` (ver
+  // js/rack-modular.js, `RackModular.patchParaObjeto`, que mantem
+  // obj.largura/profundidade/altura em sincronia) e a malha e montada por
+  // `Engine3D._buildRackMesh`.
+  rack: { shape: 'box', w: 0.6, d: 0.6, h: 0.6234, y0: 0, color: 0x2b2f36 },
+  // [18/09/2026 UTC] RODADA 166 -- Equipamentos de rede de rack 19" (ver js/rede-equip.js;
+  // malha real em `Engine3D._buildRedeMesh`). w = 482,6 mm (19"), 1U = 44,45 mm (2U = 88,9),
+  // profundidade: switch 250 mm; patch panel 40 mm de corpo + 100 mm de barra guia traseira.
+  switch24: { shape: 'box', w: 0.4826, d: 0.25, h: 0.04445, y0: 0, color: 0x363c44 },
+  switch48: { shape: 'box', w: 0.4826, d: 0.25, h: 0.04445, y0: 0, color: 0x363c44 },
+  patchpanel24: { shape: 'box', w: 0.4826, d: 0.14, h: 0.04445, y0: 0, color: 0x1f2225 },
+  patchpanel48: { shape: 'box', w: 0.4826, d: 0.14, h: 0.0889, y0: 0, color: 0x1f2225 },
+  // [18/09/2026 UTC] RODADA 167 -- infraestrutura PASSIVA de rede (js/rede-passiva.js / rede-equip.js).
+  dio12: { shape: 'box', w: 0.4826, d: 0.2, h: 0.04445, y0: 0, color: 0x2f343b },
+  dio24: { shape: 'box', w: 0.4826, d: 0.2, h: 0.04445, y0: 0, color: 0x2f343b },
+  dio48: { shape: 'box', w: 0.4826, d: 0.2, h: 0.0889, y0: 0, color: 0x2f343b },
+  guia_h1: { shape: 'box', w: 0.4826, d: 0.06, h: 0.04445, y0: 0, color: 0x2f343b },
+  guia_h2: { shape: 'box', w: 0.4826, d: 0.06, h: 0.0889, y0: 0, color: 0x2f343b },
+  guia_v: { shape: 'box', w: 0.1, d: 0.1, h: 1.8, y0: 0, color: 0x2f343b },
+  bandeja_fixa: { shape: 'box', w: 0.4826, d: 0.35, h: 0.04445, y0: 0, color: 0x767d8b },
+  bandeja_basc: { shape: 'box', w: 0.4826, d: 0.35, h: 0.0889, y0: 0, color: 0x767d8b },
+  pdu8: { shape: 'box', w: 0.4826, d: 0.05, h: 0.04445, y0: 0, color: 0x2f343b },
+  frente_falsa: { shape: 'box', w: 0.4826, d: 0.01, h: 0.04445, y0: 0, color: 0x2f343b },
+  kit_vent: { shape: 'box', w: 0.4826, d: 0.1, h: 0.04445, y0: 0, color: 0x2f343b },
+  // [19/09/2026 UTC] NOVO (RODADA 171) -- No-break/UPS, Storage (NAS/SAN/Disk Shelf).
+  nobreak_torre: { shape: 'box', w: 0.19, d: 0.4, h: 0.38, y0: 0, color: 0x23272c },
+  nobreak_1u: { shape: 'box', w: 0.4826, d: 0.48, h: 0.04445, y0: 0, color: 0x23272c },
+  nobreak_2u: { shape: 'box', w: 0.4826, d: 0.48, h: 0.0889, y0: 0, color: 0x23272c },
+  nobreak_corporativo: { shape: 'box', w: 0.4826, d: 0.8, h: 0.8001, y0: 0, color: 0x23272c },
+  storage_12: { shape: 'box', w: 0.4826, d: 0.85, h: 0.0889, y0: 0, color: 0x2f343b },
+  storage_24: { shape: 'box', w: 0.4826, d: 0.85, h: 0.0889, y0: 0, color: 0x2f343b },
+  storage_60: { shape: 'box', w: 0.4826, d: 1.0, h: 0.1778, y0: 0, color: 0x2f343b },
+  espelho1: { shape: 'box', w: 0.086, d: 0.03, h: 0.086, y0: 0.3, color: 0xe9ebee },
+  espelho2: { shape: 'box', w: 0.086, d: 0.03, h: 0.086, y0: 0.3, color: 0xe9ebee },
+  espelho4: { shape: 'box', w: 0.102, d: 0.03, h: 0.102, y0: 0.3, color: 0xe9ebee },
+  caixa_piso2: { shape: 'box', w: 0.11, d: 0.11, h: 0.06, y0: 0, color: 0xe9ebee },
+  caixa_piso4: { shape: 'box', w: 0.13, d: 0.13, h: 0.06, y0: 0, color: 0xe9ebee },
+  abracadeira_velcro: { shape: 'box', w: 0.03, d: 0.014, h: 0.03, y0: 0, color: 0x2b2e33 },
+  abracadeira_nylon: { shape: 'box', w: 0.03, d: 0.014, h: 0.03, y0: 0, color: 0xe8e6de },
+  // Eletrocalha: peça de tamanho fixo (seção 200x100 mm, comprimento padrão 2m -- `obj.profundidade`), builder genérico.
+  eletrocalha: { shape: 'box', w: 0.2, d: 2, h: 0.1, y0: 0, color: 0x9aa3ad },
+  // Canaleta PVC: peça de tamanho fixo (seção 50x20 mm, comprimento padrão 2m -- `obj.profundidade`), builder genérico.
+  canaleta: { shape: 'box', w: 0.05, d: 2, h: 0.02, y0: 0, color: 0xf2f2ee },
+  // Leito aramado: peça de tamanho fixo (seção 300x50 mm, comprimento padrão 2m -- `obj.profundidade`), builder genérico.
+  leito: { shape: 'box', w: 0.3, d: 2, h: 0.05, y0: 0, color: 0xc9ced6 },
+  // Eletroduto: peça de tamanho fixo (33 mm de diâmetro externo, comprimento padrão 2m -- `obj.profundidade`), builder genérico.
+  eletroduto: { shape: 'box', w: 0.033, d: 2, h: 0.033, y0: 0, color: 0x3b3f46 },
   quadro: { shape: 'box', w: 1.2, d: 0.05, h: 0.8, y0: 1.1, color: 0xe8ecf2 },
   // [15/09/2026] NOVO — "quadro-parede": item decorativo distinto do
   // `quadro` acima (que é um QUADRO BRANCO/lousa, cor clara — usado pra

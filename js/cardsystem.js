@@ -123,6 +123,8 @@ window.CardSystem = {
     }
     el.innerHTML = html;
     container.appendChild(el);
+    // Janela nova sempre à frente das outras (ver js/windowmanager.js).
+    try { window.WindowManager?.focus?.(el); } catch (e) { /* segue sem z-index gerenciado */ }
     if (typeof wireFn === 'function') {
       try { wireFn(el, data, ctx); } catch (err) { console.error(`[CardSystem] erro ao "wire" o card "${id}":`, err); }
     }

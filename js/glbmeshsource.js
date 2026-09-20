@@ -1,9 +1,6 @@
 /* js/glbmeshsource.js
  * [16/09/2026 UTC] NOVO — pedido verbatim: "Implemente o ObjMeshSource para
- * .glb como você mencionou." (ver progresso-sessao.md RODADA 69: gerar
- * `luminaria.glb`/`poste.glb`/`relogio.glb` — os 3 tipos que precisam de
- * material "sempre aceso"/textura embutida — não bastava sozinho, porque
- * `window.Model3DLoader` (js/model3dloader.js) só carrega modelo IMPORTADO
+ * .glb como você mencionou." só carrega modelo IMPORTADO
  * PELO USUÁRIO em tempo de execução, salvo no IndexedDB; não existia
  * nenhum jeito de um `.glb` ESTÁTICO/EMBUTIDO no próprio projeto (ex.
  * `assets/modelos/luminaria.glb`) ser carregado automaticamente, do jeito

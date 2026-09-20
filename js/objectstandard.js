@@ -67,6 +67,90 @@
  * isso é irrelevante (o usuário não consegue desenhar um objeto antes da
  * tela nem ter montado).
  */
+// [18/09/2026 UTC] NOVO (RODADA 156) — pedido do usuário (teste feito por
+// ele mesmo): "no mapa 2D, acessei a janela de propriedades do objeto porta
+// e fui na parte dos scripts, porém não tinha script algum. O script da
+// porta que você fez deveria estar ali." CAUSA RAIZ: os scripts de
+// abrir/fechar porta por duplo clique (RODADA 155, e o "molde" de
+// exemplo pronto desde a RODADA 62) sempre existiram só como TEXTO em
+// `assets/exemplos/_exemplo-script-porta-*.txt`, pra copiar/colar
+// manualmente — nenhum código deste projeto jamais chamava
+// `ObjectStandard.setDefaultComponents('porta', ...)` (o "molde de
+// comportamento por tipo" que `applyDefaultComponents`, abaixo, aplica
+// automaticamente em toda porta NOVA) com esse conteúdo. Ou seja, mesmo
+// com `comManeneta: true` virando padrão na RODADA 155, nenhuma porta
+// nova ganhava o Script/Gatilho de fato — só a malha 3D (a maçaneta)
+// mudou de padrão, o COMPORTAMENTO (script) continuou 100% manual.
+// CORRIGIDO: `_seedPortaScriptPadraoSeNecessario()` grava, UMA ÚNICA VEZ
+// (flag `DB.getSetting('portaScriptPadraoSeed')`, para não "ressuscitar"
+// o molde se o usuário decidir apagá-lo de propósito depois em "Acessar
+// modelos" > "⚙️ Comportamento padrão" > "Porta"), um molde padrão pro
+// tipo 'porta' com: 1 componente Script (código abaixo, mesma lógica —
+// Start/Update/aoClicarDuasVezes com velocidade proporcional ao duplo
+// clique — dos arquivos de exemplo `_exemplo-script-porta-*.txt`) + 1
+// componente EventTrigger (evento "Ao Clicar Duas Vezes"/`onDoubleClick`
+// → ação chamando `aoClicarDuasVezes` no Script acima). A partir de
+// agora, toda porta NOVA criada pela ferramenta "Porta" já nasce com
+// essa dupla de componentes prontos (via `applyDefaultComponents`, mesmo
+// caminho de sempre) — o usuário pode editar/remover livremente depois,
+// por objeto ou reconfigurando o molde do tipo inteiro.
+const _DEFAULT_PORTA_SCRIPT_CODE = [
+  '/**',
+  ' * Start é chamada antes do primeiro quadro (uma vez, ao iniciar o objeto).',
+  ' */',
+  'function Start() {',
+  '  // Garante um estado inicial coerente (porta fechada, sem animação em',
+  '  // curso) mesmo se `anguloAbertura` nunca tiver sido definido antes.',
+  '  if (obj.anguloAbertura === undefined) obj.anguloAbertura = obj.aberta ? 90 : 0;',
+  '}',
+  '',
+  '/**',
+  ' * Update é chamada uma vez por quadro (a cada frame).',
+  ' */',
+  'function Update() {',
+  '  // Nada por quadro neste exemplo — a animação suave da folha (e da',
+  '  // maçaneta, quando a porta tiver `comManeneta:true`) já é feita pelo',
+  '  // motor 3D sozinho (Engine3D._updateDoorAnimations), só olhando o',
+  '  // VALOR de obj.anguloAbertura definido abaixo em aoClicarDuasVezes().',
+  '}',
+  '',
+  '// Debounce: evita que um duplo clique durante a animação em curso dispare',
+  '// uma 2ª troca antes da 1ª terminar visualmente. A duração VARIA (ver',
+  '// abaixo), então o debounce é recalculado a cada chamada.',
+  'var _debounceAte = 0;',
+  '',
+  '// A velocidade com que se dá os 2 cliques do duplo clique influencia a',
+  '// velocidade com que a porta abre/fecha — `view3d._ultimoIntervaloDuploCliqueMs`',
+  '// (disponível pra todo Script) é o intervalo real (ms) entre os 2 cliques',
+  '// do duplo clique mais recente.',
+  'function _calcularVelocidadeGrausPorSeg() {',
+  "  var intervaloMs = (typeof view3d !== 'undefined' && view3d && typeof view3d._ultimoIntervaloDuploCliqueMs === 'number')",
+  '    ? view3d._ultimoIntervaloDuploCliqueMs',
+  '    : 300;',
+  '  var MS_MIN = 100, MS_MAX = 600;',
+  '  var t = (Math.max(MS_MIN, Math.min(MS_MAX, intervaloMs)) - MS_MIN) / (MS_MAX - MS_MIN);',
+  '  var DEG_PER_SEC_RAPIDO = 90 / 0.25;',
+  '  var DEG_PER_SEC_LENTO = 90 / 0.8;',
+  '  return DEG_PER_SEC_RAPIDO + (DEG_PER_SEC_LENTO - DEG_PER_SEC_RAPIDO) * t;',
+  '}',
+  '',
+  '/**',
+  ' * Chamada pelo Gatilho de Evento "Ao Clicar Duas Vezes" (onDoubleClick) —',
+  ' * alterna a porta entre aberta (90°) e fechada (0°), na velocidade',
+  ' * calculada acima.',
+  ' */',
+  'function aoClicarDuasVezes() {',
+  '  var agora = Date.now();',
+  '  if (agora < _debounceAte) return;',
+  '  var velocidade = _calcularVelocidadeGrausPorSeg();',
+  '  obj._velocidadeGrausPorSeg = velocidade;',
+  '  _debounceAte = agora + Math.round((90 / velocidade) * 1000) + 50;',
+  '  var estaAberta = (obj.anguloAbertura || 0) > 45;',
+  '  obj.anguloAbertura = estaAberta ? 0 : 90;',
+  '}',
+  '',
+].join('\n');
+
 window.ObjectStandard = {
   _cache: {}, // tipoKey -> array de components (o "molde" cru, nunca mutado direto — sempre clonado antes de usar)
 
@@ -77,6 +161,43 @@ window.ObjectStandard = {
     } catch (err) {
       console.error('[ObjectStandard] falha ao carregar defaultComponentsByType', err);
       this._cache = this._cache || {};
+    }
+  },
+
+  /** [18/09/2026 UTC] NOVO (RODADA 156) — ver comentário grande acima de
+   *  `_DEFAULT_PORTA_SCRIPT_CODE`. Roda uma única vez na vida do banco
+   *  (flag `portaScriptPadraoSeed`), depois de `_reloadCache()` já ter
+   *  carregado o molde salvo — só semeia se NINGUÉM (nem o usuário, nem
+   *  esta função antes) já tiver configurado um molde pra 'porta'. */
+  async _seedPortaScriptPadraoSeNecessario() {
+    try {
+      const jaSemeado = await DB.getSetting('portaScriptPadraoSeed', false);
+      if (jaSemeado) return;
+      const moldeAtual = this._cache && this._cache.porta;
+      if (Array.isArray(moldeAtual) && moldeAtual.length) {
+        // Já existe um molde (configurado manualmente antes desta rodada
+        // existir) — não sobrescreve, só marca como "resolvido" pra nunca
+        // mais checar de novo.
+        await DB.setSetting('portaScriptPadraoSeed', true);
+        return;
+      }
+      const scriptId = Utils.uid('comp');
+      const eventTriggerId = Utils.uid('comp');
+      const molde = [
+        { id: scriptId, type: 'Script', enabled: true, code: _DEFAULT_PORTA_SCRIPT_CODE },
+        {
+          id: eventTriggerId,
+          type: 'EventTrigger',
+          enabled: true,
+          events: [
+            { event: 'onDoubleClick', actions: [{ targetComponentId: scriptId, method: 'aoClicarDuasVezes', args: [] }] },
+          ],
+        },
+      ];
+      await this.setDefaultComponents('porta', molde);
+      await DB.setSetting('portaScriptPadraoSeed', true);
+    } catch (err) {
+      console.error('[ObjectStandard] falha ao semear o molde padrão de "porta"', err);
     }
   },
 
@@ -119,7 +240,76 @@ window.ObjectStandard = {
     if (!entity || (Array.isArray(entity.components) && entity.components.length)) return;
     const molde = this._cache && this._cache[tipoKey];
     if (!Array.isArray(molde) || !molde.length) return;
-    entity.components = molde.map((c) => ({ ...JSON.parse(JSON.stringify(c)), id: Utils.uid('comp') }));
+    // [18/09/2026 UTC] CORRIGIDO (RODADA 158) — pedido verbatim: "Fiz o
+    // teste com uma porta nova. No componente o script deveria estar
+    // selecionado. E no método, deveria estar selecionado o método
+    // 'aoClicarDuasVezes()'. Porém só estava '--componente--' e
+    // '--método--'." CAUSA RAIZ: cada componente clonado ganhava um `id`
+    // NOVO (`Utils.uid('comp')`, de propósito — ver comentário grande da
+    // função, acima — pra 2 instâncias do mesmo tipo não compartilharem
+    // `targetComponentId` colidindo), mas os componentes `EventTrigger` do
+    // MOLDE apontam pro `id` ANTIGO do Script (`action.targetComponentId`,
+    // gravado quando o molde foi salvo, ex. pelo `_seedPortaScriptPadraoSeNecessario`
+    // da RODADA 156) — depois da troca de IDs, essa referência ficava
+    // "orfã" (nenhum componente da PORTA de verdade tinha mais aquele id
+    // antigo), e a UI (`js/mapview.js` `_renderComponentsEditor`, que só
+    // marca `selected` quando `sc.id === action.targetComponentId`) não
+    // encontrava nada pra pré-selecionar — daí "--componente--"/
+    // "--método--" em vez do Script/`aoClicarDuasVezes` já configurados no
+    // molde. CORRIGIDO: constrói um mapa "id antigo → id novo" enquanto
+    // clona, depois passa de novo por todo `EventTrigger` clonado
+    // reescrevendo `action.targetComponentId` através desse mapa (id sem
+    // correspondência — ex. aponta pra um componente que não fazia parte
+    // deste molde — vira string vazia, mesmo estado "não configurado" de
+    // sempre, em vez de deixar uma referência quebrada).
+    const idMap = new Map();
+    const clones = molde.map((c) => {
+      const clone = { ...JSON.parse(JSON.stringify(c)), id: Utils.uid('comp') };
+      idMap.set(c.id, clone.id);
+      return clone;
+    });
+    for (const clone of clones) {
+      if (clone.type !== 'EventTrigger' || !Array.isArray(clone.events)) continue;
+      for (const ev of clone.events) {
+        for (const action of (ev.actions || [])) {
+          action.targetComponentId = idMap.get(action.targetComponentId) || '';
+        }
+      }
+    }
+    entity.components = clones;
+  },
+
+  /** [18/09/2026 UTC] NOVO (RODADA 158) — "auto-cura" de uma entidade
+   *  concreta que já ficou salva com a referência quebrada descrita no
+   *  comentário grande de `applyDefaultComponents` acima (bug já corrigido
+   *  ali, mas só vale pra entidades criadas DAQUI PRA FRENTE — entidades
+   *  já salvas com o `id` órfão continuariam quebradas pra sempre sem
+   *  isto, ex.: a porta de teste que o próprio usuário usou pra reportar o
+   *  problema). Só repara o caso INEQUÍVOCO: exatamente 1 componente
+   *  `Script` na entidade — nesse caso, qualquer `action.targetComponentId`
+   *  de um `EventTrigger` que não bater com NENHUM `id` real da própria
+   *  entidade só pode ter sido, de fato, uma referência pra esse único
+   *  Script (perdida na clonagem) — reconecta pra ele. Com 0 ou 2+
+   *  Scripts, não mexe em nada (não dá pra adivinhar com segurança qual
+   *  era o alvo original) — melhor deixar como "não configurado" (o
+   *  usuário resolve manualmente) do que reconectar errado. */
+  repairOrphanScriptLinks(entity) {
+    const comps = entity?.components;
+    if (!Array.isArray(comps) || !comps.length) return;
+    const scriptComps = comps.filter((c) => c.type === 'Script');
+    if (scriptComps.length !== 1) return;
+    const unicoScriptId = scriptComps[0].id;
+    const idsValidos = new Set(comps.map((c) => c.id));
+    for (const c of comps) {
+      if (c.type !== 'EventTrigger' || !Array.isArray(c.events)) continue;
+      for (const ev of c.events) {
+        for (const action of (ev.actions || [])) {
+          if (action.targetComponentId && !idsValidos.has(action.targetComponentId)) {
+            action.targetComponentId = unicoScriptId;
+          }
+        }
+      }
+    }
   },
 
   // -------------------------------------------------------------------
@@ -395,5 +585,8 @@ window.ObjectStandard = {
 
 // Carrega o cache em memória assim que o script roda (ver nota grande no
 // topo do arquivo sobre `applyDefaultComponents` ser síncrona) — fire-and-
-// forget, não bloqueia o carregamento da página.
-window.ObjectStandard._reloadCache();
+// forget, não bloqueia o carregamento da página. [18/09/2026 UTC, RODADA
+// 156] Encadeado com `_seedPortaScriptPadraoSeNecessario()` (precisa do
+// cache já carregado pra decidir se semeia ou não) — ver comentário grande
+// acima de `_DEFAULT_PORTA_SCRIPT_CODE`.
+window.ObjectStandard._reloadCache().then(() => window.ObjectStandard._seedPortaScriptPadraoSeNecessario());

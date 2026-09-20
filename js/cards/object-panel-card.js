@@ -57,7 +57,7 @@
 // Não testado ao vivo em navegador nesta rodada (sem acesso a navegador
 // nesta sessão) — só `node --check` (sintaxe) e reprodução isolada em
 // Node chamando `build(...)` com objetos de stub (mesma técnica usada pra
-// achar a causa raiz do bug da RODADA 17 do progresso-sessao.md),
+// achar a causa raiz do bug da RODADA 17),
 // confirmando que o HTML/wiring são gerados sem lançar exceção pros casos
 // testados (objeto comum e "Piso"). Vale um teste manual na janela de
 // propriedades de alguns tipos diferentes de objeto antes de confiar
@@ -80,6 +80,15 @@ window.ObjectPanelCard = {
     const isRetangulo = obj.forma === 'retangulo';
     const isPoligono = obj.forma === 'poligono';
     const isImagem = obj.forma === 'imagem';
+    // [18/09/2026 UTC] NOVO -- "Rack" modular de 19" (js/rack-modular.js): em
+    // vez de Largura/Profundidade/Altura livres, so 2 parametros (Us e
+    // Profundidade em mm, restritos a matriz de mercado); as medidas 2D/3D
+    // sao derivadas deles por `RackModular.patchParaObjeto`.
+    const isRack = obj.tipo === 'rack' && !!window.RackModular && !!window.RACK_CATALOGO;
+    // [18/09/2026 UTC] RODADA 166 -- Switch 24/48 e Patch Panel 24/48 (js/rede-equip.js): medidas fixas
+    // (19" x 1U/2U reais); o painel ganha energia, instalacao no rack, tabela de portas (rotulo/LED/cabo)
+    // e conexao de cabos.
+    const isRede = !!window.RedeEquip && window.RedeEquip.ehEquipRede(obj.tipo);
     // Forma com um `tipo` de catálogo associado (ex.: "mesa" — ver
     // _MESA_FORMA_DEF) mostra o nome DAQUELE tipo ("Mesa"), não o rótulo
     // genérico da forma ("Retângulo/quadrado desenhado") — mantém a
@@ -116,6 +125,7 @@ window.ObjectPanelCard = {
         <div class="obj-item-row">
           <span class="obj-item-row-desc">${item ? `🔗 ${Utils.escapeHtml(item.descricao || '(sem nome)')}${item.patrimonio ? ` <small>(${Utils.escapeHtml(item.patrimonio)})</small>` : ''}` : `⚠️ item removido${entry.patrimonio ? ` — patrimônio <small>${Utils.escapeHtml(entry.patrimonio)}</small>` : ''}`}</span>
           ${dupBadge}
+          <button type="button" class="icon-btn sm obj-item-editar" data-id="${entry.id}" title="Editar: trocar este patrimônio por outro">✏️</button>
           ${item ? `<button type="button" class="icon-btn sm obj-item-ver" data-id="${entry.id}" title="Ver detalhes do item">👁️</button>` : ''}
           <button type="button" class="icon-btn sm obj-item-remover" data-id="${entry.id}" title="Remover esta associação">✂️</button>
         </div>`;
@@ -161,7 +171,7 @@ window.ObjectPanelCard = {
     // de verdade, só existe pra uniformidade com outras formas retângulo).
     const isEscada = obj.tipo === 'escada';
     const escadaDegrausField = isEscada
-      ? `<label class="map-panel-field" title="A altura do lance no 3D é sempre 2 metros fixos, independente do campo 'Altura' acima."><span>Degraus</span><input type="number" step="1" min="1" max="60" id="obj-escada-degraus" value="${Math.max(1, Math.round(obj.escadaDegraus) || 11)}"></label>`
+      ? `<label class="map-panel-field" title="A escada é gerada por código a partir de Largura, Profundidade, Altura e Degraus desta janela (o 3D e o Modelador usam estes valores)."><span>Degraus</span><input type="number" step="1" min="1" max="60" id="obj-escada-degraus" value="${Math.max(1, Math.round(obj.escadaDegraus) || 11)}"></label>`
       : '';
     // [13/09/2026] NOVO — "Acabamento" do objeto "Piso" (pedido do usuário:
     // "chão lajotado"). Só aparece pra `obj.tipo === 'piso'` (nenhum outro
@@ -181,10 +191,105 @@ window.ObjectPanelCard = {
         </select>
       </label>
     ` : '';
-    const formaFields = isRetangulo ? `
+    const rackFieldsHtml = isRack ? (() => {
+      const RC = window.RACK_CATALOGO;
+      const r = window.RackModular.fromObjeto(obj);
+      const optUs = RC.ALTURAS_U.map((u) => `<option value="${u}" ${u === r.us ? 'selected' : ''}>${u}U</option>`).join('');
+      const optProf = RC.PROFUNDIDADES_MM.map((pf) => `<option value="${pf}" ${pf === r.profundidade ? 'selected' : ''}>${pf} mm</option>`).join('');
+      const elevField = r.tipo === 'parede'
+        ? `<label class="map-panel-field" title="Distancia do chao ate a base do rack de parede."><span>Altura da base (m)</span><input type="number" step="0.05" min="0" id="obj-rack-elev" value="${(obj.elevacao || 0).toFixed(2)}"></label>`
+        : '';
+      // [18/09/2026 UTC] RODADA 164 -- Montagem (pecas desmontaveis) e Equipamentos.
+      const mont = Object.assign({ frente: true, traseira: true, lateralEsq: true, lateralDir: true, topo: true, base: true }, obj.rackMontagem || {});
+      const tt = obj.rackTraseiraTipo === 'chapa' ? 'chapa' : 'porta';
+      const checks = RC.PECAS.map((p) => {
+        const rot = p.chave === 'traseira' ? (tt === 'chapa' ? 'Chapa de tr\u00e1s' : 'Porta de tr\u00e1s') : p.rotulo;
+        return `<label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" data-rack-peca="${p.chave}" ${mont[p.chave] ? 'checked' : ''}> ${Utils.escapeHtml(rot)}</label>`;
+      }).join('');
+      const acessAtuais = r.acessorios();
+      const listaAcess = acessAtuais.length ? acessAtuais.map((a) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px"><span>${Utils.escapeHtml((RC.ACESSORIOS[a.tipo] && RC.ACESSORIOS[a.tipo].rotulo) || a.tipo)} &mdash; U${a.uInicial}${a.alturaU > 1 ? '&ndash;' + (a.uInicial + a.alturaU - 1) : ''}</span><button type="button" class="btn btn-sm" data-rack-rem="${Utils.escapeHtml(a.id)}">Remover</button></div>`).join('')
+        : '<div style="font-size:12.5px;color:var(--text-dim)">Nenhum equipamento instalado.</div>';
+      const optTipos = Object.keys(RC.ACESSORIOS).filter((k) => k === 'organizador' || k === 'bandeja').map((k) => `<option value="${k}">${Utils.escapeHtml(RC.ACESSORIOS[k].rotulo)}</option>`).join('');
+      const RE0 = window.RedeEquip;
+      const eqRede = RE0 ? RE0.equipDoRack(ctx._map, obj.id).sort((a, b) => (a.rackU || 0) - (b.rackU || 0)) : [];
+      const redeRackHtml = RE0 ? `<fieldset class="map-panel-field" style="border:1px solid var(--border,#3a4250);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px">
+        <legend style="font-size:12.5px;padding:0 4px">Equipamentos de rede (por U): switches, patch panels, DIO, guias, PDU...</legend>
+        ${eqRede.length ? eqRede.map((e) => { const sq = RE0.especificar(e.tipo); return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px"><span>U${e.rackU}${sq.alturaU > 1 ? '\u2013' + (e.rackU + sq.alturaU - 1) : ''} \u00b7 ${Utils.escapeHtml(sq.rotulo)} \u2014 ${Utils.escapeHtml(e.nome || '')}</span><button type="button" class="btn btn-sm" data-rack-rede-ret="${e.id}">Retirar</button></div>`; }).join('') : '<div style="font-size:12.5px;color:var(--text-dim)">Nenhum instalado.</div>'}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><select id="obj-rack-rede-tipo">${RE0.TIPOS_RACKAVEIS.map((t) => `<option value="${t}">${Utils.escapeHtml(RE0.especificar(t).rotulo)}</option>`).join('')}</select><button type="button" class="btn btn-sm" data-rack-rede-add="sel">\uff0b Instalar na 1\u00aa U livre</button></div>
+      </fieldset>` : '';
+      const montagemHtml = `
+      <fieldset class="map-panel-field" style="border:1px solid var(--border,#3a4250);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px">
+        <legend style="font-size:12.5px;padding:0 4px">Montagem (pe\u00e7as)</legend>
+        ${checks}
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px" title="O que fecha a traseira do rack: uma porta articulada (com grelha) ou uma chapa met\u00e1lica fixa."><span>Traseira:</span><select id="obj-rack-traseira"><option value="porta" ${tt === 'porta' ? 'selected' : ''}>Porta</option><option value="chapa" ${tt === 'chapa' ? 'selected' : ''}>Chapa met\u00e1lica</option></select></label>
+        <div style="display:flex;gap:6px"><button type="button" class="btn btn-sm" id="obj-rack-desmontar">Desmontar tudo (s\u00f3 a arma\u00e7\u00e3o)</button><button type="button" class="btn btn-sm" id="obj-rack-montar">Montar tudo</button></div>
+        <div style="font-size:11.5px;color:var(--text-dim)">No Ver em 3D: dois cliques na porta abrem/fecham (Modo Navega\u00e7\u00e3o); clique esquerdo no Modo Edi\u00e7\u00e3o abre o menu (remover a pe\u00e7a mirada, recolocar, equipamentos).</div>
+      </fieldset>
+      <fieldset class="map-panel-field" style="border:1px solid var(--border,#3a4250);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px">
+        <legend style="font-size:12.5px;padding:0 4px">Acess\u00f3rios (organizador/bandeja, por U)</legend>
+        ${listaAcess}
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select id="obj-rack-acc-tipo">${optTipos}</select>
+          <label style="font-size:12.5px">Altura <input type="number" id="obj-rack-acc-h" min="1" max="${r.us}" step="1" value="1" style="width:52px">U</label>
+          <label style="font-size:12.5px" title="Vazio = primeira U livre">U inicial <input type="number" id="obj-rack-acc-u" min="1" max="${r.us}" step="1" placeholder="auto" style="width:60px"></label>
+          <button type="button" class="btn btn-sm" id="obj-rack-acc-add">Adicionar</button>
+        </div>
+      </fieldset>
+      ${redeRackHtml}`;
+      return `
+      <label class="map-panel-field" title="Altura util em Us (1U = 44,45 mm). Ate 14U o rack e de parede; a partir de 16U e de piso (com rodizios)."><span>Altura (Us)</span><select id="obj-rack-us">${optUs}</select></label>
+      <label class="map-panel-field"><span>Profundidade (mm)</span><select id="obj-rack-prof">${optProf}</select></label>
+      <div class="map-panel-field" style="font-size:12.5px; color:var(--text-dim)">Tipo: <b>${r.tipo === 'parede' ? 'Parede' : 'Piso'}</b> &middot; ${Math.round(r.dim.largura)} &times; ${r.dim.profundidade} &times; ${Math.round(r.dim.alturaTotal)} mm (L &times; P &times; A) &middot; ${r.us} pontos de encaixe (1 por U)</div>
+      ${elevField}
+      ${montagemHtml}
+      <label class="map-panel-field"><span>Preenchimento</span><input type="color" id="obj-cor" value="${obj.cor || '#2b2f36'}"></label>
+      <label class="map-panel-field" title="Cor do contorno no mapa 2D"><span>Contorno</span><input type="color" id="obj-cor-contorno" value="${obj.corContorno || obj.cor || '#2b2f36'}"></label>
+    `;
+    })() : '';
+    const redeFieldsHtml = isRede ? (() => {
+      const RE = window.RedeEquip, esc = (t) => Utils.escapeHtml(String(t == null ? '' : t));
+      const sp = RE.especificar(obj.tipo), ehSw = RE.ehSwitch(obj.tipo), r = RE.garantirRede(obj), mapa = ctx._map;
+      const racks = (mapa.objects || []).filter((o) => o.tipo === 'rack');
+      const rackAtual = obj.rackId ? racks.find((o) => o.id === obj.rackId) : null;
+      const optRacks = racks.map((o) => `<option value="${o.id}">${esc(o.nome || 'Rack')} (${o.rackUs || 12}U)</option>`).join('');
+      const instHtml = rackAtual
+        ? `<div style="font-size:13px">Instalado em <b>${esc(rackAtual.nome || 'Rack')}</b> · U${obj.rackU}${sp.alturaU > 1 ? '–' + (obj.rackU + sp.alturaU - 1) : ''}</div><div><button type="button" class="btn btn-sm" id="obj-rede-retirar">Retirar do rack</button></div>`
+        : (racks.length ? `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><select id="obj-rede-rack">${optRacks}</select><label style="font-size:12.5px" title="Vazio = 1ª U livre">U <input type="number" id="obj-rede-u" min="1" step="1" placeholder="auto" style="width:56px"></label><button type="button" class="btn btn-sm" id="obj-rede-instalar">Instalar no rack</button></div>`
+          : '<div style="font-size:12.5px;color:var(--text-dim)">Nenhum rack no mapa. Solte o equipamento sobre um rack para encaixar na U mais próxima.</div>');
+      const linhas = sp.portas.map((pt) => {
+        const pr = r.portas[pt.n] || {}, cabo = RE.caboDaPorta(mapa, obj.id, pt.n);
+        let cab = '—';
+        if (cabo) { const l = RE.outroLado(cabo, obj.id, pt.n), o = (mapa.objects || []).find((x) => x.id === l.obj); cab = `🔌 ${esc(o ? (o.nome || o.tipo) : '?')}:${l.porta} <button type="button" class="btn btn-sm" data-rede-des="${pt.n}" title="Desconectar">×</button>`; }
+        const st = ehSw ? `<td><select data-rede-st="${pt.n}">${['auto', 'active', 'idle', 'off'].map((v) => `<option value="${v}" ${(pr.status || 'auto') === v ? 'selected' : ''}>${v === 'auto' ? 'auto' : v === 'active' ? 'pisca' : v === 'idle' ? 'fixo' : 'apagado'}</option>`).join('')}</select></td>` : '';
+        return `<tr><td style="white-space:nowrap">${pt.tipo === 'sfp' ? 'SFP ' : ''}${pt.n}</td><td><input data-rede-rot="${pt.n}" value="${esc(pr.rotulo || '')}" style="width:100%;min-width:70px"></td>${st}<td style="white-space:nowrap">${cab}</td></tr>`;
+      }).join('');
+      const outros = (mapa.objects || []).filter((o) => RE.ehEquipRede(o.tipo));
+      const optDe = sp.portas.filter((pt) => !RE.caboDaPorta(mapa, obj.id, pt.n)).map((pt) => `<option value="${pt.n}">${pt.tipo === 'sfp' ? 'SFP ' : ''}${pt.n}</option>`).join('');
+      const optCabo = Object.keys(RE.REDE_CATALOGO.CABOS).filter((k) => k !== 'console' && k !== 'fibra').map((k) => `<option value="${k}">${esc(RE.REDE_CATALOGO.CABOS[k].rotulo)}</option>`).join('');
+      return `
+      <div class="map-panel-field" style="font-size:12.5px;color:var(--text-dim)">${esc(sp.modelo)} · ${sp.largura} × ${sp.profundidade} × ${sp.alturaMm} mm${sp.alturaU ? ' (' + sp.alturaU + 'U, rack 19")' : ''} · ${sp.portas.length} porta(s)</div>
+      <fieldset class="map-panel-field" style="border:1px solid var(--border,#3a4250);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px"><legend style="font-size:12.5px;padding:0 4px">Identificação e portas</legend>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px"><span>labelID</span><input type="text" id="obj-rede-label" value="${esc(r.labelID || '')}" placeholder="ex.: PP-A01 / TOM-12" style="flex:1"></label>
+        ${sp.familia === 'dio' ? `<label style="display:flex;gap:8px;align-items:center;font-size:13px"><span>Conector</span><select data-rede-cfg="conector">${['LC', 'SC', 'ST'].map((k) => `<option value="${k}" ${(r.conector || 'LC') === k ? 'selected' : ''}>${k}</option>`).join('')}</select><span>Fibra</span><select data-rede-cfg="fibra">${['SMF', 'OM3', 'OM4'].map((k) => `<option value="${k}" ${(r.fibra || 'SMF') === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>` : ''}
+        ${(sp.familia === 'patchpanel' || sp.familia === 'tomada') ? `<label style="display:flex;gap:8px;align-items:center;font-size:13px"><span>Keystone</span><select data-rede-cfg="categoria">${['cat5e', 'cat6', 'cat6a', 'cat7'].map((k) => `<option value="${k}" ${(r.categoria || 'cat6') === k ? 'selected' : ''}>${({ cat5e: 'Cat5e', cat6: 'Cat6', cat6a: 'Cat6A', cat7: 'Cat7' })[k]}</option>`).join('')}</select><span>Blindagem</span><select data-rede-cfg="blindagem">${['U/UTP', 'F/UTP', 'S/FTP'].map((k) => `<option value="${k}" ${(r.blindagem || 'U/UTP') === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>` : ''}
+      </fieldset>
+      ${ehSw ? `<fieldset class="map-panel-field" style="border:1px solid var(--border,#3a4250);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px"><legend style="font-size:12.5px;padding:0 4px">Energia</legend>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="obj-rede-ligado" ${r.ligado ? 'checked' : ''}> Ligado (LEDs acendem conforme os cabos)</label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px"><span>Hostname</span><input type="text" id="obj-rede-host" value="${esc(r.hostname)}" style="flex:1"></label>
+        <div style="font-size:11.5px;color:var(--text-dim)">No Ver em 3D: dois cliques (Modo Navegação) ligam/desligam; clique esquerdo (Modo Edição) abre as opções.</div></fieldset>` : ''}
+      ${RE.ehRackavel(obj.tipo) ? `<fieldset class="map-panel-field" style="border:1px solid var(--border,#3a4250);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px"><legend style="font-size:12.5px;padding:0 4px">Rack</legend>${instHtml}</fieldset>` : ''}
+      ${sp.portas.length ? `<fieldset class="map-panel-field" style="border:1px solid var(--border,#3a4250);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px"><legend style="font-size:12.5px;padding:0 4px">Portas e cabos</legend>
+        <div style="max-height:220px;overflow:auto"><table style="width:100%;font-size:12.5px;border-collapse:collapse"><thead><tr><th align="left">Porta</th><th align="left">Rótulo</th>${ehSw ? '<th align="left">LED</th>' : ''}<th align="left">Cabo</th></tr></thead><tbody>${linhas}</tbody></table></div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span style="font-size:12.5px">Cabear porta</span><select id="obj-rede-cn-de">${optDe}</select><span style="font-size:12.5px">a</span><select id="obj-rede-cn-para">${outros.map((o) => `<option value="${o.id}">${esc(o.nome || o.tipo)}</option>`).join('')}</select><select id="obj-rede-cn-pp"></select><select id="obj-rede-cn-tipo">${optCabo}</select><button type="button" class="btn btn-sm" id="obj-rede-cn-btn">Conectar</button></div>
+      </fieldset>` : ''}
+      <label class="map-panel-field"><span>Preenchimento</span><input type="color" id="obj-cor" value="${obj.cor || (ehSw ? '#363c44' : '#1f2225')}"></label>
+      <label class="map-panel-field" title="Cor do contorno no mapa 2D"><span>Contorno</span><input type="color" id="obj-cor-contorno" value="${obj.corContorno || obj.cor || '#363c44'}"></label>
+    `;
+    })() : '';
+    const formaFields = isRede ? redeFieldsHtml : isRack ? rackFieldsHtml : isRetangulo ? `
       <label class="map-panel-field"><span>Largura (m)</span><input type="number" step="0.05" min="0.05" id="obj-largura" value="${(obj.largura ?? 0.5).toFixed(2)}"></label>
       <label class="map-panel-field"><span>Profundidade (m)</span><input type="number" step="0.05" min="0.05" id="obj-profundidade" value="${(obj.profundidade ?? 0.5).toFixed(2)}"></label>
-      <label class="map-panel-field"><span>Altura (m)</span><input type="number" step="0.05" min="0.05" id="obj-altura" value="${(obj.altura ?? 0.5).toFixed(2)}"></label>
+      <label class="map-panel-field"><span>Altura (m)</span><input type="number" step="0.05" min="0.05" id="obj-altura" value="${(isEscada ? (obj.alturaEscada || obj.altura || 2.0) : (obj.altura ?? 0.5)).toFixed(2)}"></label>
       ${escadaDegrausField}
       ${acabamentoField}
       <label class="map-panel-field"><span>Preenchimento</span><input type="color" id="obj-cor" value="${obj.cor || '#8a92a3'}"></label>
@@ -271,13 +376,25 @@ window.ObjectPanelCard = {
            objeto de uma mesma classe de uma vez. -->
       <label class="map-panel-field"><span>🏷️ Classes</span><input type="text" id="obj-classes" value="${Utils.escapeHtml((Mapping.getObjectClasses(obj) || []).join(', '))}" placeholder="ex: sala-reuniao, mobiliario" title="Uma ou mais 'classes' (separadas por vírgula ou espaço) — igual ao atributo 'class' do HTML. Use o painel '🏷️ Grupos' pra ocultar/destacar todos os objetos de uma mesma classe de uma vez."></label>
       ${grupoFieldHtml}
-      <label class="map-panel-field"><span>Posição X (m)</span><input type="number" step="0.1" id="obj-x" value="${obj.x.toFixed(2)}"></label>
-      <label class="map-panel-field"><span>Posição Y (m)</span><input type="number" step="0.1" id="obj-y" value="${obj.y.toFixed(2)}"></label>
+      <!-- [19/09/2026 UTC] CORRIGIDO (RODADA 194) -- pedido verbatim: "Implemente as setas na janela de
+           propriedades para todos os objetos que há no catálogo [...] é uma janela padrão que carrega
+           valores dos objetos." Este É o painel padrão (Mapa->Planta baixa->Ferramentas->Objetos, também
+           usado por qualquer objeto do catálogo colocado no mapa) -- a RODADA 193 tinha implementado as
+           setas só em porta/janela/câmera/texto/trajeto (ver mapview.js) e uma varredura por grep na época
+           não achou campos "obj-x"/"obj-y" em mapview.js porque o HTML deste painel foi extraído pra este
+           arquivo (js/cards/object-panel-card.js) numa refatoração anterior -- não fazia parte daquela
+           varredura. Mesmo padrão visual/rótulo ("→" pro X, "↓" pro Z, mesmo quando o campo/propriedade se
+           chama "y" internamente, igual porta-y/janela-y/cam-y/txt-y) das outras janelas.-->
+      <label class="map-panel-field"><span>Posição X (m) <span class="map-panel-axis-arrow" title="Sentido em que o eixo X aumenta seus valores">→</span></span><input type="number" step="0.1" id="obj-x" value="${obj.x.toFixed(2)}"></label>
+      <label class="map-panel-field"><span>Posição Z (m) <span class="map-panel-axis-arrow" title="Sentido em que este eixo aumenta seus valores (para baixo no mapa 2D)">↓</span></span><input type="number" step="0.1" id="obj-y" value="${obj.y.toFixed(2)}"></label>
       <label class="map-panel-field"><span>Rotação (°)</span><input type="number" step="1" id="obj-angulo" value="${grausAngulo}"></label>
       <label class="map-panel-field"><span>Andar / piso</span><input type="number" step="1" id="obj-piso" value="${obj.piso || 0}"></label>
       ${formaFields}
       <div class="map-panel-field">
-        <span>Patrimônio(s) associado(s)${itemEntries.length ? ` (${itemEntries.length})` : ''}</span>
+        <span style="display:flex; align-items:center; justify-content:space-between; gap:8px">
+          <span>Patrimônio(s) associado(s)${itemEntries.length ? ` (${itemEntries.length})` : ''}</span>
+          <button type="button" class="btn secondary sm" id="obj-item-associar">🔗 ${itemEntries.length ? 'Associar outro' : 'Associar'}</button>
+        </span>
         <div class="obj-item-list">${itemRows || '<div style="font-size:12.5px; color:var(--text-dim)">Nenhum</div>'}</div>
       </div>
       ${linkedItem ? `<label class="map-panel-field"><span>Patrimônio</span><input type="text" id="obj-patrimonio" value="${Utils.escapeHtml(linkedItem.patrimonio || '')}"></label>` : ''}
@@ -382,9 +499,14 @@ window.ObjectPanelCard = {
         <button class="btn secondary sm" id="obj-transformacao" title="Posição/Rotação (X/Y/Z)/Escala (X/Y/Z) deste objeto, com os mesmos controles do Modelador — aplicado em tempo real">🔄 Transformação</button>
         ` : `
         <button class="btn secondary sm" id="obj-modelar" title="Editar a malha 3D deste objeto vértice a vértice, como no Blender (abre a Visualização 3D já no Modo de Edição)">🔧 Modelar em 3D</button>
-        <button class="btn secondary sm" id="obj-tipo-trocar">🔄 Trocar tipo/forma</button>
+        <!-- [19/09/2026 UTC] REMOVIDO (RODADA 171) -- pedido verbatim do usuário: "No mapa 2D, na
+             janela de propriedades dos objetos, remova o botão 'Trocar tipo/forma'." O botão
+             #obj-tipo-trocar e todo o fluxo de _pickObjectType/substituição de tipo foram
+             mantidos intactos no restante do arquivo (função "wire" mais abaixo) só que agora
+             inofensivos: o querySelector('#obj-tipo-trocar') sempre retorna null (elemento não
+             existe mais no HTML) e o if (_btnObjTipoTrocar) que envolve o .onclick já existente
+             evita qualquer erro -- nada mais precisou mudar. -->
         `}
-        <button class="btn secondary sm" id="obj-item-associar">🔗 ${itemEntries.length ? 'Associar outro patrimônio' : 'Associar a um item'}</button>
         <button class="btn danger sm" id="obj-excluir">🗑️ Excluir</button>
       </div>`;
 
@@ -476,7 +598,16 @@ window.ObjectPanelCard = {
     const ensureCommitted = () => { if (emReedit()) ctx._finalizeFormaDraft(); };
     const salvarCampo = (patch) => {
       if (emReedit()) ctx._applyFormaDraftFieldPatch(patch);
-      else { Mapping.updateObject(ctx._map, obj.id, patch); ctx._saveMap(); }
+      else {
+        const alvo = Mapping.updateObject(ctx._map, obj.id, patch);
+        ctx._saveMap();
+        // [18/09/2026 UTC] RODADA 165 -- no "Ver em 3D" (ctx = View3D, tem `_engine`) o
+        // painel so gravava no mapa: a malha 3D so refletia ao sair/entrar do 3D
+        // (ex.: "Desmontar tudo" do Rack). Agora reconstroi SO este objeto na hora.
+        if (alvo && ctx._engine && typeof ctx._engine.rebuildObjectIncremental === 'function') {
+          try { ctx._engine.rebuildObjectIncremental(alvo); } catch (err) { console.warn('[ObjectPanel] rebuild 3D ao vivo falhou (dado ja salvo):', err); }
+        }
+      }
     };
     // NOVO (07/09/2026), pedido verbatim: "Todos os objetos, agora, devem
     // ter um nome." — objetos criados ANTES desta rodada (Mapping.addObject
@@ -713,7 +844,98 @@ window.ObjectPanelCard = {
         await DB.updateItem(linkedItem.id, { patrimonio: e.target.value });
       };
     }
-    if (isRetangulo) {
+    if (isRede) {
+      // [18/09/2026 UTC] RODADA 166 -- equipamento de rede: energia, rack, portas e cabos.
+      const RE = window.RedeEquip;
+      const reabrir = () => ctx._openObjectPanel?.((ctx._map.objects || []).find((o) => o.id === obj.id) || obj, modoVer3D ? { modoVer3D: true } : undefined);
+      const persistir = (o) => { ctx._saveMap(); if (ctx._engine && ctx._engine.rebuildObjectIncremental) { try { ctx._engine.rebuildObjectIncremental(o); } catch (err) { console.warn('[ObjectPanel] rebuild 3D falhou:', err); } } };
+      const sp = RE.especificar(obj.tipo);
+      const r = () => RE.garantirRede(objAtual());
+      const q = (s2) => panel.querySelector(s2);
+      if (q('#obj-rede-ligado')) q('#obj-rede-ligado').onchange = (e) => { r().ligado = e.target.checked; ctx._saveMap(); };
+      if (q('#obj-rede-label')) q('#obj-rede-label').oninput = (e) => { r().labelID = e.target.value; ctx._saveMap(); };
+      panel.querySelectorAll('[data-rede-cfg]').forEach((sel) => { sel.onchange = (e) => { r()[sel.getAttribute('data-rede-cfg')] = e.target.value; persistir(objAtual()); }; });
+      if (q('#obj-rede-host')) q('#obj-rede-host').oninput = (e) => { r().hostname = e.target.value; ctx._saveMap(); };
+      if (q('#obj-rede-instalar')) q('#obj-rede-instalar').onclick = () => {
+        const rack = (ctx._map.objects || []).find((o) => o.id === q('#obj-rede-rack').value);
+        const res = RE.instalarNoRack(ctx._map, objAtual(), rack, parseInt(q('#obj-rede-u').value, 10) || 0);
+        if (!res.ok) { Utils.toast(res.erro || 'Não foi possível instalar.', { type: 'warn' }); return; }
+        persistir(objAtual()); if (ctx._engine && ctx._engine.rebuildCabos) ctx._engine.rebuildCabos(); reabrir();
+      };
+      if (q('#obj-rede-retirar')) q('#obj-rede-retirar').onclick = () => { RE.retirarDoRack(ctx._map, objAtual()); persistir(objAtual()); if (ctx._engine && ctx._engine.rebuildCabos) ctx._engine.rebuildCabos(); reabrir(); };
+      panel.querySelectorAll('[data-rede-rot]').forEach((inp) => {
+        inp.onchange = () => { const n = inp.getAttribute('data-rede-rot'); const rr = r(); rr.portas[n] = rr.portas[n] || {}; rr.portas[n].rotulo = inp.value.trim(); ctx._saveMap(); };
+      });
+      panel.querySelectorAll('[data-rede-st]').forEach((sel) => {
+        sel.onchange = () => { const n = sel.getAttribute('data-rede-st'); const rr = r(); rr.portas[n] = rr.portas[n] || {}; rr.portas[n].status = sel.value; ctx._saveMap(); };
+      });
+      panel.querySelectorAll('[data-rede-des]').forEach((b) => { b.onclick = () => { RE.desconectarPorta(ctx._map, obj.id, parseInt(b.getAttribute('data-rede-des'), 10)); reabrir(); }; });
+      const preencherPP = () => {
+        const alvo = (ctx._map.objects || []).find((o) => o.id === q('#obj-rede-cn-para').value), sa = alvo && RE.especificar(alvo.tipo);
+        q('#obj-rede-cn-pp').innerHTML = sa ? sa.portas.filter((pt) => !RE.caboDaPorta(ctx._map, alvo.id, pt.n)).map((pt) => `<option value="${pt.n}">${pt.tipo === 'sfp' ? 'SFP ' : ''}${pt.n}</option>`).join('') : '';
+      };
+      q('#obj-rede-cn-para').onchange = preencherPP; preencherPP();
+      q('#obj-rede-cn-btn').onclick = () => {
+        const de = parseInt(q('#obj-rede-cn-de').value, 10), pp = parseInt(q('#obj-rede-cn-pp').value, 10);
+        if (!de || !pp) { Utils.toast('Escolha a porta de origem e a de destino.', { type: 'warn' }); return; }
+        const res = RE.conectar(ctx._map, objAtual(), de, q('#obj-rede-cn-para').value, pp, { tipo: q('#obj-rede-cn-tipo').value });
+        if (!res.ok) { Utils.toast(res.erro || 'Não foi possível conectar.', { type: 'warn' }); return; }
+        reabrir();
+      };
+      q('#obj-cor').oninput = (e) => salvarCampo({ cor: e.target.value });
+      q('#obj-cor-contorno').oninput = (e) => salvarCampo({ corContorno: e.target.value });
+    } else if (isRack) {
+      // [18/09/2026 UTC] Rack modular: aplica Us/profundidade de uma vez
+      // (patch derivado de RackModular.patchParaObjeto) e reabre o painel pra
+      // refletir tipo (parede/piso), medidas e o campo de altura da base.
+      const reabrir = () => ctx._openObjectPanel?.((ctx._map.objects || []).find((o) => o.id === obj.id) || obj, modoVer3D ? { modoVer3D: true } : undefined);
+      const aplicarRack = (us, prof) => {
+        salvarCampo(window.RackModular.patchParaObjeto(objAtual(), us, prof));
+        reabrir();
+      };
+      panel.querySelector('#obj-rack-us').onchange = (e) => aplicarRack(parseInt(e.target.value, 10), objAtual().rackProfundidade || 600);
+      panel.querySelector('#obj-rack-prof').onchange = (e) => aplicarRack(objAtual().rackUs || 12, parseInt(e.target.value, 10));
+      const campoElev = panel.querySelector('#obj-rack-elev');
+      if (campoElev) campoElev.oninput = (e) => salvarCampo({ elevacao: Math.max(0, parseFloat(e.target.value) || 0) });
+      // [18/09/2026 UTC] RODADA 164 -- montagem + equipamentos (o 3D reconstroi so este rack).
+      const RM = window.RackModular;
+      panel.querySelectorAll('[data-rack-peca]').forEach((cb) => {
+        cb.onchange = () => { salvarCampo(RM.patchMontagem(objAtual(), { [cb.getAttribute('data-rack-peca')]: cb.checked })); reabrir(); };
+      });
+      panel.querySelector('#obj-rack-traseira').onchange = (e) => { salvarCampo(RM.patchTraseiraTipo(objAtual(), e.target.value)); reabrir(); };
+      panel.querySelector('#obj-rack-desmontar').onclick = () => { salvarCampo(RM.patchDesmontarTudo(objAtual())); reabrir(); };
+      panel.querySelector('#obj-rack-montar').onclick = () => { salvarCampo(RM.patchMontarTudo(objAtual())); reabrir(); };
+      panel.querySelectorAll('[data-rack-rem]').forEach((b) => {
+        b.onclick = () => { salvarCampo(RM.patchRemoveAcessorio(objAtual(), b.getAttribute('data-rack-rem'))); reabrir(); };
+      });
+      panel.querySelector('#obj-rack-acc-add').onclick = () => {
+        const tipo = panel.querySelector('#obj-rack-acc-tipo').value;
+        const h = parseInt(panel.querySelector('#obj-rack-acc-h').value, 10) || 1;
+        const u = parseInt(panel.querySelector('#obj-rack-acc-u').value, 10) || 0;
+        const patch = RM.patchAddAcessorio(objAtual(), tipo, h, u, Utils.uid('acc'));
+        if (!patch) { Utils.toast('N\u00e3o h\u00e1 espa\u00e7o livre para ' + h + 'U neste rack.', { type: 'warn' }); return; }
+        salvarCampo(patch); reabrir();
+      };
+      // [18/09/2026 UTC] RODADA 166 -- switches/patch panels reais do rack (por U).
+      panel.querySelectorAll('[data-rack-rede-add]').forEach((b) => {
+        b.onclick = () => {
+          const RE = window.RedeEquip, novo = RE.criarNoRack(ctx._map, objAtual(), (b.getAttribute('data-rack-rede-add') === 'sel' ? panel.querySelector('#obj-rack-rede-tipo').value : b.getAttribute('data-rack-rede-add')), 0);
+          if (!novo) { Utils.toast('N\u00e3o h\u00e1 espa\u00e7o livre neste rack.', { type: 'warn' }); return; }
+          ctx._saveMap();
+          if (ctx._engine && ctx._engine.addObjectIncremental) { try { ctx._engine.addObjectIncremental(novo); } catch (err) { console.warn('[ObjectPanel] 3D:', err); } }
+          reabrir();
+        };
+      });
+      panel.querySelectorAll('[data-rack-rede-ret]').forEach((b) => {
+        b.onclick = () => {
+          const e = (ctx._map.objects || []).find((o) => o.id === b.getAttribute('data-rack-rede-ret'));
+          if (e) { window.RedeEquip.retirarDoRack(ctx._map, e); ctx._saveMap(); if (ctx._engine && ctx._engine.rebuildObjectIncremental) ctx._engine.rebuildObjectIncremental(e); if (ctx._engine && ctx._engine.rebuildCabos) ctx._engine.rebuildCabos(); }
+          reabrir();
+        };
+      });
+      panel.querySelector('#obj-cor').oninput = (e) => salvarCampo({ cor: e.target.value });
+      panel.querySelector('#obj-cor-contorno').oninput = (e) => salvarCampo({ corContorno: e.target.value });
+    } else if (isRetangulo) {
       // BUG CORRIGIDO (05/09/2026), pedido verbatim: "Ao mover e
       // redimensionar, pela janela de propriedades, está acontecendo o
       // mesmo problema de antes." — Largura/Profundidade, do jeito que
@@ -752,7 +974,7 @@ window.ObjectPanelCard = {
       };
       panel.querySelector('#obj-largura').oninput = (e) => resizeMantendoCantoOrigem('largura', parseFloat(e.target.value) || 0.05);
       panel.querySelector('#obj-profundidade').oninput = (e) => resizeMantendoCantoOrigem('profundidade', parseFloat(e.target.value) || 0.05);
-      panel.querySelector('#obj-altura').oninput = (e) => salvarCampo({ altura: parseFloat(e.target.value) || 0.05 });
+      panel.querySelector('#obj-altura').oninput = (e) => { const h = parseFloat(e.target.value) || 0.05; salvarCampo(isEscada ? { altura: h, alturaEscada: h } : { altura: h }); };
       // NOVO (01/09/2026) — escada 3D paramétrica, ver comentário grande em formaFields.
       if (isEscada) panel.querySelector('#obj-escada-degraus').oninput = (e) => salvarCampo({ escadaDegraus: Utils.clamp(parseInt(e.target.value, 10) || 11, 1, 60) });
       panel.querySelector('#obj-cor').oninput = (e) => salvarCampo({ cor: e.target.value });
@@ -963,6 +1185,24 @@ window.ObjectPanelCard = {
       reentrarReedit(fresh);
       ctx._openObjectPanel(fresh || obj);
     };
+    panel.querySelectorAll('.obj-item-editar').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const itemId = await Utils.pickItem({ ambienteId: ctx._map.id, title: 'Trocar este patrimônio por' });
+        if (!itemId) return;
+        const itemEscolhido = await DB.getItem(itemId);
+        ensureCommitted();
+        const alvo = (ctx._map.objects || []).find((o) => o.id === obj.id) || obj;
+        if (!Mapping.replaceItemInObject(ctx._map, alvo.id, btn.dataset.id, itemId, itemEscolhido?.patrimonio)) {
+          Utils.toast('Este patrimônio já está associado a este objeto.', { type: 'warn' });
+          return;
+        }
+        ctx._saveMap();
+        Utils.toast('Patrimônio atualizado ✓', { type: 'ok' });
+        const fresh = (ctx._map.objects || []).find((o) => o.id === obj.id);
+        reentrarReedit(fresh);
+        ctx._openObjectPanel(fresh || obj);
+      });
+    });
     panel.querySelectorAll('.obj-item-remover').forEach((btn) => {
       btn.addEventListener('click', () => {
         ensureCommitted();

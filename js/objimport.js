@@ -193,6 +193,7 @@ const ObjImport = {
     // em `MAP_OBJECT_EXTRAS`/`LIBRARY`.
     if (window.Icons?.MAP_OBJECT_EXTRAS) {
       window.Icons.MAP_OBJECT_EXTRAS[key] = { label: `📥 ${label}`, svg: this._GENERIC_SVG };
+      window.NovosObjetos?.marcar(key, new Date().toISOString());
     }
     return item;
   },

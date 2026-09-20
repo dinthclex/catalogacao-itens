@@ -199,6 +199,8 @@ const WindowManager = {
     const el = (idOrEl.nodeType === 1) ? idOrEl : (this._windows.get(idOrEl)?.el || null);
     if (!el) return this._focusZ;
 
+    // Limpa registros de elementos que já saíram do DOM (evita acumular).
+    this._windows.forEach((ww, k) => { if (ww.el && !ww.el.isConnected && ww !== this._topWindow && typeof k !== 'string') this._windows.delete(k); });
     let w = this._windows.get(el);
     if (!w) {
       // Auto-cadastro: `focus(el)` foi chamado direto num elemento nunca
@@ -292,7 +294,12 @@ const WindowManager = {
     if (!el.classList || !el.classList.contains('modal-backdrop')) return;
     const id = `modal-backdrop-${++_seq}`;
     el.dataset.wmId = id;
-    WindowManager.register(id, { el, kind: 'modal', label: 'Modal', zIndex: WindowManager._nextModalZ() });
+    // Sempre à frente de TUDO que já está aberto (inclusive painéis flutuantes
+    // focados, que ficam em `_focusZ`): nasce acima do maior entre o próximo
+    // z de modal e o z de foco atual, e empurra `_focusZ` junto.
+    const z = Math.max(WindowManager._nextModalZ(), WindowManager._focusZ + 1);
+    WindowManager.register(id, { el, kind: 'modal', label: 'Modal', zIndex: z });
+    if (WindowManager._focusZ < z) WindowManager._focusZ = z;
   };
   const untrackOne = (el) => {
     if (!el.dataset || !el.dataset.wmId) return;

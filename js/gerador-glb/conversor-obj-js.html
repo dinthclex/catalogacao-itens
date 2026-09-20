@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Importar objeto — conversor .obj</title>
+<!-- Versão simplificada: a mesma janela "Importar objeto" do app (js/cards/importar-objeto-card.js), aberta em
+     página própria. Título, área de arrastar, botão de selecionar, .bat e lista simples; o passo a passo fica atrás
+     do botão "Passo a passo e detalhes". Funciona por file:/// (só usa <script src>). -->
+<style>body{margin:0;background:#0f1420;color:#e6ebf5;font-family:system-ui,Segoe UI,sans-serif}
+.btn{border:1px solid #4a5573;background:#26304a;color:#e6ebf5;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit}
+.btn.primary{background:#2d6cdf;border-color:#2d6cdf}.btn.sm{font-size:12.5px}</style>
+</head>
+<body>
+<script src="../objcategorias.js"></script>
+<script src="../cards/importar-objeto-card.js"></script>
+<script>ImportarObjetoCard.open({ standalone: true });</script>
+</body>
+</html>

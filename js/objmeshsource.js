@@ -335,16 +335,21 @@ window.ObjMeshSource = (function () {
       }
     },
 
-    /** Tenta carregar `assets/modelos/<slug(nome)>.malha.js` — só uma vez
+    /** Tenta carregar `assets/modelos/js/<slug(nome)>.malha.js` — só uma vez
      *  por `nome` (a vida inteira da página); chamadas seguintes devolvem
      *  a MESMA Promise já em andamento/resolvida (evita 2 `<script>`
      *  duplicados se `preload` for chamado 2x rápido pro mesmo tipo, ex.
-     *  de `ObjectAssets.registerModel` E de `preloadDeclared` juntos). */
+     *  de `ObjectAssets.registerModel` E de `preloadDeclared` juntos).
+     *  [20/09/2026 UTC] Caminho ATUALIZADO — pedido verbatim: "Em
+     *  'outputs/modelo/' migre os '*.js' (*.malha.js e *.config.js) para
+     *  uma pasta js, ficando 'outputs/assets/modelos/js/'." Só o `.malha.js`
+     *  (código) mudou de pasta; `.obj`/`.mtl`/`.glb` (dados de modelo)
+     *  continuam direto em `assets/modelos/`. */
     preload(nome) {
       if (!nome) return Promise.resolve(false);
       if (_preloadPromises[nome]) return _preloadPromises[nome];
       _attempted[nome] = true;
-      _preloadPromises[nome] = _tryLoadScript(`assets/modelos/${_slug(nome)}.malha.js`);
+      _preloadPromises[nome] = _tryLoadScript(`assets/modelos/js/${_slug(nome)}.malha.js`);
       return _preloadPromises[nome];
     },
 

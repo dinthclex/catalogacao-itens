@@ -116,11 +116,21 @@ const Modelos3DView = {
   // `MAP_OBJECT_EXTRAS`) no mesmo `ensureCustomTypesRegistered`.
   _customTypesRegistered: false,
 
+  /** Objetos EXCLUÍDOS do catálogo (só ocultos; "♻️ Restaurar objetos" traz todos de volta). */
+  async _carregarExcluidos() {
+    try {
+      const lista = await DB.getSetting('objetosExcluidos', []);
+      if (window.Icons) window.Icons._objetosExcluidos = new Set(Array.isArray(lista) ? lista : []);
+    } catch (e) { /* segue sem filtro */ }
+  },
+
   async ensureCustomTypesRegistered() {
+    await this._carregarExcluidos();
     if (this._customTypesRegistered) return;
     const customTipos = await DB.getSetting('customObjectModelTypes', []);
     (customTipos || []).forEach((c) => {
       if (!c || !c.tipo) return;
+      window.NovosObjetos?.marcar(c.tipo, c.criadoEm);
       if (window.OBJECT3D_PROFILES && !window.OBJECT3D_PROFILES[c.tipo]) {
         window.OBJECT3D_PROFILES[c.tipo] = { shape: 'box', w: 0.4, d: 0.4, h: 0.4, y0: 0, color: 0x8a92a3 };
       }
@@ -457,10 +467,12 @@ const Modelos3DView = {
     const modelos = await DB.getAllObjectModels();
     const porTipo = {};
     modelos.forEach((m) => { (porTipo[m.tipo] || (porTipo[m.tipo] = {}))[m.nivel] = true; });
-    const tipos = Object.keys(window.OBJECT3D_PROFILES || {}).sort((a, b) => this._label(a).localeCompare(this._label(b), 'pt-BR'));
+    const _exc = window.Icons?._objetosExcluidos;
+    const tipos = Object.keys(window.OBJECT3D_PROFILES || {}).filter((t) => !(_exc && _exc.has(t))).sort((a, b) => this._label(a).localeCompare(this._label(b), 'pt-BR'));
     // NOVO (07/09/2026) — ver comentário grande no botão "📥 Importar .obj"
     // logo abaixo (HTML do toolbar).
     const importados = window.ObjImport?.listImported?.() || [];
+    const excluidosN = (window.Icons?._objetosExcluidos && window.Icons._objetosExcluidos.size) || 0;
 
     container.innerHTML = `
       <div class="view-pad">
@@ -485,9 +497,10 @@ const Modelos3DView = {
                3D". Lista/ícone dos importados aparecem na seção
                "📥 Objetos importados (.obj)" logo abaixo da lista de tipos
                padrão — ver _render (bloco importados). -->
-          <label class="btn secondary sm modelos3d-import-btn" title="Escolher um ou mais arquivos .obj do seu aparelho — fica disponível na ferramenta Objetos (2D e 3D) até a página recarregar">
-            📥 Importar .obj<input type="file" accept=".obj" multiple id="m3dv-obj-input" style="display:none">
-          </label>
+          <button type="button" class="btn secondary sm" id="m3dv-restaurar-objs" title="Traz de volta ao catálogo todos os objetos excluídos (não recria arquivos apagados por .bat)">♻️ Restaurar objetos${excluidosN ? ` (${excluidosN})` : ''}</button>
+          <button type="button" class="btn secondary sm modelos3d-import-btn" id="m3dv-importar-objeto" title="Abre o passo a passo para importar um objeto novo (conversor .obj integrado)">
+            📥 Importar objeto
+          </button>
         </div>
         <div class="modelos3d-list" id="m3dv-list">
           ${tipos.map((tipo) => this._rowHtml(tipo, porTipo[tipo] || {})).join('')}
@@ -519,14 +532,27 @@ const Modelos3DView = {
     // ver bloco grande de comentário acima de `_criarNovoModelo`.
     container.querySelector('#m3dv-novo-modelo').onclick = () => this._criarNovoModelo();
     // NOVO (07/09/2026) — ver comentário grande no HTML do botão acima.
-    const objInput = container.querySelector('#m3dv-obj-input');
-    if (objInput) {
-      objInput.onchange = async () => {
-        const n = await window.ObjImport?.importFiles?.(objInput.files);
-        if (n > 0) Utils.toast?.(`${n} objeto(s) .obj importado(s) ✓ — já disponível na ferramenta Objetos.`, { type: 'ok' });
-        await this._render(); // reconstrói já com a nova seção "Objetos importados"
-      };
-    }
+    container.querySelector('#m3dv-restaurar-objs').onclick = async () => {
+      const n = (window.Icons?._objetosExcluidos && window.Icons._objetosExcluidos.size) || 0;
+      if (!n) { Utils.toast?.('Nenhum objeto excluído para restaurar.', { type: 'warn' }); return; }
+      await DB.setSetting('objetosExcluidos', []);
+      if (window.Icons) window.Icons._objetosExcluidos = new Set();
+      Utils.toast?.(`${n} objeto(s) restaurado(s) ao catálogo ✓`, { type: 'ok' });
+      await this._render();
+    };
+    container.querySelectorAll('.m3dv-excluir').forEach((btn) => {
+      btn.onclick = () => this._excluirObjeto(btn.dataset.tipo);
+    });
+    container.querySelector('#m3dv-importar-objeto').onclick = () => {
+      window.ImportarObjetoCard?.open({
+        // "Testar agora": carrega o .obj só nesta sessão (ObjImport, em memória).
+        onTestar: async (files) => {
+          const n = await window.ObjImport?.importFiles?.(files);
+          if (n > 0) Utils.toast?.(`${n} objeto(s) carregado(s) nesta sessão ✓ — já disponível na ferramenta Objetos.`, { type: 'ok' });
+          await this._render();
+        },
+      });
+    };
     container.querySelectorAll('.m3dv-2d-import').forEach((btn) => {
       btn.onclick = () => this._abrirEditor2D(btn.dataset.tipo);
     });
@@ -612,6 +638,7 @@ const Modelos3DView = {
           ${tipo === 'escada' ? '<span class="modelos3d-badge-codigo" title="A escada continua sendo gerada por código quando suas dimensões/degraus são alterados dos valores padrão do catálogo — só nesse caso ela não usa a malha do arquivo.">🧩 gerado por código (se modificada)</span>' : ''}
           <span class="modelos3d-row-head-actions">
             ${isCustom ? `<button type="button" class="btn secondary sm m3dv-renomear" data-tipo="${Utils.escapeHtml(tipo)}" title="Trocar o nome deste modelo customizado">✏️ Renomear</button>` : ''}
+            <button type="button" class="btn secondary sm m3dv-excluir" data-tipo="${Utils.escapeHtml(tipo)}" title="Excluir este objeto do catálogo (pede confirmação; depois oferece um .bat para apagar os arquivos). Dá para trazê-lo de volta com Restaurar objetos.">🗑 Excluir</button>
             <button type="button" class="btn secondary sm m3dv-2d" data-tipo="${Utils.escapeHtml(tipo)}" title="Editar a representação 2D (ícone SVG) deste tipo, usado na planta baixa">🎨 Representação 2D</button>
             <!-- NOVO (12/09/2026), pedido verbatim: "deve ser possível
                  definir características de cada objeto [...] Esta
@@ -632,6 +659,31 @@ const Modelos3DView = {
           ${nivelHtml('lowpoly', 'Low poly')}
         </div>
       </div>`;
+  },
+
+  /** "🗑 Excluir": confirma; oculta o objeto do catálogo (persistido) e abre a janela com os arquivos/alterações + .bat. */
+  async _excluirObjeto(tipo) {
+    const nome = this._label(tipo);
+    window.CardSystem.mount(this._container, 'confirm', {
+      title: 'Excluir objeto',
+      message: `Excluir "${nome}" do catálogo de objetos? Objetos deste tipo já colocados nos mapas continuam existindo. Em seguida você verá os arquivos e alterações necessários e um .bat para apagá-los do projeto.`,
+      buttons: [
+        { id: 'excluir', label: '🗑 Excluir', variant: 'danger' },
+        { id: 'cancelar', label: '✕ Cancelar', variant: 'secondary' },
+      ],
+      onChoose: async (id) => {
+        if (id !== 'excluir') return;
+        const lista = await DB.getSetting('objetosExcluidos', []);
+        if (!lista.includes(tipo)) lista.push(tipo);
+        await DB.setSetting('objetosExcluidos', lista);
+        if (window.Icons) window.Icons._objetosExcluidos = new Set(lista);
+        const doManifesto = !!window.NovosObjetos?.info(tipo);
+        const semArquivos = this._isCustomType(tipo) || (window.ObjImport?.isCustomKey?.(tipo));
+        await this._render();
+        if (!semArquivos) window.ImportarObjetoCard?.abrirExclusao({ tipo, nome, codigo: !doManifesto });
+        else Utils.toast?.(`"${nome}" excluído (restaurável em ♻️ Restaurar objetos).`, { type: 'ok' });
+      },
+    }, {});
   },
 
   async _remover(tipo, nivel) {
@@ -904,6 +956,8 @@ const Modelos3DView = {
     // Modelador de objeto único dentro de "Ver em 3D".
     const btnExitNativo = ctx.overlay.querySelector('#m3d-exit-btn');
     if (btnExitNativo) btnExitNativo.hidden = true;
+    const btnApplyNativo = ctx.overlay.querySelector('#m3d-apply-btn');
+    if (btnApplyNativo) btnApplyNativo.hidden = true;
     Utils.toast?.(`🔧 Editando "${this._label(tipo)}" — ${nivel === 'detalhado' ? 'Detalhado' : 'Low poly'}`, { duration: 3200 });
   },
 

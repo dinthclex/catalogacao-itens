@@ -2555,6 +2555,25 @@ datalist {}
 }
 .map-obj-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
 .map-obj-picker-grid .map-obj-pick-item.active { border-color: #ffd166; background: rgba(255,209,102,0.14); }
+/* [20/09/2026 UTC] "Por categoria": subtítulo colorido por grupo + selo "novo" de objeto importado. */
+.map-obj-picker-grid .map-obj-pick-group-label {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 6px;
+  margin-top: 6px; padding: 3px 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .2px;
+  color: var(--text); border-left: 3px solid var(--cat-cor, #8a92a3);
+  background: color-mix(in srgb, var(--cat-cor, #8a92a3) 16%, transparent); border-radius: 4px;
+}
+.map-obj-picker-grid .map-obj-pick-group-label:first-child { margin-top: 0; }
+.map-obj-picker-grid .map-obj-pick-group-label .cat-ic { font-size: 13px; line-height: 1; }
+.map-obj-pick-item.map-obj-pick-novo { position: relative; }
+.map-obj-novo {
+  position: absolute; top: 2px; right: 2px; padding: 0 4px; border-radius: 8px;
+  font-size: 9px; font-weight: 700; line-height: 14px; color: #1b1400; background: #ffd166;
+  box-shadow: 0 0 6px rgba(255,209,102,.7);
+}
+.map-obj-novo-f1 { background: #57e08a; box-shadow: 0 0 6px rgba(87,224,138,.8); }
+.map-obj-novo-f2 { background: #ffd166; }
+.map-obj-novo-f3 { background: #b8bfcc; box-shadow: none; }
+.map-obj-novo-txt { display: block; font-size: 9px; color: var(--text-dim); margin-top: 1px; white-space: nowrap; }
 
 /* NOVO (06/09/2026) — janela "🐞 Depuração do Mapa 2D" (ver mapview.js
    _openDebugWindow/_renderDebugWindow) — reaproveita a base de
@@ -3042,6 +3061,14 @@ datalist {}
   flex-wrap: wrap;
 }
 .map-panel-field > span:first-child { min-width: 0; flex: 1 1 120px; }
+/* [19/09/2026 UTC] NOVO (RODADA 192) -- pedido verbatim: "na propriedade 'Posição X (m)' e a
+   propriedade 'Posição Y (m)', deve aparecer uma seta indicando para onde o número cresce [...] O
+   title destas setas deve informar que se trata do sentido em que aquele eixo aumenta os seus
+   valores." Setinha (→ pro X, ↓ pro eixo vertical do mapa 2D, que no código/mundo 3D é o Z -- ver
+   `js/mapview.js`) ao lado do rótulo, com `title` próprio (tooltip no hover/toque). Só cosmético --
+   `cursor:help` avisa que tem tooltip, `opacity` mais baixa pra não competir visualmente com o texto
+   do rótulo. */
+.map-panel-axis-arrow { opacity: .7; cursor: help; font-weight: 700; }
 /* [09/09/2026] Ajuste solicitado pelo usuário: "Organize a apresentação dos
    botões de script que, atualmente, ficam no final da janela de
    propriedades." — moldura própria (`<fieldset>`/`<legend>`) pra agrupar
@@ -3649,6 +3676,9 @@ datalist {}
    botão, mantendo sempre a mesma centralização (sem efeito de pressionar
    nenhum, como pedido). */
 .v3d-fotocam-sair-topcenter:active { transform: translateX(-50%); }
+/* "Sair da câmera": vermelho transparente (em vez de escuro transparente). */
+.v3d-fotocam-sair-topcenter { background: rgba(200,40,40,0.55); border-color: rgba(255,120,120,0.55); color: #fff; }
+.v3d-fotocam-sair-topcenter:hover { background: rgba(220,50,50,0.8); }
 
 /* [13/09/2026] CORRIGIDO — pedido verbatim: HUD 3D (posição/qtd. de
    objetos/fps) ilegível em cima de fundo claro/branco da cena 3D (o texto
@@ -7228,9 +7258,23 @@ body.view-mapa .history-widget { display: none; }
    mapconfig.js '_aplicarCoresSecoes'/'_mapConfigCorSecao' (JS, nao CSS --
    precisa do TEXTO do <h4> de cada secao pra decidir a cor, o que o CSS
    sozinho nao consegue ler), chamado 1x ao abrir o modal (`open()`) e que
-   sobrescreve este border-left via `style.borderLeftColor` inline. */
+   sobrescreve este border-left via `style.borderLeftColor` inline.
+   [19/09/2026 UTC] CORRIGIDO (RODADA 195) -- pedido verbatim: "A cor da tira nas 'configurações 3D'
+   para cada seção, ainda está a mesma, deve ser alguma herança CSS que sobrescreve a que você aplicou."
+   A RODADA 194 já tinha reforçado bastante `_aplicarCoresSecoes` (try/catch por seção, busca alternativa
+   do <h4>, reexecução num requestAnimationFrame) sem resolver -- sem navegador de verdade pra inspecionar
+   ao vivo, a causa exata de o `style.borderLeftColor` inline não estar "pegando" nas seções 3D não pôde
+   ser confirmada com certeza. Em vez de continuar caçando essa causa às cegas, a correção agora contorna
+   o problema por completo: troca a disputa de cascata pela cor em si (border-left-color inline vs. esta
+   regra) por uma variável CSS (`--mc-cor-secao`), lida aqui via `var(...)` com o mesmo tom fixo de antes
+   como FALLBACK -- `_aplicarCoresSecoes` (mapconfig.js) agora só grava essa variável na própria seção
+   (`sec.style.setProperty('--mc-cor-secao', cor)`), nunca mais mexendo em `border-left-color` diretamente.
+   Uma custom property definida inline no PRÓPRIO elemento não tem NENHUMA disputa de especificidade/
+   `!important` pra perder -- `var()` sempre lê o valor mais próximo definido na cadeia de herança a
+   partir do próprio elemento, então esta correção funciona mesmo que a causa raiz de antes (nunca
+   confirmada) continue existindo. */
 .mapconfig-section {
-  border-left: 3px solid rgba(120, 150, 200, 0.55);
+  border-left: 3px solid var(--mc-cor-secao, rgba(120, 150, 200, 0.55));
 }
 /* [13/09/2026 UTC] NOVO — pedido verbatim: "Nas 'configurações 3D', na
    seção '🌗 Hora do dia', na 'Trilha de horas do dia' [...] Faça esta
@@ -7986,28 +8030,4 @@ body.classic-mode-active .bsp-shell-reset-btn { display: none; }
 }
 .settings-fullscreen-title { font-weight: 700; font-size: 14.5px; }
 .settings-fullscreen-body { flex: 1 1 auto; overflow: auto; }
-/* [16/09/2026 UTC] RODADA 104 — pedido verbatim: "A janelinha está com
-   algum transition ativado, pois ao redimensionar a transição para as
-   novas dimensões é lenta em transição. Elimine este transition (deve ser
-   alguma herança CSS)." INVESTIGADO — nenhuma regra deste arquivo tem um
-   seletor amplo o bastante (tipo `div{...}`/`button{...}`/`*{...}`) pra
-   alcançar `.v3d-trena3d-painel-rapido` ou seus filhos por herança/
-   cascata; o painel e seus botões são construídos 100% via `style` inline
-   em JS (view3d.js), sem nenhuma classe CSS deste arquivo aplicada a eles
-   além desta própria regra nova. Mesmo sem uma causa CSS concreta
-   encontrada (a inspeção não achou nenhuma regra `transition` que sequer
-   pudesse alcançar o painel), esta regra `!important` de alta
-   especificidade é adicionada como garantia definitiva — cobre CADA
-   filho (`*`) do painel, não só ele mesmo — sobrepondo qualquer herança
-   futura ou regra que venha a ser adicionada por engano. Se ainda houver
-   sensação de "lentidão" depois disso, não é uma transição CSS de
-   verdade — é o próprio navegador suavizando o redraw do `width`/`left`
-   sendo mudado a cada `pointermove` do handle de resize (ver
-   `_trena3DWireResizeHandle`, view3d.js) — não há nada a "desligar" nesse
-   caso, é o comportamento normal de renderização do navegador durante um
-   arrasto rápido, não uma animação configurável pelo app. */
-.v3d-trena3d-painel-rapido,
-.v3d-trena3d-painel-rapido * {
-  transition: none !important;
-  animation: none !important;
-}
+/* [19/09/2026 UTC] RODADA 191 -- CSS da Trena 3D movido pra css/trena3d.css (ver o arquivo). */

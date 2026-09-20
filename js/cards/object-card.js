@@ -61,11 +61,7 @@ window.CardSystem.register('object', {
         wire: (elCartao) => elCartao.querySelector('#v3d-fc-modelar')?.addEventListener('click', () => {
           elCartao.remove();
           const alvo = (view3d._map.objects || []).find((o) => o.id === obj.id) || obj;
-          if (!alvo.customMesh && window.Modeler3D?.ensureCustomMesh) {
-            window.Modeler3D.ensureCustomMesh(alvo);
-            Mapping.updateObject(view3d._map, alvo.id, { customMesh: alvo.customMesh, customMeshXform: alvo.customMeshXform, forma: alvo.forma, largura: alvo.largura, profundidade: alvo.profundidade, altura: alvo.altura });
-            DB.saveMap(view3d._map);
-          }
+          // A malha do Modelador é montada (e só gravada ao aplicar) dentro de Modeler3D.enter — nada é semeado/salvo aqui.
           // Se estiver no modo "Ver através desta câmera", a câmera deve
           // permanecer na perspectiva da câmera selecionada, não orbital.
           window.Modeler3D?.enter(view3d, alvo, { enterOrbital: !(view3d._orbCamMode || view3d._fotoCamMode) });

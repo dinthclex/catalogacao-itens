@@ -143,8 +143,10 @@
    .m3d-btn genérico usa um fundo translúcido bem claro
    (rgba(255,255,255,0.06)), que quase some contra o céu claro do
    Modelador; aqui só este botão ganha um fundo escuro próprio. */
-.m3d-exit { position: absolute; top: 64px; right: 220px; pointer-events: auto; background: rgba(20,22,26,0.55); }
-.m3d-exit:hover { background: rgba(20,22,26,0.75); }
+.m3d-exit { position: absolute; top: 64px; right: 220px; pointer-events: auto; background: rgba(200,40,40,0.55); border-color: rgba(255,120,120,0.55); }
+.m3d-exit:hover { background: rgba(220,50,50,0.8); }
+.m3d-apply { position: absolute; top: 64px; right: 372px; pointer-events: auto; background: rgba(58,123,213,0.55); border-color: rgba(120,170,255,0.55); }
+.m3d-apply:hover { background: rgba(58,123,213,0.8); }
 
 /* Painel N — campo numérico estilo Blender (pedido do usuário, com
    screenshots do "Transform" do Blender). Sub-painel recolhível

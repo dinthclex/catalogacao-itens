@@ -1,0 +1,36 @@
+/**
+ * css/trena3d.css — CSS da "📏 Trena 3D" (RODADA 191).
+ *
+ * [19/09/2026 UTC] NOVO — pedido verbatim: "Ícones, CSS, tudo deve ficar
+ * modular e em arquivos separados." A imensa maioria da UI da Trena 3D
+ * (janelinha de acesso rápido, rótulos das medidas, botão de debug) é
+ * construída 100% via `style` inline em JS (ver js/trena3d.js) -- por
+ * isso este arquivo é pequeno: só a regra abaixo (que precisa mesmo ser
+ * CSS, não inline, pra vencer qualquer herança/cascata futura -- ver o
+ * comentário grande nela) realmente precisava viver num arquivo .css.
+ */
+/* [16/09/2026 UTC] RODADA 104 — pedido verbatim: "A janelinha está com
+   algum transition ativado, pois ao redimensionar a transição para as
+   novas dimensões é lenta em transição. Elimine este transition (deve ser
+   alguma herança CSS)." INVESTIGADO — nenhuma regra deste arquivo tem um
+   seletor amplo o bastante (tipo `div{...}`/`button{...}`/`*{...}`) pra
+   alcançar `.v3d-trena3d-painel-rapido` ou seus filhos por herança/
+   cascata; o painel e seus botões são construídos 100% via `style` inline
+   em JS (view3d.js), sem nenhuma classe CSS deste arquivo aplicada a eles
+   além desta própria regra nova. Mesmo sem uma causa CSS concreta
+   encontrada (a inspeção não achou nenhuma regra `transition` que sequer
+   pudesse alcançar o painel), esta regra `!important` de alta
+   especificidade é adicionada como garantia definitiva — cobre CADA
+   filho (`*`) do painel, não só ele mesmo — sobrepondo qualquer herança
+   futura ou regra que venha a ser adicionada por engano. Se ainda houver
+   sensação de "lentidão" depois disso, não é uma transição CSS de
+   verdade — é o próprio navegador suavizando o redraw do `width`/`left`
+   sendo mudado a cada `pointermove` do handle de resize (ver
+   `_trena3DWireResizeHandle`, view3d.js) — não há nada a "desligar" nesse
+   caso, é o comportamento normal de renderização do navegador durante um
+   arrasto rápido, não uma animação configurável pelo app. */
+.v3d-trena3d-painel-rapido,
+.v3d-trena3d-painel-rapido * {
+  transition: none !important;
+  animation: none !important;
+}

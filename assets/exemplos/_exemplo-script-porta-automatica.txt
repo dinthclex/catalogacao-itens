@@ -54,20 +54,50 @@ function Update() {
   // de obj.anguloAbertura definido abaixo em aoClicarDuasVezes().
 }
 
-// Debounce simples: evita que um duplo clique durante a animação em curso
-// (~500ms) dispare uma 2ª troca antes da 1ª terminar visualmente — sem
-// isso, cliques duplos "rápidos demais" alternariam o alvo várias vezes
-// antes do usuário ver a porta terminar de abrir/fechar.
+// Debounce: evita que um duplo clique durante a animação em curso dispare
+// uma 2ª troca antes da 1ª terminar visualmente. Como a duração agora VARIA
+// (ver abaixo), o debounce também precisa variar — recalculado a cada
+// chamada, em vez de um número fixo de sempre.
 var _debounceAte = 0;
 
 /**
+ * [18/09/2026] NOVO — "a velocidade com que se dá os dois cliques deve
+ * influenciar na velocidade com que a porta abre". `view3d` (5º parâmetro
+ * disponível pra todo Script, ver js/components.js `_getOrCreateModule`)
+ * expõe `_ultimoIntervaloDuploCliqueMs`: o intervalo real (ms) entre os 2
+ * cliques que geraram o duplo clique mais recente (ver `view3d.js`
+ * `onClick`/`onDblClick`). Cliques bem próximos (rápidos) → porta abre
+ * rápido; cliques mais espaçados (ainda dentro do limite de duplo clique do
+ * navegador) → porta abre mais devagar. `MS_MIN`/`MS_MAX` só limitam o
+ * intervalo considerado (evita graus/segundo absurdos com um duplo clique
+ * "quase instantâneo" ou preguiçoso); `DEG_PER_SEC_RAPIDO`/`_LENTO` são os
+ * dois extremos de velocidade (ajuste livre, aqui é só um valor "sensato").
+ */
+function _calcularVelocidadeGrausPorSeg() {
+  var intervaloMs = (typeof view3d !== 'undefined' && view3d && typeof view3d._ultimoIntervaloDuploCliqueMs === 'number')
+    ? view3d._ultimoIntervaloDuploCliqueMs
+    : 300; // fallback (velocidade padrão de sempre, ~90°/0,5s = 180°/s)
+  var MS_MIN = 100, MS_MAX = 600;
+  var t = (Math.max(MS_MIN, Math.min(MS_MAX, intervaloMs)) - MS_MIN) / (MS_MAX - MS_MIN); // 0 (rápido) .. 1 (devagar)
+  var DEG_PER_SEC_RAPIDO = 90 / 0.25; // clique duplo bem rápido (~100ms) -> abre em ~0,25s
+  var DEG_PER_SEC_LENTO = 90 / 0.8;   // clique duplo mais devagar (~600ms) -> abre em ~0,8s
+  return DEG_PER_SEC_RAPIDO + (DEG_PER_SEC_LENTO - DEG_PER_SEC_RAPIDO) * t;
+}
+
+/**
  * Chamada pelo Gatilho de Evento "Ao Clicar Duas Vezes" (onDoubleClick) —
- * alterna a porta entre aberta (90°) e fechada (0°).
+ * alterna a porta entre aberta (90°) e fechada (0°), na velocidade calculada
+ * acima. `obj._velocidadeGrausPorSeg` é um campo TRANSIENTE (não é salvo no
+ * mapa) que `Engine3D._updateDoorAnimations` (js/engine3d.js) lê, se
+ * presente, em vez da velocidade padrão fixa — só pra esta próxima troca de
+ * ângulo.
  */
 function aoClicarDuasVezes() {
   var agora = Date.now();
   if (agora < _debounceAte) return; // animação anterior ainda em curso — ignora
-  _debounceAte = agora + 550; // um pouco mais que os ~500ms da animação
+  var velocidade = _calcularVelocidadeGrausPorSeg();
+  obj._velocidadeGrausPorSeg = velocidade;
+  _debounceAte = agora + Math.round((90 / velocidade) * 1000) + 50; // duração real desta animação + folga
   var estaAberta = (obj.anguloAbertura || 0) > 45;
   obj.anguloAbertura = estaAberta ? 0 : 90;
 }

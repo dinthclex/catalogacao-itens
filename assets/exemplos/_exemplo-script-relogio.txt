@@ -104,7 +104,7 @@ function Update(dt) {
  * possível: "Modelar em 3D" hoje converte o objeto numa malha genérica
  * (caixa) e PERDE o perfil especial de relógio (ponteiros/mostrador) no
  * processo — bug já diagnosticado (causa raiz: `Modeler3D.ensureCustomMesh`,
- * ver progresso-sessao.md, item ainda adiado por ser uma mudança de alto
+ * item ainda adiado por ser uma mudança de alto
  * risco no pipeline do Modelador, que afeta TODO objeto que passa por
  * "Modelar em 3D", não só relógios). Esta rodada resolve o pedido de
  * "ponteiros funcionando de verdade por meio de scripts" pro relógio de

@@ -45,6 +45,8 @@
 })();</script>
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="css/style.css">
+<!-- [19/09/2026 UTC] RODADA 191 -- CSS da Trena 3D modularizado (ver css/trena3d.css). -->
+<link rel="stylesheet" href="css/trena3d.css">
 <!-- Modelador 3D (pedido do usuário, 28/08/2026 — rodada de modularização):
      estilos que antes ficavam inline em js/modeler3d.js, movidos pra cá. -->
 <link rel="stylesheet" href="css/modeler3d.css">
@@ -388,8 +390,7 @@
 <script src="js/scripting.js"></script>
 <!-- [11/09/2026] NOVO — Arquitetura de Componentes do Inspector (estilo
      Unity). window.Components/window.SceneEventBus (ver comentário grande
-     no topo do próprio arquivo, e claude/spec-component-inspector-
-     architecture.md no projeto). Depois de scripting.js/sceneobjects.js
+     no topo do próprio arquivo). Depois de scripting.js/sceneobjects.js
      (o executor de folhas de código reaproveita a mesma convenção de
      parâmetros de Scripting.run — obj/SceneObjects/Scripting/map/THREE/
      Utils/view3d) e ANTES de mapview.js/view3d.js (que chamam
@@ -461,6 +462,30 @@
      ANTES de `js/mapview.js` (que o usa em runtime, dentro de
      `_openObjectPanel`). -->
 <script src="js/cards/object-panel-card.js"></script>
+<!-- [20/09/2026 UTC] js/cards/changelog-card.js -- extraído de MapView._openChangelogModal
+     (pedido verbatim: "As inserções de innerHTML devem se tornar Cards"). Registra-se em
+     window.ModalCards (host próprio para modais de app inteiro, .modal-backdrop/.modal-sheet
+     -- diferente do window.CardSystem acima, que é específico das janelinhas do "Ver em 3D").
+     Carregado ANTES de js/mapview.js, que o usa em runtime, dentro de _openChangelogModal. -->
+<script src="js/cards/changelog-card.js"></script>
+<!-- [20/09/2026 UTC] js/cards/download-app-card.js -- extraído de
+     MapView._openDownloadAppModal/_openMobileNoServerModal (mesmo motivo do
+     changelog-card.js acima). js/cards/map-panel-cards.js -- esqueletos
+     estáticos de painéis do Mapa 2D (Depuração, seletor de tipo de Objeto),
+     extraídos de MapView._openDebugWindow/_openObjectPickerPanel; usa
+     window.MapPanelCards (não window.ModalCards — não são modais soltos em
+     document.body, ver comentário grande no topo do próprio arquivo). Ambos
+     carregados ANTES de js/mapview.js, que os usa em runtime. -->
+<script src="js/cards/download-app-card.js"></script>
+<script src="js/cards/map-panel-cards.js"></script>
+<!-- [20/09/2026 UTC] NOVO -- janela "Importar objeto" (conversor .obj integrado + passo a passo). -->
+<script src="js/cards/importar-objeto-card.js"></script>
+<!-- [20/09/2026 UTC] js/cards/map-dynamic-cards.js -- os 9 templates innerHTML
+     GRANDES restantes de mapview.js que dependem de dados em tempo real
+     (this.*/parâmetros do método), extraídos pelo mesmo motivo dos cards
+     acima ("os maiores transforme em cards"). Ver comentário grande no
+     topo do próprio arquivo. Carregado ANTES de js/mapview.js. -->
+<script src="js/cards/map-dynamic-cards.js"></script>
 <script src="js/organizeview.js"></script>
 <script src="js/ambientephotos.js"></script>
 <!-- "Receitas" dos modelos 3D dos objetos padrão (rodada 51 — pedido do
@@ -469,6 +494,18 @@
      engine3d.js; precisa vir ANTES dele (compartilha o mesmo escopo de
      topo de script, ver comentário no início do arquivo). -->
 <script src="js/engine3d-profiles.js"></script>
+<!-- [20/09/2026 UTC] NOVO -- categorias do painel "Objetos" (Por categoria) + registro de objetos novos importados (manifesto assets/modelos/js/_novos-objetos.js). Precisam vir DEPOIS de icons.js e engine3d-profiles.js. -->
+<script src="js/objcategorias.js"></script>
+<script src="js/novosobjetos.js"></script>
+<script src="assets/modelos/js/_novos-objetos.js"></script>
+<!-- [18/09/2026 UTC] NOVO -- "Rack" modular de 19" (objeto parametrico do catalogo): logica pura (RackModular) + montagem Three.js (RackModularView3D). Usado por Mapping.addObject/ensureNewFields, Engine3D._buildRackMesh e o painel de propriedades (js/cards/object-panel-card.js). Nao depende de engine3d.js; so precisa estar carregado antes do uso em tempo de execucao. -->
+<script src="js/rack-modular.js"></script>
+<script src="js/rede-passiva.js"></script>
+<script src="js/rede-equip.js"></script>
+<!-- [19/09/2026 UTC] NOVO (RODADA 171) -- classes de lógica (sem Three.js) pros novos objetos No-break/UPS, Storage (NAS/SAN/Disk Shelf) e Unidades de Disco (HD/SSD): StorageDevice.insertDrive/removeDrive, UPSDevice.calculateLoad. Ver comentário completo no topo de js/rede-storage-energia.js. -->
+<script src="js/rede-storage-energia.js"></script>
+<!-- [19/09/2026 UTC] NOVO (RODADA 178) -- PatchCord dinâmico (sem Three.js na lógica, testável em Node): classe PatchCord (estados idle/ghost/connected), Plug_A/Plug_B com exitVector de ancoragem, curva de Bézier cúbica com barriga de gravidade e restrição anti-clipping contra a porta do rack (constrainCableCurvature). AINDA NÃO conectado a nenhuma tela do app (arquitetura pronta, integração com o cabeamento existente é trabalho futuro) -- ver comentário completo no topo de js/patch-cord.js. -->
+<script src="js/patch-cord.js"></script>
 <!-- [13/09/2026] NOVO — geradores de sala reutilizáveis (Sala de
      Monitoramento/Câmeras por andar/Copa/Banheiro), ver comentário grande
      no topo de js/geradores-salas.js. Só registra `window.GeradoresSalas`
@@ -489,13 +526,165 @@
      Tijolos.buildAll em _rebuildTijolos) e de view3d.js (que chama
      Tijolos.getConfig/setConfig/add/snapXZ). -->
 <script src="js/tijolos.js"></script>
-<!-- [16/09/2026 UTC] NOVO — comandos de canvas 2D do mostrador do relógio,
-     extraídos de engine3d.js (_getProceduralMostradorTexture) pra um
-     arquivo próprio reaproveitável também por ferramentas Node (geração de
-     .glb) — ver assets/js/mostrador-canvas.js. Precisa vir ANTES de
-     engine3d.js (que chama window.MostradorCanvas.desenhar). -->
-<script src="assets/js/mostrador-canvas.js"></script>
+<!-- [20/09/2026 UTC] js/objecttypes/object-type-registry.js -- infraestrutura
+     de registro de TIPO DE OBJETO do catálogo (pedido verbatim: "Transforme
+     em classe do objeto, métodos, propriedades [...] Existe o objeto global
+     [...] e existe os objetos e classes vinculadas ao objeto global"). Ver
+     comentário grande no topo do próprio arquivo pro contrato completo.
+     Carregado ANTES de engine3d.js (que já consulta o registro no
+     dispatcher de malha 3D) e de qualquer js/objecttypes/<tipo>.js. -->
+<script src="js/objecttypes/object-type-registry.js"></script>
 <script src="js/engine3d.js"></script>
+<!-- [20/09/2026 UTC] js/engine3d-rede-mesh.js -- extraído de engine3d.js
+     (pedido verbatim: "deixe apenas o core do projeto quanto ao motor 3D").
+     Cobre toda a malha 3D de Rack/infraestrutura de rede (switch, patch
+     panel, DIO, bandejas, cabos,
+     crimpagem, chicotes) -- usa o core do Engine3D mas não é o motor em
+     si. Mixin via Object.assign(Engine3D.prototype, ...) -- ver comentário
+     grande no topo do próprio arquivo. Carregado IMEDIATAMENTE depois de
+     js/engine3d.js (que declara `class Engine3D`) e antes de qualquer
+     `new Engine3D(...)` (js/app.js). -->
+<script src="js/engine3d-rede-mesh.js"></script>
+<!-- [20/09/2026 UTC] js/objecttypes/mesa.js, pilar.js, cadeira.js -- segundo
+     lote de tipos migrados pro registro (mesmo padrão do molde rack.js,
+     usando classe {Tipo}MeshBuilder própria em vez de mixin no
+     Engine3D.prototype, já que os métodos originais não estavam
+     misturados no prototype em nenhum outro lugar). ORDEM IMPORTA: são
+     registrados ANTES de rack.js pra preservar a mesma ordem de
+     prioridade que os `if`s antigos tinham em engine3d.js (mesa, pilar,
+     cadeira apareciam ANTES do `if` do rack no dispatcher original). -->
+<script src="js/objecttypes/mesa.js"></script>
+<script src="js/objecttypes/pilar.js"></script>
+<script src="js/objecttypes/cadeira.js"></script>
+<!-- [20/09/2026 UTC] js/objecttypes/rack.js -- primeiro tipo de objeto
+     migrado pro registro (molde pros próximos). Ver comentário grande no
+     topo do próprio arquivo. Carregado depois de engine3d-rede-mesh.js
+     (usa Engine3D.prototype._buildRackMesh, definido lá). -->
+<script src="js/objecttypes/rack.js"></script>
+<!-- js/objecttypes/eletrocalha.js, eletroduto.js, canaleta.js, leito.js: peças únicas de tamanho fixo (builder genérico); rede-equip.js: família "rede". Carregados depois de engine3d-rede-mesh.js. -->
+<script src="js/objecttypes/eletrocalha.js"></script>
+<script src="js/objecttypes/eletroduto.js"></script>
+<script src="js/objecttypes/canaleta.js"></script>
+<script src="js/objecttypes/leito.js"></script>
+<script src="js/objecttypes/rede-equip.js"></script>
+<!-- [20/09/2026 UTC] js/objecttypes/planta.js, luminaria.js, poste.js,
+     escada.js, relogio.js, quadro-mesa.js -- terceiro lote de tipos
+     migrados pro registro (mesmo padrão do molde rack.js). Cada um tem
+     `obj.tipo` PRÓPRIO (não compartilham tipo entre si nem com
+     mesa/pilar/cadeira/rack), então a ordem de registro entre eles não
+     afeta o comportamento -- só precisa vir depois de
+     object-type-registry.js e engine3d-profiles.js (usa
+     `objAnguloToRotY`, função global definida lá). -->
+<script src="js/objecttypes/planta.js"></script>
+<script src="js/objecttypes/luminaria.js"></script>
+<script src="js/objecttypes/poste.js"></script>
+<script src="js/objecttypes/escada.js"></script>
+<!-- [20/09/2026 UTC] NOVO -- comandos de canvas 2D do mostrador do relógio,
+     RELOCADO de `assets/js/mostrador-canvas.js` pra cá (pedido verbatim:
+     "Em 'outputs/assets/' deve ficar apenas 'exemplos/' e 'modelos/' [...]
+     O arquivo 'mostrador-canvas.js' é para gerar a imagem do relógio. Dê
+     algum jeito de integrar isso ao relógio.") -- também reaproveitado por
+     ferramentas Node (geração de .glb, ver js/gerador-glb/gerar_glb.js).
+     Carregado AQUI, imediatamente ANTES de relogio.js (que agora é quem
+     chama window.MostradorCanvas.desenhar, via
+     RelogioMeshBuilder.prototype._getProceduralMostradorTexture -- ver esse
+     arquivo), não mais de engine3d.js. -->
+<script src="js/objecttypes/mostrador-canvas.js"></script>
+<script src="js/objecttypes/relogio.js"></script>
+<script src="js/objecttypes/quadro-mesa.js"></script>
+<!-- [20/09/2026 UTC] js/objecttypes/teto-gesso.js, carro.js -- quarto
+     lote, mesmo padrão. Tipos independentes (obj.tipo próprio), ordem
+     entre eles/os anteriores não importa. -->
+<script src="js/objecttypes/teto-gesso.js"></script>
+<script src="js/objecttypes/carro.js"></script>
+<!-- [20/09/2026 UTC] js/objecttypes/imagem.js -- tipo identificado por
+     `obj.forma` (não `obj.tipo`), ver comentário grande no topo do
+     próprio arquivo pra entender o ponto de dispatch especial em
+     engine3d.js. -->
+<script src="js/objecttypes/imagem.js"></script>
+<!-- [20/09/2026 UTC] js/objecttypes/objimport.js -- tipo identificado
+     dinamicamente (`ObjImport.isCustomKey(obj.tipo)`, prefixo
+     "objimport:"), mesmo padrão de dispatch especial de imagem.js. Pedido
+     verbatim: "Os objetos importados pelo usuário (obimport) devem passar
+     pelo registro como um objeto normal." -->
+<script src="js/objecttypes/objimport.js"></script>
+<!-- [22/09/2026 UTC] js/objecttypes/porta.js, janela.js -- pedido
+     verbatim: "Porta e janela [...] devem ser tratados do mesmo jeito
+     que os demais objetos, com suas classes próprias". Ver comentário
+     grande em porta.js -- modelo de dados diferente (mapData.portas/
+     janelas, presas a paredes), chamados de um ponto dedicado em
+     engine3d.js (setScene), não pela checagem genérica de
+     mapData.objects. -->
+<script src="js/objecttypes/porta.js"></script>
+<script src="js/objecttypes/janela.js"></script>
+<!-- [20/09/2026 UTC] js/objecttypes/robo-copa.js, robo-limpeza.js,
+     robo-recepcionista.js -- pedido verbatim: "Os robôs [...] devem ser
+     do catálogo normal também". Reaproveitam
+     `Engine3D.prototype._buildGenericCatalogMesh` (o builder genérico de
+     caixa/cilindro/cone, também extraído nesta rodada -- ver comentário
+     grande nele em engine3d.js) -- carregados depois de engine3d.js, que
+     define esse método. -->
+<script src="js/objecttypes/robo-copa.js"></script>
+<script src="js/objecttypes/robo-limpeza.js"></script>
+<script src="js/objecttypes/robo-recepcionista.js"></script>
+<!-- [20/09/2026 UTC] js/objecttypes/*.js -- quinto lote: TODOS os tipos
+     restantes do catálogo que usavam só o builder GENÉRICO (caixa/
+     cilindro/cone a partir de OBJECT3D_PROFILES, sem builder bespoke) --
+     móveis de escritório, TI de mesa, banheiro/copa, estacionamento etc.
+     Mesmo padrão de robo-*.js (reaproveitam `_buildGenericCatalogMesh`).
+     Ordem entre eles não importa (cada um tem `obj.tipo` próprio). FORA
+     desta migração, de propósito: equipamentos de RACK (switch24/48,
+     patchpanel, dio, bandeja, pdu, nobreak, storage, espelho, caixa de
+     piso, abraçadeira -- usam `RedeEquip`/`_buildRedeMesh`, condição
+     dinâmica via REDE_CATALOGO, não `OBJECT3D_PROFILES` direto), e porta/janela (elementos de parede, não
+     "objetos" deste dispatcher). -->
+<script src="js/objecttypes/poltrona.js"></script>
+<script src="js/objecttypes/armario.js"></script>
+<script src="js/objecttypes/arquivo.js"></script>
+<script src="js/objecttypes/estante.js"></script>
+<script src="js/objecttypes/quadro.js"></script>
+<script src="js/objecttypes/quadro-parede.js"></script>
+<script src="js/objecttypes/geladeira.js"></script>
+<script src="js/objecttypes/ar-condicionado.js"></script>
+<script src="js/objecttypes/gabinete.js"></script>
+<script src="js/objecttypes/monitor.js"></script>
+<script src="js/objecttypes/notebook.js"></script>
+<script src="js/objecttypes/impressora.js"></script>
+<script src="js/objecttypes/switch.js"></script>
+<script src="js/objecttypes/estabilizador.js"></script>
+<script src="js/objecttypes/teclado.js"></script>
+<script src="js/objecttypes/mouse.js"></script>
+<script src="js/objecttypes/telefone.js"></script>
+<script src="js/objecttypes/grampeador.js"></script>
+<script src="js/objecttypes/caixa-som.js"></script>
+<script src="js/objecttypes/calculadora.js"></script>
+<script src="js/objecttypes/ventilador.js"></script>
+<script src="js/objecttypes/extintor.js"></script>
+<script src="js/objecttypes/bebedouro.js"></script>
+<script src="js/objecttypes/lixeira.js"></script>
+<script src="js/objecttypes/coluna.js"></script>
+<script src="js/objecttypes/caixa-generica.js"></script>
+<script src="js/objecttypes/piso.js"></script>
+<script src="js/objecttypes/teto-modular.js"></script>
+<script src="js/objecttypes/interruptor.js"></script>
+<script src="js/objecttypes/gabinete2.js"></script>
+<script src="js/objecttypes/monitor2.js"></script>
+<script src="js/objecttypes/teclado2.js"></script>
+<script src="js/objecttypes/mouse2.js"></script>
+<script src="js/objecttypes/robo.js"></script>
+<script src="js/objecttypes/pia.js"></script>
+<script src="js/objecttypes/cafeteira.js"></script>
+<script src="js/objecttypes/vaso-sanitario.js"></script>
+<script src="js/objecttypes/mictorio.js"></script>
+<script src="js/objecttypes/elevador-cabine.js"></script>
+<script src="js/objecttypes/elevador-botao-chamada.js"></script>
+<script src="js/objecttypes/disjuntor.js"></script>
+<script src="js/objecttypes/casa-robo.js"></script>
+<script src="js/objecttypes/casa-robo-telhado.js"></script>
+<script src="js/objecttypes/vaga-estacionamento.js"></script>
+<script src="js/objecttypes/cancela-poste.js"></script>
+<script src="js/objecttypes/cancela-haste.js"></script>
+<script src="js/objecttypes/interruptor-remoto.js"></script>
 <!-- Modelador 3D (pedido do usuário, 28/08/2026 — rodada de modularização:
      "Modularize o Modelador para que, tudo que seja relacionado a ele, esteja
      em arquivos separados"): antes era js/modeler3d.js sozinho, agora
@@ -557,8 +746,23 @@
 <script src="lib/codemirror/lib/codemirror.js"></script>
 <script src="lib/codemirror/mode/javascript/javascript.js"></script>
 <script src="js/mapview.js"></script>
+<!-- [20/09/2026 UTC] js/mapview-rede-2d.js -- extraído de mapview.js
+     (pedido verbatim: "deixe apenas o core do projeto quanto ao Mapa").
+     Cobre os cabos entre portas do editor 2D: desenho (Map2DRenderer,
+     mixin de classe) e hit-test (MapView, via Object.assign). Ver comentário grande no topo do próprio arquivo.
+     Carregado IMEDIATAMENTE depois de js/mapview.js. -->
+<script src="js/mapview-rede-2d.js"></script>
 <script src="js/photogrid.js"></script>
+<!-- [19/09/2026 UTC] RODADA 191 -- Trena 3D extraída pra classe própria,
+     instanciável e reutilizável (ver cabeçalho de js/trena3d.js); precisa
+     carregar ANTES de view3d.js, que instancia `new Trena3D(...)` em mount().
+     Ícones/rótulos dos botões da janelinha, em arquivo próprio (ver
+     js/trena3d-icons.js) -- precisa carregar ANTES de trena3d.js. -->
+<script src="js/trena3d-icons.js"></script>
+<script src="js/trena3d.js"></script>
 <script src="js/view3d.js"></script>
+<script src="js/view3d-rede.js"></script>
+<script src="js/rede-docs.js"></script>
 <!-- NOVO (08/09/2026), pedido verbatim: "Será o 'Info'." — módulo novo
      (window.InfoBar) que mostra título + botões 👁️/⚙️ dentro de uma divisão
      do Workspace, reaproveitando os mesmos handlers do cabeçalho global (ver

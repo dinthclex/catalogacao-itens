@@ -282,8 +282,176 @@ const MAP_OBJECT_EXTRAS = {
   // `mapObjectCatalog` abaixo — pra sugerir a planta retangular de VERDADE
   // do novo Pilar, em vez da coluna cilíndrica antiga).
   pilar: { label: 'Pilar', svg: _iconSvg(`
-    <rect x="7" y="2" width="10" height="20" rx="0.8"/>
-    <path d="M7 6h10M7 18h10"/>
+    <rect x="8.5" y="2" width="7" height="20" rx="0.8"/>
+    <path d="M8.5 6h7M8.5 18h7"/>
+  `) },
+  // [20/09/2026 UTC] NOVO -- "Viga": peça estrutural HORIZONTAL (o Pilar é a vertical).
+  viga: { label: 'Viga', svg: _iconSvg(`
+    <rect x="2" y="8.5" width="20" height="7" rx="0.8"/>
+    <path d="M6 8.5v7M18 8.5v7"/>
+  `) },
+  // [18/09/2026 UTC] NOVO -- "Rack" (rack modular de 19", objeto parametrico
+  // de catalogo, ver js/rack-modular.js): gabinete visto de frente, com
+  // porta, unidades de rack (tracinhos) e fechadura.
+  rack: { label: 'Rack', svg: _iconSvg(`
+    <rect x="5" y="2.5" width="14" height="19" rx="1"/>
+    <path d="M8 6h8M8 9h8M8 12h8M8 15h8"/>
+    <circle cx="16.5" cy="18.5" r="0.7" fill="currentColor" stroke="none"/>
+  `) },
+  // [18/09/2026 UTC] RODADA 166 -- Equipamentos de rede de RACK 19" (ver js/rede-equip.js):
+  // "Switch de 24 portas", "Switch de 48 portas" (1U) e "Patch panel" de 24 (1U) / 48 (2U)
+  // portas. SUBSTITUEM o antigo "Switch / roteador" da grade "Objetos" (a chave `switch`
+  // continua em LIBRARY so para os TIPOS DE ITEM/inventario e mapas antigos).
+  switch24: { label: 'Switch de 24 portas', svg: _iconSvg(`
+    <rect x="1.5" y="8" width="21" height="8" rx="0.8"/>
+    <path d="M4 10.4h1.6v1.6H4zM7 10.4h1.6v1.6H7zM10 10.4h1.6v1.6H10zM13 10.4h1.6v1.6H13zM4 12.8h1.6v1.6H4zM7 12.8h1.6v1.6H7zM10 12.8h1.6v1.6H10zM13 12.8h1.6v1.6H13z"/>
+    <path d="M16.5 10.4h1.6v1.6h-1.6zM19 10.4h1.6v1.6H19zM16.5 12.8h1.6v1.6h-1.6zM19 12.8h1.6v1.6H19z"/>
+  `) },
+  switch48: { label: 'Switch de 48 portas', svg: _iconSvg(`
+    <rect x="1.5" y="7" width="21" height="10" rx="0.8"/>
+    <path d="M3.5 9h1.4v1.6H3.5zM6 9h1.4v1.6H6zM8.5 9h1.4v1.6H8.5zM11 9h1.4v1.6H11zM13.5 9h1.4v1.6h-1.4zM3.5 13.4h1.4V15H3.5zM6 13.4h1.4V15H6zM8.5 13.4h1.4V15H8.5zM11 13.4h1.4V15H11zM13.5 13.4h1.4V15h-1.4z"/>
+    <path d="M17 9h1.6v1.6H17zM19.6 9h1.6v1.6h-1.6zM17 13.4h1.6V15H17zM19.6 13.4h1.6V15h-1.6z"/>
+    <path d="M3.5 11.9h11.4"/>
+  `) },
+  patchpanel24: { label: 'Patch panel de 24 portas', svg: _iconSvg(`
+    <rect x="1.5" y="8.5" width="21" height="7" rx="0.8"/>
+    <path d="M3.4 10.5h2.2v3H3.4zM6.4 10.5h2.2v3H6.4zM9.4 10.5h2.2v3H9.4zM13 10.5h2.2v3H13zM16 10.5h2.2v3H16zM19 10.5h2.2v3H19z"/>
+  `) },
+  patchpanel48: { label: 'Patch panel de 48 portas', svg: _iconSvg(`
+    <rect x="1.5" y="5.5" width="21" height="13" rx="0.8"/>
+    <path d="M3.4 7.5h2.2v3H3.4zM6.4 7.5h2.2v3H6.4zM9.4 7.5h2.2v3H9.4zM13 7.5h2.2v3H13zM16 7.5h2.2v3H16zM19 7.5h2.2v3H19z"/>
+    <path d="M3.4 13.5h2.2v3H3.4zM6.4 13.5h2.2v3H6.4zM9.4 13.5h2.2v3H9.4zM13 13.5h2.2v3H13zM16 13.5h2.2v3H16zM19 13.5h2.2v3H19z"/>
+  `) },
+  // [18/09/2026 UTC] RODADA 167 -- Ecossistema de infraestrutura PASSIVA de rede (ver js/rede-passiva.js):
+  // DIO, guias, bandejas, PDU, frente falsa, ventilacao, espelhos/caixas de piso, abracadeiras e
+  // (eletrocalha, leito, canaleta e eletroduto são peças comuns de tamanho fixo).
+  dio12: { label: 'DIO de 12 fibras (1U)', svg: _iconSvg(`
+    <rect x="1.5" y="8.5" width="21" height="7" rx="0.8"/>
+    <path d="M4 10.7 h2 v2.6 h-2z M8 10.7 h2 v2.6 h-2z M12 10.7 h2 v2.6 h-2z M16 10.7 h2 v2.6 h-2z"/>
+    <path d="M3 15.9 c1.5 -3 3 -3 4.5 0" />
+  `) },
+  dio24: { label: 'DIO de 24 fibras (1U)', svg: _iconSvg(`
+    <rect x="1.5" y="8.5" width="21" height="7" rx="0.8"/>
+    <path d="M4 10.7 h2 v2.6 h-2z M8 10.7 h2 v2.6 h-2z M12 10.7 h2 v2.6 h-2z M16 10.7 h2 v2.6 h-2z"/>
+    <path d="M3 15.9 c1.5 -3 3 -3 4.5 0" />
+  `) },
+  dio48: { label: 'DIO de 48 fibras (2U)', svg: _iconSvg(`
+    <rect x="1.5" y="6" width="21" height="12" rx="0.8"/>
+    <path d="M4 10.7 h2 v2.6 h-2z M8 10.7 h2 v2.6 h-2z M12 10.7 h2 v2.6 h-2z M16 10.7 h2 v2.6 h-2z"/>
+    <path d="M3 18.4 c1.5 -3 3 -3 4.5 0" />
+  `) },
+  guia_h1: { label: 'Guia de cabos horizontal 1U', svg: _iconSvg(`
+    <rect x="1.5" y="8.5" width="21" height="7" rx="0.8"/>
+    <path d="M5 8.5v7M9 8.5v7M13 8.5v7M17 8.5v7"/>
+  `) },
+  guia_h2: { label: 'Guia de cabos horizontal 2U', svg: _iconSvg(`
+    <rect x="1.5" y="6" width="21" height="12" rx="0.8"/>
+    <path d="M5 6v12M9 6v12M13 6v12M17 6v12"/>
+  `) },
+  guia_v: { label: 'Guia de cabos vertical', svg: _iconSvg(`
+    <rect x="8" y="2.5" width="8" height="19" rx="1"/>
+    <path d="M8 6h5M11 10h5M8 14h5M11 18h5"/>
+  `) },
+  bandeja_fixa: { label: 'Bandeja fixa 1U', svg: _iconSvg(`
+    <rect x="1.5" y="9" width="21" height="6" rx="0.8"/>
+    <path d="M4 12h16" stroke-dasharray="2 2"/>
+  `) },
+  bandeja_basc: { label: 'Bandeja basculante 2U', svg: _iconSvg(`
+    <rect x="1.5" y="6" width="21" height="12" rx="0.8"/>
+    <path d="M3 14l18-3"/><path d="M4 17h16"/>
+  `) },
+  pdu8: { label: 'Régua de tomadas (PDU) 1U', svg: _iconSvg(`
+    <rect x="1.5" y="8.5" width="21" height="7" rx="0.8"/>
+    <path d="M5 10.5h2.4v3H5zM9 10.5h2.4v3H9zM13 10.5h2.4v3H13zM17 10.5h2.4v3H17z"/>
+  `) },
+  // [19/09/2026 UTC] NOVO (RODADA 171) -- No-break/UPS, Storage (NAS/SAN/Disk Shelf).
+  nobreak_torre: { label: 'No-break torre (Interactive)', svg: _iconSvg(`
+    <rect x="6" y="2" width="12" height="20" rx="1.4"/>
+    <rect x="8.4" y="5" width="7.2" height="4" rx="0.6"/>
+    <circle cx="12" cy="16.5" r="1.6"/>
+  `) },
+  nobreak_1u: { label: 'No-break rack 1U (Interactive)', svg: _iconSvg(`
+    <rect x="1.5" y="8.5" width="21" height="7" rx="0.8"/>
+    <circle cx="6.4" cy="12" r="1.6"/>
+    <path d="M10.5 10h2.4v4h-2.4zM14.5 10h2.4v4h-2.4z"/>
+  `) },
+  nobreak_2u: { label: 'No-break rack 2U (Interactive)', svg: _iconSvg(`
+    <rect x="1.5" y="6" width="21" height="12" rx="0.8"/>
+    <circle cx="6.4" cy="12" r="2"/>
+    <path d="M10.5 9.5h2.4v5h-2.4zM14.5 9.5h2.4v5h-2.4zM17.6 9.5h2.4v5h-2.4z"/>
+  `) },
+  nobreak_corporativo: { label: 'No-break corporativo (Online Double Conversion)', svg: _iconSvg(`
+    <rect x="2.5" y="1.5" width="19" height="21" rx="1.2"/>
+    <rect x="5.5" y="4" width="13" height="5" rx="0.6"/>
+    <circle cx="12" cy="16" r="2.4"/>
+  `) },
+  storage_12: { label: 'Storage NAS/SAN 12 baias (2U)', svg: _iconSvg(`
+    <rect x="1.5" y="6" width="21" height="12" rx="0.8"/>
+    <path d="M4 8.5h4v7H4zM9 8.5h4v7H9zM14 8.5h4v7h-4zM19 8.5h2v7h-2z"/>
+  `) },
+  storage_24: { label: 'Storage NAS/SAN 24 baias (2U)', svg: _iconSvg(`
+    <rect x="1.5" y="6" width="21" height="12" rx="0.8"/>
+    <path d="M3.5 8.5h2.6v7H3.5zM7 8.5h2.6v7H7zM10.5 8.5h2.6v7h-2.6zM14 8.5h2.6v7H14zM17.5 8.5h2.6v7h-2.6z"/>
+  `) },
+  storage_60: { label: 'Storage NAS/SAN 60 baias (4U)', svg: _iconSvg(`
+    <rect x="1.5" y="3" width="21" height="18" rx="0.8"/>
+    <path d="M3.5 5.5h2.2v13H3.5zM6.4 5.5h2.2v13H6.4zM9.3 5.5h2.2v13H9.3zM12.2 5.5h2.2v13h-2.2zM15.1 5.5h2.2v13h-2.2zM18 5.5h2.2v13H18z"/>
+  `) },
+  frente_falsa: { label: 'Frente falsa 1U (blanking panel)', svg: _iconSvg(`
+    <rect x="1.5" y="9.5" width="21" height="5" rx="0.8"/>
+    <circle cx="4" cy="12" r="0.7"/><circle cx="20" cy="12" r="0.7"/>
+  `) },
+  kit_vent: { label: 'Kit de ventilação 1U', svg: _iconSvg(`
+    <rect x="1.5" y="8.5" width="21" height="7" rx="0.8"/>
+    <circle cx="8" cy="12" r="2.6"/><circle cx="16" cy="12" r="2.6"/><path d="M8 9.6v4.8M5.6 12h4.8M16 9.6v4.8M13.6 12h4.8"/>
+  `) },
+  espelho1: { label: 'Espelho de parede 1 módulo', svg: _iconSvg(`
+    <rect x="6" y="6" width="12" height="12" rx="1.4"/>
+    <path d="M10 10h4v4h-4z"/>
+  `) },
+  espelho2: { label: 'Espelho de parede 2 módulos', svg: _iconSvg(`
+    <rect x="6" y="6" width="12" height="12" rx="1.4"/>
+    <path d="M8.6 8.6h6.8v2.6H8.6zM8.6 12.8h6.8v2.6H8.6z"/>
+  `) },
+  espelho4: { label: 'Espelho de parede 4 módulos', svg: _iconSvg(`
+    <rect x="5" y="5" width="14" height="14" rx="1.4"/>
+    <path d="M7.6 7.6h3.6v3.6H7.6zM12.8 7.6h3.6v3.6h-3.6zM7.6 12.8h3.6v3.6H7.6zM12.8 12.8h3.6v3.6h-3.6z"/>
+  `) },
+  caixa_piso2: { label: 'Caixa de piso 2 módulos', svg: _iconSvg(`
+    <rect x="4" y="7" width="16" height="10" rx="1.4"/>
+    <path d="M7 10h4v4H7zM13 10h4v4h-4z"/>
+  `) },
+  caixa_piso4: { label: 'Caixa de piso 4 módulos', svg: _iconSvg(`
+    <rect x="3" y="5" width="18" height="14" rx="1.4"/>
+    <path d="M6 8h3v3H6zM10.5 8h3v3h-3zM15 8h3v3h-3zM6 13h3v3H6z"/>
+  `) },
+  abracadeira_velcro: { label: 'Abraçadeira de velcro', svg: _iconSvg(`
+    <rect x="9" y="15" width="6" height="4" rx="0.8"/>
+    <circle cx="12" cy="10" r="6"/>
+  `) },
+  abracadeira_nylon: { label: 'Abraçadeira de nylon', svg: _iconSvg(`
+    <rect x="10" y="15" width="4" height="4" rx="0.6"/>
+    <circle cx="12" cy="10" r="5"/><path d="M12 5V3"/>
+  `) },
+  // Eletrocalha: peça de tamanho fixo (comprimento padrão 2m, editável em `profundidade`), como qualquer objeto de catálogo.
+  eletrocalha: { label: 'Eletrocalha', svg: _iconSvg(`
+    <path d="M3 8h18M3 16h18M3 8v8M21 8v8"/>
+    <path d="M7 11.5h10M7 13.5h10" stroke-dasharray="2 1.5"/>
+  `) },
+  // Leito aramado: peça de tamanho fixo (comprimento padrão 2m, editável em `profundidade`), como qualquer objeto de catálogo.
+  leito: { label: 'Leito aramado', svg: _iconSvg(`
+    <path d="M3 9h18v6H3z"/>
+    <path d="M6 9v6M9 9v6M12 9v6M15 9v6M18 9v6"/>
+  `) },
+  // Canaleta PVC: peça de tamanho fixo (comprimento padrão 2m, editável em `profundidade`), como qualquer objeto de catálogo.
+  canaleta: { label: 'Canaleta PVC', svg: _iconSvg(`
+    <rect x="3" y="10" width="18" height="4" rx="0.8"/>
+    <path d="M3 12h18" stroke-dasharray="1.5 1.5"/>
+  `) },
+  // Eletroduto: peça de tamanho fixo (comprimento padrão 2m, editável em `profundidade`), como qualquer objeto de catálogo.
+  eletroduto: { label: 'Eletroduto', svg: _iconSvg(`
+    <path d="M3 9.5h18M3 14.5h18"/>
+    <path d="M3 9.5a2.5 2.5 0 0 0 0 5M21 9.5a2.5 2.5 0 0 1 0 5"/>
   `) },
   planta: { label: 'Planta / vaso', svg: _iconSvg(`
     <path d="M12 11v10"/>
@@ -709,7 +877,9 @@ const Icons = {
     // comum igual qualquer outro (ver `OBJECT3D_PROFILES.mesa`/
     // `_buildMesaMesh`, engine3d.js) — sem o mecanismo de "forma com
     // gizmo"/`_MESA_FORMA_DEF` de antes (removido, não volta).
-    Object.keys(this.LIBRARY).forEach((key) => out.push({ key, label: this.LIBRARY[key].label, svg: this.LIBRARY[key].svg }));
+    // [18/09/2026 UTC] RODADA 166 -- 'switch' ("Switch / roteador") SAIU da grade: virou dois
+    // objetos independentes, "Switch de 24 portas" e "Switch de 48 portas" (MAP_OBJECT_EXTRAS).
+    Object.keys(this.LIBRARY).filter((key) => key !== 'switch').forEach((key) => out.push({ key, label: this.LIBRARY[key].label, svg: this.LIBRARY[key].svg }));
     // 'porta'/'janela' SAÍRAM daqui (pedido do usuário: "como porta e janela
     // têm ferramentas separadas, as que estão ali dentro dos objetos deve
     // ser eliminada") — já existem como ferramentas dedicadas (🚪 Porta / 🪟
@@ -744,7 +914,9 @@ const Icons = {
       // estar nesta lista de exclusão).
       .filter((key) => key !== 'porta' && key !== 'janela' && key !== 'piso' && key !== 'coluna')
       .forEach((key) => out.push({ key, label: this.MAP_OBJECT_EXTRAS[key].label, svg: this.MAP_OBJECT_EXTRAS[key].svg }));
-    return out;
+    // Objetos excluídos em "Acessar modelos" (Set preenchido por Modelos3DView._carregarExcluidos) somem do catálogo.
+    const exc = this._objetosExcluidos;
+    return exc && exc.size ? out.filter((o) => !exc.has(o.key)) : out;
   },
  
   /** Converte um ícone (por key) numa data URL utilizável em <img>/drawImage

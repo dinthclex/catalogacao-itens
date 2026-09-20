@@ -132,9 +132,7 @@
   // mundo' [...] tendo 'RelogioPredio.getHoraAtual()' num mapa novo que
   // não tem um prédio, ficará incoerente." Renomeado `window.RelogioPredio`
   // -> `window.RelogioMundo` e a chave de config persistida
-  // `relogioPredioConfig` -> `relogioMundoConfig` em todo o projeto (ver
-  // `progresso-sessao.md`, RODADA seguinte, pra lista completa de
-  // arquivos). Chave antiga mantida aqui só pra 1 leitura de migração (ver
+  // `relogioPredioConfig` -> `relogioMundoConfig` em todo o projeto (a lista de arquivos foi atualizada na mesma rodada). Chave antiga mantida aqui só pra 1 leitura de migração (ver
   // `_carregarConfigPersistida` mais abaixo) — sem isso, quem já tinha
   // ajustado `velocidade`/horários no `⚙️` antes desta rodada perderia a
   // configuração ao abrir o app de novo (a chave nova nasceria vazia).

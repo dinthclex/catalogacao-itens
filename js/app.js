@@ -473,7 +473,20 @@ const App = {
             DB.getSetting(window.ClassicMode?._OPMODE_KEY || 'classicOperationMode', ''),
             DB.getSetting('conferenciaNome', ''),
           ]);
-          if (!modoJaEscolhido && !(nomeJaDefinido && nomeJaDefinido.trim())) telaInicialPadrao = 'mapa';
+          // [19/09/2026 UTC] CORRIGIDO (RODADA 194) -- pedido verbatim: "Continua aparecendo o 'Tabela'
+          // ao iniciar o app, quando clica-se fora da splash screen, sem selecionar uma das opções que
+          // aparece ali." CAUSA RAIZ DE VERDADE (a "correção" da RODADA 193 tinha o bug ERRADO): o valor
+          // gravado em `_OPMODE_KEY` pelas escolhas da splash (ver `data-mode` dos botões/`finish(modo)`
+          // em classicmode.js) é a STRING `'mapeamento'`, nunca `'mapa'` -- a comparação
+          // `modoJaEscolhido === 'mapa'` da rodada passada NUNCA batia com nada de verdade (bug bobo de
+          // string errada), então aquele "conserto" não teve efeito nenhum na prática — nem no F5 (o caso
+          // que motivou a RODADA 193) nem no "fechar a splash sem escolher" (que reusa este MESMO cálculo
+          // de `telaInicialPadrao`, já que `App._boot()` chama `navigate(telaInicialPadrao)` ANTES de
+          // `ClassicMode.openSplashScreen()` — a splash abre por CIMA de uma tela que já foi decidida por
+          // este trecho, sem esperar a escolha do usuário). Corrigido pra comparar com o valor certo,
+          // `'mapeamento'`.
+          const instalacaoNova = !modoJaEscolhido && !(nomeJaDefinido && nomeJaDefinido.trim());
+          if (instalacaoNova || modoJaEscolhido === 'mapeamento') telaInicialPadrao = 'mapa';
         } catch (e) { /* melhor esforço — na dúvida, mantém 'tabela' */ }
         // [15/09/2026 UTC] NOVO — pedido verbatim: "Ao selecionar o
         // 'Mapeamento de ambientes' [...] Deve ser mostrado o 'Planta
@@ -483,7 +496,10 @@ const App = {
         // de ENTRADA do Mapa (botões Planta baixa/Fotos/Caixa) e vai
         // direto pra Planta baixa (`MapView._forcarTelaInicial`, ver
         // mapview.js `mount()`).
-        if (telaInicialPadrao === 'mapa' && typeof MapView !== 'undefined') MapView._forcarTelaInicial = 'planta';
+        // [19/09/2026 UTC] RODADA 192 -- pedido verbatim: "por padrao, quando for
+        // o modo 'Mapeamento de ambientes', deve ficar a tela do 'Caixa'"
+        // -- trocado de 'planta' (RODADA de 15/09) pra 'caixa'.
+        if (telaInicialPadrao === 'mapa' && typeof MapView !== 'undefined') MapView._forcarTelaInicial = 'caixa';
         console.log(`[BOOT] navigate(${telaInicialPadrao}): iniciando (tela principal ainda não está na tela)...`);
         await this.navigate(telaInicialPadrao);
         console.log(`[BOOT] navigate(${telaInicialPadrao}): concluído em ${(performance.now() - this._dbgBootInicio).toFixed(0)}ms desde o início do boot — tela principal já visível a partir daqui.`);
@@ -837,6 +853,14 @@ const App = {
    *  verdade (era exatamente o ciclo relatado pelo usuário). */
   async navigate(view, opts = {}) {
     if (!this.views[view]) return;
+    // [19/09/2026 UTC] NOVO (RODADA 195) -- flag "já navegou pelo menos 1x nesta carga de página", pra
+    // `ClassicMode.enter()` conseguir distinguir "boot do zero" (nenhuma tela de verdade decidida ainda)
+    // de "já tem uma tela em curso" (troca manual pelo botão 🔀 no meio de uma sessão) -- ver comentário
+    // grande em classicmode.js `enter()` (`this.currentView` SEMPRE é truthy, mesmo antes do 1º
+    // `navigate()` de verdade -- é inicializado como `'tabela'` de fábrica, nunca `null`/`undefined`, ver
+    // a declaração do objeto App logo no topo deste arquivo -- não dava pra usar como sinal de "ainda não
+    // navegou").
+    this._navegouAoMenosUmaVez = true;
     // NOVO (08/09/2026): 'workspace' (BSPLayout) agora é a raiz
     // PERMANENTE do app inteiro (ver BSPLayout.mount(#app) em _boot()
     // abaixo) — navegar pra ela indireta/programaticamente aninharia o
@@ -933,6 +957,27 @@ const App = {
    *  `fallback` só é usado se a pilha estiver vazia (ex.: tela aberta direto
    *  por algum atalho, sem nenhuma navegação anterior registrada nesta
    *  sessão) — evita ficar sem destino nenhum nesse caso raro. */
+  /** [20/09/2026 UTC] NOVO (RODADA 230) -- fallback de `closeView3D()` (ver comentário
+   *  grande lá) pro caso raro de `_navStack` vazia (nenhuma navegação anterior registrada
+   *  nesta sessão antes de abrir o "3D" do rodapé). MESMA detecção de modo de operação já
+   *  usada em `_boot()` pra decidir `telaInicialPadrao`/`MapView._forcarTelaInicial` --
+   *  "Mapeamento de ambientes" (ou splash fechada sem escolher nada numa instalação nova)
+   *  tem 'Caixa' como tela padrão; qualquer outro modo mantém 'Tabela'. Duplicar essa
+   *  detecção (em vez de guardar `telaInicialPadrao` como propriedade) é proposital: aqui
+   *  o valor precisa refletir o modo de operação ATUAL (pode ter mudado depois do boot),
+   *  não o congelado no momento em que o app abriu. */
+  async _prevViewFallbackPadrao() {
+    try {
+      const [modoJaEscolhido, nomeJaDefinido] = await Promise.all([
+        DB.getSetting(window.ClassicMode?._OPMODE_KEY || 'classicOperationMode', ''),
+        DB.getSetting('conferenciaNome', ''),
+      ]);
+      const instalacaoNova = !modoJaEscolhido && !(nomeJaDefinido && nomeJaDefinido.trim());
+      if (instalacaoNova || modoJaEscolhido === 'mapeamento') return 'caixa';
+    } catch (e) { /* melhor esforço — na dúvida, mantém 'tabela' */ }
+    return 'tabela';
+  },
+
   async back(fallback = 'tabela') {
     const target = this._navStack.pop() || fallback;
     await this.navigate(target, { isBack: true });
@@ -1034,7 +1079,33 @@ const App = {
     }
     const prev = this.views.__view3d__;
     if (prev?.unmount) { try { prev.unmount(); } catch (e) { console.warn('unmount(__view3d__) falhou:', e); } }
-    const target = this._prevView || 'tabela';
+    // [20/09/2026 UTC] CORRIGIDO (RODADA 230) -- pedido verbatim: "Ao ir em 'Ver em 3D' pelo
+    // botão do rodapé do app e, depois, clicar em 'Sair do 3D', está retornando para a tela
+    // 'Tabela'. Deve voltar para a tela padrão da opção escolhida." CAUSA RAIZ: este `target`
+    // só conhecia `this._prevView` -- uma variável escrita SÓ por `openView3D(ambienteId)`
+    // (o 3D aberto DE DENTRO da Planta baixa do Mapa, ver comentário grande acima). O botão
+    // "3D" do RODAPÉ, porém, é uma tela normal do roteador (`views.ver3d`, ver topo do
+    // arquivo) aberta via `App.navigate('ver3d')` -- que nunca escreve em `_prevView` (usa
+    // `_navStack`, a pilha de "de onde vim" já existente pra `App.back()`). Chegando por
+    // esse caminho, `_prevView` ficava com um valor VELHO de uma sessão anterior de 3D
+    // embutido no Mapa (ou `undefined`, numa sessão sem nenhum) -- então o `|| 'tabela'`
+    // sempre "vencia" (ou o valor velho errado), não importa se a tela de origem de
+    // verdade era 'caixa' (padrão de 'Mapeamento de ambientes'), 'mapa', ou qualquer outra.
+    // CORRIGIDO: quando o 3D atual foi aberto pelo rodapé (`currentView === 'ver3d'`),
+    // usa a MESMA pilha `_navStack` de `App.back()` -- o topo dela é exatamente a tela de
+    // onde o usuário veio antes de clicar "3D", então "Sair do 3D" volta pra ELA (Caixa,
+    // Mapa, ou qualquer outra), em vez de sempre 'Tabela'. Só cai no fallback fixo
+    // (`_prevViewFallbackPadrao()`, calculado abaixo a partir do MESMO modo de operação
+    // usado no boot -- ver `telaInicialPadrao` em `_boot()`) se a pilha estiver vazia (ex.:
+    // 'ver3d' foi a 1ª tela desta sessão, sem navegação anterior registrada) -- nesse caso
+    // raro, "Mapeamento de ambientes" (ou splash fechada sem escolher nada) volta pra
+    // 'Caixa', igual ao pedido verbatim citado acima; qualquer outro modo mantém 'Tabela'.
+    // O caminho antigo (`_prevView`, 3D embutido no Mapa) continua IDÊNTICO -- não mexe
+    // nesse caso, que já funcionava certo.
+    const veioDoRodape = this.currentView === 'ver3d';
+    const target = veioDoRodape
+      ? (this._navStack.pop() || await this._prevViewFallbackPadrao())
+      : (this._prevView || 'tabela');
     document.querySelectorAll('.bsp-botoes-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === target));
     document.getElementById('view-title').textContent = this.titles[target] || 'Catalogação de Itens';
     document.body.classList.toggle('view-mapa', target === 'mapa');

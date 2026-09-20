@@ -227,6 +227,7 @@ const ModelerUI = {
       // "Ferramentas" também) ou não (só "Criar"), em vez de um `state`
       // fixo passado pelo chamador — o MESMO elemento serve os dois
       // contextos, nunca duplicado.
+      + '<button type="button" class="m3d-btn m3d-apply" id="m3d-apply-btn" title="Grava as alterações no objeto sem sair do Modelador">✔ Aplicar alterações</button>'
       + '<button type="button" class="m3d-btn m3d-exit" id="m3d-exit-btn">✕ Sair do Modelador</button>'
       // [15/09/2026] REMOVIDO -- pedido verbatim (Parte B): "o botão
       // dropdown 'Propriedades' (que aparece no lado direito da tela),
@@ -243,7 +244,8 @@ const ModelerUI = {
     state.wrapEl.appendChild(root);
     state.rootEl = root;
 
-    root.querySelector('#m3d-exit-btn').onclick = () => window.Modeler3D.exit();
+    root.querySelector('#m3d-exit-btn').onclick = () => window.Modeler3D.requestExit();
+    root.querySelector('#m3d-apply-btn').onclick = () => window.Modeler3D.applyChanges();
     root.querySelector('#m3d-campos-btn').onclick = () => { ModelerInput.toggleCamPosMode(state); this.updateToolbarActive(state); };
 
     root.querySelector('#m3d-mode-btn').onclick = () => {
