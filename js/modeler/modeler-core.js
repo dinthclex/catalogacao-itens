@@ -133,7 +133,11 @@ const Modeler3D = {
       // Detalhes finos repetidos (conectores/furos = muitas instâncias) ficam de fora por padrão; opção em Configurações 3D.
       const incluir = !!(window.MapConfig && MapConfig._cache && MapConfig._cache.modeladorIncluirDetalhes);
       const limite = incluir ? 3000 : 48;
-      const skipNode = (n) => n.isInstancedMesh && n.count > limite;
+      // Equipamento de rede (switch, patch panel...): LEDs animados e serigrafia (textos) continuam sendo do objeto
+      // original, que segue interativo por baixo da malha editada (ver Engine3D._buildRedeInteractiveOverlay).
+      const ehRede = !!(window.RedeEquip && window.RedeEquip.ehEquipRede(obj.tipo));
+      const ledRede = ehRede ? (engine._redeRuntime && engine._redeRuntime.get(obj.id) && engine._redeRuntime.get(obj.id).view._ledMalha) : null;
+      const skipNode = (n) => (n.isInstancedMesh && n.count > limite) || (ehRede && (n.name === 'serigrafia' || (ledRede && n === ledRede)));
       const parts = [];
       roots.forEach((r) => {
         const m = ModelerMesh.fromThreeGroup(r, { skipNode });
@@ -342,7 +346,7 @@ const Modeler3D = {
    *  `camera3` (mesma técnica de `toggleCamPosMode`), sem nenhum
    *  comportamento orbital — usado por `view3d.js` quando o Modelador é
    *  aberto enquanto o personagem está em "Ver através desta câmera"
-   *  (`_orbCamMode`/`_fotoCamMode` ativos): pedido verbatim do usuário
+   *  (`_fotoCamMode` ativo): pedido verbatim do usuário
    *  "ao entrar no Modelador, estando no modo 'Ver através desta câmera',
    *  a câmera não deve ficar orbital, mas sim deve permanecer na
    *  perspectiva da câmera que se selecionou". Antes desta rodada, mesmo
@@ -508,14 +512,14 @@ const Modeler3D = {
     // selecionada deve se manter" (entrando no Modelador enquanto "vendo
     // através" de uma câmera/orb calibrado). ANTES este bloco (e o de
     // `_camTransition` logo abaixo) usavam `view3d._camera` — a câmera de
-    // navegação normal, que enquanto `_fotoCamMode`/`_orbCamMode` está
+    // navegação normal, que enquanto `_fotoCamMode` está
     // ativo é só o jogador "andando por trás" invisível (ver arquitetura
     // documentada em view3d.js): nada a ver com o que está de fato sendo
     // exibido na tela. `_poseFromCurrentCamera(state)` lê a pose de
     // `state.camera` (`engine.camera3`, a câmera Three.js de VERDADE, já
     // sincronizada pelo último `render()` com QUALQUER câmera efetivamente
     // usada pra desenhar o quadro mais recente — navegação normal,
-    // `_fotoCamMode`, `_orbCamMode`, câmera assistida, sobrevoo, etc.,
+    // `_fotoCamMode`, sobrevoo, etc.,
     // sem precisar tratar cada caso à parte aqui) — mesma função já usada
     // pra converter órbita<->livre (`toggleCamPosMode`, mais abaixo). Sem
     // mudança nenhuma pro caso normal (fora de câmera-vista): `camera3` já
@@ -594,10 +598,9 @@ const Modeler3D = {
       // RAIZ: `state.camera` É `engine.camera3` (MESMA referência, ver
       // comentário grande logo acima em `enter()`) — enquanto travado numa
       // câmera calibrada, `camera3.near/far` ficam nos valores de
-      // `cam.clipStartM/clipEndM` (ver view3d.js `_enterCameraOrbView`/
+      // `cam.clipStartM/clipEndM` (ver view3d.js
       // `_enterFotoCameraView`, `engine.setClipPlanes`), pensados pro
-      // "Camera Match" (alinhar a cena com a FOTO de fundo) — não pro
-      // Modelador. Um objeto perto do limite de `clipEndM` continua com o
+      // alinhamento da cena com a FOTO de fundo — não pro Modelador. Um objeto perto do limite de `clipEndM` continua com o
       // CENTRO dentro do recorte (por isso ele aparece), mas o gizmo (ver
       // modeler-gizmo.js `updateGizmo`, `depthTest:false`/`renderOrder`
       // alto só livra ele de ser TAMPADO por outra malha — nunca do recorte
@@ -700,16 +703,19 @@ const Modeler3D = {
       const view3d = state.view3d, obj = state.obj, mapId = view3d?._map?.id, objId = obj?.id;
       if (mapId == null || objId == null) return;
       const antes = state.objBackupEntrada, depois = this._backupObj(obj);
-      const aplicar = async (b) => {
+      const eqAntes = state._equipAntes || null;
+      const eqDepois = eqAntes ? eqAntes.map((e) => { const o = (view3d._map.objects || []).find((x) => x.id === e.id) || {}; return { id: e.id, x: o.x, y: o.y, elevacao: o.elevacao }; }) : null;
+      const aplicar = async (b, eq) => {
         const m = (view3d?._map && view3d._map.id === mapId) ? view3d._map : await DB.getMap(mapId);
         const o = ((m && m.objects) || []).find((x) => x.id === objId);
         if (!o) return;
         this._BACKUP_KEYS.forEach((k) => { if (b[k] === undefined) delete o[k]; else o[k] = JSON.parse(JSON.stringify(b[k])); });
+        if (eq) eq.forEach((e) => { const q = (m.objects || []).find((x) => x.id === e.id); if (q) { q.x = e.x; q.y = e.y; if (e.elevacao === undefined) delete q.elevacao; else q.elevacao = e.elevacao; } });
         Mapping.recalcBounds(m);
         await DB.saveMap(m);
         if (view3d && view3d._map === m) view3d._rebuildScene?.();
       };
-      History.push({ label: 'Modelador (' + (obj.nome || obj.tipo || 'objeto') + ')', undo: () => aplicar(antes), redo: () => aplicar(depois) });
+      History.push({ label: 'Modelador (' + (obj.nome || obj.tipo || 'objeto') + ')', undo: () => aplicar(antes, eqAntes), redo: () => aplicar(depois, eqDepois) });
     } catch (e) { /* histórico é opcional */ }
   },
   _backupObj(obj) {
@@ -1017,6 +1023,18 @@ const Modeler3D = {
       // novo no array, nunca duplica. Se por qualquer motivo o objeto não
       // for mais encontrado por id (removido enquanto o Modelador estava
       // aberto, por exemplo), não faz nada — não recria um "objeto órfão".
+      // Rack movido no Modelador: os equipamentos instalados nele (rackId) vão junto, mantendo a posição relativa.
+      if (obj.tipo === 'rack' && (patch.x != null || patch.elevacao != null)) {
+        const dx = (patch.x != null ? patch.x - (obj.x || 0) : 0);
+        const dy = (patch.y != null ? patch.y - (obj.y || 0) : 0);
+        const dz = (patch.elevacao != null ? patch.elevacao - (obj.elevacao || 0) : 0);
+        if (!state._equipAntes) state._equipAntes = (map.objects || []).filter((o) => o && o.rackId === obj.id && o.id !== obj.id).map((o) => ({ id: o.id, x: o.x, y: o.y, elevacao: o.elevacao }));
+        if (dx || dy || dz) {
+          (map.objects || []).forEach((o) => {
+            if (o && o.rackId === obj.id && o.id !== obj.id) { o.x = (o.x || 0) + dx; o.y = (o.y || 0) + dy; o.elevacao = (o.elevacao || 0) + dz; }
+          });
+        }
+      }
       Mapping.updateObject(map, obj.id, patch);
       // Salvaguarda defensiva (pedido do usuário — "não pode ficar 'dois'
       // dele"): se por algum caminho externo o mapa tiver acabado com mais
@@ -1055,7 +1073,7 @@ const Modeler3D = {
    *  `toggleCamPosMode`) sempre passam `camPose` explicitamente agora:
    *  `enter()` passa `_poseFromCurrentCamera(state)` (a pose de VERDADE da
    *  câmera `camera3`, não `view3d._camera` — ver comentário grande em
-   *  `enter()` sobre por que isso importa em `_fotoCamMode`/`_orbCamMode`);
+   *  `enter()` sobre por que isso importa em `_fotoCamMode`);
    *  `toggleCamPosMode` passa `state.freeCam` (de onde a câmera livre
    *  parou). `state.view3d._camera` como reserva (`camPose ||`) só por
    *  segurança — nenhum caminho conhecido chama isto sem `camPose`. */

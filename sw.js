@@ -15,6 +15,8 @@ const APP_SHELL = [
   './js/utils.js',
   './js/modulehost.js',
   './js/flip.js',
+  './js/botoeslayout.js',
+  './js/camcontrol3d.js',
   './js/eventlog.js',
   './js/icons.js',
   './js/objimport.js',
@@ -78,7 +80,6 @@ const APP_SHELL = [
   './js/app.js',
   './js/cards/cards.css',
   './js/cards/object-card.js',
-  './js/cards/camera-card.js',
   './js/cards/foto-pin-card.js',
   './js/cards/tijolo-aglomerado-card.js',
   './js/cards/orphan-patrimonio-card.js',
@@ -124,4 +125,4 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
-const CACHE_VERSION = 'catalogo-v645';
+const CACHE_VERSION = 'catalogo-v662';

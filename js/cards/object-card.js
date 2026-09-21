@@ -64,7 +64,7 @@ window.CardSystem.register('object', {
           // A malha do Modelador é montada (e só gravada ao aplicar) dentro de Modeler3D.enter — nada é semeado/salvo aqui.
           // Se estiver no modo "Ver através desta câmera", a câmera deve
           // permanecer na perspectiva da câmera selecionada, não orbital.
-          window.Modeler3D?.enter(view3d, alvo, { enterOrbital: !(view3d._orbCamMode || view3d._fotoCamMode) });
+          window.Modeler3D?.enter(view3d, alvo, { enterOrbital: !view3d._fotoCamMode });
         }),
       },
       // [15/09/2026 UTC] ALTERADO — pedido verbatim: "No 'Ver em 3D', ao

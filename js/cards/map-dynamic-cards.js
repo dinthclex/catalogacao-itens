@@ -31,7 +31,7 @@ window.MapDynamicCards.mountPlanta = function () {
             <button type="button" class="icon-btn sm map-panel-close" id="map-toolsidebar-close" title="Fechar barra de ferramentas">✕</button>
           </div>
           <div class="map2d-toolsidebar-grid">
-            ${this.PTOOLS.map((t) => `<button class="icon-btn map2d-ptool-btn" id="ptool-${t.id}" data-ptool="${t.id}" title="${t.title}">${t.icon}<span>${t.label}</span></button>`).join('')}
+            ${this.PTOOLS.map((t) => this._ptoolBtnHtml(t)).join('')}
             <!-- [14/09/2026 UTC] REMOVIDO — botões próprios de
                  "Adicionar orb"/"Objetos" (#map-mode-itens/#map-mode-objects).
                  Pedido verbatim: "Unifique os sistemas (sem considerar

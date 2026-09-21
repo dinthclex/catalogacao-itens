@@ -6,7 +6,7 @@
  * Este módulo é o equivalente a `bpy.data.objects` do Blender: um "dicionário"
  * central que agrega TODOS os objetos nomeados de um mapa (`map`), não
  * importa em qual coleção interna eles moram de verdade (`map.objects`,
- * `map.walls`, `map.portas`, `map.janelas`, `map.textos`, `map.cameras`,
+ * `map.walls`, `map.portas`, `map.janelas`, `map.textos`,
  * `map.medidas2d`, `map.tracos2d`) — cada um desses arrays já ganha um
  * `nome` único (globalmente, entre TODAS as coleções — ver
  * `Mapping._allSceneNames`/`_nextObjectName` em mapping.js) no momento em
@@ -35,7 +35,7 @@
  *
  * Cada entrada devolvida tem: `{ kind, nome, ref, colecao }` — `kind` é um
  * rótulo curto do tipo ('objeto'|'parede'|'porta'|'janela'|'texto'|
- * 'camera'|'medida2d'|'traco2d'), `ref` é o objeto de VERDADE (a mesma
+ * 'medida2d'|'traco2d'), `ref` é o objeto de VERDADE (a mesma
  * referência dentro do array do mapa — mutar `ref` já é mutar o mapa, sem
  * cópia), `colecao` é o nome do array (`map.objects`, etc.) onde ele mora —
  * útil pra quem precisa chamar `Mapping.update*`/`Mapping.remove*` depois.
@@ -52,7 +52,6 @@ window.SceneObjects = {
     { key: 'portas', kind: 'porta' },
     { key: 'janelas', kind: 'janela' },
     { key: 'textos', kind: 'texto' },
-    { key: 'cameras', kind: 'camera' },
     { key: 'medidas2d', kind: 'medida2d' },
     { key: 'tracos2d', kind: 'traco2d' },
   ],

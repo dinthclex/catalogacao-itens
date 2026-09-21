@@ -501,6 +501,10 @@ const MAP_OBJECT_EXTRAS = {
   // continuam desenhando normalmente a partir daqui; 2) este `svg` é
   // reaproveitado como ícone do novo botão dedicado 'piso' em mapview.js
   // PTOOLS (mesmo esquema já usado para reaproveitar o ícone de 'janela').
+  parede: { label: 'Parede', svg: _iconSvg(`
+    <rect x="3" y="5" width="18" height="14" rx="1"/>
+    <path d="M3 9.7h18M3 14.3h18M9 5v4.7M15 9.7v4.6M9 14.3V19"/>
+  `) },
   piso: { label: 'Piso (laje de andar)', svg: _iconSvg(`
     <rect x="3" y="3" width="18" height="18" rx="1" fill="currentColor" fill-opacity="0.12"/>
     <rect x="3" y="3" width="18" height="18" rx="1"/>
@@ -912,13 +916,27 @@ const Icons = {
       // [15/09/2026 UTC] 'coluna' continua fora (substituída por 'pilar',
       // objeto comum retangular novo, incluído normalmente abaixo por não
       // estar nesta lista de exclusão).
-      .filter((key) => key !== 'porta' && key !== 'janela' && key !== 'piso' && key !== 'coluna')
+      .filter((key) => key !== 'porta' && key !== 'janela' && key !== 'piso' && key !== 'parede' && key !== 'coluna')
       .forEach((key) => out.push({ key, label: this.MAP_OBJECT_EXTRAS[key].label, svg: this.MAP_OBJECT_EXTRAS[key].svg }));
     // Objetos excluídos em "Acessar modelos" (Set preenchido por Modelos3DView._carregarExcluidos) somem do catálogo.
     const exc = this._objetosExcluidos;
     return exc && exc.size ? out.filter((o) => !exc.has(o.key)) : out;
   },
  
+  /** Elementos que são criados por FERRAMENTAS próprias do Mapa 2D (Porta, Janela, Piso, Parede) e que também
+   *  aparecem no catálogo de objetos ("Objetos" e "Acessar modelos"): clicar num deles ativa a ferramenta
+   *  correspondente em vez de escolher um carimbo. Mesmo formato de `mapObjectCatalog()`, com `ferramenta: true`. */
+  ferramentaCatalog() {
+    const out = [
+      { key: 'porta', label: this.MAP_OBJECT_EXTRAS.porta.label, svg: this.MAP_OBJECT_EXTRAS.porta.svg },
+      { key: 'janela', label: this.MAP_OBJECT_EXTRAS.janela.label, svg: this.MAP_OBJECT_EXTRAS.janela.svg },
+      { key: 'piso', label: 'Piso', svg: this.MAP_OBJECT_EXTRAS.piso.svg },
+      { key: 'parede', label: 'Parede', svg: this.MAP_OBJECT_EXTRAS.parede.svg },
+    ].map((o) => Object.assign(o, { ferramenta: true }));
+    const exc = this._objetosExcluidos;
+    return exc && exc.size ? out.filter((o) => !exc.has(o.key)) : out;
+  },
+
   /** Converte um ícone (por key) numa data URL utilizável em <img>/drawImage
    *  no canvas — troca "currentColor" (que só funciona dentro do CSS de uma
    *  página, não dentro de uma imagem standalone) pela cor explícita pedida. */

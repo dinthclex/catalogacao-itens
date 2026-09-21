@@ -8,8 +8,7 @@
  * ser possível defini-lo."
  *
  * ESTE ARQUIVO É SÓ UM EXEMPLO — extensão `.txt` de propósito (mesma
- * convenção dos outros `_exemplo-*.txt` desta pasta, ex.
- * `_exemplo-script-camera-vigilancia.txt`): NÃO é carregado automaticamente
+ * convenção dos outros `_exemplo-*.txt` desta pasta): NÃO é carregado automaticamente
  * pelo app (só arquivos `<tipo>.model.js` são). Pra usar de verdade, copie
  * o miolo (a chamada `registerModel`) pra `assets/modelos/<seu-tipo>.model.js`
  * — o nome do arquivo TEM que bater com o `tipo` do objeto no catálogo.

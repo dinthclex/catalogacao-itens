@@ -1,6 +1,6 @@
 /* js/objectassets.js
  * NOVO (12/09/2026) — pedido verbatim: "Faça a reescrita completa dos
- * cartões 3D hardcoded de câmera/foto para rotearem 100% pelo sistema
+ * cartões 3D hardcoded de foto para rotearem 100% pelo sistema
  * genérico de componentes. Inclusive, faça para todos os objetos em
  * 'Ferramentas'->'Objetos' [...] Todos os objetos, não só os padrão [...],
  * mas também os novos devem seguir a mesma organização. Implemente na
@@ -15,16 +15,16 @@
  * onInstanceClick pra Instância):
  *
  *   1. MODELO (`assets/modelos/<chave>.model.js`) — comportamento PADRÃO
- *      de um TIPO inteiro de objeto (todas as câmeras, todos os pinos de
+ *      de um TIPO inteiro de objeto (todos os pinos de
  *      foto, todas as cadeiras de um certo `tipo`, etc.). Um arquivo por
- *      chave: `camera`, `fotopin`, `_generic` (fallback universal — todo
+ *      chave: `fotopin`, `_generic` (fallback universal — todo
  *      `tipo` de objeto do catálogo, fixo ou customizado, que NÃO tenha o
  *      seu próprio arquivo cai aqui) e, opcionalmente, `<tipo>.model.js`
  *      pra QUALQUER tipo específico (ex.: `gabinete.model.js`) — ver
  *      `OBJECT3D_PROFILES`/"Acessar modelos" pra a lista de tipos.
  *   2. INSTÂNCIA (`assets/instancias/<nome-do-objeto>.instance.js`) —
  *      comportamento só de UM objeto específico já colocado no mapa
- *      (`SceneObjects`/`nome`, ver js/sceneobjects.js — "Câmera.001", por
+ *      (`SceneObjects`/`nome`, ver js/sceneobjects.js — "Objeto.001", por
  *      exemplo), sobrepondo (não substituindo) o Modelo do tipo dele.
  *      Totalmente OPCIONAL — a imensa maioria dos objetos nunca tem um.
  *
@@ -73,7 +73,7 @@
  *   - onModelMouseDown/onModelMouseUp ficam só como HOOK DISPONÍVEL, SEM
  *     despacho automático — os eventos `mousedown`/`mouseup` do canvas já
  *     são usados por várias ferramentas de construção (colocar tijolo,
- *     arraste de câmera orbital, etc.) e reaproveitar o mesmo listener
+ *     etc.) e reaproveitar o mesmo listener
  *     pra também checar "tem um objeto pickável sob a mira?" arriscaria
  *     regressão nelas sem poder testar ao vivo nesta rodada — deixado de
  *     fora de propósito, CONSERVADOR.
@@ -175,7 +175,7 @@
  * depois que o nome de verdade virou `.config.js` numa rodada anterior.
  * Deixado documentado aqui em vez de reescrever cada menção antiga. */
 window.ObjectAssets = {
-  _models: {},      // chave (tipo/'camera'/'fotopin'/'_generic') -> def registrada
+  _models: {},      // chave (tipo/'fotopin'/'_generic') -> def registrada
   _instances: {},    // nome do objeto -> def registrada
   _modelAttempted: {}, // chave -> true (já tentou carregar, com ou sem sucesso — evita re-tentar toda hora)
   _instanceAttempted: {},
@@ -231,7 +231,7 @@ window.ObjectAssets = {
   },
 
   /** Slug de nome de arquivo — nomes de objeto podem ter espaços/acentos
-   *  (ex.: "Câmera.001") que não são ideais em nome de arquivo; troca por
+   *  (ex.: "Objeto.001") que não são ideais em nome de arquivo; troca por
    *  algo seguro e determinístico (mesmo nome sempre vira o mesmo slug). */
   _slug(s) {
     return String(s || '')
@@ -255,7 +255,7 @@ window.ObjectAssets = {
     });
   },
 
-  /** Garante que o Modelo de `chave` (tipo de objeto, ou 'camera'/
+  /** Garante que o Modelo de `chave` (tipo de objeto, ou
    *  'fotopin'/'_generic') já foi TENTADO carregar de
    *  `assets/modelos/js/<chave>.config.js` — só tenta uma vez por chave (a
    *  vida inteira da página); chamadas seguintes devolvem na hora. Devolve
@@ -312,10 +312,10 @@ window.ObjectAssets = {
    *  estar no "Ver em 3D" (ex.: colocado com a ferramenta de construção)
    *  ainda funcionam — só que o 1º clique nesse tipo específico usa o
    *  `_generic` (ou o Modelo, se já tiver terminado de carregar a tempo) e
-   *  os cliques seguintes já pegam o cache quente. 'camera'/'fotopin' são
-   *  sempre incluídos (todo mapa pode ter câmera/foto vinculada). */
+   *  os cliques seguintes já pegam o cache quente. 'fotopin' é
+   *  sempre incluído (todo mapa pode ter foto vinculada). */
   async warmupModelsForMap(map) {
-    const chaves = new Set(['camera', 'fotopin', '_generic']);
+    const chaves = new Set(['fotopin', '_generic']);
     for (const obj of (map?.objects || [])) { if (obj?.tipo) chaves.add(obj.tipo); }
     await Promise.all([...chaves].map((c) => this.ensureModelLoaded(c)));
   },
@@ -337,7 +337,7 @@ window.ObjectAssets = {
    *  a ordem importa, um `.model.js` que ainda não rodou não teria
    *  disparado preload nenhum pra esperar. */
   async ensureMeshesReadyForMap(map) {
-    const chaves = new Set(['camera', 'fotopin', '_generic']);
+    const chaves = new Set(['fotopin', '_generic']);
     for (const obj of (map?.objects || [])) { if (obj?.tipo) chaves.add(obj.tipo); }
     await Promise.all([...chaves].map((c) => this.ensureModelLoaded(c)));
     await window.ObjMeshSource?.awaitAllPending?.();
@@ -349,11 +349,11 @@ window.ObjectAssets = {
    *  objeto pickável em 3D" — pedido verbatim: "rotearem 100% pelo sistema
    *  genérico de componentes [...] todos os objetos [...] devem seguir a
    *  mesma organização." Chamado por `view3d.js` no lugar do antigo
-   *  `if (hit.type==='camera') this._showCameraCard3D(...)`/etc. inline.
+   *  `if (hit.type==='fotopin') ...`/etc. inline.
    *  Prioridade (Instância > Modelo do tipo específico > Modelo
    *  `_generic`) — MESMA ordem "modelo vs. instância" do prompt de
    *  referência do usuário ("scripts [...] executados em conjunto ou
-   *  sobrepondo os scripts do modelo base"). `chave` é 'camera'/'fotopin'/
+   *  sobrepondo os scripts do modelo base"). `chave` é 'fotopin'/
    *  `obj.tipo||'_generic'`; `entity` é a referência real do objeto
    *  (`hit.ref`); `ctx` é `{view3d, DB, Utils, map}` — MESMA convenção de
    *  parâmetros já usada por `Components`/`Scripting` no resto do app.
@@ -437,7 +437,7 @@ window.ObjectAssets = {
    *   B) `dispatchSpawn3D` (novo, abaixo) — chama `onModelSpawn`/
    *      `onInstanceSpawn` (que já existiam como "gancho reservado", nunca
    *      efetivamente disparado antes desta rodada) pra cada
-   *      câmera/objeto/foto assim que a cena 3D é (re)construída (ver
+   *      objeto/foto assim que a cena 3D é (re)construída (ver
    *      `view3d.js` `_rebuildScene`/`_dispatchSpawnAll3D`). Isso é o
    *      lugar CERTO pra um Modelo "semear" comportamento padrão de
    *      verdade em código — ex.: `assets/modelos/<tipo>.model.js` pode,
@@ -449,8 +449,7 @@ window.ObjectAssets = {
    *      (`ObjectStandard.applyDefaultComponents`, aplicado na CRIAÇÃO do
    *      objeto em js/mapping.js — este aqui roda toda vez que a cena 3D
    *      é montada/reconstruída, útil pra objetos JÁ existentes que ainda
-   *      não tinham esse componente). Ver `assets/modelos/camera.model.js`
-   *      pra um exemplo concreto funcionando.
+   *      não tinham esse componente).
    * ===================================================================== */
 
   /** Monta o `ctx` completo a partir do que `view3d.js` já monta
@@ -512,11 +511,10 @@ window.ObjectAssets = {
   },
 
   /** Chamado por `view3d.js` `_dispatchSpawnAll3D` depois de TODA
-   *  (re)construção da cena 3D — percorre câmeras/objetos/fotos do mapa e
+   *  (re)construção da cena 3D — percorre objetos/fotos do mapa e
    *  chama `dispatchSpawn3D` pra cada um (a guarda `_spawnedNamed` acima
    *  garante que só faz efeito de verdade na 1ª vez de cada objeto). */
   dispatchSpawnAllForMap(map, ctx) {
-    for (const cam of (map?.cameras || [])) this.dispatchSpawn3D('camera', cam, ctx);
     for (const foto of (map?.fotos || [])) this.dispatchSpawn3D('fotopin', foto, ctx);
     for (const obj of (map?.objects || [])) this.dispatchSpawn3D(obj?.tipo || '_generic', obj, ctx);
   },

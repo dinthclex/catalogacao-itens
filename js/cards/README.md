@@ -6,12 +6,11 @@ textos quando clica o que acontece. Estava pensando em fazer uma pasta
 chamada 'cards/' e todos eles ficam ali. São as janelas do app. Em vez de
 ser injeções em innerHTML nos arquivos do projeto."
 
-## O que tem aqui hoje (5 cards fixos)
+## O que tem aqui hoje (4 cards fixos)
 
 | arquivo | quando aparece |
 |---|---|
 | `object-card.js` | ao mirar/clicar em QUALQUER objeto do catálogo (mesa, cadeira, robô, porta, retângulo/polígono solto, etc.) — o mais usado |
-| `camera-card.js` | ao mirar/clicar num objeto "Câmera" |
 | `foto-pin-card.js` | ao mirar/clicar no retângulo 3D de uma foto vinculada ao mapa |
 | `tijolo-aglomerado-card.js` | ao mirar/clicar num "aglomerado" de tijolos soltos (parede feita com a ferramenta de tijolo, ainda sem virar objeto) |
 | `orphan-patrimonio-card.js` | ao clicar num objeto cujo(s) patrimônio(s) vinculado(s) já foi(ram) excluído(s) do catálogo |
@@ -98,7 +97,7 @@ senão usa `bodyHtml`/`wire`.
   com outros overlays do app — não duplicada aqui). O elemento que o
   `CardSystem.mount` cria já nasce com essa classe.
 - Pra estilizar o CONTEÚDO do seu card, use `style="..."` inline no HTML
-  retornado (é o que todos os 5 cards atuais fazem, seguindo o padrão que
+  retornado (é o que todos os 4 cards atuais fazem, seguindo o padrão que
   já existia antes desta pasta existir) ou classes já definidas em
   `css/style.css` (ex.: `.detail-grid`, `.map-fotopin-thumb`).
 - Existe também `cards/cards.css`, carregado por `<link rel="stylesheet">`
@@ -129,9 +128,9 @@ senão usa `bodyHtml`/`wire`.
 
 - **Acoplamento com `View3D` mantido de propósito em vários cards** (ex.:
   `object-card.js` usa `ctx.view3d._modelarObjetosHabilitado`/
-  `_openObjectPropsAndScripts3D`/`_openRoboMonitoringApp3D`; `camera-card.js`
-  e `foto-pin-card.js` usam bastante `ctx.view3d._engine`/`_afterMapMutated`/
-  `_orbCamMode`/`_fotoCamMode`/etc.). Isso é INTENCIONAL — o pedido do
+  `_openObjectPropsAndScripts3D`/`_openRoboMonitoringApp3D`; `foto-pin-card.js`
+  usa bastante `ctx.view3d._engine`/`_afterMapMutated`/
+  `_fotoCamMode`/etc.). Isso é INTENCIONAL — o pedido do
   usuário foi poder configurar TEXTO/ESTILO/comportamento de alto nível de
   cada card sem mexer no resto do app, não reescrever a integração
   profunda com o motor 3D. Forçar uma separação total teria significado
@@ -147,7 +146,7 @@ senão usa `bodyHtml`/`wire`.
 - **Não testado ao vivo em navegador nesta rodada** (sem acesso a
   navegador nesta sessão) — a extração foi cuidadosa (texto/HTML/lógica
   movidos literalmente, variável por variável, sem reescrever nada), mas
-  vale um teste manual de cada um dos 5 cards (abrir "Ver em 3D", clicar
+  vale um teste manual de cada um dos 4 cards (abrir "Ver em 3D", clicar
   em: um objeto qualquer, uma câmera, um pino de foto, um aglomerado de
   tijolos soltos, um objeto com patrimônio excluído) antes de confiar
   cegamente que ficou 100% idêntico ao comportamento anterior.

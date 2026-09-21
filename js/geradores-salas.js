@@ -2,8 +2,7 @@
  * NOVO (13/09/2026) — INFRAESTRUTURA DE GERAÇÃO DE SALAS reutilizável,
  * pedida em 2 itens separados do backlog do usuário:
  *
- *  (A) "sala de monitoramento no térreo com 4 câmeras por andar (pegando os
- *      acessos das escadas e elevadores) [...] deve ser como uma de verdade
+ *  (A) "sala de monitoramento no térreo [...] deve ser como uma de verdade
  *      em uma cidade (pois, como o prédio será maior, ficará grande)."
  *  (B) "Copas (de café) [...] Faça um prédio maior, com banheiros feminino e
  *      masculino por andar."
@@ -44,14 +43,8 @@
  * lógica):
  *   - deps.addWall(map, x1, y1, x2, y2, piso, extra?) -> parede criada
  *   - deps.addObject(map, x, y, tipo, piso, extra?) -> objeto criado
- *   - deps.addCamera(map, x, y, piso, extra?) -> câmera criada (em
- *     map.cameras — ver js/mapping.js `Mapping.addCamera`, MESMO shape de
- *     campos, só que aqui `piso` é parâmetro posicional explícito, já que o
- *     `Mapping.addCamera` real não tem esse parâmetro dedicado — quem
- *     implementa `deps.addCamera` decide se bota em `extra.piso` ou não)
  *   - deps.addText(map, x, y, content, piso, extra?) -> texto/placa criado
- *     (ver js/mapping.js `Mapping.addText` — mesma observação de `piso`
- *     acima)
+ *     (ver js/mapping.js `Mapping.addText`)
  * Nenhuma das 4 funções abaixo lê/escreve `window`/`require` diretamente —
  * só usa o que vier em `deps`, o que também as deixa fáceis de testar
  * isoladamente (bastam mocks simples de `deps`, sem precisar de DOM nem de
@@ -61,8 +54,6 @@
  * - gerarSalaMonitoramento(map, deps, origemX, origemY, larguraDisponivel,
  *   numMonitores, piso?) — sala grande no térreo com parede de monitores +
  *   mesas/cadeiras de operador + boa iluminação (item A).
- * - gerarCamerasAndar(map, deps, centroEscada, centroElevadores, piso) — 4
- *   câmeras por andar, apontando pros acessos de escada/elevador (item A).
  * - gerarCopa(map, deps, origemX, origemY, piso) — copa de café pequena
  *   (item B).
  * - gerarBanheiro(map, deps, origemX, origemY, piso, genero) — banheiro
@@ -125,49 +116,6 @@ function gerarSalaMonitoramento(map, deps, origemX, origemY, larguraDisponivel, 
   }
 
   return { monitores, mesas, cadeiras, luminarias };
-}
-
-/** [item A.2] 4 câmeras por andar, apontando pros acessos de escada e
- *  elevador — pedido verbatim: "4 câmeras por andar (pegando os acessos das
- *  escadas e elevadores)". Coloca 2 câmeras olhando pro acesso da escada
- *  (uma de cada lado/ângulo, cobertura sem ponto cego) e 2 olhando pro
- *  acesso dos elevadores, todas no MESMO piso informado, todas registradas
- *  em `map.cameras` via `deps.addCamera` (herdando de graça o card 3D já
- *  funcional do sistema de câmeras existente — nada de especial precisa
- *  acontecer aqui pra isso funcionar, é a mesma câmera de sempre).
- *  `modeloVisual` (opcional, 5º parâmetro) permite plantar já no modelo
- *  "PS1" novo desta rodada (ver engine3d.js) em vez do padrão — por
- *  padrão usa o modelo PADRÃO (mais barato de renderizar em quantidade;
- *  numa "cidade" de câmeras — pedido do usuário — a maioria das câmeras
- *  do prédio não precisa da geometria mais pesada do modelo PS1, que faz
- *  mais sentido pra um punhado de câmeras "de destaque").
- *  `centroEscada`/`centroElevadores`: `{x,y}` em metros, o ponto que as
- *  câmeras devem MIRAR (não onde a câmera fica — a câmera é posicionada
- *  um pouco afastada e alta, apontando pro centro do acesso, como uma
- *  câmera de teto/parede real apontaria). Devolve o array das 4 câmeras
- *  criadas, na ordem [escadaA, escadaB, elevadorA, elevadorB]. */
-function gerarCamerasAndar(map, deps, centroEscada, centroElevadores, piso, modeloVisual = undefined) {
-  const AFASTAMENTO = 2.5; // metros de distância da câmera até o alvo que ela mira
-  function posicionarMirando(alvo, direcaoGraus) {
-    const rad = direcaoGraus * Math.PI / 180;
-    // A câmera fica na direção OPOSTA à mira (afastada do alvo) — mesma
-    // convenção de ângulo já usada pelo resto do app (0 = eixo X, ver
-    // comentário grande em engine3d.js sobre `cam.angulo`).
-    const cx = alvo.x - Math.cos(rad) * AFASTAMENTO;
-    const cy = alvo.y - Math.sin(rad) * AFASTAMENTO;
-    return { x: cx, y: cy, angulo: rad };
-  }
-  const pEscadaA = posicionarMirando(centroEscada, 45);
-  const pEscadaB = posicionarMirando(centroEscada, 225); // lado oposto — cobre o ponto cego da primeira
-  const pElevA = posicionarMirando(centroElevadores, 135);
-  const pElevB = posicionarMirando(centroElevadores, -45);
-  const extraBase = modeloVisual ? { modeloVisual } : {};
-  return [
-    deps.addCamera(map, pEscadaA.x, pEscadaA.y, piso, { angulo: pEscadaA.angulo, nome: `Câmera Escada A (Piso ${piso})`, ...extraBase }),
-    deps.addCamera(map, pEscadaB.x, pEscadaB.y, piso, { angulo: pEscadaB.angulo, nome: `Câmera Escada B (Piso ${piso})`, ...extraBase }),
-    deps.addCamera(map, pElevA.x, pElevA.y, piso, { angulo: pElevA.angulo, nome: `Câmera Elevadores A (Piso ${piso})`, ...extraBase }),
-    deps.addCamera(map, pElevB.x, pElevB.y, piso, { angulo: pElevB.angulo, nome: `Câmera Elevadores B (Piso ${piso})`, ...extraBase }),
-  ];
 }
 
 /** [item B.1] Copa (café) — salinha pequena com pia, cafeteira, mesa
@@ -410,7 +358,7 @@ function gerarCerca(map, deps, pontos) {
 }
 
 const API = {
-  gerarSalaMonitoramento, gerarCamerasAndar, gerarCopa, gerarBanheiro,
+  gerarSalaMonitoramento, gerarCopa, gerarBanheiro,
   gerarSalaDisjuntores, gerarCasasRobos,
   gerarPatioEstacionamento, gerarCancela, gerarCerca,
 };

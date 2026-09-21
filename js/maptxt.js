@@ -577,7 +577,7 @@
     }
 
     const map = {
-      id: mapaId || window.Utils.uid('map'), nome: mapaNome, walls, points: [], trilha: [], cameras: [],
+      id: mapaId || window.Utils.uid('map'), nome: mapaNome, walls, points: [], trilha: [],
       objects, textos: [], portas, janelas, layers: [], parentId: null,
       criadoEm: window.DB ? window.DB.nowISO() : new Date().toISOString(),
       atualizadoEm: window.DB ? window.DB.nowISO() : new Date().toISOString(),

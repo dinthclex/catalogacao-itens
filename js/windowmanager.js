@@ -331,4 +331,61 @@ WindowManager._nextModalZ = function _nextModalZ() {
   return z;
 };
 
+
+/**
+ * Regra global (pedido do usuário): "sempre que for clicado em um botão que ativa uma janela, esta janela deve tomar a frente".
+ * Depois de um clique em botão, observa o DOM por um instante e, se uma janela/painel flutuante aparecer (adicionada ao DOM ou
+ * reexibida — display/class 'hidden'/atributo hidden), traz ela para a frente com `WindowManager.focus`. Também traz para a frente
+ * a janela que CONTÉM o botão clicado. `.modal-backdrop` fica de fora (já empilhado por `_nextModalZ`); avisos (toast) também.
+ */
+(function () {
+  if (typeof document === 'undefined') return;
+  const JANELA = /(panel|modal|overlay|card|window|popover|dialog|sheet|janela|painel|flashcard|floating|flutuante)/i;
+  const IGNORAR = /(toast|tooltip|backdrop|hud|topbar|hotbar|vignette|cc3d-gimbal)/i;
+  let ate = 0, obs = null;
+  const cls = (el) => (typeof el.className === 'string' ? el.className : (el.getAttribute && el.getAttribute('class')) || '');
+  const ehJanela = (el) => {
+    if (!el || el.nodeType !== 1 || !el.isConnected) return false;
+    const c = cls(el);
+    if (IGNORAR.test(c) || IGNORAR.test(el.id || '')) return false;
+    if (!(JANELA.test(c) || JANELA.test(el.id || '') || el.getAttribute('role') === 'dialog' || el.dataset.panelType)) return false;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+    return cs.position === 'fixed' || cs.position === 'absolute';
+  };
+  const trazer = (el) => { try { WindowManager.focus(el); } catch (e) { /* ignora */ } };
+  const candidatos = (n) => {   // o próprio nó e seus descendentes diretos "janela" (uma janela pode vir dentro de um wrapper)
+    if (!n || n.nodeType !== 1) return;
+    if (ehJanela(n)) { trazer(n); return; }
+    if (n.querySelectorAll) n.querySelectorAll('[class*="panel"],[class*="card"],[class*="overlay"],[class*="window"],[role="dialog"],[data-panel-type]').forEach((d) => { if (ehJanela(d)) trazer(d); });
+  };
+  const escutar = () => {
+    if (obs) return;
+    obs = new MutationObserver((muts) => {
+      if (Date.now() > ate) { obs.disconnect(); obs = null; return; }
+      muts.forEach((m) => {
+        if (m.type === 'childList') m.addedNodes.forEach(candidatos);
+        else if (m.type === 'attributes') {
+          const t = m.target, antes = m.oldValue || '';
+          const estavaOculta = m.attributeName === 'hidden' ? true
+            : m.attributeName === 'style' ? /display:\s*none/.test(antes)
+            : /(^|\s)(hidden|collapsed|is-hidden)(\s|$)/.test(antes);
+          if (estavaOculta) candidatos(t);
+        }
+      });
+    });
+    obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['style', 'class', 'hidden'] });
+  };
+  document.addEventListener('click', (e) => {
+    const t = e.target && e.target.closest ? e.target.closest('button, [role="button"], .btn, .icon-btn, a[href], summary') : null;
+    if (!t) return;
+    // 1) a janela onde o botão está também vai para a frente
+    let a = t.parentElement;
+    while (a && a !== document.body) { if (ehJanela(a) && !a.classList.contains('modal-backdrop')) { trazer(a); break; } a = a.parentElement; }
+    // 2) janelas que este clique fizer aparecer (síncrono ou logo depois, ex.: depois de um await)
+    ate = Date.now() + 1200;
+    escutar();
+  }, true);
+})();
+
 window.WindowManager = WindowManager;

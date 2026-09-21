@@ -23,7 +23,7 @@
  *     salvo em `DB.getObjectModel(tipo, nivel)` (vértices reais, se o
  *     usuário desenhou um em "Acessar modelos" > Editar).
  *   - "Instância" (o que é próprio de CADA objeto colocado no mapa) =
- *     a entrada de verdade em `map.objects`/`map.cameras`/etc., já com
+ *     a entrada de verdade em `map.objects`/etc., já com
  *     `entity.components` (`js/components.js`: `ScriptComponent`/
  *     `EventTriggerComponent`, disparados por `window.SceneEventBus` em
  *     `onClick`/`onProximityEnter`/etc. — o "ao clicar com o botão
@@ -37,7 +37,7 @@
  *      POR TIPO (a peça que faltava pra padronizar "novos objetos [...]
  *      seguirem os mesmos modelos"): quando um objeto NOVO de um tipo é
  *      criado (`js/mapping.js` `addWall`/`addDoor`/`addWindow`/
- *      `addCamera`/`addObject`), ele já nasce com uma CÓPIA dos
+ *      `addObject`), ele já nasce com uma CÓPIA dos
  *      `components` configurados como padrão daquele tipo — configurável
  *      pela tela "Acessar modelos" (novo botão "⚙️ Comportamento padrão",
  *      ver js/modelos3d.js), reaproveitando o MESMO editor de componentes
@@ -203,7 +203,7 @@ window.ObjectStandard = {
 
   /** Lê (assíncrono — pra UI, ex.: abrir o editor de "Comportamento
    *  padrão" de um tipo) o molde de components cru salvo pra `tipoKey`
-   *  (`'parede'|'porta'|'janela'|'camera'|<tipo de objeto>`, ver
+   *  (`'parede'|'porta'|'janela'|<tipo de objeto>`, ver
    *  `_kindKeyFor` em js/mapping.js). Sempre devolve um array (novo, nunca
    *  a referência interna do cache) — vazio se não houver nada configurado. */
   async getDefaultComponents(tipoKey) {
@@ -227,7 +227,7 @@ window.ObjectStandard = {
   },
 
   /** SÍNCRONA — chamada de dentro de `js/mapping.js` `addWall`/`addDoor`/
-   *  `addWindow`/`addCamera`/`addObject`, logo que a entidade é criada.
+   *  `addWindow`/`addObject`, logo que a entidade é criada.
    *  Se houver um molde padrão configurado pra `tipoKey` (cache já
    *  carregado — ver nota grande no topo do arquivo), clona os components
    *  (com IDs NOVOS por componente — `Utils.uid`, nunca reaproveita o `id`
@@ -325,8 +325,8 @@ window.ObjectStandard = {
    *  variações: só a COR de um pontinho `●`, verde se a entrada mais
    *  recente do histórico foi hoje ou nesta semana, cinza se for mais
    *  antiga.) Usado tanto no botão/legenda "Histórico deste objeto" (2D:
-   *  `mapview.js` `_historicoFieldsetHtml`; 3D: `view3d.js` — os 3 cartões
-   *  de câmera/foto/objeto) quanto sobre o objeto na cena 3D (ver
+   *  `mapview.js` `_historicoFieldsetHtml`; 3D: `view3d.js` — os cartões
+   *  de foto/objeto) quanto sobre o objeto na cena 3D (ver
    *  `engine3d.js` `_addHistoricoDestaque`, mesmo esquema de cor). Devolve
    *  `null` se o objeto ainda não tem NENHUMA entrada de histórico (sem
    *  indicador — "só deve aparecer quando algo foi colocado ali"). */

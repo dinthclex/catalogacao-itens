@@ -143,6 +143,40 @@ const ModelerMesh = {
     return this._mergeVF(partes);
   },
 
+  /** Pinta uma peça `{vertices,edges,faces}` (vértice[3] = 0xRRGGBB, vértice[4] = alfa; alfa < 1 = vidro). */
+  _pintarVF(parte, hex, alfa = 1) {
+    parte.vertices.forEach((v) => { v[3] = hex; v[4] = alfa; });
+    return parte;
+  },
+
+  /** Porta — folha de madeira + maçanetas (haste + puxador) nas DUAS faces, perto da borda livre. Base em y=0,
+   *  largura no eixo X, espessura no Z (mesma convenção de `engine3d.js _buildDoorOrWindowMesh`). */
+  portaMesh(w, d, h) {
+    const cor = 0x8a5a34, metal = 0xc9ced6;
+    const partes = [this._pintarVF(this._boxVF(0, h / 2, 0, w, h, d), cor)];
+    const yM = Math.min(h * 0.48, 1.0), xM = w / 2 - Math.max(0.06, w * 0.09);
+    const lado = Math.max(0.035, d * 0.35);
+    [-1, 1].forEach((sz) => {
+      const zBase = sz * d / 2;
+      partes.push(this._pintarVF(this._boxVF(xM, yM, zBase + sz * 0.02, 0.05, 0.05, 0.04), metal));                      // roseta
+      partes.push(this._pintarVF(this._boxVF(xM - 0.045, yM, zBase + sz * (0.04 + lado / 2), 0.11, 0.028, lado * 0.8), metal)); // alavanca
+    });
+    return this._mergeVF(partes);
+  },
+
+  /** Janela — moldura fina de 4 barras (5cm) + vidro translúcido no meio, como no "Ver em 3D". Base em y=0. */
+  janelaMesh(w, d, h) {
+    const b = Math.min(0.05, Math.min(w, h) * 0.3), moldura = 0xe8ecf2;
+    const partes = [
+      this._pintarVF(this._boxVF(0, b / 2, 0, w, b, d), moldura),
+      this._pintarVF(this._boxVF(0, h - b / 2, 0, w, b, d), moldura),
+      this._pintarVF(this._boxVF(-w / 2 + b / 2, h / 2, 0, b, h - 2 * b, d), moldura),
+      this._pintarVF(this._boxVF(w / 2 - b / 2, h / 2, 0, b, h - 2 * b, d), moldura),
+      this._pintarVF(this._boxVF(0, h / 2, 0, Math.max(0.02, w - 2 * b), Math.max(0.02, h - 2 * b), Math.min(d, 0.01)), 0xcfeaff, 0.3),
+    ];
+    return this._mergeVF(partes);
+  },
+
   /** Mesa — tampo + 4 pernas, MESMAS proporções de `engine3d.js
    *  _buildMesaMesh`. */
   mesaMesh(w, d, h) {
@@ -1833,8 +1867,7 @@ const ModelerMesh = {
   markerSpeakerMesh() { return this.coneMesh(16, 0.14, 0.14, 0.12); },
   markerCameraMesh() {
     // caixa (corpo) + cone achatado (lente), igual ao ícone clássico de
-    // câmera — "é a câmera que já temos" (o usuário já tem câmeras de
-    // verdade em outra parte do app; aqui é só o marcador/ícone).
+    // câmera — aqui é só o marcador/ícone.
     const corpo = this.cubeMeshCentered(0.22);
     const lente = this.coneMesh(12, 0.09, 0.09, 0.08);
     this.translateMesh(lente, 0, 0, -0.15); // desloca a "lente" pra fora do corpo, no eixo Z — só um ícone, sem apontar de verdade

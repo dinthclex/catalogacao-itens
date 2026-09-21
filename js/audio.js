@@ -23,7 +23,7 @@
  * implementação de `tocarSomMotor` por um `new Audio('assets/sons/motor-
  * camera.mp3')` com `.play()`/`.pause()`, mantendo a MESMA API pública
  * (`AudioFX.tocarSomMotor(iniciar)`) — nenhum código que já chama essa API
- * (o script de exemplo da câmera de vigilância) precisaria mudar.
+ * precisaria mudar.
  *
  * POLÍTICA DE AUTOPLAY DOS NAVEGADORES — tratada aqui: um `AudioContext` só
  * pode emitir som depois de alguma interação real do usuário na página

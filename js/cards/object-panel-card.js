@@ -397,8 +397,7 @@ window.ObjectPanelCard = {
         </span>
         <div class="obj-item-list">${itemRows || '<div style="font-size:12.5px; color:var(--text-dim)">Nenhum</div>'}</div>
       </div>
-      ${linkedItem ? `<label class="map-panel-field"><span>Patrimônio</span><input type="text" id="obj-patrimonio" value="${Utils.escapeHtml(linkedItem.patrimonio || '')}"></label>` : ''}
-      <label class="map-panel-field" title="Pedido do usuário (28/08/2026, Modelador 3D): objeto marcado aqui pode servir de 'chão' para navegação entre andares vista de cima. NOTA: este campo hoje só é PERSISTIDO/EXPOSTO — a movimentação em 1ª pessoa de verdade que subiria em cima dele (e trocaria de andar) ainda não existe neste app (só câmera orbital/andar no chão fixo do piso atual), ver changelog."><span>🧱 Colisão (serve de chão visto de cima)</span><input type="checkbox" id="obj-colisao-topo" ${obj.colisaoTopo ? 'checked' : ''}></label>
+      <label class="map-panel-field" title="Pedido do usuário (28/08/2026, Modelador 3D): objeto marcado aqui pode servir de 'chão' para navegação entre andares vista de cima. NOTA: este campo hoje só é PERSISTIDO/EXPOSTO — a movimentação em 1ª pessoa de verdade que subiria em cima dele (e trocaria de andar) ainda não existe neste app (só câmera orbital/andar no chão fixo do piso atual), ver changelog."><span>🧱 Colisão (serve de chão visto de cima)</span><input type="checkbox" id="obj-colisao-topo" ${obj.colisaoTopo !== false ? 'checked' : ''}></label>
       <!-- NOVO (07/09/2026), pedido verbatim: "carregar imagens como
            texturas... a possibilidade de mudar de cor as faces. Deve ser
            possível texturizar as faces. Definir cor para as faces. Também,
@@ -835,15 +834,6 @@ window.ObjectPanelCard = {
     panel.querySelector('#obj-transformacao')?.addEventListener('click', () => {
       ctx._openObjectTransformSidebar3D?.(obj);
     });
-    // Patrimônio (pedido do usuário) — edita direto o campo do ITEM ligado
-    // (não do objeto — o objeto em si não tem patrimônio próprio, quem tem é
-    // o item catalogado associado a ele, ver `linkedItem`/obj.itemIds), sem
-    // precisar abrir a ficha completa do item só pra isso.
-    if (linkedItem) {
-      panel.querySelector('#obj-patrimonio').oninput = async (e) => {
-        await DB.updateItem(linkedItem.id, { patrimonio: e.target.value });
-      };
-    }
     if (isRede) {
       // [18/09/2026 UTC] RODADA 166 -- equipamento de rede: energia, rack, portas e cabos.
       const RE = window.RedeEquip;
@@ -1170,6 +1160,7 @@ window.ObjectPanelCard = {
         return;
       }
       ctx._saveMap();
+      if (ctx._engine && ctx._rebuildScene) ctx._rebuildScene();   // no "Ver em 3D": redesenha o objeto com o destaque de item associado
       // Avisa se este patrimônio JÁ estava em outro objeto do mapa (mesmo
       // conceito da flag 🔁 desenhada na grade) — o usuário pode não
       // perceber na hora, já que a busca não filtra itens já associados em
@@ -1197,6 +1188,7 @@ window.ObjectPanelCard = {
           return;
         }
         ctx._saveMap();
+        if (ctx._engine && ctx._rebuildScene) ctx._rebuildScene();
         Utils.toast('Patrimônio atualizado ✓', { type: 'ok' });
         const fresh = (ctx._map.objects || []).find((o) => o.id === obj.id);
         reentrarReedit(fresh);
@@ -1209,6 +1201,7 @@ window.ObjectPanelCard = {
         const alvo = (ctx._map.objects || []).find((o) => o.id === obj.id) || obj;
         Mapping.removeItemFromObject(ctx._map, alvo.id, btn.dataset.id);
         ctx._saveMap();
+        if (ctx._engine && ctx._rebuildScene) ctx._rebuildScene();
         Utils.toast('Associação removida.', { type: 'warn' });
         const fresh = (ctx._map.objects || []).find((o) => o.id === obj.id);
         reentrarReedit(fresh);

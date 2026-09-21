@@ -92,9 +92,6 @@
  *   dispositivo, com detecção/resolução de conflito (mapa já existe etc.).
  * - findImportConflict/applyImportDecision/countImportConflicts/importItems:
  *   mesmo fluxo de conflito, só que pra ITENS (patrimônios) importados.
- * - savePerspMatchSession/getPerspMatchSession/getPerspMatchSessionsForMapa/
- *   deletePerspMatchSession: CRUD de sessões salvas do antigo "Camera Match"
- *   (js/perspmatch.js — tela desligada, mas os dados/API continuam aqui).
  *
  * ---- Erros sempre notificados ----
  * Toda operação (leitura OU gravação) passa por `tx()` abaixo — qualquer
@@ -105,14 +102,9 @@
  * batido, silenciosa, como uma promessa rejeitada que ninguém viu.
  */
 
-const DB_NAME = 'catalogacao_itens_db';
-// [10/09/2026] Implementação da spec 'Camera Matching / Persp Match'
-// solicitada pelo usuário: bump de versão (4 -> 5) pra criar a store nova
-// `perspMatchSessions` (ver onupgradeneeded logo abaixo) — guarda a sessão de
-// calibração (foto + EXIF + linhas de fuga + âncoras de escala + pose
-// calculada) à PARTE dos objetos normais do mapa, no mesmo espírito de
-// `mapPhotos` (fotos pesadas não devem viver dentro do documento do mapa,
-// que é salvo com muita frequência).
+// Restauração de fábrica: um sufixo em localStorage aponta para um banco NOVO
+// (o antigo continua no navegador, porém desvinculado do app).
+const DB_NAME = 'catalogacao_itens_db' + (function () { try { return localStorage.getItem('catalogo_db_sufixo') || ''; } catch (e) { return ''; } })();
 // [13/09/2026] Pedido verbatim: "Implemente um pipeline de carregamento de
 // modelo (ex. GLTFLoader do three.js) e um novo campo no perfil tipo
 // modeloArquivo: 'monitor.glb' [...] Para poder substituir os modelos 3D por
@@ -144,11 +136,6 @@ const STORES = {
   // dá pra ler/gravar cada nível independente sem precisar reescrever o
   // outro.
   objectModels: 'objectModels',
-  // [10/09/2026] Sessões de "📐 Camera Match" — ver js/perspmatch.js e a
-  // especificação salva no projeto ('spec-camera-matching-persp-match.md').
-  // Uma sessão é uma UNIDADE por foto (nunca um objeto do mapa em si — ver
-  // comentário grande no CRUD abaixo).
-  perspMatchSessions: 'perspMatchSessions',
 };
 
 let _dbPromise = null;
@@ -217,15 +204,6 @@ function openDB() {
       if (!db.objectStoreNames.contains(STORES.objectModels)) {
         const objectModels = db.createObjectStore(STORES.objectModels, { keyPath: 'id' });
         objectModels.createIndex('tipo', 'tipo', { unique: false });
-      }
-
-      // [10/09/2026] Implementação da spec 'Camera Matching / Persp Match':
-      // store nova para as sessões de calibração por foto — ver comentário
-      // grande em STORES.perspMatchSessions acima e no CRUD mais abaixo
-      // ('---------- PERSP MATCH ----------').
-      if (!db.objectStoreNames.contains(STORES.perspMatchSessions)) {
-        const perspMatch = db.createObjectStore(STORES.perspMatchSessions, { keyPath: 'id' });
-        perspMatch.createIndex('mapaId', 'mapaId', { unique: false });
       }
 
       // [13/09/2026] Modelos 3D importados (.glb/.gltf) — ver comentário
@@ -552,9 +530,6 @@ _settingsCache.ensure().then((map) => {
   _saveDestinoCache.guardarServidor = !!map.get('autoSaveAtivo')?.value;
 }).catch(() => {});
 const _objectModelsCache = makeStoreCache(STORES.objectModels, 'id');
-// [10/09/2026] Cache da store nova de sessões Persp Match — mesmo padrão
-// makeStoreCache já usado por todas as outras stores neste arquivo.
-const _perspMatchCache = makeStoreCache(STORES.perspMatchSessions, 'id');
 
 // Chave de registro da store `objectModels` — ver comentário grande em
 // STORES.objectModels acima. Função central pra nunca montar essa string
@@ -1737,7 +1712,7 @@ const DBApi = {
     let criados = 0, atualizados = 0, mantidos = 0;
     const criadosMaps = [], atualizadosAntes = [];
     const local = await _mapsCache.ensure();
-    const CAMPOS_PLANTA = ['walls', 'points', 'trilha', 'cameras', 'objects', 'textos', 'portas', 'janelas', 'layers', 'bounds', 'modo'];
+    const CAMPOS_PLANTA = ['walls', 'points', 'trilha', 'objects', 'textos', 'portas', 'janelas', 'layers', 'bounds', 'modo'];
     for (const m of maps || []) {
       if (!m || !m.id) continue;
       const existente = local.get(m.id);
@@ -1920,45 +1895,6 @@ const DBApi = {
       }
     }
     return { criados, atualizados, ignorados };
-  },
-
-  // ---------- PERSP MATCH (sessões de "📐 Camera Match") ----------
-  // [10/09/2026] Implementação da spec 'Camera Matching / Persp Match'
-  // solicitada pelo usuário (ver doc do projeto
-  // 'spec-camera-matching-persp-match.md', seção 3 "Estrutura de Dados").
-  // Uma sessão preserva a FOTO original + toda a calibração (EXIF, linhas de
-  // fuga, âncoras de escala, objetos posicionados) para permitir reabrir e
-  // ajustar mais tarde sem repetir o trabalho manual — NUNCA é, ela mesma,
-  // um objeto do mapa (câmera/objeto calibrados são gravados à parte, via
-  // Mapping.addCamera/addObject, quando a sessão é confirmada — ver
-  // js/perspmatch.js `_confirmarSalvar`). Mesmo padrão de CRUD das outras
-  // stores deste arquivo (cache local + put/delete espelhando o cache).
-  async savePerspMatchSession(session) {
-    const rec = { ...session, atualizadoEm: nowISO() };
-    if (!rec.criadoEm) rec.criadoEm = rec.atualizadoEm;
-    await tx([STORES.perspMatchSessions], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.perspMatchSessions).put(rec)));
-    const map = await _perspMatchCache.ensure();
-    map.set(rec.id, rec);
-    return cloneRec(rec);
-  },
-
-  async getPerspMatchSession(id) {
-    const map = await _perspMatchCache.ensure();
-    return cloneRec(map.get(id));
-  },
-
-  /** Todas as sessões vinculadas a UM mapa — usado pra listar "sessões Persp
-   *  Match já feitas neste mapa" (reabrir/ajustar) na entrada da ferramenta. */
-  async getPerspMatchSessionsForMapa(mapaId) {
-    const map = await _perspMatchCache.ensure();
-    return [...map.values()].filter((r) => r.mapaId === mapaId).map(cloneRec)
-      .sort((a, b) => (b.atualizadoEm || '').localeCompare(a.atualizadoEm || ''));
-  },
-
-  async deletePerspMatchSession(id) {
-    await tx([STORES.perspMatchSessions], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.perspMatchSessions).delete(id)));
-    const map = await _perspMatchCache.ensure();
-    map.delete(id);
   },
 };
 

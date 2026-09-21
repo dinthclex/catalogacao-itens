@@ -5,7 +5,7 @@
  * (js/view3d.js) — ver comentário grande no topo de `js/cardsystem.js` pro
  * porquê da extração.
  *
- * MESMO espírito de `js/cards/camera-card.js`, só que aqui a foto SEMPRE
+ * A foto SEMPRE
  * existe (o retângulo só é construído quando `foto.thumbDataUrl`/`dataUrl`
  * estão presentes) — sem estado "sem foto associada" pra tratar. `data`
  * (chamado `foto` aqui) é o registro já achatado de `mapview.js
@@ -88,10 +88,41 @@ window.CardSystem.register('foto-pin', {
       };
       let v3dPropsApi = null;
       DB.getAmbientePhoto(foto.id).then((photo) => v3dAtualizarThumb(photo));
-      el.querySelector('#v3d-foto-anexar').onclick = () => el.querySelector('#v3d-foto-anexar-file').click();
+      // [20/09/2026] Anexar/trocar foto: arquivo do aparelho OU foto já tirada em Mapa → Fotos (com botão de retorno).
+      const escolherOrigemFoto = async () => {
+        const origem = await Utils.showChoiceModal({
+          title: 'Anexar foto à câmera', message: 'De onde vem a foto?',
+          choices: [
+            { value: 'arquivo', label: '📁 Escolher um arquivo do aparelho' },
+            { value: 'fotos', label: '📷 Usar uma foto já tirada (Mapa → Fotos)' },
+            { value: 'cancelar', label: 'Cancelar', secondary: true },
+          ],
+        });
+        if (!origem || origem === 'cancelar') return;
+        if (origem === 'arquivo') { el.querySelector('#v3d-foto-anexar-file').click(); return; }
+        const displayAntes = el.style.display;
+        el.style.display = 'none';
+        const volta = () => { if (el.isConnected) { el.style.display = displayAntes || ''; try { window.WindowManager?.focus(el); } catch (e) { /* ignora */ } } };
+        AmbientePhotos.open(view3d._map, {
+          returnToLabel: 'a câmera', onExit: volta,
+          pickPhoto: async (idEscolhido) => {
+            volta();
+            try {
+              const escolhida = await DB.getAmbientePhoto(idEscolhido);
+              const atual = await DB.getAmbientePhoto(foto.id);
+              if (!escolhida || !atual) return;
+              const novo = { ...atual, dataUrl: escolhida.dataUrl, thumbDataUrl: escolhida.thumbDataUrl || escolhida.dataUrl };
+              await DB.saveAmbientePhoto(novo);
+              v3dAtualizarThumb(novo);
+              Utils.toast('Foto anexada ✓', { type: 'ok' });
+            } catch (err) { console.error('Falha ao anexar foto de Mapa → Fotos:', err); Utils.toast('Não foi possível anexar esta foto: ' + (err?.message || err), { type: 'danger', duration: 5000 }); }
+          },
+        });
+      };
+      el.querySelector('#v3d-foto-anexar').onclick = escolherOrigemFoto;
       el.querySelector('#v3d-foto-thumb-wrap').addEventListener('click', (e) => {
         if (e.target.closest('#v3d-foto-anexar')) return; // já tem handler próprio
-        el.querySelector('#v3d-foto-anexar-file').click();
+        escolherOrigemFoto();
       });
       el.querySelector('#v3d-foto-anexar-file').onchange = async (e) => {
         const file = e.target.files?.[0];

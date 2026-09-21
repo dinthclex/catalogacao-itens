@@ -6,7 +6,7 @@
  * interrelacionados. Opções que só fazem sentido no 3D (raycasting) só
  * aparecem quando aberto de lá. O resto é comum aos dois.
  *
- * Este painel já teve também um "menu da cena toda" (lista paredes/câmeras/
+ * Este painel já teve também um "menu da cena toda" (lista paredes/
  * objetos/itens marcados no mapa atual, com selecionar/excluir) e o
  * controle "Mostrar informações dos itens no mapa" — removidos a pedido do
  * usuário, pra deixar a janela mais enxuta. `opts.onSelect`/`opts.onDelete`
@@ -667,7 +667,7 @@ const MapConfig = {
     // cor deles (custo zero por quadro, só uma mistura de cor na hora de
     // criar o material).
     modoLuminarias3D: 'dinamico', // 'dinamico' (luz de verdade, padrão) | 'leve' (cor, sem luz — melhor p/ várias lâmpadas)
-    // Corte por distância de renderização dos objetos/itens/câmeras do mapa
+    // Corte por distância de renderização dos objetos/itens do mapa
     // (pedido do usuário, 25/08/2026: "crie uma opção para mudar o jeito com
     // que os blocos de objetos são carregados e como é feita a decisão de
     // renderizar ou não eles"). Antes desta opção, a "Distância de
@@ -811,6 +811,9 @@ const MapConfig = {
     // sai do 3D, se o checkbox estiver ligado) e restaurados por `View3D.mount()` (ramo do personagem 2D,
     // sobrescrevendo o yaw derivado de `_personagem2D.angulo`/pitch=0 de sempre).
     mapa2DApontamentoRecargaYaw: null,
+    // Posição (x,y no mapa) do personagem, guardada junto do apontamento quando 'Guardar apontamento da câmera e posição do personagem' está marcado.
+    mapa2DPersonagemRecargaX: null,
+    mapa2DPersonagemRecargaY: null,
     mapa2DApontamentoRecargaPitch: null,
     // ---------- Seção "🐞 Debug" (pedido do usuário, 25/08/2026: "deve
     // haver uma seção nas 'configurações 3D' para opções de debug. O
@@ -884,6 +887,12 @@ const MapConfig = {
     // — exige também o interruptor mestre `debugModoAtivo` (ver
     // `_isDebugCameraPanelAtivo()`, view3d.js).
     debugCameraPanelAtivo: false,
+    // [20/09/2026] "Controle de câmera" (js/camcontrol3d.js): HUD verde de status (canto inferior esquerdo) e linhas de informação dentro do painel — desligados por padrão;
+    // painel (gimbal + campos) e anel/barras ligados por padrão, com botões na tela para ocultá-los.
+    debugCamHudAtivo: false,
+    debugCamInfoAtivo: false,
+    camCtlPainelAtivo: true,
+    camCtlAneisAtivo: true,
     // ---------- Seção "🌗 Hora do dia" (pedido do usuário, 03/09/2026):
     // "Coloque uma seção, nas 'configurações 3D', para fazer com que se
     // possa escolher entre manhã, dia, tarde e noite. E uma barra com vários
@@ -1050,66 +1059,10 @@ const MapConfig = {
     // pra INSTALAÇÕES NOVAS (sem nenhuma preferência salva ainda) — quem já
     // tem uma escolha salva no banco continua com ela, intocada.
     camada3DNovosItens: 'atual', // 'separada' (camada própria "Adicionados no 3D") | 'atual' (a que estava ativa no 2D, ATUAL padrão)
-    // ---------- [12/09/2026, RE-CORRIGIDO NESTA RODADA — ver nota abaixo]
-    // "Sair da câmera": o que acontece com o ponto de vista do personagem.
-    // Pedido verbatim original do usuário: "ao clicar em 'Sair da câmera', a
-    // perspectiva que o personagem tinha quando foi clicado em 'Ver
-    // através dessa câmera' deve ser preservada [...] deve ter uma seção
-    // do objeto 'Câmera' [...] é possível definir se ao clicar em 'Sair da
-    // câmera', o personagem 'permanece com o ponto de vista da câmera que
-    // está sendo vista naquele momento' ou se 'voltar ao ponto de vista
-    // original do personagem [...]'. Deve haver uma seção para o 'Orb de
-    // câmera', também, com as mesmas opções. Por padrão, para a câmera e
-    // para o 'orb de foto' deve ser 'permanece com o ponto de vista da
-    // câmera'." Ver view3d.js `_exitCameraOrbView()`/`_exitFotoCameraView()`.
-    //
-    // HISTÓRICO desta chave (para não repetir as mesmas idas-e-vindas numa
-    // rodada futura):
-    // 1) 1ª implementação: UMA chave (`cameraExitViewMode`) compartilhada
-    //    entre "Câmeras" E "orb de foto", por engano ("orb de câmera" =
-    //    "Câmeras" — ERRADO).
-    // 2) CORRIGIDO: usuário esclareceu que "orb de câmera" é sinônimo de
-    //    "orb de foto", não de "Câmeras" — viraram 2 chaves independentes
-    //    (`cameraExitViewMode` + `fotoOrbExitViewMode` NOVA), com 2 seções
-    //    de UI totalmente independentes (mudar uma não afeta a outra).
-    // 3) ESTA RODADA (pedido novo, verbatim): "a seção 'Câmera — Sair da
-    //    câmera' e a seção 'Orb de câmera — Sair da câmera', na verdade
-    //    devem ser uma só, pois já não existe mais 'Orb da câmera' e
-    //    'Câmera' (no mapa 2D foi unificado)". INVESTIGAÇÃO FEITA ANTES DE
-    //    MEXER (arquivos recém-lidos do disco do usuário, que confirmou ter
-    //    editado o projeto FORA desta conversa antes desta rodada): NO
-    //    CÓDIGO ATUAL, os 2 tipos de objeto CONTINUAM genuinamente
-    //    separados — `js/mapping.js` ainda tem `map.cameras` (tipo
-    //    "Câmeras", kind:'camera', caixa+cone) E `map.fotos` (tipo "orb de
-    //    foto", esfera+cone+placa, via `DB.addAmbientePhoto`) como arrays
-    //    DIFERENTES; `js/mapview.js` ainda tem 2 ferramentas separadas na
-    //    barra do mapa 2D ("📷 Câmera" e "🖼️ Orb de foto", linha ~4107);
-    //    `js/view3d.js` ainda tem 2 code-paths totalmente separados
-    //    (`_enterCameraOrbView`/`_exitCameraOrbView` travando a câmera DE
-    //    VERDADE vs. `_enterFotoCameraView`/`_exitFotoCameraView` em modo
-    //    espectador) — nenhuma ocorrência de "unific" encontrada em
-    //    `mapping.js`/`view3d.js`/`engine3d.js`/`mapconfig.js`. Ou seja, a
-    //    unificação descrita pelo usuário NÃO está refletida no código
-    //    staged nesta rodada — pode ter sido uma mudança que não chegou a
-    //    ser salva, uma confusão de terminologia (mesmo risco já documentado
-    //    2x neste arquivo), ou um plano ainda não executado.
-    //    DECISÃO (conforme instrução explícita do usuário, mesmo com a
-    //    discrepância documentada acima — não deixar as 2 seções
-    //    silenciosamente como estavam): as 2 SEÇÕES DE UI foram fundidas
-    //    numa só ("Ver através desta câmera — 'Sair da câmera'"), com UM
-    //    ÚNICO grupo de radio. Por baixo, para não arriscar quebrar nenhum
-    //    dos 2 code-paths (que continuam de fato distintos), a chave
-    //    `fotoOrbExitViewMode` foi REMOVIDA dos DEFAULTS e
-    //    `view3d.js _fotoOrbExitViewMode()` passou a delegar direto pra
-    //    `_cameraExitViewMode()` (mesma leitura de `cameraExitViewMode`) —
-    //    ou seja, hoje EXISTE DE FATO só 1 chave persistida
-    //    (`cameraExitViewMode`), controlando os 2 code-paths a partir de 1
-    //    única seção de UI, exatamente como o usuário pediu. Se uma rodada
-    //    futura confirmar que os 2 tipos de objeto foram mesmo unificados
-    //    no código (não só seria bom fundir a UI — o código-fonte também
-    //    deveria ganhar um tipo só), ou o oposto (usuário volta a querer 2
-    //    controles independentes), ajustar aqui e nos 2 lugares citados.
-    cameraExitViewMode: 'lockedView', // ÚNICA chave agora (ver histórico acima) — controla tanto "Câmeras" quanto "orb de foto"/"orb de câmera". 'lockedView' (permanece no ponto de vista da câmera — PADRÃO) | 'originalView' (volta ao ponto de vista do personagem de antes de "Ver através desta câmera")
+    // ---------- "Sair da câmera": o que acontece com o ponto de vista do personagem
+    // ao sair de "Ver através desta câmera" (orb de foto — ver view3d.js
+    // `_exitFotoCameraView()`; lido por `_cameraExitViewMode()`).
+    cameraExitViewMode: 'lockedView', // 'lockedView' (permanece no ponto de vista da câmera — PADRÃO) | 'originalView' (volta ao ponto de vista do personagem de antes de "Ver através desta câmera")
     // ---------- Método de interação de camadas (mapa 2D) — pedido do
     // usuário (03/09/2026): "Percebi que os elementos estão interagindo
     // entre as camadas, eles devem ficar isolados por camada [...] 'isolado
@@ -1362,6 +1315,7 @@ const MapConfig = {
     objetoNovoDuracaoHoras: 24, // por quanto tempo o selo "novo" aparece (padrão: 1 dia)
     objetoNovoIndicador: 'fixo', // 'fixo' (mesmo selo o período todo) | 'variavel' (muda com o tempo)
     objetoNovoTexto: false, // mostra 'agora mesmo', 'há 1 minuto', 'há uma hora'... junto do selo
+    objetoNovoNaTelaModelos: true, // mostra o selo também na tela 'Acessar modelos' (onde fica o botão Importar objeto)
     objetoNovoPosicao: 'misturado', // 'misturado' (padrão) | 'inicio' | 'fim' ("Objetos novos importados")
 
     // "Ver através das paredes" (pedido do usuário, 26/08/2026: "um botão
@@ -2132,7 +2086,7 @@ const MapConfig = {
    * mesma estrutura, ver mapping.js). `opts`:
    *  - context: '2d' | '3d' — controla quais opções específicas aparecem.
    *  - onSelect(kind, entity): opcional — chamado ao tocar "Selecionar" numa
-   *    linha da lista (kind: 'wall'|'camera'|'object'|'itemPin'). Se ausente,
+   *    linha da lista (kind: 'wall'|'object'|'itemPin'). Se ausente,
    *    o botão some pra aquele tipo.
    *  - onDelete(kind, entity): async — chamado ao tocar "Excluir". Depois de
    *    concluir, a lista é recarregada sozinha.
@@ -2450,9 +2404,10 @@ const MapConfig = {
               <span><span class="t">Preservar zoom</span></span>
             </label>
           </div>
+          <hr style="border:0; border-top:1px solid var(--border); margin:10px 0 8px">
           <label class="radio-opt" style="margin-top:2px">
             <input type="checkbox" id="mc-2d-voltar-recarga-apontamento" ${cfg.mapa2DPersistirApontamentoPersonagem === true ? 'checked' : ''}>
-            <span><span class="t">Guardar apontamento da câmera do personagem</span><br><span class="d">Estando marcada, pra onde a câmera livre do "Ver em 3D" estava apontada (yaw/pitch) ao sair do 3D também é guardado — e restaurado ao entrar de novo no 3D pela posição do personagem (inclusive depois de recarregar a página, quando o modo acima for "Voltar na posição do personagem"). O giro do boneco no mapa 2D (direção do "🧭 Modo Navegação") continua sendo guardado à parte, sempre. Desativado por padrão.</span></span>
+            <span><span class="t">Guardar apontamento da câmera e posição do personagem</span><br><span class="d">Estando marcada, a posição do personagem no mapa também é guardada (e restaurada ao recarregar a página ou voltar ao 3D), além de pra onde a câmera livre do "Ver em 3D" estava apontada (yaw/pitch) ao sair do 3D também é guardado — e restaurado ao entrar de novo no 3D pela posição do personagem (inclusive depois de recarregar a página, quando o modo acima for "Voltar na posição do personagem"). O giro do boneco no mapa 2D (direção do "🧭 Modo Navegação") continua sendo guardado à parte, sempre. A gravação é automática, mas só acontece depois que o personagem/câmera ficam parados pelo tempo de "Velocidade de salvamento do mapa" (configurações do app) e só se algo mudou — com o app parado nada é gravado. Desativado por padrão.</span></span>
           </label>
         </div>
         <!-- Seção "🗂️ Método de interação de camadas" (pedido do usuário,
@@ -2678,6 +2633,10 @@ const MapConfig = {
               <input type="checkbox" id="mc-objeto-novo-texto" ${cfg.objetoNovoTexto ? 'checked' : ''}>
               <span><span class="t">Mostrar texto junto do selo</span><br><span class="d">Ex.: "agora mesmo", "há 1 minuto", "há uma hora", "há um dia", "há 1 semana".</span></span>
             </label>
+            <label class="radio-opt" style="margin-top:8px">
+              <input type="checkbox" id="mc-objeto-novo-modelos" ${cfg.objetoNovoNaTelaModelos !== false ? 'checked' : ''}>
+              <span><span class="t">Mostrar o selo também na tela "Acessar modelos"</span><br><span class="d">A tela dos objetos onde fica o botão "Importar objeto" ganha o mesmo selo (e texto, se ligado acima).</span></span>
+            </label>
             <label class="field" style="margin-top:8px">
               <span class="lbl">Onde aparecem os objetos novos</span>
               <select id="mc-objeto-novo-posicao">
@@ -2733,6 +2692,11 @@ const MapConfig = {
              Botao do rodape (capturar) trocou de Fotos para Foto; botao
              Mapa->Foto trocou para Mapa->Fotos. Titulos e textos destas
              duas secoes atualizados na mesma direcao. -->
+        <div class="mapconfig-section">
+          <h4>🧰 Janela "Ferramentas"</h4>
+          <span class="d" style="display:block; margin-bottom:6px">Distribuição dos botões da janela "Ferramentas": clique e arraste para mudar de lugar (como em Objetos → "Livre"), ✕ remove e "➕ Adicionar" traz de volta um botão removido ou coloca qualquer objeto do catálogo. Os ícones são os mesmos de "Objetos".</span>
+          <div id="mc-layout-ferr" class="map2d-toolsidebar-grid mc-layout-grid"></div>
+        </div>
         <div class="mapconfig-section">
           <h4>📷 Foto</h4>
           <span class="d" style="display:block; margin-bottom:5px">Ao confirmar "✅ Marcar aqui" (vincular uma foto a uma posição no mapa, em "Foto" → tirar/escolher foto → 🗺️), o que fazer depois:</span>
@@ -3241,25 +3205,19 @@ const MapConfig = {
              que estava ativa no 2D quando "Ver em 3D" foi clicado (ver
              view3d.js mount/_layerIdParaNovosItens). -->
         <div class="mapconfig-section">
+          <h4>🎛️ Rodapé do "Ver em 3D"</h4>
+          <span class="d" style="display:block; margin-bottom:6px">Distribuição dos botões do rodapé do "Ver em 3D": clique e arraste para mudar de lugar (como em Objetos → "Livre"), ✕ remove e "➕ Adicionar" traz de volta um botão removido ou coloca qualquer objeto do catálogo. Os ícones são os mesmos da janela "Ferramentas" do mapa 2D.</span>
+          <div id="mc-layout-rodape" class="v3d-hotbar-preview"></div>
+        </div>
+        <div class="mapconfig-section">
           <h4>Itens construídos dentro do 3D</h4>
           <span style="display:block; font-size:12.5px; color:var(--text-dim); margin-bottom:5px">Parede/porta/janela/objeto criados aqui dentro vão para</span>
           <label class="radio-opt"><input type="radio" name="mc-camada3d" value="separada" ${cfg.camada3DNovosItens !== 'atual' ? 'checked' : ''}><span><span class="t">Uma camada separada, "Adicionados no 3D"</span><br><span class="d">Criada automaticamente na primeira vez — fácil de achar/organizar/ocultar depois, sem misturar com o resto do desenho.</span></span></label>
           <label class="radio-opt"><input type="radio" name="mc-camada3d" value="atual" ${cfg.camada3DNovosItens === 'atual' ? 'checked' : ''}><span><span class="t">A camada que estava ativa no 2D</span><br><span class="d">A mesma camada selecionada na Planta baixa no momento em que "Ver em 3D" foi clicado.</span></span></label>
         </div>
-        <!-- [12/09/2026 — FUNDIDA NESTA RODADA, ver nota grande em
-             DEFAULTS.cameraExitViewMode acima para o histórico completo.
-             Pedido verbatim: "a seção 'Câmera — Sair da câmera' e a seção
-             'Orb de câmera — Sair da câmera', na verdade devem ser uma só,
-             pois já não existe mais 'Orb da câmera' e 'Câmera' [...] nas
-             'configurações 3D' deve ter só o que permaneceu também." Antes
-             desta rodada havia 2 seções/2 chaves independentes
-             (cameraExitViewMode/fotoOrbExitViewMode); agora é 1 seção só,
-             1 grupo de radios, 1 chave (cameraExitViewMode) — controla os 2
-             code-paths internos (Câmeras/orb de foto) a partir de um único
-             controle visível, como pedido. -->
         <div class="mapconfig-section">
           <h4>Ver através desta câmera — "Sair da câmera"</h4>
-          <span style="display:block; font-size:12.5px; color:var(--text-dim); margin-bottom:5px">Ao clicar "👁️ Ver através desta câmera"/"✖ Sair da câmera" (numa "Câmera" ou num "orb de foto"), o que acontece com o ponto de vista do personagem ao sair:</span>
+          <span style="display:block; font-size:12.5px; color:var(--text-dim); margin-bottom:5px">Ao clicar "👁️ Ver através desta câmera"/"✖ Sair da câmera" (num "orb de foto"), o que acontece com o ponto de vista do personagem ao sair:</span>
           <label class="radio-opt"><input type="radio" name="mc-cam-exitview" data-exitview-group="camera" value="lockedView" ${cfg.cameraExitViewMode !== 'originalView' ? 'checked' : ''}><span><span class="t">Permanece com o ponto de vista da câmera (padrão)</span><br><span class="d">O personagem continua vendo exatamente de onde a câmera estava mostrando no momento em que "Sair da câmera" foi clicado — a transição fica contínua, só que agora livre pra olhar em volta/andar dali.</span></span></label>
           <label class="radio-opt"><input type="radio" name="mc-cam-exitview" data-exitview-group="camera" value="originalView" ${cfg.cameraExitViewMode === 'originalView' ? 'checked' : ''}><span><span class="t">Volta ao ponto de vista original do personagem</span><br><span class="d">O personagem volta pra onde/como estava olhando no instante EXATO em que "Ver através desta câmera" foi clicado, antes de travar na câmera.</span></span></label>
         </div>
@@ -3370,12 +3328,12 @@ const MapConfig = {
             <span class="d">"Dinâmico" acende uma luz de verdade por luminária (mais realista, mais pesado com muitas). "Leve" não acende luz nenhuma — só clareia a cor dos objetos perto de cada luminária, decidido uma vez ao montar a cena (não a cada quadro) — útil pra testar mapas com muitas luminárias sem perder FPS.</span>
           </label>
           <label class="field" style="margin-top:10px">
-            <span class="lbl">Carregamento de objetos/itens/câmeras</span>
+            <span class="lbl">Carregamento de objetos/itens</span>
             <select id="mc-objeto-render-modo">
               <option value="objeto" ${(cfg.objetoRenderModo || 'objeto') === 'objeto' ? 'selected' : ''}>Por objeto (padrão — testa cada um contra a distância de renderização)</option>
               <option value="chunk" ${cfg.objetoRenderModo === 'chunk' ? 'selected' : ''}>Por pedaço (chunk — testa blocos inteiros de uma vez)</option>
             </select>
-            <span class="d">Antes desta opção, a "Distância de renderização" acima só afetava a neblina — todo objeto/item/câmera do mapa continuava sendo desenhado de verdade, só ficando encoberto visualmente. Agora o que estiver fora do alcance nem é desenhado. "Por objeto" testa cada um individualmente (simples, sempre exato). "Por pedaço" agrupa objetos em blocos e testa o bloco inteiro — menos testes por quadro em mapas com MUITOS objetos, mas um bloco só some quando sai inteiro do alcance (corte mais grosseiro). Paredes/piso/porta/janela nunca são afetados — sempre visíveis.</span>
+            <span class="d">Antes desta opção, a "Distância de renderização" acima só afetava a neblina — todo objeto/item do mapa continuava sendo desenhado de verdade, só ficando encoberto visualmente. Agora o que estiver fora do alcance nem é desenhado. "Por objeto" testa cada um individualmente (simples, sempre exato). "Por pedaço" agrupa objetos em blocos e testa o bloco inteiro — menos testes por quadro em mapas com MUITOS objetos, mas um bloco só some quando sai inteiro do alcance (corte mais grosseiro). Paredes/piso/porta/janela nunca são afetados — sempre visíveis.</span>
             <input type="number" id="mc-objeto-chunk-tam" class="${cfg.objetoRenderModo === 'chunk' ? '' : 'hidden'}"
               style="margin-top:6px" min="2" max="100" step="1"
               value="${Math.round(Utils.clamp(Number(cfg.objetoChunkTamanho) || 10, 2, 100))}"
@@ -3393,7 +3351,7 @@ const MapConfig = {
             <span class="lbl">Limite de objetos por quadro</span>
             <input type="number" id="mc-limite-frame-valor" min="1" step="1"
               value="${Math.max(1, Math.round(Number(cfg.objetoLimitePorFrame) || 1200))}"
-              placeholder="ex: 1200" title="Quantidade máxima de objetos/itens/câmeras desenhados numa mesma cena/quadro">
+              placeholder="ex: 1200" title="Quantidade máxima de objetos/itens desenhados numa mesma cena/quadro">
             <span class="d">Quando o contador de objetos desenhados numa cena chega neste limite, nenhum outro é desenhado NAQUELE quadro — o resto só aparece (ou não, se sair do alcance/setor antes) no quadro seguinte. Objetos mais PERTO do personagem têm prioridade (são desenhados primeiro); um limite baixo com muitos objetos espalhados pode deixar objetos distantes "piscando" entre quadros — os scripts/rotinas deles (animação, NPC) continuam rodando normalmente mesmo fora da tela, só a malha para de ser desenhada. Padrão: 1200.</span>
           </label>
           <!-- [13/09/2026] NOVO — pedido verbatim: "Adicione controles de
@@ -3504,7 +3462,7 @@ const MapConfig = {
                padrão." -->
           <label class="radio-opt" style="margin-top:8px">
             <input type="checkbox" id="mc-debug-enquadramento-camera" ${cfg.debugEnquadramentoCameraAtivo !== false ? 'checked' : ''}>
-            <span><span class="t">Enquadramento de câmera</span><br><span class="d">O "retângulo amarelo" que representa os limites/enquadramento de uma câmera calibrada (📷 Câmeras/orbs de foto) — visível ao selecionar a câmera e em "Ver através desta câmera".</span></span>
+            <span><span class="t">Enquadramento de câmera</span><br><span class="d">O "retângulo amarelo" que representa os limites/enquadramento de uma câmera calibrada (orbs de foto) — visível ao selecionar o orb e em "Ver através desta câmera".</span></span>
           </label>
           <!-- [17/09/2026 UTC] NOVO (RODADA 123) — pedido verbatim: imprimir
                (pra teste) as coordenadas x/y de tela calculadas, junto do
@@ -3537,6 +3495,14 @@ const MapConfig = {
           <label class="radio-opt" style="margin-top:8px">
             <input type="checkbox" id="mc-debug-camera-panel" ${cfg.debugCameraPanelAtivo === true ? 'checked' : ''}>
             <span><span class="t">Painel de debug da câmera (yaw/pitch — ESC/Pointer Lock)</span><br><span class="d">Janela flutuante e arrastável, dentro de "Ver em 3D", com o histórico cronológico de eventos de teclado/mouse/Pointer Lock e o yaw/pitch da câmera em cada um — ferramenta de diagnóstico do "salto" da câmera ao pressionar ESC. Desligado por padrão.</span></span>
+          </label>
+          <label class="radio-opt" style="margin-top:8px">
+            <input type="checkbox" id="mc-debug-cam-hud" ${cfg.debugCamHudAtivo === true ? 'checked' : ''}>
+            <span><span class="t">HUD de status do Controle de câmera</span><br><span class="d">Faixa verde no canto inferior esquerdo do "Ver em 3D" com o modo da câmera e se o painel de controle está aberto. Desligado por padrão.</span></span>
+          </label>
+          <label class="radio-opt" style="margin-top:8px">
+            <input type="checkbox" id="mc-debug-cam-info" ${cfg.debugCamInfoAtivo === true ? 'checked' : ''}>
+            <span><span class="t">Informações de debug na tela "Controle de câmera"</span><br><span class="d">Mostra dentro do painel a posição, o tamanho e o z-index do painel e do gimbal. Desligado por padrão.</span></span>
           </label>
         </div>
         <!-- Seção "🧱 Parede" (pedido do usuário, 24/08/2026) — snaps da
@@ -5473,10 +5439,6 @@ const MapConfig = {
     modal.querySelectorAll('input[name="mc-camada3d"]').forEach((r) => {
       r.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ camada3DNovosItens: e.target.value }); });
     });
-    // [12/09/2026 — FUNDIDA NESTA RODADA] a seção "Câmera"/"Orb de câmera"
-    // virou 1 seção só ("Ver através desta câmera", ver HTML acima e nota
-    // grande em DEFAULTS.cameraExitViewMode) — 1 único grupo de radios
-    // (data-exitview-group="camera"), 1 única chave (cameraExitViewMode).
     modal.querySelectorAll('input[data-exitview-group="camera"]').forEach((r) => {
       r.addEventListener('change', async (e) => {
         if (!e.target.checked) return;
@@ -5496,6 +5458,7 @@ const MapConfig = {
     modal.querySelector('#mc-objeto-transparencia-2d')?.addEventListener('change', async (e) => { await this.set({ objetoTransparencia2DAtivo: e.target.checked }); });
     modal.querySelector('#mc-objeto-novo-horas')?.addEventListener('change', async (e) => { const h = Math.min(8760, Math.max(0.1, Number(e.target.value) || 24)); e.target.value = h; await this.set({ objetoNovoDuracaoHoras: h }); });
     modal.querySelector('#mc-objeto-novo-indicador')?.addEventListener('change', async (e) => { await this.set({ objetoNovoIndicador: e.target.value }); });
+    modal.querySelector('#mc-objeto-novo-modelos')?.addEventListener('change', async (e) => { await this.set({ objetoNovoNaTelaModelos: e.target.checked }); });
     modal.querySelector('#mc-objeto-novo-texto')?.addEventListener('change', async (e) => { await this.set({ objetoNovoTexto: e.target.checked }); });
     modal.querySelector('#mc-objeto-novo-posicao')?.addEventListener('change', async (e) => { await this.set({ objetoNovoPosicao: e.target.value }); });
     modal.querySelector('#mc-destaque-extra-dourado-2d')?.addEventListener('change', async (e) => { await this.set({ destaqueExtra2DDouradoAtivo: e.target.checked }); });
@@ -5620,13 +5583,10 @@ const MapConfig = {
     // de ser um fundo branco, deve simular a grade do mapa 2D." CAUSA
     // RAIZ da 1ª tentativa (rodada anterior): a ferramenta "Câmera" da
     // janela "Ferramentas" (`_ptool === 'foto-orb'`, ver mapview.js linha
-    // ~4450) NÃO usa `_drawCameraShape` (o leque/cunha de campo de visão,
-    // usado por `mapData.cameras` — um conceito ANTIGO/diferente, ligado
-    // ao `_mode === 'camera'`) — ela cria um "orb de foto"
+    // ~4450) cria um "orb de foto"
     // (`mapData.fotos`), desenhado como uma bolinha verde (`#7cffb2`) com
     // o emoji 🖼️ no centro e uma seta saindo dela na direção
-    // `foto.dirAngulo` (ver `this.mapData.fotos.forEach` em mapview.js,
-    // logo depois do desenho das câmeras) — É ESSE o desenho reproduzido
+    // `foto.dirAngulo` (ver `this.mapData.fotos.forEach` em mapview.js) — É ESSE o desenho reproduzido
     // agora aqui (ícone/cores/proporções copiados 1:1 daquela função).
     // MapConfig é um módulo à parte, sem acesso aos métodos de MapView
     // (mesmo motivo documentado no h4 SVG da seção "Fotos" logo abaixo),
@@ -5975,6 +5935,8 @@ const MapConfig = {
     // [17/09/2026 UTC] NOVO (RODADA 125) — ver DEFAULTS.debugBotaoTelaAtivo.
     modal.querySelector('#mc-debug-botao-tela')?.addEventListener('change', async (e) => { await this.set({ debugBotaoTelaAtivo: e.target.checked }); });
     modal.querySelector('#mc-debug-camera-panel')?.addEventListener('change', async (e) => { await this.set({ debugCameraPanelAtivo: e.target.checked }); });
+    modal.querySelector('#mc-debug-cam-hud')?.addEventListener('change', async (e) => { await this.set({ debugCamHudAtivo: e.target.checked }); });
+    modal.querySelector('#mc-debug-cam-info')?.addEventListener('change', async (e) => { await this.set({ debugCamInfoAtivo: e.target.checked }); });
     // Pedido do usuário (03/09/2026) — ver DEFAULTS.bussola3DAtiva/seção "🧭
     // Bússola 3D" acima.
     modal.querySelector('#mc-bussola3d')?.addEventListener('change', async (e) => { await this.set({ bussola3DAtiva: e.target.checked }); });
@@ -6081,6 +6043,17 @@ const MapConfig = {
     // Centralização ao voltar pro mapa" da rodada 48 — ver comentário grande no HTML acima e
     // DEFAULTS.mapa2DVoltar*). Os 3 rádios do modo + as 5 checkboxes (2 por modo 'anterior'/
     // 'personagem', 1 só pra 'origem') gravam cada campo direto — mesmo padrão de `mc-modovoo3d` acima.
+    // Distribuição dos botões da janela "Ferramentas" (2D) e do rodapé do "Ver em 3D" (3D) — js/botoeslayout.js.
+    const _blFerr = modal.querySelector('#mc-layout-ferr');
+    if (_blFerr && window.BotoesLayout && window.MapView && MapView._ptoolsLayoutBase) {
+      const base = MapView._ptoolsLayoutBase();
+      BotoesLayout.criar(Object.assign(base, { permanente: true, grid: () => _blFerr, htmlBotao: (t) => MapView._ptoolBtnHtml(t, true) })).renderizar();
+    }
+    const _blRod = modal.querySelector('#mc-layout-rodape');
+    if (_blRod && window.BotoesLayout && window.View3D && View3D._hotbarLayoutBase) {
+      const base = View3D._hotbarLayoutBase();
+      BotoesLayout.criar(Object.assign(base, { permanente: true, grid: () => _blRod, htmlBotao: (d) => View3D._hotbarBtnHtml(d, true) })).renderizar();
+    }
     modal.querySelectorAll('input[name="mc-2d-voltar-modo"]').forEach((r) => {
       r.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ mapa2DVoltarModo: e.target.value }); });
     });
@@ -8071,6 +8044,35 @@ const MapConfig = {
       e.preventDefault(); // evita 2 guias abertas (a nossa + a navegação padrão do <a>)
     });
   },
+};
+
+
+/**
+ * Guarda automaticamente o "apontamento + posição do personagem" (opção `mapa2DPersistirApontamentoPersonagem`),
+ * mas SÓ depois que a pose ficou parada pelo tempo de "Velocidade de salvamento do mapa" (configurações do app,
+ * `DB.getMapSaveDebounceMs`) e SÓ se mudou desde a última gravação — app parado não grava nada no disco.
+ * `getPatch()` devolve o objeto a gravar (ou null); devolve uma função que interrompe o monitoramento.
+ */
+MapConfig.autoGuardarPose = function (getPatch) {
+  let ultimo = null, gravado = null, desde = 0, ocupado = false;
+  const id = setInterval(async () => {
+    if (ocupado) return;
+    const cfg = MapConfig._cache || MapConfig.DEFAULTS || {};
+    if (cfg.mapa2DPersistirApontamentoPersonagem !== true) return;
+    let patch = null;
+    try { patch = getPatch(); } catch (e) { return; }
+    if (!patch) return;
+    const k = JSON.stringify(patch);
+    if (k !== ultimo) { ultimo = k; desde = Date.now(); return; }   // mudou: reinicia a contagem
+    if (k === gravado) return;                                       // já gravado, nada novo
+    ocupado = true;
+    try {
+      const ms = (window.DB && DB.getMapSaveDebounceMs) ? await DB.getMapSaveDebounceMs() : 1000;
+      if (Date.now() - desde >= ms) { gravado = k; await MapConfig.set(patch); }
+    } catch (e) { console.warn('Falha ao guardar apontamento/posição:', e); }
+    ocupado = false;
+  }, 250);
+  return () => clearInterval(id);
 };
 
 window.MapConfig = MapConfig;

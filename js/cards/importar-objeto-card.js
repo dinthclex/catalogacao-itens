@@ -186,6 +186,8 @@ window.ObjectAssets.registerModel(${JSON.stringify(tipo)}, {
 .imp-obj-warn{color:#ffb454;font-size:11px}
 .imp-obj-term{background:#0a0d14;color:#7CFC98;border:1px solid #2b3a2f;border-radius:8px;padding:10px 12px;font:12px/1.5 Consolas,'Courier New',monospace;white-space:pre-wrap;word-break:break-all;position:relative}
 .imp-obj-term .dim{color:#8fa39a}
+.imp-obj-mf h4{margin:0 0 4px;font-size:13px}
+.imp-obj-editor{background:#fff;color:#1b1f2a;border:1px solid #b9c0cf;border-radius:6px;padding:8px 10px;font:12px/1.5 Consolas,'Courier New',monospace;white-space:pre-wrap;word-break:break-all;margin:0;position:relative;user-select:all}
 .imp-obj-term button{position:absolute;top:6px;right:6px}
 .imp-obj-det{border-top:1px solid #39425a;padding-top:10px;line-height:1.5}
 .imp-obj-det h3{font-size:14px;margin:14px 0 4px}
@@ -208,7 +210,15 @@ window.ObjectAssets.registerModel(${JSON.stringify(tipo)}, {
 <b>5.</b> Recarregue o app com <b>Ctrl+F5</b>. O objeto aparece em Ferramentas → Objetos com o selo "novo".</p>
 
 <h3>Método manual (sem o .bat)</h3>
-<p>Use "Baixar arquivos .js soltos", copie <code>&lt;tipo&gt;.malha.js</code> e <code>&lt;tipo&gt;.config.js</code> para <code>assets/modelos/js/</code> e cole a linha do manifesto no fim de <code>assets/modelos/js/_novos-objetos.js</code>. Categorias válidas: <code>escritorio, redes, eletrica, estrutura, mobiliario, copa, externa, robotica, formas, outros</code>. Para ícone 2D próprio, acrescente <code>svg: '&lt;svg …&gt;…&lt;/svg&gt;'</code> na linha.</p>
+<ol>
+<li>Clique em "⬇ .js soltos" na linha do objeto (baixa dois arquivos).</li>
+<li>Copie <code>&lt;tipo&gt;.malha.js</code> para <code>assets/modelos/js/</code>.</li>
+<li>Copie <code>&lt;tipo&gt;.config.js</code> para <code>assets/modelos/js/</code>.</li>
+<li>Copie a linha do quadro "Manifesto" (botão 📋 Copiar).</li>
+<li>Cole essa linha no fim de <code>assets/modelos/js/_novos-objetos.js</code>.</li>
+<li>Recarregue o app com Ctrl+F5.</li>
+</ol>
+<p>Categorias válidas: <code>escritorio, redes, eletrica, estrutura, mobiliario, copa, externa, robotica, formas, outros</code>. Para ícone 2D próprio, acrescente <code>svg: '&lt;svg …&gt;…&lt;/svg&gt;'</code> na linha do manifesto.</p>
 
 <h3>Excluir um objeto</h3>
 <p>Em Ferramentas → Objetos → Acessar modelos, use "🗑 Excluir" no objeto. Ele some do catálogo na hora (isso é reversível com "♻️ Restaurar objetos"); a janela de exclusão oferece um .bat que apaga de vez os arquivos do objeto e a linha dele no manifesto.</p>
@@ -251,7 +261,7 @@ window.ObjectAssets.registerModel(${JSON.stringify(tipo)}, {
       </div>
       <div class="imp-obj-hint" id="imp-hint">Escolha o(s) arquivo(s) para liberar o .bat. Depois: baixe o .bat e dê dois cliques nele, na mesma pasta do index.html.</div>
       <div class="imp-obj-list" id="imp-list"></div>
-      <div class="imp-obj-term" id="imp-term" hidden></div>
+      <div class="imp-obj-mf" id="imp-term" hidden></div>
       <div class="imp-obj-det" id="imp-det" hidden>${PASSO_A_PASSO}</div>`;
     const det = body.querySelector('#imp-det');
     body.querySelector('#imp-toggle').onclick = () => { det.hidden = !det.hidden; if (!det.hidden) det.scrollIntoView({ block: 'start', behavior: 'smooth' }); };
@@ -263,16 +273,13 @@ window.ObjectAssets.registerModel(${JSON.stringify(tipo)}, {
       const v = validos();
       term.hidden = !v.length;
       if (!v.length) return;
-      const linhas = [];
-      v.forEach((it, n) => {
-        it.criadoEm = it.criadoEm || new Date().toISOString();
-        linhas.push(`<span class="dim">[${n + 1}] criar   assets\\modelos\\js\\${esc(it.tipo)}.malha.js</span>`);
-        linhas.push(`<span class="dim">    criar   assets\\modelos\\js\\${esc(it.tipo)}.config.js</span>`);
-        linhas.push(`<span class="dim">    anexar  assets\\modelos\\js\\_novos-objetos.js  &lt;&lt;</span>`);
-        linhas.push('&gt; ' + esc(linhaManifesto(it)));
-      });
-      term.innerHTML = linhas.join('\n');
-      const c = mkBtn('secondary', '📋 Copiar', 'Copiar o(s) texto(s) do manifesto (linhas "NovosObjetos.registrar")');
+      v.forEach((it) => { it.criadoEm = it.criadoEm || new Date().toISOString(); });
+      term.innerHTML = '<h4>Manifesto</h4>';
+      const ed = document.createElement('pre'); ed.className = 'imp-obj-editor';
+      ed.textContent = v.map(linhaManifesto).join('\n');
+      term.appendChild(ed);
+      const c = mkBtn('secondary', '📋 Copiar', 'Copiar a(s) linha(s) do manifesto');
+      c.style.marginTop = '6px';
       c.onclick = async () => { const t = v.map(linhaManifesto).join('\n'); try { await navigator.clipboard.writeText(t); window.Utils?.toast?.('Manifesto copiado', { type: 'ok' }); } catch (e) { window.prompt('Copie:', t); } };
       term.appendChild(c);
     };
@@ -348,13 +355,18 @@ window.ObjectAssets.registerModel(${JSON.stringify(tipo)}, {
     const tipo = info.tipo;
     const { body, fechar } = criarOverlay('imp-obj-excl', '🗑 Excluir objeto — arquivos e alterações', false);
     const arquivos = [`assets\\modelos\\js\\${tipo}.malha.js`, `assets\\modelos\\js\\${tipo}.config.js`, `assets\\modelos\\js\\${tipo}.glb.js (se existir)`];
+    const nav = info.soNavegador
+      ? '<div class="imp-obj-aviso">Este objeto foi criado/carregado dentro do app (fica guardado no navegador, não em arquivos do projeto). Ele já foi ocultado do catálogo e pode voltar com "♻️ Restaurar objetos". O .bat abaixo só é necessário se você também instalou arquivos com este mesmo nome.</div>'
+      : '';
     const codigo = info.codigo
       ? `<div class="imp-obj-aviso">"${esc(info.nome || tipo)}" é um objeto <b>padrão do app</b> (definido em código). Ele já foi <b>ocultado do catálogo</b> e pode voltar com "♻️ Restaurar objetos". Para removê-lo de vez do código seria preciso editar à mão: <code>js/engine3d-profiles.js</code> (perfil), <code>js/icons.js</code> (ícone), <code>js/objcategorias.js</code> (categoria) e, se existir, <code>js/objecttypes/${esc(tipo)}.js</code> (+ a tag no <code>index.html</code>). O .bat abaixo só apaga os arquivos de modelo.</div>`
       : '';
     body.innerHTML = `
       <div>O objeto <b>${esc(info.nome || tipo)}</b> foi removido do catálogo. Para apagar também os arquivos dele do projeto:</div>
-      <div class="imp-obj-term"><span class="dim">apagar:</span>\n${arquivos.map((a) => '  ' + esc(a)).join('\n')}\n<span class="dim">alterar:</span>\n  assets\\modelos\\js\\_novos-objetos.js  <span class="dim">(remove a linha  tipo: '${esc(tipo)}')</span></div>
-      ${codigo}
+      ${info.soNavegador
+        ? `<div class="imp-obj-term"><span class="dim">Objeto:</span>\n  ${esc(info.nome || tipo)}\n<span class="dim">Guardado só no navegador — não há arquivos do projeto para apagar.</span></div>`
+        : `<div class="imp-obj-term"><span class="dim">apague:</span>\n${arquivos.map((a) => '  ' + esc(a)).join('\n')}\n<span class="dim">altere:</span>\n  assets\\modelos\\js\\_novos-objetos.js  <span class="dim">(remova a linha  tipo: '${esc(tipo)}')</span></div>`}
+      ${codigo}${nav}
       <div class="imp-obj-actions"><button type="button" class="btn primary sm imp-obj-btn" id="exc-bat" title="Baixa o .bat que apaga os arquivos acima. Dê dois cliques nele, na pasta do index.html.">⬇ Baixar .bat de exclusão</button></div>
       <div class="imp-obj-hint">Baixe o .bat e dê dois cliques nele, <b>na mesma pasta que contém o index.html</b> (ele confere e avisa se estiver na pasta errada). Depois recarregue o app com Ctrl+F5.</div>
       <div class="imp-obj-aviso"><b>Por que um .bat?</b> ${esc(AVISO_FILE)}</div>`;

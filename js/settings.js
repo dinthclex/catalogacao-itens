@@ -203,6 +203,36 @@ const SettingsView = {
     setTimeout(() => location.reload(), 600);
   },
 
+  _abrirFabrica() {
+    if (document.getElementById('st-fabrica-ov')) return;
+    const ov = document.createElement('div');
+    ov.id = 'st-fabrica-ov';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:2147483600;padding:16px';
+    ov.innerHTML = `<div style="background:var(--bg-card,#1e222b);color:var(--text,#e8ecf3);max-width:480px;width:100%;border-radius:12px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.5)">
+      <h3 style="margin:0 0 10px">🏭 Carregar Configurações de Fábrica</h3>
+      <p style="margin:0 0 8px">Tudo será restaurado ao <b>padrão de fábrica</b>: preferências, opções de todos os menus e dados locais do app.</p>
+      <p style="margin:0 0 8px">Os arquivos salvos no navegador (<b>IndexedDB</b>: itens, mapas, fotos etc.) serão <b>desvinculados do app</b> — o app abrirá vazio. Os dados antigos continuam no navegador, mas sem uso pelo app.</p>
+      <p style="margin:0 0 14px;opacity:.8;font-size:.9em">Backups em arquivo que você exportou não são afetados. Esta ação não pode ser desfeita pelo app.</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn secondary sm" id="st-fab-cancel">Cancelar</button>
+        <button class="btn sm" id="st-fab-ok" style="background:#c0392b;color:#fff">Restaurar de fábrica</button>
+      </div></div>`;
+    document.body.appendChild(ov);
+    if (window.WindowManager) { try { WindowManager.register('st-fabrica', { el: ov, kind: 'modal', label: 'Configurações de fábrica' }); } catch (e) { /* ignora */ } }
+    ov.querySelector('#st-fab-cancel').onclick = () => ov.remove();
+    ov.querySelector('#st-fab-ok').onclick = () => {
+      try {
+        const ks = [];
+        for (let i = 0; i < localStorage.length; i++) ks.push(localStorage.key(i));
+        ks.forEach((k) => { if (k !== 'catalogo_db_sufixo') localStorage.removeItem(k); });
+        localStorage.setItem('catalogo_db_sufixo', '_' + Date.now());
+      } catch (e) { /* ignora */ }
+      try { sessionStorage.clear(); } catch (e) { /* ignora */ }
+      Utils.toast('Configurações de fábrica carregadas ✓ Recarregando...', { type: 'ok' });
+      setTimeout(() => location.reload(), 600);
+    };
+  },
+
   async mount(container) {
     this._container = container;
     const cfg = await DB.getAllSettings();
@@ -303,6 +333,7 @@ const SettingsView = {
                selecionado, nome da conferência, identidade do aparelho,
                backups/dados cadastrados). -->
           <button class="btn secondary sm" id="st-reset-padroes" title="Redefinir TODAS as opções de TODOS os menus do app para os valores de fábrica (não apaga itens, fotos, mapas nem backups)">↩️ Redefinir padrões do app</button>
+          <button class="btn secondary sm" id="st-fabrica" title="Restaura tudo ao padrão de fábrica e desvincula os dados salvos (IndexedDB) do app">🏭 Carregar Configurações de Fábrica</button>
           <button class="btn secondary sm" id="st-close" title="Fechar as configurações e voltar">✕ Fechar</button>
         </div>
 
@@ -950,7 +981,7 @@ const SettingsView = {
              js/mapview.js/view3d.js ('Acessar modelos'/Modelador,
              ambos "pertencem" à tela que os abre — ver pedido verbatim
              na mesma rodada). -->
-        <div class="settings-section" data-cat="mapa">
+        <div class="settings-section only-workspace" data-cat="mapa">
           <h3>🧩 Workspace — abrir em tela cheia?</h3>
           <p style="font-size:12.5px; color:var(--text-dim)">
             Quando uma divisão de tela do "🧩 Workspace" (barra inferior do app)
@@ -1046,6 +1077,7 @@ const SettingsView = {
       else App.back('tabela');
     };
     container.querySelector('#st-reset-padroes').onclick = () => this._resetarPadroesDoApp();
+    container.querySelector('#st-fabrica').onclick = () => this._abrirFabrica();
     container.querySelector('#st-baixar-tudo').onclick = () => this._downloadFullCatalog();
     const btnGuiaTexto = container.querySelector('#st-download-guia-texto');
     if (btnGuiaTexto) btnGuiaTexto.onclick = () => this._downloadServerGuideText();

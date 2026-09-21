@@ -8,7 +8,7 @@
  * DB.getOrCreateSingleMap/addMap/setCurrentMap e _openMapSwitcherModal
  * abaixo; pedido do usuário, 27/08/2026, revertendo a decisão anterior de
  * "ambiente único" citada nos comentários mais antigos deste arquivo),
- * desenhar paredes manualmente, e posicionar câmeras/objetos/itens.
+ * desenhar paredes manualmente, e posicionar objetos/itens.
  *
  * Os modos "Assistido 2D" (sensores/GPS) e "Assistido 3D" (câmera, baseado em
  * reconhecimento de objeto ao filmar) foram retirados da tela (botões e
@@ -34,7 +34,7 @@
  * - constructor(canvas) — cria o renderer preso a um <canvas>.
  * - resize()/setMapData(mapData) — redimensiona/troca o mapa desenhado.
  * - render(opts)/_renderFrame(opts) — MÉTODO PRINCIPAL, desenha 1 quadro
- *   completo (grade, réguas, paredes, portas/janelas, câmeras, objetos,
+ *   completo (grade, réguas, paredes, portas/janelas, objetos,
  *   formas, textos, medidas/traços, seleção/hover) — a maior função da
  *   classe, concentra a maior parte da lógica de desenho.
  * - worldToScreen(x,y)/screenToWorld(sx,sy) — conversão entre coordenadas
@@ -49,7 +49,7 @@
  *   `_drawDestaqueExtraObj`/`_drawDestaqueExtraPin`/`_drawRaioAzulGlow`/
  *   `_drawDestaqueExtraRaioObj`/`_drawDestaqueExtraRaioPin` (destaque de
  *   seleção/hover/patrimônio associado), `_drawDoorShape`/
- *   `_drawWindowShape`/`_drawCameraShape` (porta/janela/câmera),
+ *   `_drawWindowShape` (porta/janela),
  *   `_drawHoverStroke`/`_drawHoverRect`/`_drawDoorWindowRing`,
  *   `_computeItemAssocIndex`/`_drawItemBadges` (selos de patrimônio
  *   associado), `_drawFormaShape` (qualquer forma geométrica — a maior
@@ -162,7 +162,7 @@
  *   touch+mouse) — arrastar/redimensionar/desenhar, cada um dos MAIORES
  *   métodos do arquivo (~800-900 linhas cada).
  * - Hit-testing por tipo de elemento (usados pelos handlers acima):
- *   `_hitTestDrawable`, `_hitTestWallBody`, `_hitTestCamera`,
+ *   `_hitTestDrawable`, `_hitTestWallBody`,
  *   `_hitTestItemPin`, `_hitTestFotoPin`, `_pointInObjectShape`,
  *   `_pointInDoorWindowShape`, `_hitTestObject`, `_formaNome`.
  *
@@ -181,7 +181,7 @@
  * - _orderChainPoints/_startReeditChain/_distToSegment/
  *   _connectedWallIds/_findSnapPoint/_screenToWorldRaw/
  *   _computeParedeHover/_paredeLineSnap/_paredeResolvePoint/
- *   _hitTestWallForAttach/_computeDoorWindowGhost/_computeCameraGhost/
+ *   _hitTestWallForAttach/_computeDoorWindowGhost/
  *   _computeFotoOrbGhost.
  *
  * Pan/zoom do canvas e painéis flutuantes (infraestrutura reaproveitada
@@ -207,11 +207,8 @@
  *   componentes/scripts (ver components.js) — fieldset resumo + editor
  *   tela-cheia + a "folha de código" em si, reaproveitados por TODOS os 6
  *   tipos de entidade com componentes (objeto/parede/porta/janela/
- *   câmera/texto).
+ *   texto).
  * - _openDoorPanel/_openWindowPanel — porta/janela.
- * - _openCameraPanel/_pickPhotoForCamera/_pickPhotoFromList/
- *   _openCameraPhoto — câmera (inclui vincular foto de referência e o
- *   botão "Ver em 3D através desta câmera").
  * - _openFotoPin/_openFotoPinPopover/_openFotoPinWheel/
  *   _closeFotoPinWheel/_openVanishCamScreen/_drawFotoPinPreview/
  *   _wireFotoPinPreviewOrbit — orb/pino de foto (popover completo +
@@ -467,8 +464,7 @@ class Map2DRenderer {
     this.view = { cx: 0, cy: 0, zoom: 32, rot: 0 }; // px por metro; rot em radianos
     this.selectedItemId = null;
     this.selectedWallId = null;
-    this.selectedCameraId = null;
-    this.selectedFotoId = null; // pino de foto (mapaX/mapaY, ver Parte 5) selecionado — mesma ideia de selectedCameraId, hoje só usada pro anel de hover
+    this.selectedFotoId = null; // pino de foto (mapaX/mapaY, ver Parte 5) selecionado — hoje só usada pro anel de hover
     this.selectedObjectId = null;
     this.selectedTextId = null;
     this.selectedDoorId = null; // ferramenta "Porta" — ver mapview.js _openDoorPanel
@@ -629,7 +625,7 @@ class Map2DRenderer {
    *  outros marcadores de UI do mapa, ex. o retículo do gizmo — senão
    *  ficaria enorme/sumida em zooms extremos), na cor laranja (bem
    *  distinta da grade cinza de fundo e das cores já usadas por
-   *  paredes/objetos/câmeras). `this.showOrigemMundo` é ligado/desligado
+   *  paredes/objetos). `this.showOrigemMundo` é ligado/desligado
    *  por `MapView` (ver `mount`/`_onMapConfigChange`), lendo
    *  `MapConfig` — mesmo padrão de `this.showGrid`. */
   _drawOrigemMundo(ctx, w, h) {
@@ -1029,51 +1025,6 @@ class Map2DRenderer {
     ctx.rotate(-(pos.angulo || 0) - this.view.rot);
     ctx.translate(-s.x, -s.y);
     return { largura, esp };
-  }
-
-  /** Desenha só a FORMA de uma câmera (ponto + cunha do campo de visão) num
-   *  ponto de tela já resolvido — sem seleção/hover em volta (fica por
-   *  conta de quem chama, igual _drawDoorShape/_drawWindowShape acima).
-   *  Extraído do loop de `this.mapData.cameras` (ver render() abaixo) pra
-   *  ser reaproveitado pelo "ghost" da ferramenta Câmeras (pedido do
-   *  usuário: "a câmera, no 2D, deve ter um ghost também" — mesmo espírito
-   *  do ghost de porta/janela). Devolve o raio do ponto central (6 ou 8px,
-   *  conforme `selected`) pra quem chama desenhar o anel de seleção/hover/
-   *  ghost no tamanho certo. */
-  _drawCameraShape(ctx, cam, s, selected) {
-    const rayLen = 42;
-    const half = (cam.fov || Math.PI / 3) / 2;
-    const a1 = (cam.angulo || 0) - half, a2 = (cam.angulo || 0) + half;
-    const p1 = { x: s.x + Math.cos(a1) * rayLen, y: s.y + Math.sin(a1) * rayLen };
-    const p2 = { x: s.x + Math.cos(a2) * rayLen, y: s.y + Math.sin(a2) * rayLen };
-    const cor = selected ? '#ffd166' : '#4fd1ff';
-    ctx.beginPath();
-    ctx.moveTo(s.x, s.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.closePath();
-    ctx.fillStyle = selected ? '#312c1f' : '#142832';
-    ctx.fill();
-    ctx.strokeStyle = cor; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(p1.x, p1.y); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
-    const r = selected ? 8 : 6;
-    ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = cor; ctx.fill();
-    ctx.strokeStyle = '#0a0d11'; ctx.lineWidth = 2; ctx.stroke();
-    // Anel tracejado extra em volta da câmera ATIVA pra 3D — é a que
-    // define de onde a visualização 3D começa (botão "🎥 Ver em 3D a
-    // partir desta câmera" no submenu da câmera; só uma por vez).
-    if (cam.ativo3D) {
-      ctx.beginPath();
-      ctx.setLineDash([3, 3]);
-      ctx.arc(s.x, s.y, r + 5, 0, Math.PI * 2);
-      ctx.strokeStyle = '#4fd1ff'; ctx.lineWidth = 2; ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    if (cam.fotoId) {
-      ctx.font = '9px sans-serif'; ctx.fillStyle = '#0a0d11'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('📷', s.x, s.y + 0.5);
-      ctx.textBaseline = 'alphabetic';
-    }
-    return r;
   }
 
   _drawHoverStroke(ctx, a, b, lw) {
@@ -2088,7 +2039,7 @@ class Map2DRenderer {
     // Imagem "de piso": "quando for imagem, e for a camada mais abaixo,
     // deve ficar no nível do chão" — uma imagem esticada por cima de vários
     // objetos aparecia por cima deles, "como se estivesse voando", porque o
-    // desenho é por TIPO (paredes, depois pontos/câmeras/objetos/...) — ver
+    // desenho é por TIPO (paredes, depois pontos/objetos/...) — ver
     // comentário grande logo abaixo, "camadaFundo" — e a ordem entre
     // objetos do MESMO tipo é só a ordem de inserção no array, sem nenhuma
     // relação com a camada. Só pra imagens (`forma === 'imagem'`— pedido
@@ -2304,29 +2255,6 @@ class Map2DRenderer {
       });
     }
 
-    // câmeras — ponto + duas retas marcando as bordas do campo de visão
-    // (mesma ideia dos minimapas 2D de jogos com raycasting), com uma cunha
-    // semi-transparente entre elas pra ficar fácil de ver a direção de longe.
-    (this.mapData.cameras || []).forEach((cam) => {
-      if (!this._layerVisible(cam.layerId)) return;
-      if (!this._pisoVisible(cam)) return;
-      ctx.save();
-      ctx.globalAlpha = this._layerOpacity(cam.layerId);
-      const s = this.worldToScreen(cam.x, cam.y);
-      const selected = cam.id === this.selectedCameraId;
-      const r = this._drawCameraShape(ctx, cam, s, selected);
-      if (opts.toolSelection?.has(`camera:${cam.id}`)) {
-        ctx.beginPath();
-        ctx.setLineDash([4, 3]);
-        ctx.arc(s.x, s.y, r + 7, 0, Math.PI * 2);
-        ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 2.5; ctx.stroke();
-        ctx.setLineDash([]);
-      } else if (this._isHovered(opts, 'camera', cam.id)) {
-        this._drawHoverRing(ctx, s.x, s.y, r + 7);
-      }
-      ctx.restore();
-    });
-
     // objetos — três representações possíveis (obj.forma):
     //  - 'icone' (ou sem `forma`, objetos antigos): SEM forma desenhada
     //    própria — _drawFormaShape resolve o formato/tamanho reais na hora
@@ -2342,7 +2270,7 @@ class Map2DRenderer {
     //    metros/unidades — "círculo" configurável, poucos lados = triângulo/
     //    quadrado/hexágono etc.).
     // Objeto associado a um ou mais itens do catálogo (obj.itemIds) ganha
-    // selo(s) 🔗 — mesma ideia do 📷 nas câmeras com foto associada — em
+    // selo(s) 🔗 — em
     // qualquer forma. Ver _drawItemBadges.
     (this.mapData.objects || []).forEach((obj) => {
       if (!this._layerVisible(obj.layerId)) return;
@@ -2585,10 +2513,10 @@ class Map2DRenderer {
       // _drawItemBadges/_computeItemAssocIndex acima) — os já associados a um
       // objeto já ganham o destaque no PRÓPRIO objeto (ver
       // _drawDestaqueExtraObj/_drawDestaqueExtraRaioObj).
-      if (!this._itemAssocIndexFrame?.has(it.id)) {
-        if (this.destaqueExtraRaio2DAtivo) this._drawDestaqueExtraRaioPin(ctx, s.x, s.y, selected ? 10 : 7);
-        if (this.destaqueExtraDourado2DAtivo) this._drawDestaqueExtraPin(ctx, s.x, s.y, selected ? 10 : 7);
-      }
+      // Em TODOS os pinos de patrimônio (associados a um objeto ou não): a versão anterior pulava os associados, e por
+      // isso o destaque não aparecia em vários patrimônios.
+      if (this.destaqueExtraRaio2DAtivo) this._drawDestaqueExtraRaioPin(ctx, s.x, s.y, selected ? 10 : 7);
+      if (this.destaqueExtraDourado2DAtivo) this._drawDestaqueExtraPin(ctx, s.x, s.y, selected ? 10 : 7);
       // Seleção das ferramentas estilo Paint.NET (ver _toolSelection em
       // mapview.js) — anel ciano tracejado, distinto do destaque amarelo de
       // "item com painel aberto" (selectedItemId) pra não confundir os dois.
@@ -2625,34 +2553,12 @@ class Map2DRenderer {
       }
     });
 
-    // Prévia ("ghost") da câmera seguindo o cursor na ferramenta Câmeras —
-    // mesma ideia do ghost de porta/janela (pedido do usuário: "a câmera,
-    // no 2D, deve ter um ghost também. Mostrando exatamente como ficaria em
-    // caso se clicasse na posição do cursor do mouse") — reaproveita a
-    // MESMA _drawCameraShape usada pra câmera de verdade acima, com os
-    // MESMOS valores padrão que `Mapping.addCamera` usaria de verdade num
-    // clique agora (ver mapview.js _computeCameraGhost).
-    if (opts.cameraGhost) {
-      const g = opts.cameraGhost;
-      ctx.save();
-      const s = this.worldToScreen(g.x, g.y);
-      const r = this._drawCameraShape(ctx, g, s, false);
-      ctx.beginPath();
-      ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = '#919294';
-      ctx.lineWidth = 1.25;
-      ctx.arc(s.x, s.y, r + 7, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-    }
-
     // [09/09/2026] Prévia ("ghost") do "Orb de foto" seguindo o cursor —
     // bug relatado pelo usuário: "a ferramenta 'Orb de foto' deve mostrar
     // um 'ghost' [...] para indicar onde/como o orb será inserido antes do
     // clique, do mesmo jeito que outras ferramentas de posicionamento
-    // provavelmente já fazem" — mesmo espírito do ghost de Câmeras logo
-    // acima (contorno tracejado + MESMO glifo 🖼️ do orb de verdade, ver
+    // provavelmente já fazem" — mesmo espírito do ghost de porta/janela
+    // (contorno tracejado + MESMO glifo 🖼️ do orb de verdade, ver
     // desenho de `this.mapData.fotos` logo abaixo), só semi-transparente
     // (`globalAlpha`) pra ficar claramente uma prévia, não um orb real.
     if (opts.fotoOrbGhost) {
@@ -3364,18 +3270,14 @@ class Map2DRenderer {
       ctx.translate(s.x, s.y);
       ctx.rotate((p.angulo || 0) + this.view.rot);
       // O personagem 2D é "um objeto com uma câmera associada" (pedido do
-      // usuário) — mesma ideia de leque da câmera de verdade (ver
-      // _drawCameraShape acima), só que sem substituir aquele desenho: aqui
-      // é SÓ as duas linhas laterais do campo de visão, mais compridas
-      // ("prolongar") e mais finas, sem o preenchimento da cunha nem o
-      // ponto central de câmera (o corpo do personagem já é o disco/seta
-      // logo abaixo). O ângulo de abertura é o MESMO da câmera de verdade
-      // em 3D (`camera3`, ver engine3d.js `new THREE.PerspectiveCamera(72,
-      // ...)`) — pedido: "deve corresponder ao 3D" — não o `cam.fov`
-      // configurável de câmeras de vigilância do mapa (conceito diferente).
+      // usuário): aqui são SÓ as duas linhas laterais do campo de visão,
+      // compridas ("prolongar") e finas, sem preenchimento de cunha (o corpo
+      // do personagem já é o disco/seta logo abaixo). O ângulo de abertura é
+      // o MESMO da câmera de verdade em 3D (`camera3`, ver engine3d.js `new
+      // THREE.PerspectiveCamera(72, ...)`) — pedido: "deve corresponder ao 3D".
       const FOV_3D = Math.PI * (72 / 180);
       const halfFov = FOV_3D / 2;
-      const rayLenFov = 90; // bem mais longo que a cunha da câmera de verdade (42px, ver _drawCameraShape) — "prolongar"
+      const rayLenFov = 90; // "prolongar"
       ctx.save();
       ctx.strokeStyle = 'rgba(255,255,255,0.55)';
       ctx.lineWidth = 1;
@@ -3388,15 +3290,14 @@ class Map2DRenderer {
       ctx.restore();
       // Corpo: disco branco com contorno escuro — cor própria (nenhum outro
       // elemento do mapa usa branco puro), pra nunca se confundir com pino
-      // de item/foto/câmera/objeto.
+      // de item/foto/objeto.
       ctx.beginPath();
       ctx.arc(0, 0, 9, 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff';
       ctx.fill();
       ctx.strokeStyle = '#0a0d11'; ctx.lineWidth = 2; ctx.stroke();
       // Cunha sólida indicando a direção que o personagem está olhando/
-      // andando (mesma ideia do leque da câmera — ver _drawCameraShape —
-      // só que sólida e bem menor, tipo seta).
+      // andando (sólida e pequena, tipo seta).
       ctx.beginPath();
       ctx.moveTo(12, 0);
       ctx.lineTo(2, -6);
@@ -3758,8 +3659,7 @@ const MapView = {
   // (_photoPlacementId/_itemPlacementId) — pedido verbatim (RODADA 55):
   // "Mapeie as dependências ... e as torne modulares e reaproveitáveis."
   // Modo "escolher uma posição X/Y genérica no mapa, SEM nenhum registro
-  // do banco envolvido" (usado pelo botão "🗺️ Definir origem no mapa" da
-  // grade automática de Câmeras, ver js/mapconfig.js) — ver
+  // do banco envolvido" (usado pelo botão "🗺️ Definir origem no mapa", ver js/mapconfig.js) — ver
   // `enterMapPositionPickerMode` mais abaixo pro mapeamento completo de
   // dependências e o que pôde/não pôde ser reaproveitado dos 2 modos
   // acima. `true` enquanto o modo estiver ativo (guarda os mesmos pontos
@@ -3793,7 +3693,6 @@ const MapView = {
   // `drag.lockedUntil`) — precisam ser o mesmo número, daí ser um campo só.
   _LAYER_FLIP_DURATION_MS: 180,
   _selectedWallId: null,
-  _selectedCameraId: null,
   _selectedObjectId: null,
   _selectedDoorId: null, // ferramenta "Porta" — ver _openDoorPanel
   _selectedWindowId: null, // ferramenta "Janela" — ver _openWindowPanel
@@ -4187,7 +4086,7 @@ const MapView = {
   // reeditar) — aumentado bem além do usado internamente por
   // _hitTestWallBody por padrão (9px), que era pequeno demais pra tocar com
   // conforto (pedido do usuário). Mesmo valor usado pelos atalhos de
-  // observação de câmera/objeto (_hitTestCamera/_hitTestObject, 18px).
+  // observação de câmera/objeto (_hitTestFotoPin/_hitTestObject, 18px).
   _CURVE_HIT_PX: 18,
   _curveHoverChain: null, // ids das paredes da "polilinha" sob o cursor agora (ferramenta Reta/Curva, sem edição em andamento) — só pra desenhar o traço tracejado de hover
   // Quando um clique parado reabre uma reta/curva JÁ finalizada pra reeditar
@@ -4213,12 +4112,11 @@ const MapView = {
   // snap quando presente.
   _paredeHover: null, // {x,y,kind:'endpoint'|'body',wallId} | null
   _doorWindowGhost: null, // prévia da ferramenta Porta/Janela (ver _computeDoorWindowGhost) — {isDoor,attached,pos,...campos da porta/janela} | null
-  _cameraGhost: null, // prévia da ferramenta Câmeras (ver _computeCameraGhost) — {x,y,...campos da câmera} | null
   // [09/09/2026] Bug relatado pelo usuário: "a ferramenta 'Orb de foto'
   // deve mostrar um 'ghost' [...] para indicar onde/como o orb será
   // inserido antes do clique, do mesmo jeito que outras ferramentas de
-  // posicionamento [Câmeras/Porta/Janela] já fazem" — MESMO padrão de
-  // `_cameraGhost`/`_doorWindowGhost` acima (ver _computeFotoOrbGhost).
+  // posicionamento [Porta/Janela] já fazem" — MESMO padrão de
+  // `_doorWindowGhost` acima (ver _computeFotoOrbGhost).
   _fotoOrbGhost: null, // prévia da ferramenta "Orb de foto" — {x,y} | null
   _paredeEspessura: 0.12, // metros — editável na barra de contexto (linha 4) enquanto a ferramenta está ativa
   _paredeTipo: 'padrao', // ver WALL_TYPES — só existe 1 tipo por enquanto, campo pronto pra quando houver mais
@@ -4303,7 +4201,7 @@ const MapView = {
     // simples e direta (clique em lugar vazio → 1 objeto 'piso', 10x10m,
     // ver _onCanvasClick e Mapping.applyDefaultShapeToObject em mapping.js).
     { id: 'piso', icon: Icons.MAP_OBJECT_EXTRAS.piso.svg, label: 'Piso', title: 'Piso: clique num lugar vazio do mapa para posicionar uma laje de piso (10m x 10m, redimensionável depois pelo painel de propriedades).' },
-    { id: 'parede', icon: '🧱', label: 'Parede', title: 'Parede: clique marca o 1º ponto, clique de novo marca o 2º e cria a parede reta entre eles — espessura ajustável na barra de contexto. Passe o cursor sobre a PONTA de uma parede já existente (área de teste do tamanho da espessura dela) ou sobre o CORPO dela (encaixa na linha de centro) para ver um "✕" — clicar ali começa/termina a nova parede exatamente encostada, formando uma cadeia conectada de verdade. Tem snap próprio (encaixa na linha de centro de paredes por perto, distância configurável), além do snap da grade — os dois podem ficar ligados ao mesmo tempo.' },
+    { id: 'parede', icon: Icons.MAP_OBJECT_EXTRAS.parede.svg, label: 'Parede', title: 'Parede: clique marca o 1º ponto, clique de novo marca o 2º e cria a parede reta entre eles — espessura ajustável na barra de contexto. Passe o cursor sobre a PONTA de uma parede já existente (área de teste do tamanho da espessura dela) ou sobre o CORPO dela (encaixa na linha de centro) para ver um "✕" — clicar ali começa/termina a nova parede exatamente encostada, formando uma cadeia conectada de verdade. Tem snap próprio (encaixa na linha de centro de paredes por perto, distância configurável), além do snap da grade — os dois podem ficar ligados ao mesmo tempo.' },
     { id: 'pencil', icon: '✏️', label: 'Lápis', title: 'Lápis: arraste para desenhar parede(s) à mão livre — o caminho percorrido vira segmentos retos conectados (uma polilinha de paredes), a partir dos pontos capturados a cada quadro.' },
     { id: 'eyedropper', icon: '💧', label: 'Conta-gotas', title: 'Conta-gotas: clique e arraste sobre o mapa para amostrar continuamente a cor do que está sob o cursor, mostrada numa caixa de cor na barra de contexto.' },
     { id: 'texto', icon: '🔤', label: 'Texto', title: 'Texto: clique num lugar vazio para colocar um rótulo de texto (abre editável na hora); toque num texto já existente pra editar conteúdo/cor/tamanho ou excluir; arraste um já existente pra reposicionar.' },
@@ -4344,20 +4242,6 @@ const MapView = {
     // enquanto não houver foto anexada, a miniatura vira um botão "📎 Anexar
     // foto". Clique num orb JÁ existente só abre o painel dele (mesmo
     // padrão de Porta/Janela), não cria um novo em cima.
-    // [10/09/2026] RENOMEADO — pedido verbatim: "Na mapa 2D, na janela de
-    // 'Ferramentas', o objeto 'Câmeras' e 'Orb de foto' devem ser
-    // unificados. Fica o ícone de 'Câmeras', mas fica a janela de
-    // propriedades do 'Orb de foto' [...] Depois das trocas todas, então o
-    // 'Orb de foto' passa a se chamar 'Câmera' e o objeto 'Câmeras' (na
-    // janela de 'Ferramentas') deve ser removido do projeto." — o botão
-    // antigo "📷 Câmeras" (modo `camera`/`#map-mode-camera`/
-    // `_openCameraPanel`, ver comentário grande em `_mountPlanta` sobre a
-    // migração de dados antigos) foi removido da barra; este único botão
-    // (ícone 📷, agora "Câmera") o substitui por completo — continua
-    // criando/editando um "Orb de foto" por baixo dos panos (mesmo id
-    // 'foto-orb', mesma _placeFotoOrbAtWorld/_openFotoPinPopover — "o 2D e
-    // 3D preservam as formas do 'Orb de foto'", pedido verbatim, por isso
-    // NADA do desenho/posicionamento muda, só rótulo e ícone da ferramenta).
     { id: 'foto-orb', icon: '📷', label: 'Câmera', title: 'Câmera: clique num lugar do mapa para colocar uma câmera nova, mesmo sem foto anexada ainda — anexe uma pelo painel de propriedades quando quiser (botão "📎 Anexar foto", enquanto não houver imagem). Direção/inclinação/altura/campo de visão e scripts ajustáveis como qualquer câmera já vinculada. Toque numa já existente pra abrir o painel dela.' },
     // [14/09/2026 UTC] UNIFICADO — pedido verbatim: "Unifique os sistemas
     // (sem considerar compatibilidade com código legado) na janela
@@ -4377,6 +4261,47 @@ const MapView = {
     { id: 'itens', icon: '📍', label: 'Adicionar orb', title: 'Adicionar orb: toque para escolher um item do catálogo e marcar onde ele está na planta (o mesmo que o orb faz nas fotos, mas na planta) — aparece também no 3D; toque num pino já existente para editar o andar ou remover.' },
     { id: 'objects', icon: '🪑', label: 'Objetos', title: 'Objetos: escolha um tipo no catálogo (mesmos ícones dos tipos de item, formas desenháveis, e mais alguns) e toque para posicionar; toque num já existente pra editar posição/rotação/andar/tipo, e opcionalmente associar a um item já catalogado.' },
   ],
+
+  /** HTML de um botão da janela "Ferramentas" (usado no esqueleto e na distribuição editável). `preview` (seção de
+   *  configurações): sem id nem estado ativo, para não colidir com a janela real. Extras (`obj:<tipo>`) escolhem
+   *  o tipo na ferramenta Objetos. */
+  _ptoolBtnHtml(t, preview) {
+    const ativo = !preview && this._ptoolBtnIsActive && this._ptoolBtnIsActive(t.id);
+    return `<button class="icon-btn map2d-ptool-btn${ativo ? ' active' : ''}"${preview || t.extra ? '' : ` id="ptool-${t.id}"`} data-blid="${t.id}" data-ptool="${t.id}" title="${Utils.escapeHtml(t.title || t.label)}">${t.icon}<span>${Utils.escapeHtml(t.label)}</span></button>`;
+  },
+
+  /** Clique num botão da janela "Ferramentas": ferramenta normal ou objeto do catálogo acrescentado (`obj:<tipo>`). */
+  _ativarBotaoFerramenta(id) {
+    if (String(id).startsWith('obj:')) {
+      if (this._formaDraft) this._finalizeFormaDraft();
+      this._setPTool('objects');
+      this._objectStampType = String(id).slice(4);
+      this._updateToolCtx?.();
+      return;
+    }
+    this._setPTool(id);
+  },
+
+  _ptoolDefExtra(id) {
+    if (!String(id).startsWith('obj:')) return null;
+    const key = String(id).slice(4);
+    const o = ((window.Icons && window.Icons.mapObjectCatalog && window.Icons.mapObjectCatalog()) || []).find((x) => x.key === key);
+    return o ? { id, extra: true, icon: o.svg, label: o.label, title: 'Objeto: ' + o.label + ' — escolhe este tipo na ferramenta Objetos' } : null;
+  },
+
+  /** Parte comum da configuração de BotoesLayout da janela "Ferramentas" (usada pela janela real e pela seção das
+   *  "configurações 2D"). */
+  _ptoolsLayoutBase() {
+    return {
+      chave: 'mapa2dFerramentas',
+      defs: () => this.PTOOLS,
+      defExtra: (id) => this._ptoolDefExtra(id),
+      catalogoExtras: () => ((window.Icons && window.Icons.mapObjectCatalog && window.Icons.mapObjectCatalog()) || []).map((o) => ({ id: 'obj:' + o.key, label: o.label, icon: o.svg })),
+      rotulo: (t) => t.label,
+      iconeHtml: (t) => t.icon,
+      aoMudar: () => { const c = this._ptoolsLayout; if (c && this._container) { c._carregado = false; c.renderizar(); } },
+    };
+  },
 
   /** Chamado pelo app.js (App.navigate) ao entrar na aba "Mapa" — SÓ monta a
    *  tela de entrada (2 botões grandes + Caixa), nunca mais o editor de
@@ -4661,6 +4586,7 @@ const MapView = {
         <p style="font-size:11.5px; color:var(--text-dim)">Escolha um mapa para editar, ou crie um novo — cada mapa tem sua própria planta baixa, fotos e itens posicionados.</p>
         <div id="map-switch-list" style="max-height:50vh; overflow:auto; display:flex; flex-direction:column; gap:6px; margin:10px 0"></div>
         <button type="button" class="btn block" id="map-switch-novo" title="Criar um novo mapa vazio">➕ Novo mapa</button>
+        <button type="button" class="btn block danger" id="map-switch-del-todos" style="margin-top:8px" title="Excluir TODOS os mapas de uma vez (as plantas baixas são perdidas; itens e fotos não são apagados). Fica um mapa vazio novo.">🗑 Excluir todos os mapas</button>
       </div>`;
     document.body.appendChild(modal);
     const close = () => modal.remove();
@@ -4719,7 +4645,7 @@ const MapView = {
         btn.onclick = async () => {
           const id = btn.dataset.id;
           const m = await DB.getMap(id);
-          if (!confirm(`Excluir o mapa "${this._displayName(m)}"? A planta baixa dele (paredes/câmeras/objetos) é perdida — itens e fotos vinculados a ele NÃO são apagados, só ficam sem mapa até serem posicionados de novo.`)) return;
+          if (!confirm(`Excluir o mapa "${this._displayName(m)}"? A planta baixa dele (paredes/objetos) é perdida — itens e fotos vinculados a ele NÃO são apagados, só ficam sem mapa até serem posicionados de novo.`)) return;
           await DB.deleteMap(id);
           window.OrganizeView?.invalidate?.();
           const restantes = await DB.getAllMaps();
@@ -4729,6 +4655,19 @@ const MapView = {
       });
     };
     render(await DB.getAllMaps());
+
+    modal.querySelector('#map-switch-del-todos').onclick = async () => {
+      const todos = await DB.getAllMaps();
+      if (!todos.length) return;
+      if (!confirm(`Excluir TODOS os ${todos.length} mapa(s)? As plantas baixas (paredes/objetos) são perdidas — itens e fotos vinculados NÃO são apagados, só ficam sem posição no mapa. Esta ação não pode ser desfeita. Um mapa vazio novo será criado.`)) return;
+      for (const m of todos) await DB.deleteMap(m.id);
+      window.OrganizeView?.invalidate?.();
+      const novo = await DB.getOrCreateSingleMap();
+      await DB.setCurrentMap(novo.id);
+      Utils.toast?.(`${todos.length} mapa(s) excluído(s).`, { type: 'ok' });
+      close();
+      await this._showScreen('entry');
+    };
 
     modal.querySelector('#map-switch-novo').onclick = async () => {
       const nome = prompt('Nome do novo mapa:', '');
@@ -4768,6 +4707,12 @@ const MapView = {
    *  — corpo IDÊNTICO ao antigo mount() desta tela, só que agora chamado só
    *  ao entrar em 'planta' via _showScreen (ver comentário em _screen). */
   async _mountPlanta(container) {
+    if (this._stopAutoPose2D) this._stopAutoPose2D();
+    this._stopAutoPose2D = (typeof MapConfig !== 'undefined' && MapConfig.autoGuardarPose) ? MapConfig.autoGuardarPose(() => {
+      const p = this._personagem2D;
+      if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+      return { mapa2DPersonagemRecargaX: p.x, mapa2DPersonagemRecargaY: p.y, mapa2DApontamentoRecargaAngulo: Number.isFinite(p.angulo) ? p.angulo : 0 };
+    }) : null;
     // NOVO (08/09/2026), pedido verbatim: "ao selecionar o 'Mapa 2D' no
     // dropdown, fica aparecendo a mensagem 'Não consegui carregar Planta
     // baixa', quando ou o canvas (id='map-canvas') não está visível ou a
@@ -5131,8 +5076,18 @@ const MapView = {
     // (nada mais chama `_setMode`) — mantidos só como referência
     // histórica comentada, ver logo abaixo de `_isFormaDraftPTool`.
     container.querySelectorAll('.map2d-ptool-btn').forEach((btn) => {
-      btn.onclick = () => this._setPTool(btn.dataset.ptool);
+      btn.onclick = () => this._ativarBotaoFerramenta(btn.dataset.ptool);
     });
+    // Distribuição dos botões da janela "Ferramentas" (js/botoeslayout.js): a edição (arrastar/remover/adicionar) fica
+    // nas "configurações 2D"; aqui só se lê o estado salvo.
+    if (window.BotoesLayout) {
+      this._ptoolsLayout = window.BotoesLayout.criar(Object.assign(this._ptoolsLayoutBase(), {
+        grid: () => this._container?.querySelector('#map-toolsidebar .map2d-toolsidebar-grid'),
+        htmlBotao: (t) => this._ptoolBtnHtml(t),
+        ligar: (g) => g.querySelectorAll('.map2d-ptool-btn').forEach((btn) => { btn.onclick = () => this._ativarBotaoFerramenta(btn.dataset.ptool); }),
+      }));
+      this._ptoolsLayout.renderizar();
+    }
     // "🧊 Novo Cubo 3D" (pedido do usuário, 28/08/2026 — ver comentário grande
     // junto do botão, acima, no HTML) — cria o objeto no centro da área
     // visível do 2D agora (mesma conta que o resto do app usa pra "centro da
@@ -5158,7 +5113,7 @@ const MapView = {
       // comentário lá), mas este gêmeo no 2D ficou pra trás — cada clique
       // aqui recriava o problema, por isso a camada "ficava surgindo a toda
       // hora" mesmo depois daquela correção anterior. Mesmo padrão dos
-      // outros criadores de elemento do 2D (ex.: addWall/addCamera/
+      // outros criadores de elemento do 2D (ex.: addWall/
       // addObject/addText mais abaixo neste arquivo): usa
       // `this._activeLayerId` (a camada ativa no momento da criação), nunca
       // um literal vazio.
@@ -5307,31 +5262,7 @@ const MapView = {
     // vez, ou fundindo automaticamente vários mapas antigos num só) e que
     // `ambienteAtualId` aponta pra ele.
     this._map = await DB.getOrCreateSingleMap();
-    Mapping.ensureNewFields(this._map); // mapas salvos antes desta versão não têm cameras[]/objects[]/layers[] ainda
-    // [15/09/2026 UTC] REMOVIDO — `_migrateLegacyCamerasParaOrbDeFoto()`
-    // existia desde 10/09/2026 (quando a ferramenta "Câmeras" da janela
-    // "Ferramentas" do mapa 2D foi unificada com "Orb de foto") e rodava
-    // AQUI, TODO mount() da tela, convertendo qualquer entrada de
-    // `map.cameras` num "Orb de foto" equivalente. Pedido verbatim desta
-    // rodada: "Há resquícios no código para manter compatibilidade.
-    // Remova todas as referências de duplicidade [...] Não considere
-    // compatibilidade com código legado." CAUSA RAIZ que tornava isto não
-    // só desnecessário mas ATIVAMENTE PERIGOSO: `map.cameras` deixou de
-    // ser exclusivo da ferramenta antiga — hoje é usado por um sistema
-    // 100% separado e ATIVO, as câmeras de vigilância (`Mapping.addCamera`
-    // chamado pela hotbar do "Ver em 3D", `cam.modeloVisual==='ps1'` em
-    // `js/engine3d.js`, e por `js/geradores-salas.js`). Como a migração
-    // convertia QUALQUER entrada de `map.cameras` indiscriminadamente, ela
-    // destruiria (convertendo pra "Orb de foto") câmeras de vigilância
-    // reais toda vez que o mapa 2D fosse aberto depois de uma ter sido
-    // criada no 3D — um bug real, não só duplicidade cosmética. Câmeras
-    // antigas (criadas pela ferramenta "Câmeras" já removida, antes de
-    // 10/09/2026) que ainda não tinham sido abertas nesta tela desde então
-    // simplesmente continuam sendo "Câmeras" normais — o painel/edição/
-    // exclusão de `map.cameras` (`_openCameraPanel`/`_hitTestCamera`,
-    // MANTIDOS) continuam funcionando para elas, só não migram mais
-    // sozinhas — sem perda de funcionalidade real, só sem o "resquício de
-    // compatibilidade" automático.
+    Mapping.ensureNewFields(this._map); // mapas salvos antes desta versão não têm objects[]/layers[] ainda
     // Pedido do usuário (22/08/2026): "Só pode haver coisas no mapa se
     // estiver em uma camada... porque cada camada tem itens e só pode haver
     // itens na grade associados a alguma camada" — cura, de uma vez, todo
@@ -5412,9 +5343,14 @@ const MapView = {
       }
       // [20/09/2026 UTC] NOVO (RODADA 223) -- "guardar apontamento da câmera do personagem": restaura
       // `_personagem2D.angulo` (só faz sentido no modo 'personagem', é o apontamento DO PERSONAGEM).
-      if (personagemR && cfgReload.mapa2DPersistirApontamentoPersonagem === true && Number.isFinite(cfgReload.mapa2DApontamentoRecargaAngulo)) {
+      if (cfgReload.mapa2DPersistirApontamentoPersonagem === true && Number.isFinite(cfgReload.mapa2DApontamentoRecargaAngulo)) {
         if (!this._personagem2D) this._personagem2D = { x: 0, y: 0, angulo: 0 };
         this._personagem2D.angulo = cfgReload.mapa2DApontamentoRecargaAngulo;
+      }
+      if (cfgReload.mapa2DPersistirApontamentoPersonagem === true && Number.isFinite(cfgReload.mapa2DPersonagemRecargaX) && Number.isFinite(cfgReload.mapa2DPersonagemRecargaY)) {
+        if (!this._personagem2D) this._personagem2D = { x: 0, y: 0, angulo: 0 };
+        this._personagem2D.x = cfgReload.mapa2DPersonagemRecargaX;
+        this._personagem2D.y = cfgReload.mapa2DPersonagemRecargaY;
       }
       if (mudouReload) { this._syncZoomSliderPosition(); this._updateBottombarMapa(); }
     } else {
@@ -5559,8 +5495,11 @@ const MapView = {
         // [20/09/2026 UTC] NOVO (RODADA 223) -- "guardar apontamento da câmera do personagem": só faz
         // sentido junto do modo 'personagem' (é o apontamento DO PERSONAGEM). `_personagem2D.angulo` é o
         // único "apontamento" rastreado pro boneco do Modo Navegação (sem pitch separado nesse campo).
-        if (personagemR && cfgP.mapa2DPersistirApontamentoPersonagem === true && this._personagem2D && Number.isFinite(this._personagem2D.angulo)) {
+        if (cfgP.mapa2DPersistirApontamentoPersonagem === true && this._personagem2D && Number.isFinite(this._personagem2D.angulo)) {
           patch.mapa2DApontamentoRecargaAngulo = this._personagem2D.angulo;
+        }
+        if (cfgP.mapa2DPersistirApontamentoPersonagem === true && this._personagem2D && Number.isFinite(this._personagem2D.x) && Number.isFinite(this._personagem2D.y)) {
+          patch.mapa2DPersonagemRecargaX = this._personagem2D.x; patch.mapa2DPersonagemRecargaY = this._personagem2D.y;
         }
         if (Object.keys(patch).length) MapConfig.set(patch).catch((e) => console.warn('Falha ao persistir posição/zoom/apontamento do mapa 2D pra sobreviver ao F5:', e));
       }
@@ -5569,6 +5508,7 @@ const MapView = {
     // ganhar tamanho de verdade (ver o guard de container 0×0 no início de
     // _mountPlanta), desliga o ResizeObserver pendente — senão ele ficaria
     // "vivo" tentando remontar um container que já nem é mais o atual.
+    if (this._stopAutoPose2D) { this._stopAutoPose2D(); this._stopAutoPose2D = null; }
     if (this._plantaPendingResizeObserver) { this._plantaPendingResizeObserver.disconnect(); this._plantaPendingResizeObserver = null; }
     this._running = false;
     // Desfaz o ancoramento no canto superior direito aplicado em
@@ -6628,7 +6568,7 @@ const MapView = {
     this._renderer.resize(); // garante canvas.width/height (device px) atualizados ANTES de calcular
     const canvas = this._renderer.canvas;
     if (!canvas.width || !canvas.height) return;
-    const hasContent = ['walls', 'points', 'trilha', 'cameras', 'objects', 'textos']
+    const hasContent = ['walls', 'points', 'trilha', 'objects', 'textos']
       .some((campo) => (this._map[campo] || []).length > 0);
     if (!hasContent) {
       if (!soPosicao) this._setZoomToStepIndex(this._nearestZoomStepIndex(100));
@@ -6677,7 +6617,7 @@ const MapView = {
   },
 
   /** Retângulo delimitador de TODOS os elementos "navegáveis" da grade — mesmos campos de
-   *  Mapping.recalcBounds (walls/points/trilha/cameras/objects/textos) MAIS os pinos de item
+   *  Mapping.recalcBounds (walls/points/trilha/objects/textos) MAIS os pinos de item
    *  do catálogo (this._map.itens) e de foto (this._map.fotos), que recalcBounds NÃO considera
    *  (só usados pro desenho dos pinos, ver _refreshItensNoMapa/_refreshFotosNoMapa) — pedido do
    *  usuário é enquadrar TUDO que está desenhado, incluindo esses pinos. Devolve null se não
@@ -6692,7 +6632,6 @@ const MapView = {
     (this._map.walls || []).forEach((w) => { consider(w.x1, w.y1); consider(w.x2, w.y2); });
     (this._map.points || []).forEach((p) => consider(p.x, p.y));
     (this._map.trilha || []).forEach((p) => consider(p.x, p.y));
-    (this._map.cameras || []).forEach((c) => consider(c.x, c.y));
     (this._map.objects || []).forEach((o) => consider(o.x, o.y));
     (this._map.textos || []).forEach((t) => consider(t.x, t.y));
     (this._map.itens || []).forEach((it) => consider(it.x, it.y));
@@ -6942,7 +6881,6 @@ const MapView = {
         kind: 'wall', id: chainWalls[0]?.id, chainIds,
       });
     });
-    (map.cameras || []).forEach((c) => out.push({ label: c.nome ? `📷 ${c.nome}` : '📷 Câmera', x: c.x, y: c.y, kind: 'camera', id: c.id }));
     (map.objects || []).forEach((o) => out.push({ label: o.nome ? `🧊 ${o.nome}` : '🧊 Objeto', x: o.x, y: o.y, kind: 'object', id: o.id }));
     (map.textos || []).forEach((t) => out.push({ label: t.content ? `📝 "${t.content}"` : '📝 Texto', x: t.x, y: t.y, kind: 'text', id: t.id }));
     (map.itens || []).forEach((it) => out.push({ label: it.label ? `📦 ${it.label}` : '📦 Item', x: it.x, y: it.y, kind: 'itemPin', id: it.id }));
@@ -6979,7 +6917,7 @@ const MapView = {
    *  "não está contando"). DECISÃO DE DESIGN (pro changelog): em vez de uma
    *  variável de contador separada (`this._gridItemCount`, incrementada/
    *  decrementada manualmente em CADA função de adicionar/remover algo da
-   *  grade — paredes, câmeras, objetos, textos, itens, fotos, cada uma com
+   *  grade — paredes, objetos, textos, itens, fotos, cada uma com
    *  vários pontos de entrada e desfazer/refazer próprios), preferi
    *  recalcular do zero a partir das listas AO VIVO (`_buildNavElementsList`,
    *  que já é a fonte de verdade usada por ◀/▶) — impossível dessincronizar
@@ -7492,16 +7430,16 @@ const MapView = {
    *  está aparecendo no rodapé da grade à esquerda (à direita de
    *  'X: — Y: —')." Ponto ÚNICO e centralizado que resolve "o que está
    *  selecionado agora no mapa 2D, com que tipo e nome" — cobre TODOS os
-   *  tipos selecionáveis (parede, porta, janela, câmera/fotopin, objeto
+   *  tipos selecionáveis (parede, porta, janela, fotopin, objeto
    *  genérico, texto), cada um com seu próprio campo de estado
    *  (`_selectedWallId`, `_selectedDoorId`, `_selectedWindowId`,
-   *  `_panelFotoPinId`/`_selectedCameraId`, `_selectedObjectId`,
+   *  `_panelFotoPinId`, `_selectedObjectId`,
    *  `_selectedTextId`) em vez de espalhar "if" por vários handlers de
    *  clique — qualquer código novo que precise saber "o que está
    *  selecionado" (não só o rodapé) pode chamar este mesmo método.
    *  Retorna `{ tipo, nome }` ou `null` se nada estiver selecionado. A
    *  ferramenta "Selecionar" (`_ptool === 'select'`) não é mais exigida:
-   *  os painéis de propriedade de parede/porta/janela/câmera/texto abrem
+   *  os painéis de propriedade de parede/porta/janela/texto abrem
    *  com ferramentas próprias (não com "Selecionar"), então exigir
    *  `_ptool==='select'` escondia o rodapé nesses casos — o campo de id
    *  correspondente já só fica setado enquanto aquele painel está aberto
@@ -7520,9 +7458,8 @@ const MapView = {
       const j = (this._map.janelas || []).find((x) => x.id === this._selectedWindowId);
       if (j) return { tipo: 'Janela', nome: j.nome || WINDOW_TYPES[j.tipo]?.label || '(sem nome)' };
     }
-    if (this._panelFotoPinId || this._selectedCameraId) {
-      const id = this._panelFotoPinId || this._selectedCameraId;
-      const f = (this._map.fotos || []).find((x) => x.id === id);
+    if (this._panelFotoPinId) {
+      const f = (this._map.fotos || []).find((x) => x.id === this._panelFotoPinId);
       if (f) return { tipo: 'Câmera', nome: f.nome || '(sem nome)' };
     }
     if (this._selectedTextId) {
@@ -7573,9 +7510,9 @@ const MapView = {
     // porém não está contando." — CAUSA RAIZ: este contador só somava
     // `this._map.itens` (só pinos de PATRIMÔNIO do catálogo) — mas os
     // botões ◀/▶ ao lado (`#bbm-nav-prev/-next`) navegam por uma lista bem
-    // mais ampla (`_buildNavElementsList()`: paredes/retas, câmeras,
+    // mais ampla (`_buildNavElementsList()`: paredes/retas,
     // objetos, textos, itens E fotos — ver lá) — colocar uma parede, um
-    // objeto, uma câmera ou um texto na grade nunca mexia neste número,
+    // objeto ou um texto na grade nunca mexia neste número,
     // dando a impressão de "quebrado" pra quem testava com qualquer coisa
     // além de um patrimônio de catálogo. Corrigido: agora conta a MESMA
     // lista que ◀/▶ navegam (ver _updateBbmItemCount), então qualquer
@@ -7648,11 +7585,11 @@ const MapView = {
     // objetos não está aparecendo no rodapé da grade à esquerda (à direita
     // de 'X: — Y: —')." CAUSA RAIZ: a implementação de 13/09/2026 só lia
     // `this._selectedObjectId` (objeto genérico do catálogo) — parede,
-    // porta, janela, câmera/fotopin e texto usam campos de estado
+    // porta, janela, fotopin e texto usam campos de estado
     // DIFERENTES (`_selectedWallId`, `_selectedDoorId`, `_selectedWindowId`,
-    // `_panelFotoPinId`/`_selectedCameraId`, `_selectedTextId` — ver
+    // `_panelFotoPinId`, `_selectedTextId` — ver
     // _openWallPanel/_openDoorPanel/_openWindowPanel/_openFotoPinPopover/
-    // _openCameraPanel/_openTextPanel), então clicar em qualquer um desses
+    // _openTextPanel), então clicar em qualquer um desses
     // outros tipos nunca preenchia o rodapé (o `if (obj)` nunca era
     // verdadeiro pra eles). Corrigido centralizando a resolução do "tipo +
     // nome" atualmente selecionado em `_resolverSelecaoParaRodape()` (ver
@@ -7907,11 +7844,11 @@ const MapView = {
     // 2) NOVO (07/09/2026), pedido verbatim: "Todos os objetos devem
     //    funcionar com as setas do teclado: 'Lápis', 'Parede', 'Porta',
     //    'Janela', 'Texto', 'Reta/Curva', cada uma das 'Formas', 'Trena',
-    //    'Traço guia', 'Orb de foto', 'Câmeras', 'Adicionar orb' [...],
+    //    'Traço guia', 'Orb de foto', 'Adicionar orb' [...],
     //    cada um dos 'Objetos' e o 'Novo cubo 3D'. Apenas o 'Retículo
     //    métrico' está funcionando atualmente." CAUSA RAIZ: esta função só
-    //    tinha ramos dedicados pra câmera/texto/objeto (via
-    //    `_selectedCameraId`/`_selectedTextId`/`_selectedObjectId`) — tudo
+    //    tinha ramos dedicados pra texto/objeto (via
+    //    `_selectedTextId`/`_selectedObjectId`) — tudo
     //    o mais que a ferramenta "Selecionar" marca (parede, porta, janela,
     //    pino de item/orb de patrimônio, orb de foto) fica só em
     //    `_toolSelection` (o Set "estilo Paint.NET" que o clique único
@@ -8002,7 +7939,7 @@ const MapView = {
           tocarPainel('fotoPin', id);
           return;
         }
-        // camera / text / object / porta+janela SOLTAS (sem parentWallId).
+        // text / object / porta+janela SOLTAS (sem parentWallId).
         const rawX = ref.ref.x + dx, rawY = ref.ref.y + dy;
         const newX = arredondarParaSnap(rawX), newY = arredondarParaSnap(rawY);
         const corrDx = (newX - rawX) + dx, corrDy = (newY - rawY) + dy;
@@ -8011,8 +7948,7 @@ const MapView = {
           patch.reticuloOrigemX = (ref.ref.reticuloOrigemX ?? ref.ref.x) + corrDx;
           patch.reticuloOrigemY = (ref.ref.reticuloOrigemY ?? ref.ref.y) + corrDy;
         }
-        if (kind === 'camera') Mapping.updateCamera(this._map, id, patch);
-        else if (kind === 'text') Mapping.updateText(this._map, id, patch);
+        if (kind === 'text') Mapping.updateText(this._map, id, patch);
         else if (kind === 'object') Mapping.updateObject(this._map, id, patch);
         else Object.assign(ref.ref, patch); // porta/janela soltas — sem Mapping.updateDoor/Window aqui pra não chamar recalcBounds 2x (já chamado abaixo)
         moveu = true;
@@ -8022,8 +7958,7 @@ const MapView = {
         Mapping.recalcBounds(this._map);
         this._saveMap();
         if (this._panelEl && panelKind && panelId) {
-          if (panelKind === 'camera') this._openCameraPanel((this._map.cameras || []).find((c) => c.id === panelId));
-          else if (panelKind === 'text') this._openTextPanel((this._map.textos || []).find((t) => t.id === panelId));
+          if (panelKind === 'text') this._openTextPanel((this._map.textos || []).find((t) => t.id === panelId));
           else if (panelKind === 'object') this._openObjectPanel((this._map.objects || []).find((o) => o.id === panelId));
           else if (panelKind === 'wall') this._openWallPanel((this._map.walls || []).find((w) => w.id === panelId));
           else if (panelKind === 'porta') this._openDoorPanel((this._map.portas || []).find((d) => d.id === panelId));
@@ -8037,13 +7972,12 @@ const MapView = {
     // 3) Fallback pra quando NADA está em `_toolSelection` mas ainda assim
     //    há uma ficha de propriedades aberta pra um elemento selecionado
     //    por um caminho que NÃO passa pela ferramenta "Selecionar" (ex.:
-    //    tocar numa câmera já existente com a ferramenta "Câmeras" ativa,
-    //    ou num orb de patrimônio com "Adicionar orb" ativa — ver
-    //    _onCanvasClick, ramos `this._mode === 'camera'`/`'itens'` — eles
-    //    abrem o painel/`_selectedCameraId`/`_selectedItemPinId` direto,
+    //    tocar num orb de patrimônio com "Adicionar orb" ativa — ver
+    //    _onCanvasClick, ramo `'itens'` — ele
+    //    abre o painel/`_selectedItemPinId` direto,
     //    sem nunca tocar em `_toolSelection`). Mesma lista de campos
     //    dedicados já existente (`_selectedWallId`/`_selectedDoorId`/
-    //    `_selectedWindowId`/`_selectedCameraId`/`_selectedTextId`/
+    //    `_selectedWindowId`/`_selectedTextId`/
     //    `_selectedObjectId`/`_selectedItemPinId`/`selectedFotoId`), cada
     //    um preenchido pelo respectivo `_open*Panel` (ver ali) e zerado por
     //    `_closePanel()` — então nunca há mais de um preenchido ao mesmo
@@ -8082,15 +8016,6 @@ const MapView = {
           Mapping.recalcBounds(this._map);
           this._saveMap();
           if (this._panelEl) isDoor ? this._openDoorPanel(el) : this._openWindowPanel(el);
-          return true;
-        }
-      }
-      if (this._selectedCameraId) {
-        const cam = (this._map.cameras || []).find((c) => c.id === this._selectedCameraId);
-        if (cam) {
-          Mapping.updateCamera(this._map, cam.id, { x: arredondarParaSnap(cam.x + dx), y: arredondarParaSnap(cam.y + dy) });
-          this._saveMap();
-          if (this._panelEl) this._openCameraPanel((this._map.cameras || []).find((c) => c.id === cam.id) || cam);
           return true;
         }
       }
@@ -8373,7 +8298,7 @@ const MapView = {
     Utils.toast('🖼️ Imagem pronta — arraste as alças para ajustar (Shift = proporcional), gire pelo orb, toque fora para concluir.', { duration: 5000 });
   },
 
-  /** Recortar/copiar a seleção atual (paredes/câmeras/objetos/textos/pinos
+  /** Recortar/copiar a seleção atual (paredes/objetos/textos/pinos
    *  de item, ver _collectSelectedRefs) pro clipboard interno (em memória —
    *  não usa o clipboard do sistema operacional). Pinos de item são um caso
    *  à parte: um item só pode ter UMA posição no mapa (mapaX/mapaY no
@@ -8423,7 +8348,7 @@ const MapView = {
           const m = await DB.getMap(mapId);
           if (m) {
             elSnapshots.forEach((s) => {
-              const arr = s.kind === 'wall' ? (m.walls ||= []) : s.kind === 'camera' ? (m.cameras ||= []) : s.kind === 'object' ? (m.objects ||= []) : s.kind === 'porta' ? (m.portas ||= []) : s.kind === 'janela' ? (m.janelas ||= []) : (m.textos ||= []);
+              const arr = s.kind === 'wall' ? (m.walls ||= []) : s.kind === 'object' ? (m.objects ||= []) : s.kind === 'porta' ? (m.portas ||= []) : s.kind === 'janela' ? (m.janelas ||= []) : (m.textos ||= []);
               arr.push({ ...s.data });
             });
             Mapping.recalcBounds(m);
@@ -8439,7 +8364,7 @@ const MapView = {
           const m = await DB.getMap(mapId);
           if (m) {
             const idsToRemove = new Set(elRefs.map((r) => r.id));
-            ['walls', 'cameras', 'objects', 'textos', 'portas', 'janelas'].forEach((k) => { m[k] = (m[k] || []).filter((x) => !idsToRemove.has(x.id)); });
+            ['walls', 'objects', 'textos', 'portas', 'janelas'].forEach((k) => { m[k] = (m[k] || []).filter((x) => !idsToRemove.has(x.id)); });
             Mapping.recalcBounds(m);
             await DB.saveMap(m);
           }
@@ -8450,7 +8375,7 @@ const MapView = {
     });
   },
 
-  /** Exclui a seleção atual (paredes/câmeras/objetos/textos/pinos de item) — pedido do
+  /** Exclui a seleção atual (paredes/objetos/textos/pinos de item) — pedido do
    *  usuário: pressionar DEL/Backspace com algo selecionado na grade deve excluir o que
    *  estiver selecionado. MESMA lógica de remoção de `_clipboardCutOrCopy('cut')` (pinos de
    *  item perdem a posição, os demais tipos somem de `this._map`), só que sem tocar no
@@ -8460,7 +8385,7 @@ const MapView = {
    *  excluir/cortar/colar) na hora de incluir 'porta'/'janela' nesses fluxos. */
   _mapArrForKind(map, kind) {
     return {
-      wall: map.walls, camera: map.cameras, object: map.objects, text: map.textos,
+      wall: map.walls, object: map.objects, text: map.textos,
       porta: map.portas, janela: map.janelas,
     }[kind];
   },
@@ -8509,7 +8434,6 @@ const MapView = {
     // painel de uma foto sendo excluída aqui nunca acontecia.
     const deletedKeys = new Set(refs.map((r) => `${r.kind}:${r.id}`));
     const openKey = this._selectedWallId ? `wall:${this._selectedWallId}`
-      : this._selectedCameraId ? `camera:${this._selectedCameraId}`
       : this._selectedObjectId ? `object:${this._selectedObjectId}`
       : this._selectedTextId ? `text:${this._selectedTextId}`
       : this._selectedDoorId ? `porta:${this._selectedDoorId}`
@@ -8588,7 +8512,7 @@ const MapView = {
           const m = await DB.getMap(mapId);
           if (m) {
             elSnapshots.forEach((s) => {
-              const arr = s.kind === 'wall' ? (m.walls ||= []) : s.kind === 'camera' ? (m.cameras ||= []) : s.kind === 'object' ? (m.objects ||= []) : s.kind === 'porta' ? (m.portas ||= []) : s.kind === 'janela' ? (m.janelas ||= []) : (m.textos ||= []);
+              const arr = s.kind === 'wall' ? (m.walls ||= []) : s.kind === 'object' ? (m.objects ||= []) : s.kind === 'porta' ? (m.portas ||= []) : s.kind === 'janela' ? (m.janelas ||= []) : (m.textos ||= []);
               arr.push({ ...s.data });
             });
             if (tracoSnapshots.length) { m.tracos2d = m.tracos2d || []; tracoSnapshots.forEach((t) => m.tracos2d.push({ ...t })); }
@@ -8610,7 +8534,7 @@ const MapView = {
           const m = await DB.getMap(mapId);
           if (m) {
             const idsToRemove = new Set(elRefs.map((r) => r.id));
-            ['walls', 'cameras', 'objects', 'textos', 'portas', 'janelas'].forEach((k) => { m[k] = (m[k] || []).filter((x) => !idsToRemove.has(x.id)); });
+            ['walls', 'objects', 'textos', 'portas', 'janelas'].forEach((k) => { m[k] = (m[k] || []).filter((x) => !idsToRemove.has(x.id)); });
             if (tracoSnapshots.length) { const tIds = new Set(tracoIds); m.tracos2d = (m.tracos2d || []).filter((t) => !tIds.has(t.id)); }
             if (medidaSnapshots.length) { const mIds = new Set(medidaIds); m.medidas2d = (m.medidas2d || []).filter((md) => !mIds.has(md.id)); }
             Mapping.recalcBounds(m);
@@ -8624,7 +8548,7 @@ const MapView = {
   },
 
   /** Cola o clipboard no ambiente atual, com um pequeno deslocamento (0.5m)
-   *  em relação à posição original — paredes/câmeras/objetos/textos ganham
+   *  em relação à posição original — paredes/objetos/textos ganham
    *  id novo de verdade (duplicata real); pinos de item recortados voltam
    *  pro mapa (é só um reposicionamento, o item continua único); pinos de
    *  item COPIADOS só colam se "duplicar itens ao colar?" estiver ligado
@@ -8678,11 +8602,6 @@ const MapView = {
         const w = Mapping.addWall(this._map, x1 + OFFSET, y1 + OFFSET, x2 + OFFSET, y2 + OFFSET, { ...rest, layerId });
         criados.push({ kind: 'wall', id: w.id });
         newSelection.add(`wall:${w.id}`);
-      } else if (entry.kind === 'camera') {
-        const { id: _id, x, y, criadoEm, ...rest } = entry.data;
-        const c = Mapping.addCamera(this._map, x + OFFSET, y + OFFSET, { ...rest, layerId, ativo3D: false });
-        criados.push({ kind: 'camera', id: c.id });
-        newSelection.add(`camera:${c.id}`);
       } else if (entry.kind === 'object') {
         const { id: _id, x, y, criadoEm, tipo, ...rest } = entry.data;
         const o = Mapping.addObject(this._map, x + OFFSET, y + OFFSET, tipo, { ...rest, layerId });
@@ -8731,7 +8650,7 @@ const MapView = {
           const m = await DB.getMap(mapId);
           if (m) {
             const idsToRemove = new Set(elCriados.map((c) => c.id));
-            ['walls', 'cameras', 'objects', 'textos', 'portas', 'janelas'].forEach((k) => { m[k] = (m[k] || []).filter((x) => !idsToRemove.has(x.id)); });
+            ['walls', 'objects', 'textos', 'portas', 'janelas'].forEach((k) => { m[k] = (m[k] || []).filter((x) => !idsToRemove.has(x.id)); });
             Mapping.recalcBounds(m);
             await DB.saveMap(m);
           }
@@ -8759,14 +8678,14 @@ const MapView = {
     // — ver comentário grande em `_ptoolBtnIsActive`: sem isto, o botão
     // "Objetos" deste seletor compacto também perdia o destaque azul ao
     // escolher Mesa/Coluna, mesmo consertado na janela "🧰 Ferramentas".
-    pop.innerHTML = this.PTOOLS.map((t) => `<button type="button" class="icon-btn sm map2d-ptool-btn ${this._ptoolBtnIsActive(t.id) ? 'active' : ''}" data-ptool="${t.id}" title="${t.title}">${t.icon}</button>`).join('');
+    pop.innerHTML = (this._ptoolsLayout ? this._ptoolsLayout.visiveis() : this.PTOOLS).map((t) => `<button type="button" class="icon-btn sm map2d-ptool-btn ${this._ptoolBtnIsActive(t.id) ? 'active' : ''}" data-ptool="${t.id}" title="${t.title}">${t.icon}</button>`).join('');
     document.body.appendChild(pop);
     const r = anchorBtn.getBoundingClientRect();
     pop.style.left = `${Math.round(r.left)}px`;
     pop.style.top = `${Math.round(r.bottom + 6)}px`;
     pop.querySelectorAll('button').forEach((btn) => {
       btn.onclick = () => {
-        this._setPTool(btn.dataset.ptool);
+        this._ativarBotaoFerramenta(btn.dataset.ptool);
         this._closeToolPicker();
       };
     });
@@ -9500,7 +9419,7 @@ const MapView = {
       // `null`, mesmo com a régua ligada.
       const cursorScreen = this._showRulers ? this._mouseScreen : null;
       const selectionBoundsWorld = this._showRulers ? this._computeSelectionWorldBoundsForRuler() : null;
-      this._renderer.render({ drawingPoints: this._drawingPoints, ghost, snapPreview, objectGhost, toolSelection, rectSelect, selectionRegions, lassoPreview, ellipsePreview, pencilPreview, curvePreview, curveEdit, curveHover, formaResizeHandles, formaDraft, textHandles, textCreateDraft, groupGizmo, paredeGhost, paredeJoin, doorWindowGhost: this._doorWindowGhost, cameraGhost: this._cameraGhost, fotoOrbGhost: this._fotoOrbGhost, personagem2D: this._navMode ? this._personagem2D : null, hoverEl: this._hoverEl, cursorScreen, selectionBoundsWorld });
+      this._renderer.render({ drawingPoints: this._drawingPoints, ghost, snapPreview, objectGhost, toolSelection, rectSelect, selectionRegions, lassoPreview, ellipsePreview, pencilPreview, curvePreview, curveEdit, curveHover, formaResizeHandles, formaDraft, textHandles, textCreateDraft, groupGizmo, paredeGhost, paredeJoin, doorWindowGhost: this._doorWindowGhost, fotoOrbGhost: this._fotoOrbGhost, personagem2D: this._navMode ? this._personagem2D : null, hoverEl: this._hoverEl, cursorScreen, selectionBoundsWorld });
       // NOVO (03/09/2026) — "Régua"/"Traço guia" da bandeja lateral (ver
       // _onMedida2DClique/_onTraco2DClique): desenhados numa passada PRÓPRIA,
       // por cima do quadro que Map2DRenderer.render acabou de terminar (o
@@ -9698,20 +9617,6 @@ const MapView = {
    *  método simplesmente não desenha pino nenhum até uma rodada futura (o
    *  "modal de vincular") ou um teste manual (ver Verificação, item g)
    *  preencherem o campo direto no banco. */
-  // [15/09/2026 UTC] REMOVIDA — `_migrateLegacyCamerasParaOrbDeFoto()`
-  // (existia desde 10/09/2026, chamada 1x por mount da Planta baixa,
-  // convertia toda entrada de `map.cameras` num "Orb de foto"/"Câmera"
-  // equivalente). Pedido verbatim: "Há resquícios no código para manter
-  // compatibilidade. Remova todas as referências de duplicidade [...] Não
-  // considere compatibilidade com código legado." Ver comentário grande
-  // no antigo call-site (dentro de `mount()`, procure "REMOVIDO" nesta
-  // mesma data) para a causa raiz completa — em resumo: `map.cameras`
-  // passou a ser usado ATIVAMENTE pelo sistema de câmeras de vigilância
-  // (hotbar 3D/`Mapping.addCamera`/`cam.modeloVisual==='ps1'`), então essa
-  // migração indiscriminada virou um risco real (converteria câmeras de
-  // vigilância de verdade pra "Orb de foto"), não só duplicidade
-  // cosmética.
-
   async _refreshFotosNoMapa() {
     if (!this._map) return;
     const fotos = await DB.getAllAmbientePhotos();
@@ -9744,7 +9649,7 @@ const MapView = {
         // alguém abrir o painel e mexer manualmente. `0` explícito (o
         // usuário desceu de propósito) continua sendo respeitado (`??` só
         // cai no padrão pra `null`/`undefined`, nunca pra `0`).
-        dirAngulo: f.mapaDirAngulo || 0, altura: f.mapaAltura ?? 1.6, rotPerp: f.mapaRotPerp || 0,
+        dirAngulo: f.mapaDirAngulo || 0, altura: f.mapaAltura ?? 1.6, rotPerp: f.mapaRotPerp || 0, roll: f.mapaRoll || 0,
         // [10/09/2026] RESTAURADO — campo tinha se perdido nesta cópia de
         // trabalho em relação a um backup mais completo do projeto (ver
         // comentário grande em js/mapview.js _openFotoPinWheel/cameraRoot e
@@ -9758,21 +9663,20 @@ const MapView = {
         // vir até aqui pro "ver através desta câmera" (js/view3d.js
         // _enterFotoCameraView) conseguir mostrar a foto semitransparente.
         dataUrl: f.dataUrl || null, thumbDataUrl: f.thumbDataUrl || null, vanishCam: f.mapaVanishCam || null,
-        // [10/09/2026] NOVO — pedido verbatim: "No objeto câmera e no 'orb
-        // da foto' deve ser possível definir as propriedades da câmera
-        // tanto no 2D quanto no 3D. São as mesmas do Blender." Ver
+        // [10/09/2026] NOVO — pedido verbatim: "No 'orb da foto' deve
+        // ser possível definir as propriedades da câmera tanto no 2D quanto
+        // no 3D. São as mesmas do Blender." Ver
         // _openFotoPinPopover (painel 2D, usa _camPropsFieldsetHtml/
-        // _wireCamPropsFieldset — MESMO fieldset da câmera "Câmeras", ver
-        // _openCameraPanel) e js/db.js (campo `mapaCamProps` no registro da
+        // _wireCamPropsFieldset) e js/db.js (campo `mapaCamProps` no registro da
         // AmbientePhoto, mesma convenção de `mapaVanishCam` acima).
         camProps: f.mapaCamProps || null,
         // [10/09/2026] NOVO — pedido verbatim: "Na janela de propriedades
         // do 'Orb de foto', devem estar presentes os botões da parte de
-        // scripts da janela de propriedades do objeto 'Câmeras', pois deve
+        // scripts da janela de propriedades dos objetos, pois deve
         // ser scriptável também." Mesmo sistema genérico de componentes
         // (`entity.components`, ver js/components.js Components.
-        // ensureComponents) já usado por parede/porta/janela/texto/objeto/
-        // câmera — persistido como `mapaComponents` no registro da
+        // ensureComponents) já usado por parede/porta/janela/texto/objeto —
+        // persistido como `mapaComponents` no registro da
         // AmbientePhoto (mesma convenção de `mapaCamProps`/`mapaVanishCam`
         // acima, já que só faz sentido pra uma foto QUANDO ela está no mapa).
         components: f.mapaComponents || [],
@@ -9815,7 +9719,7 @@ const MapView = {
     }
   },
 
-  /** Recarrega o mapa inteiro (paredes/câmeras/objetos, não só os pinos de
+  /** Recarrega o mapa inteiro (paredes/objetos, não só os pinos de
    *  item — ver _refreshMapaIfShowing acima, que só cobre pinos) do banco,
    *  MAS só se o ambiente atualmente aberto for o mesmo `mapId` — usado pelo
    *  desfazer/refazer de mutações de mapa feitas fora de `this._map` direto
@@ -10136,7 +10040,6 @@ const MapView = {
     'insert-points': '🖊️ Inserir pontos',
     'insert-lines': '📏 Inserir retas',
     'delete': '🗑️ Apagar',
-    'camera': '📷 Câmeras',
     'objects': '🪑 Objetos', // ícone próprio (não mais 🧱, o mesmo de "Parede") — pedido do usuário, 25/08/2026
     'itens': '📍 Adicionar orb', // pedido do usuário (03/09/2026): renomeado de "Itens" pra "Adicionar orb", ícone de alfinete vermelho igual ao já usado nesse conceito em outros lugares do mapa 2D (ver #map2d-drawer-orb/ambientephotos.js)
   },
@@ -10808,7 +10711,7 @@ const MapView = {
   /** Seleciona (ou substitui a seleção por) um elemento — ver ferramenta
    *  'select'. `add` (Ctrl pressionado) alterna esse elemento dentro da
    *  seleção já existente, em vez de substituir tudo por ele sozinho.
-   *  Chave composta "kind:id" (kind: 'itemPin'|'wall'|'camera'|'object'|
+   *  Chave composta "kind:id" (kind: 'itemPin'|'wall'|'object'|
    *  'text') — a seleção não é mais só de pinos de item, ver
    *  _hitTestDrawable/_recomputeToolSelectionFromRegions/_collectSelectedRefs. */
   /** Foto rápida do estado de seleção atual (_selectionRegions + _toolSelection)
@@ -11035,8 +10938,8 @@ const MapView = {
       const w = (this._map?.walls || []).find((x) => x.id === id);
       return w ? { kind, id, ref: w, startX1: w.x1, startY1: w.y1, startX2: w.x2, startY2: w.y2 } : null;
     }
-    if (kind === 'camera' || kind === 'object' || kind === 'text') {
-      const arr = kind === 'camera' ? this._map?.cameras : kind === 'object' ? this._map?.objects : this._map?.textos;
+    if (kind === 'object' || kind === 'text') {
+      const arr = kind === 'object' ? this._map?.objects : this._map?.textos;
       const el = (arr || []).find((x) => x.id === id);
       if (!el) return null;
       // BUG CORRIGIDO (05/09/2026), pedido verbatim: "Se eu clicar e arrastar
@@ -11239,12 +11142,12 @@ const MapView = {
         out.push({ kind, id, ref: el2, x: pos.x, y: pos.y, angulo: attached ? (el2.anguloExtra || 0) : (el2.angulo || 0), attached });
         return;
       }
-      const arr = kind === 'itemPin' ? this._map.itens : kind === 'camera' ? this._map.cameras
+      const arr = kind === 'itemPin' ? this._map.itens
         : kind === 'object' ? this._map.objects : this._map.textos;
       const el = (arr || []).find((x) => x.id === id);
       if (!el || skip(el.layerId)) return;
       const it = { kind, id, ref: el, x: el.x, y: el.y };
-      if (kind === 'camera' || kind === 'object' || kind === 'text') it.angulo = el.angulo || 0;
+      if (kind === 'object' || kind === 'text') it.angulo = el.angulo || 0;
       if (kind === 'object') { it.largura = el.largura; it.profundidade = el.profundidade; it.raio = el.raio; }
       if (kind === 'text') it.tamanho = el.tamanho;
       out.push(it);
@@ -11314,7 +11217,7 @@ const MapView = {
   },
 
   /** Todos os elementos "selecionáveis por região" do mapa (pinos de
-   *  item/câmeras/objetos/textos/paredes) — parede usa o PONTO MÉDIO do
+   *  item/objetos/textos/paredes) — parede usa o PONTO MÉDIO do
    *  trecho como representante (uma parede longa cruzando a borda de uma
    *  região só entra na seleção se o meio dela cair dentro — aproximação
    *  simples, consistente com como o resto do app já trata paredes em
@@ -11366,7 +11269,6 @@ const MapView = {
     // acima: pino de foto agora também é "selecionável" (marcação por área/
     // Ctrl+A, ferramenta Selecionar), igual pino de item.
     (this._map?.fotos || []).forEach((f) => { if (this._layerVisible(f.layerId) && this._layerInteractable(f.layerId)) cb('fotoPin', f.id, f.x, f.y); });
-    (this._map?.cameras || []).forEach((c) => { if (this._layerVisible(c.layerId) && this._layerInteractable(c.layerId)) cb('camera', c.id, c.x, c.y); });
     (this._map?.objects || []).forEach((o) => { if (this._layerVisible(o.layerId) && this._layerInteractable(o.layerId)) cb('object', o.id, o.x, o.y); });
     (this._map?.textos || []).forEach((t) => { if (this._layerVisible(t.layerId) && this._layerInteractable(t.layerId)) cb('text', t.id, t.x, t.y); });
     (this._map?.walls || []).forEach((w) => { if (this._layerVisible(w.layerId) && this._layerInteractable(w.layerId)) cb('wall', w.id, (w.x1 + w.x2) / 2, (w.y1 + w.y2) / 2); });
@@ -11629,9 +11531,6 @@ const MapView = {
         } else if (hitSel.kind === 'janela') {
           const j = (this._map.janelas || []).find((j) => j.id === hitSel.id);
           if (j) { this._openWindowPanel(j); this._ensureObjPanelVisivelECentralizado(); return; }
-        } else if (hitSel.kind === 'camera') {
-          const c = (this._map.cameras || []).find((c) => c.id === hitSel.id);
-          if (c) { this._openCameraPanel(c); this._ensureObjPanelVisivelECentralizado(); return; }
         } else if (hitSel.kind === 'itemPin') {
           const it = (this._map.itens || []).find((it) => it.id === hitSel.id);
           if (it) { this._openItemPinPanel(it); this._ensureObjPanelVisivelECentralizado(); return; }
@@ -11650,8 +11549,8 @@ const MapView = {
   // do disco (já estava sem nenhuma referência ativa). O SensorTracker em
   // mapping.js continua (não depende de OCR/reconhecimento), só sem modo
   // assistido ativo na tela para usá-lo. Isto NÃO afeta o "Ver em 3D"
-  // (câmeras posicionadas manualmente — App.openView3D / view3d.js /
-  // engine3d.js), que é um recurso separado e continua funcionando normal.
+  // (App.openView3D / view3d.js / engine3d.js), que é um recurso separado
+  // e continua funcionando normal.
 
   /** Abre a tela cheia de "Fotos do ambiente" (ver ambientephotos.js) — foto(s)
    *  do lugar com zoom/pan e orbs ligados a itens. Não mexe no mapa (paredes/
@@ -11787,13 +11686,11 @@ const MapView = {
       context: '2d',
       onSelect: (kind, entity) => {
         if (kind === 'wall') this._openWallPanel(entity);
-        else if (kind === 'camera') this._openCameraPanel(entity);
         else if (kind === 'object') this._openObjectPanel(entity);
         else if (kind === 'itemPin') this._openItemPinPanel(entity);
       },
       onDelete: async (kind, entity) => {
         if (kind === 'wall') { Mapping.removeWall(this._map, entity.id); await this._saveMap(); }
-        else if (kind === 'camera') { Mapping.removeCamera(this._map, entity.id); await this._saveMap(); }
         else if (kind === 'object') { Mapping.removeObject(this._map, entity.id); await this._saveMap(); }
         else if (kind === 'itemPin') { await this._removeItemPin(entity.id); }
         await this._refreshMapaIfShowing();
@@ -12039,11 +11936,6 @@ const MapView = {
         if (this._selectedWallId && chain.includes(this._selectedWallId)) this._closePanel();
         Utils.toast(chain.length > 1 ? `Polilinha apagada (${chain.length} trechos).` : 'Reta apagada.', { type: 'ok' });
         label = chain.length > 1 ? 'apagar polilinha' : 'apagar reta';
-      } else if (hitDraw.kind === 'camera') {
-        Mapping.removeCamera(this._map, hitDraw.id);
-        if (this._selectedCameraId === hitDraw.id) this._closePanel();
-        Utils.toast('Câmera apagada.', { type: 'ok' });
-        label = 'apagar câmera';
       } else if (hitDraw.kind === 'object') {
         Mapping.removeObject(this._map, hitDraw.id);
         if (this._selectedObjectId === hitDraw.id) this._closePanel();
@@ -12102,35 +11994,6 @@ const MapView = {
       });
       return;
     }
-
-    // [13/09/2026] REMOVIDO — ramo `this._mode === 'camera'` (criava um
-    // objeto "Câmeras" novo via `Mapping.addCamera` ao clicar no mapa
-    // vazio). Investigação desta rodada (fusão "Câmera"/"Orb de câmera",
-    // pedido verbatim: "Todas as duplicidades e códigos que não são mais
-    // usados devem ser removidos do projeto") confirmou que este ramo está
-    // 100% MORTO/inalcançável: nada no projeto chama `this._setMode('camera')`
-    // — o botão antigo "#map-mode-camera" já tinha sido removido do HTML
-    // numa rodada anterior (10/09/2026, ver comentário grande em mount(),
-    // "'Câmera' agora é só mais um _ptool comum"), e nenhum outro ponto do
-    // código (grep confirmado em toda `js/`) seta `this._mode` pra
-    // `'camera'`. A ferramenta "📷 Câmera" da barra 2D usa `this._ptool ===
-    // 'foto-orb'` (outro campo, outro caminho — ver PTOOLS acima), não
-    // `this._mode`. `_hitTestCamera`/`_openCameraPanel`/`Mapping.addCamera`
-    // foram MANTIDOS (não removidos) — mas [15/09/2026 UTC, ATUALIZADO] o
-    // motivo NÃO é mais dado legado: `_migrateLegacyCamerasParaOrbDeFoto`
-    // (a "rede de segurança para dados legados" citada aqui originalmente)
-    // foi REMOVIDA nesta mesma data (pedido verbatim: "Remova todas as
-    // referências de duplicidade [...] Não considere compatibilidade com
-    // código legado" — ver comentário grande em `mount()`). `map.cameras`/
-    // `_hitTestCamera`/`_openCameraPanel`/`Mapping.addCamera` continuam
-    // vivos porque viraram o sistema REAL e ATIVO de câmeras de
-    // vigilância — criadas pela hotbar do "Ver em 3D" (`Mapping.addCamera`
-    // direto, ver view3d.js) e pelos geradores automáticos de sala
-    // (`js/geradores-salas.js`), com aparência opcional "PS1"
-    // (`cam.modeloVisual==='ps1'`, `js/engine3d.js`) — não uma duplicata
-    // de "Orb de foto" nenhuma. Câmeras antigas (criadas pela ferramenta
-    // 2D já removida, antes de 10/09/2026) continuam aparecendo/editáveis/
-    // excluíveis por este MESMO caminho, só não migram mais sozinhas.
 
     if (this._ptool === 'objects') { // [14/09/2026 UTC] unificado — 'objects' agora é _ptool de verdade
       // Colocar um objeto novo NÃO deve interagir com os que já estão na
@@ -12543,14 +12406,11 @@ const MapView = {
       return;
     }
 
-    // Modo observação (nenhuma ferramenta ativa): tocar numa câmera abre a
-    // foto associada a ela (atalho), se houver; tocar num pino de FOTO
+    // Modo observação (nenhuma ferramenta ativa): tocar num pino de FOTO
     // (Parte 5) abre essa foto direto (mesmo visualizador de sempre); tocar
     // num objeto associado a um item abre a ficha desse item (mesmo
     // atalho); senão, o comportamento de sempre — tocar num item (pino)
     // abre a ficha de detalhes dele.
-    const hitCam = this._hitTestCamera(sx, sy, 18);
-    if (hitCam) { await this._openCameraPhoto(hitCam); return; }
     // ATUALIZADO (03/09/2026), pedido do usuário: "o menu de propriedades
     // da foto deve aparecer com dois cliques" — o clique ÚNICO no orb não
     // abre mais nada aqui (virou o início do arraste pra mover o orb, ver
@@ -12693,17 +12553,8 @@ const MapView = {
     } else if (this._doorWindowGhost) {
       this._doorWindowGhost = null;
     }
-    // Ferramenta "Câmeras" (modo antigo, não um _ptool — ver _mode): mesma
-    // ideia do ghost de porta/janela acima, pedido do usuário: "a câmera,
-    // no 2D, deve ter um ghost também. Mostrando exatamente como ficaria em
-    // caso se clicasse na posição do cursor do mouse".
-    if (this._mouseScreen && this._mode === 'camera' && this._map) {
-      this._cameraGhost = this._computeCameraGhost(this._mouseScreen.x, this._mouseScreen.y);
-    } else if (this._cameraGhost) {
-      this._cameraGhost = null;
-    }
     // [09/09/2026] Ferramenta "Orb de foto" — mesma ideia do ghost de
-    // Câmeras logo acima (ver comentário grande em _fotoOrbGhost/
+    // porta/janela acima (ver comentário grande em _fotoOrbGhost/
     // _computeFotoOrbGhost).
     if (this._mouseScreen && this._mode === 'view' && this._ptool === 'foto-orb' && this._map) {
       this._fotoOrbGhost = this._computeFotoOrbGhost(this._mouseScreen.x, this._mouseScreen.y);
@@ -12733,8 +12584,8 @@ const MapView = {
   /** Qual elemento (se algum) ganha o contorno tracejado de hover agora —
    *  restrito à(s) ferramenta(s)/modo(s) onde clicar/arrastar um elemento é
    *  de fato a interação principal, e ao(s) TIPO(s) de elemento que essa
-   *  ferramenta/modo realmente considera (ex.: modo "Câmeras" só liga pra
-   *  câmeras — tocar numa parede ali não faz nada, então não faz sentido
+   *  ferramenta/modo realmente considera (ex.: a ferramenta "Objetos" só liga
+   *  pra objetos — tocar numa parede ali não faz nada, então não faz sentido
    *  destacar uma). Ferramentas de desenho puro (lápis/laço/elipse/conta-
    *  gotas/mão) e a ferramenta Reta/Curva (que já tem seu próprio hover —
    *  ver _curveHoverChain) ficam de fora. Formas com um rascunho em
@@ -12745,9 +12596,7 @@ const MapView = {
     if (this._draggingObject || this._draggingFotoPin || this._draggingItemPin || this._draggingMedida2DVertex || this._draggingTraco2DVertex || this._draggingMedida2DBody || this._draggingTraco2DBody || this._draggingText || this._formaResizeDrag || this._formaDraftDrag
       || this._wallChainDrag || this._curveHandleDrag || this._moveSelDrag || this._moveRegionDrag || this._groupDrag) return null;
     const { x: sx, y: sy } = this._mouseScreen;
-    // [14/09/2026 UTC] unificado — 'camera' é _mode MORTO (virou o _ptool
-    // 'foto-orb' há tempos, ver comentário grande mais acima no arquivo);
-    // 'objects'/'itens'/'apagar' agora são _ptool de verdade, então
+    // [14/09/2026 UTC] unificado — 'objects'/'itens'/'apagar' agora são _ptool de verdade, então
     // `this._mode` nunca mais sai de 'view' e o guard final abaixo
     // (`this._mode !== 'view'`) nunca mais bloqueia nada.
     if (this._ptool === 'objects') {
@@ -12788,12 +12637,10 @@ const MapView = {
     }
     if (!this._ptool) {
       // Modo observação (sem ferramenta ativa) — mesmos atalhos de
-      // _onCanvasClick: câmera com foto, pino de foto (Parte 5), objeto
+      // _onCanvasClick: pino de foto (Parte 5), objeto
       // associado a item, pino de item. Objeto SEM item associado não abre
       // nada num clique aqui, então não hover nele (evitaria sugerir uma
       // interação que não existe).
-      const hitCam = this._hitTestCamera(sx, sy, 18);
-      if (hitCam) return { kind: 'camera', id: hitCam.id };
       const hitFoto = this._hitTestFotoPin(sx, sy, 18);
       if (hitFoto) return { kind: 'fotoPin', id: hitFoto.id };
       const hitObjLinked = this._hitTestObject(sx, sy, 18);
@@ -12952,7 +12799,7 @@ const MapView = {
       return this._hoverEl ? 'grab' : 'default';
     }
 
-    // [14/09/2026 UTC] unificado — 'insert-points'/'insert-lines'/'camera'
+    // [14/09/2026 UTC] unificado — 'insert-points'/'insert-lines'
     // são _mode MORTOS (nada mais os seta); 'delete'/'objects'/'itens'
     // viraram _ptool de verdade, e `this._mode` nunca mais sai de 'view'.
     if (this._ptool === 'apagar') return this._hoverEl ? 'not-allowed' : 'default';
@@ -15442,12 +15289,6 @@ const MapView = {
       const d = this._distToSegment(sx, sy, a.x, a.y, b.x, b.y);
       if (d < bestD) { bestD = d; best = { kind: 'wall', id: w.id }; }
     });
-    (this._map.cameras || []).forEach((c) => {
-      if (!this._layerVisible(c.layerId) || !onActiveLayer(c.layerId)) return;
-      const s = this._renderer.worldToScreen(c.x, c.y);
-      const d = Math.hypot(s.x - sx, s.y - sy);
-      if (d < bestD) { bestD = d; best = { kind: 'camera', id: c.id }; }
-    });
     // BUG CORRIGIDO (03/09/2026), pedido verbatim do usuário: "Deve dar para
     // mover o objeto de foto... porém, atualmente, nem hover destaca quando
     // passa o cursor do mouse por cima." Causa raiz: `_hitTestDrawable` (usada
@@ -15559,25 +15400,10 @@ const MapView = {
     return best;
   },
 
-  _hitTestCamera(sx, sy, thresholdPx = 16) {
-    if (!this._map) return null;
-    let best = null, bestD = thresholdPx;
-    (this._map.cameras || []).forEach((c) => {
-      if (!this._layerVisible(c.layerId)) return;
-      // NOVO (03/09/2026) — ver _layerInteractable (opção "Método de
-      // interação de camadas" em Configurações 2D).
-      if (!this._layerInteractable(c.layerId)) return;
-      const s = this._renderer.worldToScreen(c.x, c.y);
-      const d = Math.hypot(s.x - sx, s.y - sy);
-      if (d < bestD) { bestD = d; best = c; }
-    });
-    return best;
-  },
-
   /** BUG CORRIGIDO (03/09/2026), pedido verbatim do usuário: "No mapa 2D,
    *  o 'isolado por camada' ainda não está funcionando. Nem hover, nem
    *  mover deve funcionar de outras camadas, só a camada atual." Causa
-   *  raiz: `_hitTestObject`/`_hitTestCamera`/`_hitTestFotoPin` (e
+   *  raiz: `_hitTestObject`/`_hitTestFotoPin` (e
    *  `_hitTestDrawable`, ferramenta Selecionar) já respeitavam
    *  `_layerVisible`/`_layerInteractable` (ver "Método de interação de
    *  camadas", implementado antes) — mas os PINOS DE ITEM (patrimônios,
@@ -15598,7 +15424,7 @@ const MapView = {
     return hit;
   },
 
-  /** Mesma ideia de _hitTestCamera acima, só que pros pinos de FOTO (Parte
+  /** Mesma ideia de _hitTestObject, só que pros pinos de FOTO (Parte
    *  5, `this._map.fotos` — ver _refreshFotosNoMapa). ATUALIZADO (03/09/2026)
    *  — pedido do usuário: "O orb de foto também deve pertencer a uma
    *  camada." Fotos agora TÊM `layerId` (ver _refreshFotosNoMapa/
@@ -17290,23 +17116,8 @@ const MapView = {
     return { isDoor, attached: !!attach, baseObj, pos, ...fake };
   },
 
-  /** Prévia ("ghost") da ferramenta Câmeras — mesmo espírito de
-   *  _computeDoorWindowGhost acima (pedido do usuário: "a câmera, no 2D,
-   *  deve ter um ghost também. Mostrando exatamente como ficaria em caso se
-   *  clicasse na posição do cursor do mouse"). Câmera nasce sempre SOLTA
-   *  (não existe encaixe em parede pra ela, ao contrário de porta/janela),
-   *  então o ghost é só a posição do cursor com os MESMOS valores padrão de
-   *  `Mapping.addCamera`. Devolve `null` sobre uma câmera já existente (um
-   *  toque ali abre o painel dela, não cria uma nova). */
-  _computeCameraGhost(sx, sy) {
-    if (!this._map) return null;
-    if (this._hitTestCamera(sx, sy)) return null;
-    const world = this._renderer.screenToWorld(sx, sy);
-    return { x: world.x, y: world.y, angulo: 0, fov: Math.PI / 3, piso: 0, fotoId: null, ativo3D: false };
-  },
-
   /** [09/09/2026] Prévia ("ghost") da ferramenta "Orb de foto" seguindo o
-   *  cursor — MESMO padrão de `_computeCameraGhost`/`_computeDoorWindowGhost`
+   *  cursor — MESMO padrão de `_computeDoorWindowGhost`
    *  acima: null em cima de um orb já existente (o clique ali abriria o
    *  painel dele, não criaria um novo — ver `_onCanvasClick`,
    *  `_ptool === 'foto-orb'`), senão a posição no mundo onde um clique
@@ -17412,7 +17223,7 @@ const MapView = {
       // vínculo abriu a foto).
       // ATUALIZADO (03/09/2026) — mesmo furo pro modo "vincular ITEM ao mapa"
       // (ver _itemPlacementId), que agora também usa cruz fixa + confirmação.
-      // [14/09/2026 UTC] unificado — 'insert-points'/'insert-lines'/'camera'
+      // [14/09/2026 UTC] unificado — 'insert-points'/'insert-lines'
       // são _mode MORTOS; 'delete'/'objects'/'itens' viraram _ptool de verdade.
       const ferramentaAtiva = !this._photoPlacementId && !this._itemPlacementId && !this._mapPositionPickerActive
         && (this._ptool === 'apagar' || this._ptool === 'objects' || this._ptool === 'itens');
@@ -17552,10 +17363,10 @@ const MapView = {
     }, { passive: false });
   },
 
-  // ---------- Painel de propriedades flutuante (câmera/parede/objeto/pino) ----------
+  // ---------- Painel de propriedades flutuante (parede/objeto/pino) ----------
   _openPanel(html) {
     // Só remove o painel/elemento DOM anterior — NÃO usa _closePanel() aqui
-    // (que também zera _selectedWallId/_selectedCameraId/_selectedObjectId/
+    // (que também zera _selectedWallId/_selectedObjectId/
     // _selectedItemPinId/_selectedTextId): cada _open*Panel chamador já seta
     // o id selecionado correspondente ANTES de chamar _openPanel, e usar
     // _closePanel() aqui apagava esse valor na mesma hora em que era
@@ -17838,7 +17649,7 @@ const MapView = {
     // (só oculto) pro reuso. [14/09/2026 UTC] O que MUDOU nesta rodada
     // (RODADA 47, "continue a refatoração até concluí-la desta vez"): as
     // APIs de reuso (`_wallPanelApi`/`_doorPanelApi`/`_windowPanelApi`/
-    // `_textPanelApi`/`_fotoPinPanelApi`/`_cameraPanelApi`/`_objectPanelApi`)
+    // `_textPanelApi`/`_fotoPinPanelApi`/`_objectPanelApi`)
     // e os elementos cacheados por tipo (`_wallPanelEl` etc.) NÃO são mais
     // zerados aqui — antes (RODADA 45/46) precisavam ser, porque o único
     // sinal de "qual painel está aberto" era `this._panelEl` (destruído a
@@ -17852,7 +17663,6 @@ const MapView = {
     this._panelFotoPinId = null;
     if (this._fotoPinOutsideHandler) { document.removeEventListener('pointerdown', this._fotoPinOutsideHandler); this._fotoPinOutsideHandler = null; }
     this._selectedWallId = null;
-    this._selectedCameraId = null;
     this._selectedObjectId = null;
     this._selectedItemPinId = null;
     this._selectedTextId = null;
@@ -17864,7 +17674,6 @@ const MapView = {
     this.selectedFotoId = null;
     if (this._renderer) {
       this._renderer.selectedWallId = null;
-      this._renderer.selectedCameraId = null;
       this._renderer.selectedObjectId = null;
       this._renderer.selectedItemId = null;
       this._renderer.selectedTextId = null;
@@ -17917,9 +17726,9 @@ const MapView = {
   // poder ter scripts (portas, janelas, etc.)." Antes, só `map.objects`
   // (painel `_openObjectPanel`) tinha o bloco de script (`scriptCode`/
   // `scriptAtivarAoClicar`/`scriptAtivarAoAproximar`/`scriptRaioAproximacao`
-  // — ver js/scripting.js) — parede/porta/janela/câmera/texto não tinham
+  // — ver js/scripting.js) — parede/porta/janela/texto não tinham
   // NENHUMA UI de script nos seus painéis (`_openWallPanel`/`_openDoorPanel`/
-  // `_openWindowPanel`/`_openCameraPanel`/`_openTextPanel`, todos abaixo),
+  // `_openWindowPanel`/`_openTextPanel`, todos abaixo),
   // então os campos nem existiam pra esses tipos, mesmo o motor de scripts
   // (js/scripting.js) sendo genérico o bastante pra rodar em cima de
   // QUALQUER objeto — só faltava a UI. Estas 2 funções generalizam o MESMO
@@ -17932,26 +17741,21 @@ const MapView = {
   // `salvar(patch)`. Ver view3d.js `_tryPick`/`_updateScriptProximityTriggers`
   // pra a extensão dos 2 gatilhos automáticos (clicar/aproximar) pra estes
   // mesmos tipos — sem isso, os campos salvariam mas nunca disparariam nada
-  // no 3D pra parede/porta/janela/câmera/texto.
-  // ---------- [10/09/2026] NOVO — pedido verbatim: "No objeto câmera e no
-  // 'orb da foto' deve ser possível definir as propriedades da câmera tanto
+  // no 3D pra parede/porta/janela/texto.
+  // ---------- [10/09/2026] NOVO — pedido verbatim: "No 'orb da foto' deve ser possível definir as propriedades da câmera tanto
   // no 2D quanto no 3D. São as mesmas do Blender." Fieldset genérico
   // (MESMO padrão de `_scriptFieldsetHtml`/`_wireScriptFieldset` acima:
   // idPrefix único por chamador, `onSave(props, fovDeg)` decide como
-  // persistir) — usado por `_openCameraPanel` (objeto "Câmeras", campos
-  // FLAT direto no objeto) e pelo painel do orb de foto (campos dentro de
+  // persistir) — usado pelo painel do orb de foto (campos dentro de
   // um único `mapaCamProps`, ver ambientephotos/mapview `_openFotoPinPopover`
   // e `Mapping`/`DB.saveAmbientePhoto`) — o 3D (js/view3d.js
-  // `_enterCameraOrbView`/`_camOrbFovDeg`) e o motor (js/engine3d.js
+  // `_enterFotoCameraView`/`_fotoCamFovFor`) e o motor (js/engine3d.js
   // `setFov`/`setClipPlanes`) leem exatamente estes MESMOS nomes de campo,
   // então os dois painéis (2D e 3D, ver também a aba "Propriedades" do
   // objeto selecionado no 3D) nunca divergem — uma única fonte de verdade
-  // por câmera/orb. Distância focal (mm) e FOV (°) ficam sincronizados nos
+  // por orb. Distância focal (mm) e FOV (°) ficam sincronizados nos
   // dois sentidos (mesmo comportamento de Blender Lens > Focal
-  // Length/Field of View), usando `PerspMatchMath.fovDegFromFocalLength`/
-  // `focalLengthFromFovDeg` (js/perspmatch-math.js — matemática de câmera
-  // já existente/validada da ferramenta "Camera Match" original, reaproveitada
-  // aqui em vez de duplicada). DOF é guardado fielmente mas NÃO renderizado
+  // Length/Field of View), usando as funções de conversão do próprio painel. DOF é guardado fielmente mas NÃO renderizado
   // (o motor 3D deste app não tem passe de pós-processamento de profundidade
   // de campo ainda — aviso explícito na UI abaixo, em vez de esconder os
   // campos ou fingir que funcionam). Clipping (near/far) afeta de verdade o
@@ -18148,10 +17952,7 @@ const MapView = {
     let curResY = Math.round(props.resolutionY ?? 1080);
     // [15/09/2026] NOVO -- pedido verbatim: "Uma seção chamada 'Corte',
     // botão para 'Início', por padrão, 0.1. E botão para 'Fim', por
-    // padrão, 100." Defaults 0.1/100 (NÃO os 0.1/1000 usados pela extinta
-    // `_migrateLegacyCamerasParaOrbDeFoto` — função removida em
-    // 15/09/2026 UTC, ver `mount()` — este é o default de UI pedido nesta
-    // rodada, um número diferente por coincidência de nomenclatura).
+    // padrão, 100." Defaults 0.1/100.
     let curClipStart = Number.isFinite(props.clipStartM) ? props.clipStartM : 0.1;
     let curClipEnd = Number.isFinite(props.clipEndM) ? props.clipEndM : 100;
     const salvar = () => onSave({ fov: (curFovDeg * Math.PI) / 180, resolutionX: curResX, resolutionY: curResY, clipStartM: curClipStart, clipEndM: curClipEnd });
@@ -18277,7 +18078,7 @@ const MapView = {
     };
     // [11/09/2026] NOVO — pedido verbatim: "Ao carregar uma foto, a câmera
     // deve assumir a resolução da foto. A resolução da imagem carregada na
-    // câmera deve aparecer." Quem chama (`_openCameraPanel`/painel do orb
+    // câmera deve aparecer." Quem chama (painel do orb
     // de foto) usa este método quando a foto associada termina de
     // carregar/é trocada — atualiza os campos, persiste e mostra o texto
     // informativo com o tamanho da foto.
@@ -19518,233 +19319,6 @@ const MapView = {
     };
   },
 
-  // ---------- Painel: câmera (direção/FOV/posição/andar/foto associada) ----------
-  // [14/09/2026 UTC] MIGRADO (RODADA 47) — pedido verbatim: "continue a
-  // refatoração até concluí-la desta vez." Mesmo padrão de card persistente
-  // dos outros 4 tipos (parede/porta/janela/texto): `buildHtml`+`wire`
-  // separados, `panel._` reconstrói o CONTEÚDO inteiro preservando o
-  // elemento externo (`this._cameraPanelEl`), reaproveitado mesmo depois de
-  // um fechar de verdade (ver `_closePanel`/`_hideOrRemovePanel`). RISCO
-  // ESPECÍFICO deste painel (documentado no pedido): tem um bloco
-  // ASSÍNCRONO (carrega a prévia da foto associada e, dentro dele, decodifica
-  // a imagem de verdade num `<img>` invisível pra descobrir a resolução real
-  // — ver IIFE no fim de `wire`). Como agora o elemento `panel` PERMANECE no
-  // DOM (`isConnected===true`) mesmo só oculto/fechado, o antigo guard
-  // `if (!panel.isConnected) return` (usado só pra abortar se o painel foi
-  // fechado enquanto a Promise/img.onload ainda corriam) já NÃO basta —
-  // ele deixaria essas duas callbacks tardias escreverem por cima da prévia
-  // ERRADA se, nesse meio tempo, o MESMO elemento tiver sido reaproveitado
-  // pra outra câmera (troca de instância sem fechar, ou reabertura de outra
-  // câmera depois de fechado). Corrigido comparando também
-  // `panel.dataset.entityId` com o id da câmera que a callback pertence —
-  // só aplica o resultado se ainda for a câmera certa. As duas chamadas
-  // internas que antes recarregavam o painel do zero via
-  // `this._openCameraPanel(fresh)` (ativar/desativar 3D, trocar foto) agora
-  // chamam `this._cameraPanelApi.refresh(fresh)` diretamente — evita o
-  // guard de reuso no topo (que só reconstrói se o id mudou) e preserva a
-  // posição arrastada do painel, mesmo padrão já usado por
-  // "Cor padrão"/"Soltar da parede" em `_openWallPanel`/`_openDoorPanel`.
-  _openCameraPanel(cam) {
-    this._selectedCameraId = cam.id;
-    this._renderer.selectedCameraId = cam.id;
-    if (this._cameraPanelEl?.isConnected) {
-      if (this._cameraPanelEl.dataset.entityId !== String(cam.id)) this._cameraPanelApi.refresh(cam);
-      this._showPersistentPanel(this._cameraPanelEl);
-      return;
-    }
-    const buildHtml = (cam) => {
-      const grausAngulo = Math.round((cam.angulo || 0) * 180 / Math.PI);
-      return `
-      <div class="map-panel-head"><b>📷 Câmera</b><button type="button" class="icon-btn sm map-panel-close" title="Fechar">✕</button></div>
-      <label class="map-panel-field"><span>Nome</span><input type="text" id="cam-nome" value="${Utils.escapeHtml(cam.nome || '')}"></label>
-      <label class="map-panel-field"><span>Direção (° em relação ao eixo X)</span><input type="number" step="1" id="cam-angulo" value="${grausAngulo}"></label>
-      <label class="map-panel-field"><span>Posição X (m) <span class="map-panel-axis-arrow" title="Sentido em que o eixo X aumenta seus valores">→</span></span><input type="number" step="0.1" id="cam-x" value="${cam.x.toFixed(2)}"></label>
-      <label class="map-panel-field"><span>Posição Z (m) <span class="map-panel-axis-arrow" title="Sentido em que este eixo aumenta seus valores (para baixo no mapa 2D)">↓</span></span><input type="number" step="0.1" id="cam-y" value="${cam.y.toFixed(2)}"></label>
-      <label class="map-panel-field"><span>Andar / piso</span><input type="number" step="1" id="cam-piso" value="${cam.piso || 0}"></label>
-      <div class="map-panel-photo" id="cam-foto-preview">${cam.fotoId ? 'Carregando prévia…' : 'Nenhuma foto associada.'}</div>
-      ${this._camPropsFieldsetHtml('cam', cam)}
-      ${this._scriptFieldsetHtml('cam', cam)}
-      ${this._historicoFieldsetHtml('cam', cam)}
-      <div class="map-panel-actions">
-        <button class="btn secondary sm" id="cam-foto-trocar">🖼️ ${cam.fotoId ? 'Trocar foto' : 'Associar foto'}</button>
-        <button class="btn ${cam.ativo3D ? '' : 'secondary'} sm" id="cam-ver3d" title="Usa a posição e direção desta câmera como ponto de partida ao abrir a visualização 3D — só uma câmera pode estar ativa por vez.">${cam.ativo3D ? '🎥 Câmera ativa para o 3D ✓' : '🎥 Ver em 3D a partir desta câmera'}</button>
-        <!-- [10/09/2026] NOVO — pedido verbatim: "com um 'orb de câmera' deve
-             dar para ver através dele [...] deve ser possível continuar
-             interagindo com o mapa do mesmo jeito que antes." Diferente do
-             botão acima (só marca a câmera pra "Ver em 3D" começar a partir
-             dela): este JÁ abre o 3D e entra travado na visão desta câmera —
-             ver View3D._enterCameraOrbView/js/view3d.js. -->
-        <button class="btn sm" id="cam-ver3d-travado" title="Abre 'Ver em 3D' e trava a câmera do personagem na pose calibrada desta câmera, com a foto associada (se houver) sobreposta como guia de correspondência — como 'ver através da câmera' no Blender.">👁️ Ver em 3D através desta câmera</button>
-        <button class="btn danger sm" id="cam-excluir">🗑️ Excluir câmera</button>
-      </div>
-    `;
-    };
-    const panel = this._openPanel(buildHtml(cam));
-    panel.dataset.panelType = 'cam';
-    panel.dataset.persistCard = 'true';
-    panel.dataset.entityId = String(cam.id);
-    this._cameraPanelEl = panel;
-    const wire = (cam) => {
-      panel.querySelector('.map-panel-close').onclick = () => this._closePanel();
-      const salvarCampo = (patch) => { Mapping.updateCamera(this._map, cam.id, patch); this._saveMap(); };
-      this._wireScriptFieldset(panel, 'cam', cam, salvarCampo);
-      this._wireHistoricoFieldset(panel, 'cam', cam, salvarCampo);
-      // [11/09/2026] CORRIGIDO — `_wireCamPropsFieldset` mudou de assinatura
-      // nesta mesma rodada (painel de câmera reformulado: "apague todas as
-      // propriedades [...] deixe apenas a resolução"): `onSave` agora recebe
-      // só `props` (já com `fov`/`resolutionX`/`resolutionY` dentro — não tem
-      // mais "Proporção de tela" nem os campos antigos de lente/sensor), não
-      // mais `(props, fovDeg)` separados — este call site ainda esperava a
-      // forma antiga (`fovDeg` undefined chamaria `NaN * Math.PI/180`,
-      // quebrando o FOV salvo). Guarda a API devolvida (`camPropsApi`) pra
-      // poder chamar `setResolutionFromPhoto` quando uma foto for carregada —
-      // ver bloco assíncrono de prévia da foto, logo abaixo.
-      const camPropsApi = this._wireCamPropsFieldset(panel, 'cam', cam, (props) => salvarCampo(props));
-      // NOVO (07/09/2026), pedido verbatim: "...'Câmeras'... devem ter
-      // nomes... editável ou acessível depois."
-      panel.querySelector('#cam-nome').oninput = (e) => salvarCampo({ nome: e.target.value });
-      panel.querySelector('#cam-angulo').oninput = (e) => salvarCampo({ angulo: (parseFloat(e.target.value) || 0) * Math.PI / 180 });
-      panel.querySelector('#cam-x').oninput = (e) => salvarCampo({ x: parseFloat(e.target.value) || 0 });
-      panel.querySelector('#cam-y').oninput = (e) => salvarCampo({ y: parseFloat(e.target.value) || 0 });
-      panel.querySelector('#cam-piso').oninput = (e) => salvarCampo({ piso: parseInt(e.target.value, 10) || 0 });
-      // [10/09/2026] NOVO — ver comentário grande no HTML do botão acima.
-      // `View3D` é acessado direto via `window` (mesmo padrão já usado por
-      // app.js `window.View3D?._camera`) — marca a intenção ANTES de navegar
-      // (consumida em View3D.mount(), ver `this._pendingEnterCamOrbId` lá).
-      panel.querySelector('#cam-ver3d-travado').onclick = async () => {
-        if (typeof window.View3D !== 'undefined') window.View3D._pendingEnterCamOrbId = cam.id;
-        await App.openView3D(this._map.id);
-      };
-      panel.querySelector('#cam-ver3d').onclick = () => {
-        const jaAtiva = !!cam.ativo3D;
-        Mapping.setCamera3DAtiva(this._map, jaAtiva ? null : cam.id);
-        this._saveMap();
-        this._renderer?.render?.();
-        const fresh = (this._map.cameras || []).find((c) => c.id === cam.id) || cam;
-        this._cameraPanelApi.refresh(fresh);
-        Utils.toast(jaAtiva ? 'Esta câmera não define mais a perspectiva do 3D.' : 'Câmera ativa para o 3D ✓ — "Ver em 3D" agora começa a partir dela.', { type: 'ok' });
-      };
-      panel.querySelector('#cam-excluir').onclick = () => {
-        if (this._elLayerLocked(cam.layerId)) { Utils.toast('🔒 Esta câmera está numa camada bloqueada.', { type: 'warn' }); return; }
-        Mapping.removeCamera(this._map, cam.id);
-        this._saveMap();
-        this._closePanel();
-        Utils.toast('Câmera excluída.', { type: 'warn' });
-      };
-      panel.querySelector('#cam-foto-trocar').onclick = async () => {
-        const fotoId = await this._pickPhotoForCamera();
-        if (fotoId === undefined) return; // cancelado — não muda nada
-        salvarCampo({ fotoId: fotoId || null });
-        const fresh = (this._map.cameras || []).find((c) => c.id === cam.id);
-        this._cameraPanelApi.refresh(fresh || cam);
-      };
-      (async () => {
-        const camIdDaChamada = cam.id;
-        const el = panel.querySelector('#cam-foto-preview');
-        if (!cam.fotoId || !el) return;
-        const photo = await DB.getAmbientePhoto(cam.fotoId);
-        // [14/09/2026 UTC] AJUSTADO (RODADA 47) — ver comentário grande no
-        // topo de `_openCameraPanel`: `panel.isConnected` sozinho não basta
-        // mais (o elemento persiste oculto), então também confere se o
-        // painel ainda está mostrando ESTA MESMA câmera antes de aplicar o
-        // resultado tardio da Promise.
-        if (!panel.isConnected || panel.dataset.entityId !== String(camIdDaChamada)) return;
-        el.innerHTML = photo ? `<img src="${photo.thumbDataUrl || photo.dataUrl}" alt="">` : 'Foto associada não encontrada (pode ter sido excluída).';
-        // [11/09/2026] NOVO — pedido verbatim: "Ao carregar uma foto, a câmera
-        // deve assumir a resolução da foto" + "A resolução da imagem carregada
-        // na câmera deve aparecer." O objeto `photo` salvo no banco não guarda
-        // a resolução original (só `dataUrl`/`thumbDataUrl`, ver
-        // Utils.resizeImage) — descobre a resolução carregando a imagem de
-        // verdade num `<img>` invisível (`naturalWidth/Height`, a resolução
-        // REAL do arquivo decodificado, não afetada pelo tamanho de exibição
-        // do CSS) a partir do `dataUrl` de resolução plena (não o `thumbDataUrl`,
-        // que já foi reduzido pra 220px). `camPropsApi.setResolutionFromPhoto`
-        // (ver `_wireCamPropsFieldset`) atualiza os campos Resolução X/Y, o
-        // texto "📷 Foto carregada: ...px" e já salva (`onSave`).
-        if (photo && photo.dataUrl && camPropsApi?.setResolutionFromPhoto) {
-          const img = new Image();
-          img.onload = () => {
-            // Mesmo cuidado acima — o painel pode ter trocado de câmera
-            // (ou fechado de verdade e sido reaberto com OUTRA câmera)
-            // enquanto a imagem ainda decodificava.
-            if (!panel.isConnected || panel.dataset.entityId !== String(camIdDaChamada)) return;
-            camPropsApi.setResolutionFromPhoto(img.naturalWidth, img.naturalHeight);
-          };
-          img.src = photo.dataUrl;
-        }
-      })();
-    };
-    wire(cam);
-    this._cameraPanelApi = {
-      refresh: (novaCam) => {
-        this._selectedCameraId = novaCam.id;
-        this._renderer.selectedCameraId = novaCam.id;
-        panel.dataset.entityId = String(novaCam.id);
-        panel.innerHTML = buildHtml(novaCam);
-        wire(novaCam);
-      },
-    };
-  },
-
-  /** Escolhe a origem (fotos deste ambiente, ou a galeria com as de TODOS os
-   *  ambientes) e depois a foto em si, pra associar a uma câmera. Devolve o id
-   *  escolhido, `null` pra remover a associação, ou `undefined` se cancelado
-   *  (nesse caso quem chamou não deve mudar nada). */
-  async _pickPhotoForCamera() {
-    const origem = await Utils.showChoiceModal({
-      title: 'Associar foto à câmera',
-      message: 'De onde vem a foto?',
-      choices: [
-        { value: 'ambiente', label: `📍 Fotos deste ambiente (${this._displayName(this._map)})` },
-        { value: 'galeria', label: '🖼️ Todas as fotos (galeria geral)', secondary: true },
-        { value: 'remover', label: 'Remover foto associada', secondary: true, danger: true },
-        { value: 'cancelar', label: 'Cancelar', secondary: true },
-      ],
-    });
-    if (!origem || origem === 'cancelar') return undefined;
-    if (origem === 'remover') return null;
-    const fotos = origem === 'ambiente' ? await DB.getPhotosByAmbiente(this._map.id) : await DB.getAllAmbientePhotos();
-    if (!fotos.length) { Utils.toast('Nenhuma foto encontrada.', { type: 'warn' }); return undefined; }
-    return this._pickPhotoFromList(fotos);
-  },
-
-  _pickPhotoFromList(fotos) {
-    return new Promise((resolve) => {
-      const modal = document.createElement('div');
-      modal.className = 'modal-backdrop';
-      modal.innerHTML = `
-        <div class="modal-sheet">
-          <div class="handle"></div>
-          <h3 style="margin-top:0">Escolha a foto</h3>
-          <div class="map-photo-pick-grid">
-            ${fotos.map((p) => `
-              <button type="button" class="map-photo-pick-item" data-id="${p.id}" title="${Utils.escapeHtml(p.nome || 'Sem nome')}">
-                <img src="${p.thumbDataUrl || p.dataUrl}" alt="">
-                <span>${Utils.escapeHtml(p.nome || 'Sem nome')}</span>
-              </button>`).join('')}
-          </div>
-          <button class="btn secondary block" id="map-photo-pick-cancel" style="margin-top:10px">Cancelar</button>
-        </div>`;
-      document.body.appendChild(modal);
-      let resolved = false;
-      const finish = (v) => { if (resolved) return; resolved = true; modal.remove(); resolve(v); };
-      modal.querySelector('#map-photo-pick-cancel').onclick = () => finish(undefined);
-      modal.addEventListener('mousedown', (e) => { if (e.target === modal) finish(undefined); });
-      modal.querySelectorAll('.map-photo-pick-item').forEach((b) => { b.onclick = () => finish(b.dataset.id); });
-    });
-  },
-
-  /** Abre a foto associada a uma câmera (atalho do modo observação) — a foto
-   *  pode ser de OUTRO ambiente (escolhida pela galeria geral), então busca o
-   *  ambiente dono dela antes de abrir a tela de Fotos. */
-  async _openCameraPhoto(cam) {
-    if (!cam.fotoId) { Utils.toast('Esta câmera não tem foto associada. Entre no modo 📷 Câmeras para associar uma.', { type: 'warn' }); return; }
-    const photo = await DB.getAmbientePhoto(cam.fotoId);
-    if (!photo) { Utils.toast('A foto associada a esta câmera não foi encontrada (pode ter sido excluída).', { type: 'warn' }); return; }
-    const owningMap = photo.ambienteId === this._map.id ? this._map : (await DB.getMap(photo.ambienteId)) || this._map;
-    await AmbientePhotos.open(owningMap, { startPhotoId: photo.id });
-  },
-
   /** Toque num pino de FOTO na planta (Parte 5, `this._map.fotos` — ver
    *  _hitTestFotoPin/_refreshFotosNoMapa) — abria essa foto direto no
    *  visualizador de sempre (AmbientePhotos). MANTIDO como atalho interno
@@ -19969,8 +19543,7 @@ const MapView = {
     // abertura) quanto depois de anexar uma foto nova (ver
     // #fotopin-anexar-file onchange, logo abaixo) — sem precisar fechar/
     // reabrir o painel pra refletir a mudança.
-    // [14/09/2026 UTC] AJUSTADO (RODADA 47) — ver comentário grande no topo
-    // de `_openCameraPanel` sobre o mesmo risco: agora que `panel` PERSISTE
+    // [14/09/2026 UTC] AJUSTADO (RODADA 47) — agora que `panel` PERSISTE
     // no DOM mesmo fechado/oculto (só some se removido de vez, o que não
     // acontece mais pros tipos migrados), `panel.isConnected` sozinho não
     // garante mais que o resultado tardio de uma Promise/`img.onload`
@@ -19990,10 +19563,9 @@ const MapView = {
       if (img) { img.classList.toggle('hidden', !temFoto); if (temFoto) img.src = photo.thumbDataUrl || photo.dataUrl || ''; }
       if (btn) btn.classList.toggle('hidden', temFoto);
       if (hint) hint.classList.toggle('hidden', !temFoto);
-      // [11/09/2026] NOVO — mesmo pedido do `_openCameraPanel` ("Ao carregar
-      // uma foto, a câmera deve assumir a resolução da foto" + "A resolução
-      // da imagem carregada [...] deve aparecer"), aplicado aqui também
-      // (chamada tanto na 1ª abertura do painel quanto logo depois de
+      // [11/09/2026] NOVO — "Ao carregar uma foto, a câmera deve assumir a
+      // resolução da foto" + "A resolução da imagem carregada [...] deve
+      // aparecer" (chamada tanto na 1ª abertura do painel quanto logo depois de
       // anexar uma foto nova, ver `#fotopin-anexar-file onchange` abaixo) —
       // `camPropsApi` só existe a partir de `_wireCamPropsFieldset`, mais
       // abaixo neste mesmo método, mas essa chamada aqui em cima só roda de
@@ -20010,7 +19582,41 @@ const MapView = {
       }
     };
     DB.getAmbientePhoto(pin.id).then((photo) => atualizarThumbOuBotaoAnexar(photo));
-    panel.querySelector('#fotopin-anexar').onclick = () => panel.querySelector('#fotopin-anexar-file').click();
+    // [20/09/2026] Anexar foto: escolher entre um arquivo do aparelho e uma foto já tirada em Mapa → Fotos (com botão de retorno).
+    panel.querySelector('#fotopin-anexar').onclick = async () => {
+      const origem = await Utils.showChoiceModal({
+        title: 'Anexar foto à câmera',
+        message: 'De onde vem a foto?',
+        choices: [
+          { value: 'arquivo', label: '📁 Escolher um arquivo do aparelho' },
+          { value: 'fotos', label: '📷 Usar uma foto já tirada (Mapa → Fotos)' },
+          { value: 'cancelar', label: 'Cancelar', secondary: true },
+        ],
+      });
+      if (!origem || origem === 'cancelar') return;
+      if (origem === 'arquivo') { panel.querySelector('#fotopin-anexar-file').click(); return; }
+      const displayAntes = panel.style.display;
+      panel.style.display = 'none';
+      const volta = () => { if (panel.isConnected) { panel.style.display = displayAntes || ''; try { WindowManager.focus(panel); } catch (e) { /* ignora */ } } };
+      AmbientePhotos.open(this._map, {
+        returnToLabel: 'as propriedades da câmera',
+        onExit: volta,
+        pickPhoto: async (idEscolhido) => {
+          volta();
+          try {
+            const escolhida = await DB.getAmbientePhoto(idEscolhido);
+            const atual = await DB.getAmbientePhoto(pinIdDaAbertura);
+            if (!escolhida || !atual) return;
+            await DB.saveAmbientePhoto({ ...atual, dataUrl: escolhida.dataUrl, thumbDataUrl: escolhida.thumbDataUrl || escolhida.dataUrl });
+            atualizarThumbOuBotaoAnexar({ ...atual, dataUrl: escolhida.dataUrl, thumbDataUrl: escolhida.thumbDataUrl || escolhida.dataUrl });
+            Utils.toast('Foto anexada ✓', { type: 'ok' });
+          } catch (err) {
+            console.error('Falha ao anexar foto de Mapa → Fotos:', err);
+            Utils.toast('Não foi possível anexar esta foto: ' + (err?.message || err), { type: 'danger', duration: 5000 });
+          }
+        },
+      });
+    };
     panel.querySelector('#fotopin-anexar-file').onchange = async (e) => {
       const file = e.target.files?.[0];
       e.target.value = '';
@@ -20088,22 +19694,20 @@ const MapView = {
       const v = parseFloat(String(e.target.value).replace(',', '.'));
       salvarOrientacao({ mapaAltura: isNaN(v) ? 0 : v });
     };
-    // [10/09/2026] NOVO — pedido verbatim: "No objeto câmera e no 'orb da
-    // foto' deve ser possível definir as propriedades da câmera tanto no 2D
-    // quanto no 3D. São as mesmas do Blender." MESMO fieldset/lógica de
-    // `_openCameraPanel` (ver _camPropsFieldsetHtml/_wireCamPropsFieldset,
-    // acima no arquivo) — persistido como um único objeto `mapaCamProps` no
-    // registro da AmbientePhoto (mesma convenção de `mapaVanishCam`).
+    // [10/09/2026] NOVO — pedido verbatim: "No 'orb da foto' deve ser
+    // possível definir as propriedades da câmera tanto no 2D quanto no 3D.
+    // São as mesmas do Blender." Ver _camPropsFieldsetHtml/
+    // _wireCamPropsFieldset, acima no arquivo — persistido como um único
+    // objeto `mapaCamProps` no registro da AmbientePhoto (mesma convenção de `mapaVanishCam`).
     // Guarda a API devolvida (`camPropsApi`) — usada logo abaixo, em
     // `atualizarThumbOuBotaoAnexar`, pra "Ao carregar uma foto, a câmera deve
-    // assumir a resolução da foto" (mesmo pedido do `_openCameraPanel`, ver
-    // comentário grande lá).
+    // assumir a resolução da foto".
     const camPropsApi = this._wireCamPropsFieldset(panel, 'fotopin', pin.camProps || {}, (props) => salvarOrientacao({ mapaCamProps: props }));
     // [10/09/2026] NOVO — pedido verbatim: "Na janela de propriedades do
     // 'Orb de foto', devem estar presentes os botões da parte de scripts
-    // da janela de propriedades do objeto 'Câmeras', pois deve ser
+    // da janela de propriedades dos objetos, pois deve ser
     // scriptável também." MESMO sistema genérico de componentes usado por
-    // parede/porta/janela/texto/objeto/câmera (ver _scriptFieldsetHtml/
+    // parede/porta/janela/texto/objeto (ver _scriptFieldsetHtml/
     // _wireScriptFieldset acima) — o patch chega como `{components:[...]}`
     // (chave "crua", igual todo outro objeto usa), adaptado aqui pro campo
     // `mapaComponents` da AmbientePhoto (mesma convenção de `mapaCamProps`
@@ -22584,7 +22188,10 @@ const MapView = {
     if (!this._container || this._acessarModelosOverlay) return;
     const overlay = document.createElement('div');
     overlay.className = 'map2d-acessarmodelos-confinado';
-    overlay.style.cssText = 'position:absolute; inset:0; z-index:80; background:#0a0d11;';
+    overlay.style.cssText = 'position:absolute; inset:0; z-index:80; background:#0a0d11; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;';
+    // A rolagem tem de ficar SÓ com a lista: sem isto o zoom do mapa (roda do mouse no container) e
+    // outros ouvintes de baixo capturavam o evento e a tela parecia travada.
+    ['wheel', 'touchmove'].forEach((ev) => overlay.addEventListener(ev, (e) => e.stopPropagation(), { passive: true }));
     this._container.appendChild(overlay);
     this._acessarModelosOverlay = overlay;
     if (window.Modelos3DView?.mount) {
@@ -22715,7 +22322,8 @@ const MapView = {
     // injeção delas NESTE painel específico foi removida.
     // Garante tipos customizados/importados e a lista de objetos excluídos carregados antes de montar a grade.
     try { await window.Modelos3DView?.ensureCustomTypesRegistered?.(); } catch (e) { /* segue */ }
-    const catalogoBase = window.Icons?.mapObjectCatalog?.() || [];
+    const catalogoBase = (window.Icons?.mapObjectCatalog?.() || []).concat(window.Icons?.ferramentaCatalog?.() || []);
+    const chavesFerramenta = new Set((window.Icons?.ferramentaCatalog?.() || []).map((o) => o.key));
     // [RODADA 128] Modo de organização da grade + ordem "Livre" salva —
     // pedido do usuário verbatim (dropdown "Organizar:" logo abaixo do
     // título, com 3 opções, persistido pra carregar igual da próxima vez).
@@ -22787,6 +22395,8 @@ const MapView = {
     };
 
     const escolherTipo = (key) => {
+      // Porta/Janela/Piso/Parede: o item do catálogo apenas ativa a ferramenta própria (mesmo botão da janela "Ferramentas").
+      if (chavesFerramenta.has(key)) { this._setPTool(key); return; }
       if (this._formaDraft) this._finalizeFormaDraft();
       this._objectStampType = key;
       marcarAtivo();
@@ -24673,7 +24283,7 @@ const MapView = {
 
   // ---------- Camadas (🗂️ botão na barra de cima) ----------
   // Escopo desta primeira versão (combinado como razoável dado o tamanho da
-  // suíte inteira): paredes/pontos/câmeras/objetos/textos podem ser
+  // suíte inteira): paredes/pontos/objetos/textos podem ser
   // organizados em camadas nomeadas, com visibilidade (afeta o que é
   // DESENHADO — ver Map2DRenderer.render/_layerVisible) e bloqueio (impede
   // ARRASTAR/APAGAR o elemento, e impede CRIAR elemento novo enquanto a
@@ -24911,12 +24521,12 @@ const MapView = {
     return idxAlvo >= idxAtual; // índice maior = mais abaixo na pilha
   },
 
-  /** Acha o elemento layerável (parede/ponto/câmera/objeto/texto) por
+  /** Acha o elemento layerável (parede/ponto/objeto/texto) por
    *  tipo+id — usado só pra checar `.layerId` antes de apagar pelo modo
-   *  "Apagar" antigo (ver _onCanvasClick, kind 'point'/'wall'/'camera'/
+   *  "Apagar" antigo (ver _onCanvasClick, kind 'point'/'wall'/
    *  'object'/'text'). */
   _findMapEl(kind, id) {
-    const campo = { point: 'points', wall: 'walls', camera: 'cameras', object: 'objects', text: 'textos', porta: 'portas', janela: 'janelas' }[kind];
+    const campo = { point: 'points', wall: 'walls', object: 'objects', text: 'textos', porta: 'portas', janela: 'janelas' }[kind];
     if (!campo || !this._map) return null;
     return (this._map[campo] || []).find((el) => el.id === id) || null;
   },
@@ -25689,7 +25299,7 @@ const MapView = {
     }, 'adicionar camada');
     // Pedido do usuário (22/08/2026): "Quando uma camada é excluída, tudo
     // que estiver na grade através dela também deve ser excluído" —
-    // Mapping.removeLayer já cuida de paredes/pontos/câmeras/objetos/
+    // Mapping.removeLayer já cuida de paredes/pontos/objetos/
     // textos/portas/janelas (ver lá), mas os PINOS DE PATRIMÔNIO
     // (`map.itens`, ver _refreshItensNoMapa) não vivem dentro do `map` —
     // são registros à parte no banco (mapaLayerId), então precisam ser
@@ -25701,7 +25311,7 @@ const MapView = {
     // mutados diretamente no lugar por Mapping.removeLayer, então uma cópia
     // rasa (`{...map}` ou DB.getMap, que faz o mesmo) acabaria "seguindo" a
     // mutação em vez de preservar o estado de antes.
-    const PLANTA_CAMPOS = ['walls', 'points', 'trilha', 'cameras', 'objects', 'textos', 'portas', 'janelas', 'layers', 'bounds'];
+    const PLANTA_CAMPOS = ['walls', 'points', 'trilha', 'objects', 'textos', 'portas', 'janelas', 'layers', 'bounds'];
     const plantaSnapshot = () => JSON.parse(JSON.stringify(
       Object.fromEntries(PLANTA_CAMPOS.map((c) => [c, this._map[c]])),
     ));
@@ -26442,10 +26052,8 @@ const MapView = {
     // altura, e `_refreshFotosNoMapa`/engine3d.js tratavam isso como `0`
     // (altura do PRÓPRIO piso, ver `baseY` em engine3d.js) — ou seja, todo
     // pino de foto recém-vinculado nascia cravado no chão em 3D, igual um
-    // objeto "afundado". Câmeras nunca tiveram esse problema porque usam uma
-    // constante fixa (`ALTURA_CAMERA = 1.6`, ver engine3d.js) somada sempre,
-    // não um campo editável com padrão zero. Aqui, mesma ideia: só define
-    // 1,6m (mesma altura-padrão da câmera, uma altura de "olho" plausível)
+    // objeto "afundado". Aqui, define
+    // 1,6m (uma altura de "olho" plausível)
     // quando a foto ainda não tem NENHUMA altura salva (`?? `, não `||` —
     // preserva um `0` que o usuário tenha definido de propósito depois; só
     // essa 1ª vinculação nunca teve chance de gravar nada ainda). Reposicionar
@@ -26682,9 +26290,8 @@ const MapView = {
   //     (sem entrar na roda) NUNCA mexeu em rotação, nem pra foto nem pra
   //     item; portanto não há rotação nenhuma "perdida" nesta extração —
   //     ela nunca esteve no fluxo básico de posicionamento, só no submodo
-  //     à parte da roda. Um controle de rotação simples pra grade de
-  //     Câmeras (ver js/mapconfig.js) ficaria fora deste picker, como um
-  //     campo numérico próprio, se/quando implementado.
+  //     à parte da roda. Um controle de rotação simples ficaria fora deste
+  //     picker, como um campo numérico próprio, se/quando implementado.
   //  e) A cruz fixa (`_showPhotoPlacementCrosshair`) e os guards de
   //     prioridade máxima em `_onCanvasClick`/`_onObjectsPointerDown`/
   //     `_attachPanZoom`/`_unmountPlanta` (que impedem qualquer ferramenta/
@@ -26704,7 +26311,7 @@ const MapView = {
   // ----------
 
   /** API pública do novo modo — chamada por js/mapconfig.js (botão "🗺️
-   *  Definir origem no mapa" da grade automática de Câmeras). `opts.initial`
+   *  Definir origem no mapa"). `opts.initial`
    *  é aceito por simetria com os outros `enter*PlacementMode` (nenhum efeito
    *  hoje — a cruz sempre nasce centrada na visão atual do mapa, igual aos
    *  2 modos irmãos; poderia futuramente centralizar a visão nela antes de

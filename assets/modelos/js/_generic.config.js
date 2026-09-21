@@ -11,7 +11,7 @@
  * fallback de `dispatchClick3D`).
  *
  * `onModelClick` delega pro cartão genérico já existente
- * (`View3D._showObjectCard3D`) — mesmo raciocínio de camera.config.js. */
+ * (`View3D._showObjectCard3D`). */
 window.ObjectAssets.registerModel('_generic', {
   id: '_generic',
   nome: 'Objeto (padrão)',

@@ -1036,6 +1036,14 @@ class Engine3DRedeMeshMixin {
     const rt = this._redeRuntime?.get(obj?.id); if (!rt) return false;
     this._pickMeshes = this._pickMeshes.filter((m) => m.userData?.redeObj !== obj);
     this.pickables = this.pickables.filter((p) => p?.ref !== obj);
+    if (rt.custom) {   // objeto modelado: a malha editada acompanha a raiz (ghost com a forma atual e a mesma tinta)
+      this._pickMeshes = this._pickMeshes.filter((m) => m !== rt.custom);
+      rt.root.add(rt.custom);
+      rt.custom.position.set(0, rt.customLocalY || 0, 0);
+      rt.custom.scale.set(1, 1, 1);
+      rt.custom.rotation.set(0, rt.customRotY || 0, 0);
+      rt.custom.updateMatrixWorld(true);
+    }
     this._redeCarga = { id: obj.id, zOffMm: null };
     rt.carregando = true;
     return true;

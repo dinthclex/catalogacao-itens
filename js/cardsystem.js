@@ -6,20 +6,20 @@
  * ali. São as janelas do app. Em vez de ser injeções em innerHTML nos
  * arquivos do projeto."
  *
- * O QUE ERA ANTES: as 5 "janelinhas" que aparecem ao mirar/clicar em algo
- * no "Ver em 3D" (objeto do catálogo, câmera, orb de foto, aglomerado de
+ * O QUE ERA ANTES: as 4 "janelinhas" que aparecem ao mirar/clicar em algo
+ * no "Ver em 3D" (objeto do catálogo, orb de foto, aglomerado de
  * tijolos soltos, patrimônio órfão) eram montadas via `innerHTML` de
  * template literal DIRETO dentro de `js/view3d.js`
- * (`_showObjectCard3D`/`_showCameraCard3D`/`_showFotoPinCard3D`/
+ * (`_showObjectCard3D`/`_showFotoPinCard3D`/
  * `_showTijoloAglomeradoCard3D`/`_showOrphanPatrimonioCard3D`) — texto,
  * estilo inline e lógica de clique tudo misturado no meio de um arquivo de
  * ~12 mil linhas.
  *
- * O QUE É AGORA: cada uma dessas 5 janelinhas ("cards") virou um arquivo
- * PRÓPRIO em `cards/` (`cards/object-card.js`, `cards/camera-card.js`,
+ * O QUE É AGORA: cada uma dessas 4 janelinhas ("cards") virou um arquivo
+ * PRÓPRIO em `cards/` (`cards/object-card.js`, `cards/foto-pin-card.js`,
  * etc.) que se AUTO-REGISTRA aqui chamando `CardSystem.register(id, def)`.
  * `view3d.js` passou a ter só WRAPPERS FINOS que juntam os dados (o objeto/
- * câmera/etc. + o `ctx`) e mandam pro `CardSystem` montar — quem quiser
+ * foto/etc. + o `ctx`) e mandam pro `CardSystem` montar — quem quiser
  * mudar o TEXTO, o ESTILO (inclusive um `<style>` inline escopado, se
  * precisar de algo que `cards/cards.css` compartilhado não cobre) ou O QUE
  * ACONTECE AO CLICAR num botão de um card específico agora abre só o

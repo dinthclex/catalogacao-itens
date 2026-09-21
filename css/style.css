@@ -3074,8 +3074,8 @@ datalist {}
    propriedades." — moldura própria (`<fieldset>`/`<legend>`) pra agrupar
    visualmente o bloco de script (código + gatilhos + "Executar") em toda
    janela de propriedades do mapa 2D que tiver a opção (objeto/porta/
-   janela/parede/câmera/texto — ver `_openObjectPanel`/`_openDoorPanel`/
-   `_openWindowPanel`/`_openWallPanel`/`_openCameraPanel`/`_openTextPanel`
+   janela/parede/texto — ver `_openObjectPanel`/`_openDoorPanel`/
+   `_openWindowPanel`/`_openWallPanel`/`_openTextPanel`
    em mapview.js), em vez de ficar solto misturado com os outros campos ou
    junto da barra de ações do fim do painel. */
 .map-panel-fieldset {
@@ -3269,8 +3269,10 @@ datalist {}
 .obj-item-list {
   display: flex; flex-direction: column; gap: 6px;
   max-height: 220px; overflow-y: auto; margin-bottom: 4px;
+  flex: 0 0 auto; min-height: min-content;   /* nunca espreme a lista para uma linha só */
 }
 .obj-item-row {
+  flex: 0 0 auto; min-height: 34px;
   display: flex; align-items: center; gap: 6px;
   background: var(--bg-elev-2); border: 1px solid var(--border);
   border-radius: 8px; padding: 6px 8px; font-size: 12.5px;
@@ -3452,7 +3454,7 @@ datalist {}
    reconstruindo o desenho da cena (para que as coisas fiquem nítidas)."
    Por isso este wrapper NUNCA recebe transform/scale nenhum — é só um
    contêiner de agrupamento inerte. O zoom ao "ver através" de uma câmera
-   calibrada (_fotoCamMode/_orbCamMode, ver onWheel em
+   calibrada (_fotoCamMode, ver onWheel em
    _bindDesktopControls) é feito mudando o FOV real da câmera 3D via
    Engine3D.setFov (cfg.zoomFov, entre _CAMVIEW_ZOOM_FOV_MIN=5 e
    _CAMVIEW_ZOOM_FOV_MAX=140) — a cena inteira é RE-RENDERIZADA a cada
@@ -3654,7 +3656,7 @@ datalist {}
 .v3d-lockstate.locked .v3d-lockstate-hint { display: none; }
 @keyframes v3dLockHintPulse { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
 /* [15/09/2026] NOVO -- pedido verbatim (Parte B, ver Modelador/view3d.js
-   `_renderFotoCamOverlay`/`_renderCameraOrbOverlay`): "Sair da câmera" que
+   `_renderFotoCamOverlay`): "Sair da câmera" que
    antes vivia dentro da bandeja `.v3d-fotocam-overlay-controls (removida
    nesta rodada) agora é um botão solto, ancorado no topo/centro do canvas,
    logo abaixo da faixa amarela `.v3d-lockstate-hint` acima. */
@@ -3763,9 +3765,9 @@ datalist {}
    na raiz: a hotbar (ferramentas de construção — Objeto/Item/Parede/
    Câmera/Mirar) não faz sentido nenhum enquanto "vendo através" de uma
    câmera travada (não dá pra trocar de ferramenta nesse modo, ver
-   `_selectBuildTool`/`_camMode` em view3d.js) — em vez de arbitrar
+   `_selectBuildTool` em view3d.js) — em vez de arbitrar
    z-index entre as duas barras, a hotbar agora fica ESCONDIDA enquanto
-   `_fotoCamMode`/`_orbCamMode` está ativo (ver `_renderHotbar`), então as
+   `_fotoCamMode` está ativo (ver `_renderHotbar`), então as
    duas nunca mais disputam a mesma área da tela. z-index removido (volta
    ao padrão/auto) — não é mais necessário. */
 .v3d-hotbar.hidden { display: none; }
@@ -4036,8 +4038,7 @@ datalist {}
    logo abaixo perde o arredondamento de cima + a borda de cima (funde com a
    borda de baixo do botão), formando uma ÚNICA caixa contínua "botão + seu
    conteúdo" em vez de 2 blocos soltos. Classe alternada em JS
-   (`.v3d-camprops-toggle-active`) em `_showCameraCard3D`/
-   `_showFotoPinCard3D` (view3d.js). */
+   (`.v3d-camprops-toggle-active`) em `_showFotoPinCard3D` (view3d.js). */
 .v3d-camprops-toggle-active { border-radius: 8px 8px 0 0 !important; background: rgba(80,220,255,.22) !important; color: #fff !important; }
 #v3d-cam-props:not(.hidden), #v3d-foto-props:not(.hidden) { margin-top: -6px; }
 #v3d-cam-props:not(.hidden) > .map-panel-fieldset,
@@ -4071,13 +4072,13 @@ datalist {}
      'Propriedades da câmera', a janela [...] não deve ocupar toda a altura
      da tela [...] o scroll vertical deve aparecer para a rolagem." O
      fieldset "🎥 Propriedades da câmera (Blender)" (`#v3d-cam-props`, ver
-     _showCameraCard3D/_camPropsFieldsetHtml em mapview.js) é bem mais alto
+     _showFotoPinCard3D/_camPropsFieldsetHtml em mapview.js) é bem mais alto
      que o resto do cartão — sem limite, o cartão inteiro (que já nasce
      centralizado na tela) crescia além da altura da viewport, cortando
      botões/campos do fundo sem nenhum jeito de rolar até eles. Aplicado na
      classe genérica (não só no cartão de câmera) porque TODO cartão 3D
-     (.flashcard3d-overlay — objeto/item/câmera/foto, ver _showObjectCard3D/
-     _showCameraCard3D/_showFotoPinCard3D) corre o mesmo risco em telas
+     (.flashcard3d-overlay — objeto/item/foto, ver _showObjectCard3D/
+     _showFotoPinCard3D) corre o mesmo risco em telas
      baixas; `overflow-y:auto` só entra em ação quando o conteúdo realmente
      excede 80vh, então cartões pequenos (a maioria) continuam do tamanho
      natural de sempre, sem barra de rolagem nenhuma. */
@@ -6966,7 +6967,7 @@ html.catalogo-boot-classic #app { display: none; }
 /* Na tela Mapa, desfazer/refazer já têm botões próprios na linha 3 do
    cabeçalho (ver mapview.js _mountTopbarMapa) — o widget flutuante global
    some pra não duplicar. */
-body.view-mapa .history-widget { display: none; }
+body.view-mapa .history-widget:not(.always) { display: none; }
 .history-widget button {
   width: 38px; height: 38px; border-radius: 50%;
   border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--text);
@@ -8031,3 +8032,34 @@ body.classic-mode-active .bsp-shell-reset-btn { display: none; }
 .settings-fullscreen-title { font-weight: 700; font-size: 14.5px; }
 .settings-fullscreen-body { flex: 1 1 auto; overflow: auto; }
 /* [19/09/2026 UTC] RODADA 191 -- CSS da Trena 3D movido pra css/trena3d.css (ver o arquivo). */
+
+/* Selo 'novo' na tela Acessar modelos: inline (não absoluto como no painel de objetos). */
+.m3dv-novo .map-obj-novo{position:static;display:inline-block}
+
+/* Seção só faz sentido no layout Workspace (no Clássico fica oculta) */
+body.classic-mode-active .settings-section.only-workspace{display:none !important}
+
+/* ---- Distribuição editável de botões (js/botoeslayout.js) ---- */
+.bl-edit .bl-item { position: relative; cursor: grab; outline: 1px dashed rgba(0,229,255,.55); outline-offset: -2px; touch-action: none; }
+.bl-item .bl-x { position: absolute; top: 1px; right: 1px; width: 16px; height: 16px; line-height: 16px; text-align: center; font-size: 10px; border-radius: 50%; background: #d64545; color: #fff; cursor: pointer; z-index: 3; }
+.bl-item-dragging { opacity: .85; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+.bl-bar { display: flex; flex-direction: column; gap: 4px; padding: 6px 4px 2px; }
+.bl-bar-row { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+.bl-bar-hint { font-size: 10px; color: var(--text-dim); text-align: center; }
+.bl-add-list { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; max-height: 140px; overflow-y: auto; }
+.bl-add-item { display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px; font-size: 11px; background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.bl-add-item svg { width: 16px; height: 16px; }
+.v3d-hotbar-wrap { position: relative; }
+
+.v3d-hotbar.bl-edit .v3d-hotbar-slot.bl-item { cursor: grab; }
+
+.bl-add-tit { width: 100%; font-size: 11px; font-weight: 700; color: var(--text-dim); margin: 4px 0 2px; }
+.bl-add-grp { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; }
+.bl-add-busca { width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 12px; margin: 2px 0; }
+.bl-add-list { flex-direction: column; align-items: stretch; }
+.bl-add-list:not([hidden]) { display: flex; }
+.v3d-hotbar-icon svg { width: 18px; height: 18px; }
+.mc-layout-grid.map2d-toolsidebar-grid { grid-template-columns: repeat(2, 58px); justify-content: start; overflow: visible; flex: none; }
+.mc-layout-grid + .bl-bar { align-items: flex-start; max-width: 320px; }
+.v3d-hotbar-preview + .bl-bar { max-width: 520px; }
+.v3d-hotbar-preview { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; background: rgba(23,27,33,.6); border-radius: 8px; }

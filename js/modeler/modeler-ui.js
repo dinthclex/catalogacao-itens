@@ -163,10 +163,7 @@ const PRIMITIVE_CATALOG = {
     { key: 'lattice', label: 'Lattice', icone: '▧', gerar: () => ModelerMesh.markerLatticeMesh(), defaultParams: {}, params: [] },
     { key: 'empty', label: 'Empty', icone: '✛', gerar: () => ModelerMesh.markerEmptyMesh(), defaultParams: {}, params: [] },
     { key: 'speaker', label: 'Speaker', icone: '🔊', gerar: () => ModelerMesh.markerSpeakerMesh(), defaultParams: {}, params: [] },
-    // "Quanto a câmera, é a câmera que já temos (deve ser como no Blender...)
-    // Faça todos esses botões como no Blender" (pedido verbatim) — entra
-    // aqui como o mesmo marcador/ícone já usado noutro lugar do app
-    // (`markerCameraMesh`), pelo mesmo motivo dos outros marcadores acima.
+    // Marcador de câmera (`markerCameraMesh`), pelo mesmo motivo dos outros marcadores acima.
     { key: 'camera', label: 'Câmera', icone: '🎥', gerar: () => ModelerMesh.markerCameraMesh(), defaultParams: {}, params: [] },
   ],
 };
@@ -300,7 +297,7 @@ const ModelerUI = {
    *  `state.camLocked`/`state._camLockedFixedPose` só existem quando o
    *  Modelador foi aberto a partir de "Ver através desta câmera" (ver
    *  `Modeler3D.enter`, `opts.enterOrbital:false` — chamado por
-   *  `view3d.js` quando `this._orbCamMode || this._fotoCamMode`) — fora
+   *  `view3d.js` quando `this._fotoCamMode`) — fora
    *  disso esta função não desenha nada.
    *  [18/09/2026] REPOSICIONADO — pedido verbatim: "Tinha uma opção que,
    *  mesmo estando no modo 'Ver através desta câmera', era possível

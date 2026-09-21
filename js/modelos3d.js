@@ -465,6 +465,7 @@ const Modelos3DView = {
     const container = this._container;
     if (!container) return;
     const modelos = await DB.getAllObjectModels();
+    try { this._cfgNovo = (typeof MapConfig !== 'undefined') ? await MapConfig.get() : null; } catch (e) { this._cfgNovo = null; }
     const porTipo = {};
     modelos.forEach((m) => { (porTipo[m.tipo] || (porTipo[m.tipo] = {}))[m.nivel] = true; });
     const _exc = window.Icons?._objetosExcluidos;
@@ -512,7 +513,7 @@ const Modelos3DView = {
             ${importados.map((i) => `
               <div class="modelos3d-row">
                 <div class="modelos3d-row-head">
-                  <span class="ic">${this._svg(i.key)}</span><span class="t">${Utils.escapeHtml(i.label)}</span>
+                  <span class="ic">${this._svg(i.key)}</span><span class="t">${Utils.escapeHtml(i.label)}</span>${this._seloNovo(i.key)}
                   <span class="modelos3d-row-head-actions">
                     <button type="button" class="btn secondary sm m3dv-2d-import" data-tipo="${Utils.escapeHtml(i.key)}" title="Editar a representação 2D (ícone SVG) deste objeto importado, usado na planta baixa">🎨 Representação 2D</button>
                   </span>
@@ -595,6 +596,14 @@ const Modelos3DView = {
   // modelo") sempre começa com "custom-" (gerado em `_criarNovoModelo`,
   // nunca digitado pelo usuário) — usado aqui só pra decidir se mostra o
   // botão "✏️ Renomear" (só faz sentido pra estes, ver `_renomearCustom`).
+  /** Selo "novo" na tela Acessar modelos (opção em Configurações 2D → Objeto). */
+  _seloNovo(tipo) {
+    const cfg = this._cfgNovo;
+    if (!cfg || cfg.objetoNovoNaTelaModelos === false || !window.NovosObjetos) return '';
+    const h = window.NovosObjetos.seloHtml(tipo, cfg);
+    return h ? `<span class="m3dv-novo" style="position:relative;display:inline-flex;align-items:center;gap:6px;margin-left:8px">${h.replace('map-obj-novo ','map-obj-novo m3dv-novo-selo ')}</span>` : '';
+  },
+
   _isCustomType(tipo) {
     return typeof tipo === 'string' && tipo.startsWith('custom-');
   },
@@ -634,11 +643,11 @@ const Modelos3DView = {
     return `
       <div class="modelos3d-row">
         <div class="modelos3d-row-head">
-          <span class="ic">${this._svg(tipo)}</span><span class="t">${Utils.escapeHtml(this._label(tipo))}</span>
+          <span class="ic">${this._svg(tipo)}</span><span class="t">${Utils.escapeHtml(this._label(tipo))}</span>${this._seloNovo(tipo)}
+          ${['porta', 'janela', 'piso', 'parede'].includes(tipo) ? '<span class="modelos3d-badge-codigo" title="Gerado por código pela ferramenta própria do Mapa 2D; um molde editado aqui substitui o desenho por código (esticado ao tamanho de cada elemento) e Restaurar padrão volta ao desenho por código.">🧩 gerado por código</span>' : ''}
           ${tipo === 'escada' ? '<span class="modelos3d-badge-codigo" title="A escada continua sendo gerada por código quando suas dimensões/degraus são alterados dos valores padrão do catálogo — só nesse caso ela não usa a malha do arquivo.">🧩 gerado por código (se modificada)</span>' : ''}
           <span class="modelos3d-row-head-actions">
             ${isCustom ? `<button type="button" class="btn secondary sm m3dv-renomear" data-tipo="${Utils.escapeHtml(tipo)}" title="Trocar o nome deste modelo customizado">✏️ Renomear</button>` : ''}
-            <button type="button" class="btn secondary sm m3dv-excluir" data-tipo="${Utils.escapeHtml(tipo)}" title="Excluir este objeto do catálogo (pede confirmação; depois oferece um .bat para apagar os arquivos). Dá para trazê-lo de volta com Restaurar objetos.">🗑 Excluir</button>
             <button type="button" class="btn secondary sm m3dv-2d" data-tipo="${Utils.escapeHtml(tipo)}" title="Editar a representação 2D (ícone SVG) deste tipo, usado na planta baixa">🎨 Representação 2D</button>
             <!-- NOVO (12/09/2026), pedido verbatim: "deve ser possível
                  definir características de cada objeto [...] Esta
@@ -652,6 +661,7 @@ const Modelos3DView = {
                  do que for salvo aqui (ver js/objectstandard.js/
                  js/mapping.js). -->
             <button type="button" class="btn secondary sm m3dv-comportamento" data-tipo="${Utils.escapeHtml(tipo)}" title="Configurar o comportamento padrão (scripts/gatilhos de evento) de objetos NOVOS deste tipo">⚙️ Comportamento padrão</button>
+            <button type="button" class="btn secondary sm m3dv-excluir" style="margin-left:14px" data-tipo="${Utils.escapeHtml(tipo)}" title="Excluir este objeto do catálogo (pede confirmação; depois oferece um .bat para apagar os arquivos). Dá para trazê-lo de volta com Restaurar objetos.">🗑 Excluir</button>
           </span>
         </div>
         <div class="modelos3d-niveis">
@@ -680,8 +690,8 @@ const Modelos3DView = {
         const doManifesto = !!window.NovosObjetos?.info(tipo);
         const semArquivos = this._isCustomType(tipo) || (window.ObjImport?.isCustomKey?.(tipo));
         await this._render();
-        if (!semArquivos) window.ImportarObjetoCard?.abrirExclusao({ tipo, nome, codigo: !doManifesto });
-        else Utils.toast?.(`"${nome}" excluído (restaurável em ♻️ Restaurar objetos).`, { type: 'ok' });
+        Utils.toast?.(`"${nome}" excluído (restaurável em ♻️ Restaurar objetos).`, { type: 'ok' });
+        window.ImportarObjetoCard?.abrirExclusao({ tipo, nome, codigo: !doManifesto && !semArquivos, soNavegador: !!semArquivos });
       },
     }, {});
   },
@@ -812,6 +822,23 @@ const Modelos3DView = {
     // null (reading precision)" na miniatura quando 2 desses coexistiam).
     const engine = new Engine3D(canvas, cfgReal, { eye: true });
     await engine._loadPromise; // ver comentário grande no topo do arquivo — garante this._ready antes de setScene
+    // Porta/Janela (geradas por código): sem molde salvo, o ponto de partida é a MESMA malha que o "Ver em 3D" desenha
+    // (porta com as maçanetas reais, janela com moldura + painel de vidro), extraída de uma cena temporária.
+    if ((tipo === 'porta' || tipo === 'janela') && !obj.customMesh && window.Mapping && window.ModelerMesh) {
+      try {
+        const tmp = { id: 'molde-tmp', bounds: { minX: -3, minY: -3, maxX: 3, maxY: 3 }, objects: [], walls: [], portas: [], janelas: [], alturaPiso: 2.8 };
+        const el = tipo === 'porta' ? Mapping.addDoor(tmp, 0, 0, {}) : Mapping.addWindow(tmp, 0, 0, { alturaPeitoril: 0 });
+        engine.setScene(tmp);
+        const pertence = (n) => { for (let a = n; a; a = a.parent) { if (a.userData && a.userData.pick && a.userData.pick.ref === el) return true; } return false; };
+        const seed = ModelerMesh.fromThreeGroup(engine._group, { skipNode: (n) => !pertence(n) });
+        if (seed && seed.vertices && seed.vertices.length) {
+          let minY = Infinity; seed.vertices.forEach((v) => { if (v[1] < minY) minY = v[1]; });
+          seed.vertices.forEach((v) => { v[1] -= minY; });   // base em y=0 (convenção do Modelador)
+          obj.customMesh = seed;
+          obj.customMeshXform = { rotX: 0, rotY: 0, rotZ: 0, scaleX: 1, scaleY: 1, scaleZ: 1 };
+        }
+      } catch (e) { console.warn('[Modelos3D] malha real de porta/janela:', e); }
+    }
     engine.setScene(mapaFalso);
 
     return { overlay, canvasWrap, canvas, engine, obj, mapaFalso };

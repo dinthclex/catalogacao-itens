@@ -318,7 +318,7 @@ const AmbientePhotos = {
   // NADA, porque `.bsp-leaf-body` (container da divisão) ganhou
   // `transform: translateZ(0)` (css/style.css), virando "containing block"
   // de `position:fixed` pra tudo dentro dela (truque padrão do CSS).
-  async open(map, { onExit, startPhotoId, fromOrganizar, focusNorm, highlightOrbId, returnToLabel, container } = {}) {
+  async open(map, { onExit, startPhotoId, fromOrganizar, focusNorm, highlightOrbId, returnToLabel, container, pickPhoto } = {}) {
     if (this._overlayEl) return; // já aberto
     // Guarda defensiva — na prática nunca deveria disparar: com o mapa
     // único (ver DB.getOrCreateSingleMap), quem chama open() sempre tem um
@@ -332,6 +332,8 @@ const AmbientePhotos = {
     // nome da tela de origem; o botão de fechar (#ambphotos-close) troca de
     // rótulo pra deixar claro que "fechar" aqui volta pra lá, não pro Mapa.
     this._returnToLabel = returnToLabel || null;
+    // Modo "escolher foto" (ex.: anexar a uma câmera): `pickPhoto(photoId)` é chamado ao tocar em "✔ Usar esta foto"; a tela fecha em seguida.
+    this._pickPhoto = typeof pickPhoto === 'function' ? pickPhoto : null;
     this._current = null;
     this._img = null;
     this._placingOrb = false;
@@ -428,6 +430,7 @@ const AmbientePhotos = {
         <div class="ambphotos-topbar-row">
           <button class="icon-btn ambphotos-btn-close" id="ambphotos-close" title="${this._returnToLabel ? `Voltar para ${Utils.escapeHtml(this._returnToLabel)}` : 'Fechar e voltar para o mapa'}">${this._returnToLabel ? `← Voltar para ${Utils.escapeHtml(this._returnToLabel)}` : '✕ Fechar'}</button>
           <div class="ambphotos-topbar-center">
+            ${this._pickPhoto ? '<button class="icon-btn" id="ambphotos-pick" title="Anexar a foto que está aberta e voltar">✔ Usar esta foto</button>' : ''}
             <button class="icon-btn" id="ambphotos-add" title="Tirar/adicionar uma foto deste ambiente (no celular, use o modo panorama da câmera para fotos mais amplas)">📷 Adicionar foto</button>
             <button type="button" class="ambphotos-caption hidden" id="ambphotos-caption" title="Toque para dar um nome a esta foto">
               <span id="ambphotos-caption-text">Sem nome</span>
@@ -585,6 +588,14 @@ const AmbientePhotos = {
     this._ctx = this._canvas.getContext('2d');
 
     overlay.querySelector('#ambphotos-close').onclick = () => this.close();
+    const btnPick = overlay.querySelector('#ambphotos-pick');
+    if (btnPick) btnPick.onclick = () => {
+      if (!this._current) { Utils.toast('Toque numa foto da faixa para escolher qual anexar.', { type: 'warn' }); return; }
+      const id = this._current.id, cb = this._pickPhoto;
+      this._pickPhoto = null;
+      cb(id);            // primeiro entrega a escolha…
+      this.close();      // …depois fecha (o onExit só devolve a janela de propriedades)
+    };
     overlay.querySelector('#ambphotos-map-link').onclick = () => this._openMapLinkFlow();
     // NOVO (03/09/2026), pedido verbatim (item 2) — reaproveita EXATAMENTE
     // os mesmos helpers do item 1 (App.verNoMapa2D/verNoMapa3D/

@@ -58,9 +58,21 @@ const History = {
    *  pra não empilhar um toast por passo ao pular vários de uma vez.
    *  Retorna true/false (sucesso) em vez de nada, também pro jumpTo saber
    *  quando parar. */
+  /** Aviso "aplicando…" enquanto um desfazer/refazer demorado roda; devolve a função que o remove. */
+  _busy(texto) {
+    const el = document.createElement('div');
+    el.className = 'history-busy';
+    el.textContent = texto;
+    el.style.cssText = 'position:fixed;left:50%;top:14px;transform:translateX(-50%);padding:8px 16px;border-radius:20px;background:rgba(20,26,40,.94);color:#fff;font:600 13px system-ui,sans-serif;border:1px solid #4a5573;box-shadow:0 4px 18px rgba(0,0,0,.45);z-index:2147483640;pointer-events:none';
+    document.body.appendChild(el);
+    return () => el.remove();
+  },
+
   async undo({ silent = false } = {}) {
     const cmd = this._undo.pop();
     if (!cmd) return false;
+    const fimBusy = silent ? null : this._busy(`⏳ Aplicando desfazer: ${cmd.label}…`);
+    if (fimBusy) await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))); // deixa o aviso aparecer antes do trabalho pesado
     try {
       await cmd.undo();
       this._redo.push(cmd);
@@ -69,9 +81,11 @@ const History = {
       console.error('Falha ao desfazer:', err);
       Utils.toast('Não foi possível desfazer essa ação — veja o console.', { type: 'danger' });
       this._undo.push(cmd); // não perde o comando por causa de uma falha
+      if (fimBusy) fimBusy();
       await this._afterChange();
       return false;
     }
+    if (fimBusy) fimBusy();
     await this._afterChange();
     return true;
   },
@@ -79,6 +93,8 @@ const History = {
   async redo({ silent = false } = {}) {
     const cmd = this._redo.pop();
     if (!cmd) return false;
+    const fimBusy = silent ? null : this._busy(`⏳ Aplicando refazer: ${cmd.label}…`);
+    if (fimBusy) await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
     try {
       await cmd.redo();
       this._undo.push(cmd);
@@ -87,9 +103,11 @@ const History = {
       console.error('Falha ao refazer:', err);
       Utils.toast('Não foi possível refazer essa ação — veja o console.', { type: 'danger' });
       this._redo.push(cmd);
+      if (fimBusy) fimBusy();
       await this._afterChange();
       return false;
     }
+    if (fimBusy) fimBusy();
     await this._afterChange();
     return true;
   },
@@ -153,6 +171,8 @@ const History = {
     el.querySelector('#history-undo').onclick = () => this.undo();
     el.querySelector('#history-redo').onclick = () => this.redo();
     this._widgetEl = el;
+    // z-index gerenciado pelo WindowManager (acima das telas cheias/3D e dos painéis cadastrados).
+    try { window.WindowManager?.register?.('history-widget', { el, kind: 'panel', label: 'Desfazer/Refazer' }); } catch (e) { /* segue com o z-index do CSS */ }
   },
 
   _updateWidget() {
@@ -166,6 +186,7 @@ const History = {
     redoBtn.title = podeRedo ? `Refazer: ${this._redo[this._redo.length - 1].label} (Ctrl+Y)` : 'Nada para refazer';
     const mostrar = this._alwaysShow || podeUndo || podeRedo;
     this._widgetEl.classList.toggle('hidden', !mostrar);
+    this._widgetEl.classList.toggle('always', !!this._alwaysShow); // 'Sempre mostrar': aparece até na tela Mapa
   },
 
   // ---------- Janela de histórico (lista clicável, estilo pilha) ----------

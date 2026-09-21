@@ -455,7 +455,7 @@
   // 2D — ver nota grande acima de `DEFAULT_SCRIPT_CODE`).
   // `_SCRIPT_OBJ_ALIASES`: nome em inglês -> nome real em português, só
   // pros campos confirmados contra o motor de verdade (ver comentário de
-  // `DEFAULT_SCRIPT_CODE`/`js/mapping.js` `addObject`/`addCamera`/
+  // `DEFAULT_SCRIPT_CODE`/`js/mapping.js` `addObject`/
   // `addDoor`/`addWindow`): cor, ângulo (rotação Y, radianos), e as 3
   // dimensões (largura/profundidade/altura) + nome. NÃO inclui
   // `ativo`/`visivel` — não achado nenhum campo de objeto realmente lido

@@ -26,7 +26,7 @@
  * (classe, modo "assistido" do rastreamento por sensores).
  *
  * Mapping (objeto):
- * - newMap: cria um Map novo vazio (walls/points/objects/cameras/layers etc.).
+ * - newMap: cria um Map novo vazio (walls/points/objects/layers etc.).
  * - defaultAmbienteName: nome padrão "Ambiente N" quando o usuário não digita um.
  * - displayName: nome exibido de um mapa (aplica o padrão acima quando vazio).
  * - ensureNewFields: migração preguiçosa — garante que campos adicionados em
@@ -52,9 +52,6 @@
  *   parede em duas ao inserir uma porta/janela/canto novo no meio dela).
  * - addDoor/removeDoor/updateDoor, addWindow/removeWindow/updateWindow,
  *   resolveDoorWindowPos: CRUD de portas/janelas (presas a uma parede).
- * - addCamera/removeCamera/updateCamera/setCamera3DAtiva: CRUD do objeto
- *   "Câmera" (câmera fixa de segurança OU "orb de câmera"/Camera Match, ver
- *   campo opcional `fotoId`) e qual câmera está "ativa" no "Ver em 3D".
  * - _capitalizeTipo/_labelForObjectType: rótulo amigável a partir do tipo
  *   interno de um objeto do catálogo (mesa/armário/etc.).
  * - _allSceneNames/_nextObjectName: geram um nome único ("Mesa 2") ao criar
@@ -75,7 +72,7 @@
  * - latLngToLocalMeters: converte coordenada GPS pra metros locais do mapa
  *   (origem = 1º ponto capturado) — usado no modo assistido/geo.js.
  * - findPeripheralSlot: posição "livre" na borda do mapa pra um elemento
- *   novo que ainda não tem lugar certo (ex. câmera nova sem clique no chão).
+ *   novo que ainda não tem lugar certo (ex. item novo sem clique no chão).
  * - sampleAverageColor: amostra a cor média de uma paredes/imagem (usado ao
  *   colorir automaticamente uma parede a partir da câmera).
  * - linkObjects/unlinkObject/groupMembers: agrupamento de objetos (mover/
@@ -102,7 +99,6 @@ const Mapping = {
       walls: [],
       points: [],
       trilha: [],
-      cameras: [],
       objects: [],
       textos: [],
       portas: [],
@@ -149,14 +145,14 @@ const Mapping = {
     return nome || Mapping.defaultAmbienteName(map.id);
   },
 
-  /** Garante que um mapa carregado de ANTES desta versão (sem `cameras`/
+  /** Garante que um mapa carregado de ANTES desta versão (sem
    *  `objects`/`textos`/`layers`) tenha essas listas — sem isto, todo código
-   *  que assume `map.cameras`/`map.objects`/`map.textos`/`map.layers` como
+   *  que assume `map.objects`/`map.textos`/`map.layers` como
    *  array precisaria checar `|| []` em todo lugar. Chamado ao selecionar/
    *  carregar um ambiente no editor.
    *
    *  Camadas (ver mapview.js — botão "🗂️ Camadas"): paredes, pontos,
-   *  câmeras, objetos e textos têm um `layerId` opcional; sem uma camada
+   *  objetos e textos têm um `layerId` opcional; sem uma camada
    *  correspondente (mapa antigo, ou campo ausente), contam como visíveis e
    *  destráveis por padrão (ver Map2DRenderer.render/_elLayerLocked em
    *  mapview.js) — por isso um mapa sem NENHUMA camada ainda funciona
@@ -176,7 +172,7 @@ const Mapping = {
     if (map.apelido && map.apelido.trim()) map.nome = map.apelido.trim();
     delete map.apelido;
     if (!map.nome || !map.nome.trim()) map.nome = Mapping.defaultAmbienteName(map.id);
-    if (!map.cameras) map.cameras = [];
+    delete map.cameras;
     if (!map.objects) map.objects = [];
     if (!map.textos) map.textos = [];
     if (!map.portas) map.portas = []; // ferramenta "Porta" (ver mapview.js) — mapas de antes desta rodada
@@ -256,12 +252,11 @@ const Mapping = {
     // usuário já tinha testado ficou salva com a referência quebrada.
     // `repairOrphanScriptLinks` (auto-cura, só quando há exatamente 1
     // Script na entidade — caso inequívoco) reconecta isso toda vez que o
-    // mapa é carregado, pras portas (e paredes/janelas/câmeras/objetos,
+    // mapa é carregado, pras portas (e paredes/janelas/objetos,
     // mesmo mecanismo de componentes) que já ficaram salvas quebradas.
     (map.portas || []).forEach((porta) => window.ObjectStandard?.repairOrphanScriptLinks(porta));
     (map.walls || []).forEach((wall) => window.ObjectStandard?.repairOrphanScriptLinks(wall));
     (map.janelas || []).forEach((janela) => window.ObjectStandard?.repairOrphanScriptLinks(janela));
-    (map.cameras || []).forEach((cam) => window.ObjectStandard?.repairOrphanScriptLinks(cam));
     (map.objects || []).forEach((obj) => window.ObjectStandard?.repairOrphanScriptLinks(obj));
     // Migração "múltiplos patrimônios por objeto" (pedido do usuário,
     // 26/08/2026: um objeto agora pode ter MAIS DE UM patrimônio associado,
@@ -319,7 +314,7 @@ const Mapping = {
     return Mapping.ensureSafeLayer(map);
   },
 
-  /** Garante que TODO elemento "layerável" do `map` (parede/ponto/câmera/
+  /** Garante que TODO elemento "layerável" do `map` (parede/ponto/
    *  objeto/texto/porta/janela) aponte pra uma camada que REALMENTE existe
    *  — migra pra camada "de segurança" (ensureSafeLayer acima, NÃO a
    *  primeira da lista) quem estiver com `layerId` nulo ou "órfão"
@@ -356,7 +351,7 @@ const Mapping = {
     // camada delas é o próximo passo natural. Ver correção de causa raiz de
     // verdade (o "Novo Cubo 3D" do 2D sem layerId) em mapview.js, no handler
     // de '#map-mode-newcube3d'.
-    ['walls', 'points', 'cameras', 'objects', 'textos', 'portas', 'janelas', 'medidas2d', 'tracos2d'].forEach((campo) => {
+    ['walls', 'points', 'objects', 'textos', 'portas', 'janelas', 'medidas2d', 'tracos2d'].forEach((campo) => {
       (map[campo] || []).forEach((el) => {
         const resolvido = this.resolveLayerId(map, el.layerId);
         if (resolvido && resolvido !== el.layerId) { el.layerId = resolvido; mudou = true; }
@@ -412,7 +407,7 @@ const Mapping = {
   // ---------- Camadas (visibilidade/bloqueio/organização — ferramenta
   // "🗂️ Camadas" na barra do mapa 2D, ver mapview.js). Cada camada só guarda
   // metadados; a associação em si vive no `layerId` de cada parede/ponto/
-  // câmera/objeto/texto (ver addWall/addCamera/addObject/addText, que
+  // objeto/texto (ver addWall/addObject/addText, que
   // aceitam `layerId` dentro de `extra`). ----------
   /** Camada visível? Mesma regra usada em vários lugares (2D, 3D e agora a
    *  miniatura 3D): sem `layerId`, ou a camada referenciada já não existe
@@ -427,7 +422,7 @@ const Mapping = {
   },
 
   /**
-   * Devolve uma CÓPIA rasa do mapa com paredes/portas/janelas/câmeras/
+   * Devolve uma CÓPIA rasa do mapa com paredes/portas/janelas/
    * objetos/textos/itens de camada OCULTA removidos — pedido do usuário:
    * "As camadas ativadas e desativadas na janela 'camadas' devem ser
    * aplicadas no 3D também". Usado por view3d.js (visualização 3D de
@@ -445,7 +440,6 @@ const Mapping = {
       objects: filtra(map.objects),
       portas: filtra(map.portas),
       janelas: filtra(map.janelas),
-      cameras: filtra(map.cameras),
       textos: filtra(map.textos),
       itens: filtra(map.itens),
       // [09/09/2026] Ajuste ligado ao conserto de "orb de foto não aparece
@@ -461,7 +455,7 @@ const Mapping = {
   /**
    * [13/09/2026] NOVO — irmã de `filterByLayerVisibility` (mesmo espírito,
    * mesma forma), só que filtrando por ANDAR em vez de por camada: devolve
-   * uma CÓPIA rasa do mapa com paredes/portas/janelas/objetos/câmeras/fotos
+   * uma CÓPIA rasa do mapa com paredes/portas/janelas/objetos/fotos
    * de um andar DIFERENTE de `pisoIdx` removidos (mesmo critério de
    * `getAndarDaEntidade` — entidade sem andar definível, `null`, sempre
    * fica; o próprio objeto "Piso" também sempre fica, pra não sumir a laje
@@ -492,7 +486,6 @@ const Mapping = {
       objects: filtra(map.objects),
       portas: filtra(map.portas),
       janelas: filtra(map.janelas),
-      cameras: filtra(map.cameras),
       fotos: filtra(map.fotos),
     };
   },
@@ -513,7 +506,7 @@ const Mapping = {
      'andaresOcultos' mora neste mesmo sistema, junto de
      'gruposOcultos'/'gruposDestacados'/'ocultarParedesEPiso'.
      Escopo deliberado: classes só em `map.objects` (não paredes/portas/
-     janelas/câmeras/textos/itens/fotos) — o pedido verbatim foi "dar
+     janelas/textos/itens/fotos) — o pedido verbatim foi "dar
      nomes AOS OBJETOS" (o `name` do HTML já existe como campo "Nome";
      aqui só o `class` é novo). */
   getObjectClasses(obj) {
@@ -750,7 +743,7 @@ const Mapping = {
         el.x = pos.x; el.y = pos.y; el.angulo = pos.angulo;
       });
     }
-    ['walls', 'points', 'cameras', 'objects', 'textos', 'portas', 'janelas'].forEach((campo) => {
+    ['walls', 'points', 'objects', 'textos', 'portas', 'janelas'].forEach((campo) => {
       map[campo] = (map[campo] || []).filter((el) => el.layerId !== id);
     });
     map.layers.splice(idx, 1);
@@ -812,7 +805,7 @@ const Mapping = {
   /** Quantos elementos (de todos os tipos layeráveis) estão numa camada —
    *  usado só pra exibir no painel (ex: "Camada 1 (12)"). */
   countInLayer(map, layerId) {
-    return ['walls', 'points', 'cameras', 'objects', 'textos', 'portas', 'janelas']
+    return ['walls', 'points', 'objects', 'textos', 'portas', 'janelas']
       .reduce((n, campo) => n + (map[campo] || []).filter((el) => el.layerId === layerId).length, 0);
   },
 
@@ -825,13 +818,13 @@ const Mapping = {
     const orig = map.layers[idx];
     const nova = { id: Utils.uid('layer'), nome: `${orig.nome} (cópia)`, visivel: orig.visivel !== false, bloqueada: !!orig.bloqueada, opacidade: orig.opacidade ?? 255, criadoEm: DB.nowISO() };
     map.layers.splice(idx + 1, 0, nova);
-    const prefixos = { walls: 'wall', points: 'pt', cameras: 'cam', objects: 'obj', textos: 'txt', portas: 'porta', janelas: 'janela' };
+    const prefixos = { walls: 'wall', points: 'pt', objects: 'obj', textos: 'txt', portas: 'porta', janelas: 'janela' };
     // Cópias de porta/janela mantêm o `parentWallId` ORIGINAL (não remapeado
     // pra uma eventual cópia da parede feita nesta mesma operação) — caso
     // raro (duplicar uma camada que tem parede E porta/janela filha dela ao
     // mesmo tempo); resultado ainda é válido (a cópia fica ligada à parede
     // original), só não "acompanha" a parede duplicada — aceitável por ora.
-    ['walls', 'points', 'cameras', 'objects', 'textos', 'portas', 'janelas'].forEach((campo) => {
+    ['walls', 'points', 'objects', 'textos', 'portas', 'janelas'].forEach((campo) => {
       const clones = (map[campo] || [])
         .filter((el) => el.layerId === id)
         .map((el) => ({ ...el, id: Utils.uid(prefixos[campo]), layerId: nova.id }));
@@ -850,7 +843,7 @@ const Mapping = {
     const idx = (map.layers || []).findIndex((l) => l.id === id);
     if (idx === -1 || idx === map.layers.length - 1) return false;
     const destino = map.layers[idx + 1].id;
-    ['walls', 'points', 'cameras', 'objects', 'textos', 'portas', 'janelas'].forEach((campo) => {
+    ['walls', 'points', 'objects', 'textos', 'portas', 'janelas'].forEach((campo) => {
       (map[campo] || []).forEach((el) => { if (el.layerId === id) el.layerId = destino; });
     });
     map.layers.splice(idx, 1);
@@ -863,7 +856,6 @@ const Mapping = {
     (map.walls || []).forEach((w) => { consider(w.x1, w.y1); consider(w.x2, w.y2); });
     (map.points || []).forEach((p) => consider(p.x, p.y));
     (map.trilha || []).forEach((p) => consider(p.x, p.y));
-    (map.cameras || []).forEach((c) => consider(c.x, c.y));
     (map.objects || []).forEach((o) => consider(o.x, o.y));
     (map.textos || []).forEach((t) => consider(t.x, t.y));
     [...(map.portas || []), ...(map.janelas || [])].forEach((el) => {
@@ -909,7 +901,7 @@ const Mapping = {
     // `piso: 0` — NOVO (01/09/2026), item GRANDE #9 do pedido de 12 itens
     // ("Novo formato de arquivo... Escadas e outros andares também" +
     // decisão do usuário via AskUserQuestion: "Andares de verdade" —
-    // paredes/portas/janelas ganham piso, antes só objetos/câmeras tinham).
+    // paredes/portas/janelas ganham piso, antes só objetos tinham).
     // Até esta rodada, paredes eram floor-agnostic (apareciam iguais em
     // qualquer andar) — agora cada parede pertence a UM piso (mesma unidade
     // de sempre: inteiro, andar térreo = 0, ver `obj.piso` em addObject
@@ -1178,63 +1170,6 @@ const Mapping = {
     return (el.elevacaoBase || 0) + (el.alturaPeitoril || 0);
   },
 
-  // ---------- Câmeras: posição, direção (ângulo em radianos, 0 = eixo X),
-  // campo de visão (FOV, radianos) e, opcionalmente, uma foto associada
-  // (fotoId — de uma foto de qualquer ambiente, ver AmbientePhotos). ----------
-  addCamera(map, x, y, extra = {}) {
-    if (!map.cameras) map.cameras = [];
-    // NOVO (07/09/2026), pedido verbatim: "...'Câmeras'... devem ter
-    // nomes... implemente algo semelhante [ao bpy.data.objects] no app."
-    // [10/09/2026] NOVO — Campos Blender (Lens/DOF/Clipping) adicionados —
-    // ver histórico completo em js/mapview.js `_camPropsFieldsetHtml`.
-    // [11/09/2026] REESCRITO — pedido verbatim: "No 'Ver em 3D', nas
-    // propriedades de uma câmera, apague todas as propriedades. Deixe
-    // apenas FOV. [...] uma seção de 'Resolução' [...] Ao carregar uma
-    // foto, a câmera deve assumir a resolução da foto." Todo o fieldset
-    // Blender (tipo de lente/distância focal/sensor/shift/DOF/clipping)
-    // SUMIU do painel — `fov` (radianos, direto, sem derivar de foco/
-    // sensor nenhum) e `resolutionX`/`resolutionY` (pixels — influenciam o
-    // tamanho do retângulo amarelo, ver `_activeCamFrameAspect`/
-    // `_activeCamPropsVFovRad` em view3d.js e o retângulo de verdade em
-    // engine3d.js `_fotoFrustumMeshesById`) são os ÚNICOS campos de câmera
-    // que sobraram, além do que já existia antes desta rodada (posição/
-    // ângulo/piso/foto associada). `extra.fov`/`extra.resolutionX/Y` (se
-    // vierem explícitos de quem chama) têm prioridade — `...extra`
-    // continua por último.
-    const cam = {
-      id: Utils.uid('cam'), x, y, angulo: 0, fov: Math.PI / 3, piso: 0, fotoId: null,
-      criadoEm: DB.nowISO(), nome: this._nextObjectName(map, 'Câmera'),
-      resolutionX: 1920, resolutionY: 1080,
-      ...extra,
-    };
-    // NOVO (12/09/2026) — ver comentário equivalente em `addWall` acima.
-    window.ObjectStandard?.applyDefaultComponents(cam, 'camera');
-    map.cameras.push(cam);
-    this.recalcBounds(map);
-    return cam;
-  },
-  removeCamera(map, id) {
-    map.cameras = (map.cameras || []).filter((c) => c.id !== id);
-    this.recalcBounds(map);
-  },
-  updateCamera(map, id, patch) {
-    const cam = (map.cameras || []).find((c) => c.id === id);
-    if (!cam) return null;
-    Object.assign(cam, patch);
-    this.recalcBounds(map);
-    return cam;
-  },
-
-  /** Marca UMA câmera (por id) como a responsável por dar a perspectiva
-   *  inicial da visualização 3D (botão "🎥 Ver em 3D a partir desta câmera",
-   *  no submenu da câmera no mapa 2D — ver mapview.js) — ativação exclusiva:
-   *  desliga `ativo3D` de qualquer outra câmera deste mapa antes de ligar na
-   *  escolhida. Passar `id` null/vazio só desativa todas (nenhuma câmera
-   *  define a perspectiva — View3D usa a posição padrão). */
-  setCamera3DAtiva(map, id) {
-    (map.cameras || []).forEach((c) => { c.ativo3D = !!id && c.id === id; });
-  },
-
   // ---------- Objetos avulsos (mobiliário/decoração) — mesmos ícones dos
   // tipos de item (ICON_LIBRARY, ver icons.js) quando há correspondente, mais
   // alguns extras só de mapa (coluna, planta, porta, janela...), OU uma forma
@@ -1283,7 +1218,7 @@ const Mapping = {
   // NOVO (07/09/2026), pedido verbatim: "Todos os objetos devem ter nomes:
   // 'Lápis', 'Parede', 'Porta', 'Janela', 'Texto', 'Reta/Curva', cada uma das
   // formas da ferramenta 'Formas', 'Retículo métrico', 'Trena', 'Traço
-  // guia', 'Orb de foto', 'Câmeras', 'Adicionar orb', cada um dos objetos da
+  // guia', 'Orb de foto', 'Adicionar orb', cada um dos objetos da
   // ferramenta 'Objetos' e 'Novo Cubo 3D'. Assim como no Blender, há um
   // dicionário para todos os objetos em cena (bpy.data.objects[...]),
   // implemente algo semelhante no app." — o Blender usa um único namespace
@@ -1296,7 +1231,7 @@ const Mapping = {
     const nomes = [];
     const colecoes = [
       map.objects, map.walls, map.portas, map.janelas, map.textos,
-      map.cameras, map.medidas2d, map.tracos2d,
+      map.medidas2d, map.tracos2d,
     ];
     for (const col of colecoes) {
       if (!col) continue;
@@ -1840,7 +1775,7 @@ const Mapping = {
    * vários lugares (fotos hoje, itens numa rodada futura) sem depender de
    * `await`:
    *  - considera a caixa delimitadora de TUDO que já tem coordenada real no
-   *    mapa (`walls`, `points`, `cameras`, `objects`, `textos`);
+   *    mapa (`walls`, `points`, `objects`, `textos`);
    *  - `extraPoints` (opcional, array de `{x,y}`) deixa quem chama incluir
    *    TAMBÉM itens/fotos já posicionados DE PROPÓSITO (mapaX/mapaY sem
    *    `mapaAuto`) — de propósito NÃO inclui posições `mapaAuto` alheias
@@ -1871,7 +1806,6 @@ const Mapping = {
     };
     (map?.walls || []).forEach((w) => { consider(w.x1, w.y1); consider(w.x2, w.y2); });
     (map?.points || []).forEach((p) => consider(p.x, p.y));
-    (map?.cameras || []).forEach((c) => consider(c.x, c.y));
     (map?.objects || []).forEach((o) => consider(o.x, o.y));
     (map?.textos || []).forEach((t) => consider(t.x, t.y));
     (extraPoints || []).forEach((p) => { if (p) consider(p.x, p.y); });
@@ -2007,7 +1941,7 @@ const Mapping = {
   // ZERO desenho novo precisou ser escrito, nem no 2D nem no 3D).
   //
   // O "andar" de QUALQUER OUTRA entidade (parede, porta, janela, objeto,
-  // câmera, foto, texto) não é mais escolhido manualmente — é DERIVADO
+  // foto, texto) não é mais escolhido manualmente — é DERIVADO
   // geometricamente: pega-se a lista de objetos "Piso" do mapa, ordenados
   // pela altura da base deles (elevação), e o andar de uma entidade X é o
   // ÍNDICE do "Piso" mais alto que ainda está ABAIXO (ou na mesma altura)
@@ -2061,7 +1995,7 @@ const Mapping = {
    *  pertence, ou `null` quando não há nenhum "Piso" no mapa (ver
    *  comentário grande acima — nesse caso NADA deve ser filtrado, `entity`
    *  deve continuar sempre visível). `entity` pode ser um objeto, parede,
-   *  porta/janela ou câmera — usa-se `alturaEntidade(entity)` (helper
+   *  porta/janela — usa-se `alturaEntidade(entity)` (helper
    *  abaixo) pra achar a altura de referência dela, que varia por tipo de
    *  entidade (uma parede não tem `elevacao`, por exemplo).
    *  Regra: pertence ao "Piso" mais alto cuja laje está NA ALTURA OU ABAIXO
@@ -2088,7 +2022,7 @@ const Mapping = {
    *  - objeto: `elevacao` (chão do próprio objeto).
    *  - parede: 0 (paredes começam do chão do seu próprio `piso` numérico).
    *  - porta/janela: `alturaPeitoril` (onde o vão começa).
-   *  - câmera/foto/texto: `elevacao` se existir, senão 0. */
+   *  - foto/texto: `elevacao` se existir, senão 0. */
   _alturaEntidadeParaPiso(entity) {
     if (entity == null) return 0;
     if ('alturaPeitoril' in entity) return entity.alturaPeitoril || 0;

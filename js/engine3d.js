@@ -29,7 +29,7 @@
  *   vetores de direção da câmera (3D completo / projetado no plano
  *   horizontal), base de todo movimento/mira do jogador.
  * - objectPointerForward(dirAngulo,pitch) — [22/09/2026, NOVO] vetor de
- *   direção de APONTAMENTO de um OBJETO câmera/orb de foto (cone/seta,
+ *   direção de APONTAMENTO de um orb de foto (cone/seta,
  *   placa, retângulo amarelo/frustum — todos usam este mesmo vetor, ver
  *   `setScene`) — DISTINTO de `cameraForward` (direção de VISÃO do
  *   personagem/câmera de navegação): corrige uma inversão de 180° no eixo
@@ -98,10 +98,7 @@
  *   (modos espectador) e seu controle de visibilidade.
  * - setFov(deg) — campo de visão da câmera de render.
  * - setClipPlanes(nearM,farM)/clearClipPlanes() — override de
- *   near/far (ver comentário grande junto delas — "Camera Match").
- * - setCameraMeshVisible(camId,visible) — [11/09/2026, NOVO] esconde/
- *   mostra a malha caixa+cone de UMA câmera específica (usado por
- *   view3d.js `_enterCameraOrbView`/`_exitCameraOrbView`).
+ *   near/far (ver comentário grande junto delas).
  * - setFotoMeshVisible(fotoId,visible) — [12/09/2026, NOVO] mesma ideia
  *   acima, mas pra malha esfera+cone(+placa) de UM "orb de foto" (usado
  *   por view3d.js `_enterFotoCameraView`/`_exitFotoCameraView`).
@@ -120,7 +117,7 @@
  *
  * Construção da cena (a partir do mapa):
  * - setScene(mapData) — MÉTODO PRINCIPAL, reconstrói a cena 3D inteira a
- *   partir do mapa (paredes/portas/janelas/objetos/itens/câmeras/fotos/
+ *   partir do mapa (paredes/portas/janelas/objetos/itens/fotos/
  *   luminárias/postes/tijolos) — a maior função do arquivo.
  * - _buildOneObjectMesh(obj,wireframe,colWireframe) — malha de UM objeto
  *   comum (despacha pro builder certo conforme o tipo/perfil).
@@ -219,7 +216,7 @@ function cameraRightFlat(cam) { return rotY({ x: -1, y: 0, z: 0 }, cam.yaw); }
 // norte apontando para o sul, conforme a roda de pontos cardeais (no canto
 // superior direito). Deve girar 180 graus para apontar para o lado certo
 // (tomando como referência o mapa 2D)." Direção de APONTAMENTO de um
-// OBJETO câmera/orb de foto (cone/seta 3D que indica pra onde ele "olha")
+// orb de foto (cone/seta 3D que indica pra onde ele "olha")
 // — DISTINTA de `cameraForward` acima, que é a direção de VISÃO do
 // PERSONAGEM/câmera de navegação (yaw do jogador, nunca teve nenhum
 // problema relatado, NÃO TOCADA por esta correção).
@@ -250,7 +247,7 @@ function cameraRightFlat(cam) { return rotY({ x: -1, y: 0, z: 0 }, cam.yaw); }
 // única fonte de verdade da composição yaw+pitch/gimbal) e depois nega SÓ
 // o componente Z do resultado — pitch/inclinação vertical (`y`) nunca fez
 // parte do bug relatado e fica intocado. Usada em TODO lugar que precisa
-// saber "pra onde este objeto câmera/orb de foto aponta" (cone/seta,
+// saber "pra onde este orb de foto aponta" (cone/seta,
 // placa da foto, retângulo amarelo/frustum — todos compartilham a mesma
 // variável `dirVec` em `setScene`, ver comentário lá) — e também na POSE
 // de "Ver através desta câmera" (`view3d.js _computeFotoCamPose`, que
@@ -313,7 +310,7 @@ function lerpAngle(a, b, t) {
 // devolve o FOV VERTICAL DE VERDADE a usar (pra `THREE.PerspectiveCamera.
 // fov`, retângulo amarelo — [19/09/2026] "plano do backdrop 'Trás'" também
 // consumia isto antes desta rodada; plano REMOVIDO — todo lugar que hoje
-// consome um FOV vertical, ver `_activeCamPropsVFovRad`/`_camOrbFovDeg` em
+// consome um FOV vertical, ver `_activeCamPropsVFovRad` em
 // view3d.js e o bloco `vFovRad` do retângulo amarelo abaixo, em
 // `setScene`), já fazendo essa conversão — chamadores não precisam saber
 // se o FOV governa a largura ou a altura, só chamam esta função uma vez
@@ -745,15 +742,14 @@ class Engine3D {
     // própria câmera. O clique nela mesma deve ser desativado". Guarda
     // qual pickable (type+id) deve ser IGNORADO por `pickFromRay`/
     // `hoverPick`/`_hoverPickPixelPerfect` enquanto "vendo através" dela —
-    // view3d.js liga isto ao entrar em `_fotoCamMode`/`_orbCamMode`
-    // (`setPickExclude('fotoPin', fotoId)`/`setPickExclude('camera', camId)`)
-    // e desliga ao sair (`clearPickExclude()` — ver _resetCamZoom). Sem
-    // isto, o próprio orb/câmera calibrado (visível no cenário mesmo
+    // view3d.js liga isto ao entrar em `_fotoCamMode`
+    // (`setPickExclude('fotoPin', fotoId)`) e desliga ao sair (`clearPickExclude()` — ver _resetCamZoom). Sem
+    // isto, o próprio orb calibrado (visível no cenário mesmo
     // enquanto se olha "através" dele) sempre "ganhava" da mira/clique por
     // estar bem na frente da câmera renderizada.
     this._pickExclude = null; // { type, id } | null
     // [10/09/2026] NOVO — ponto de tela (NDC -1..1) onde o MOUSE está,
-    // enquanto `_fotoCamMode`/`_orbCamMode` ativos (ver view3d.js
+    // enquanto `_fotoCamMode` ativos (ver view3d.js
     // `_pickAtClientPoint`/onMouseMove) — usado por `_updateHoverHighlight`
     // pra desenhar o MESMO destaque de mira (contorno pontilhado/hitbox/
     // tightbox, conforme a config) sob o CURSOR do mouse em vez de sob o
@@ -2254,7 +2250,7 @@ class Engine3D {
    *  toda a movimentação articulada. Só aparece quando é outra câmera sendo
    *  usada para observar o cenário." — ou seja: NÃO aparece na visão em 1ª
    *  pessoa de sempre (ninguém se vê a si mesmo em 1ª pessoa), só quando
-   *  "assistindo" uma câmera fixa do mapa (ver view3d.js _enterCameraView/
+   *  "vendo através" de um orb de foto (ver view3d.js
    *  setPlayerFigureVisible). Construído uma ÚNICA vez aqui (igual aos
    *  ghosts, ver _initBuildGhosts) — escondido por padrão, só reposicionado/
    *  reanimado a cada quadro por updatePlayerFigure, nunca recriado — pra
@@ -2274,9 +2270,8 @@ class Engine3D {
     torso.position.set(0, (ALT_QUADRIL + ALT_OMBRO) / 2, 0);
     root.add(torso);
 
-    // Cabeça-câmera — MESMO desenho (corpo + lente) da malha de câmera de
-    // verdade em setScene (mapData.cameras), só menor (proporção de
-    // "cabeça"), pra deixar claro que é uma câmera, não uma cabeça humana.
+    // Cabeça-câmera — corpo + lente (proporção de "cabeça"), pra deixar
+    // claro que é uma câmera, não uma cabeça humana.
     const headPivot = new THREE.Group();
     headPivot.position.set(0, ALT_PESCOCO, 0);
     const camBody = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.11, 0.11), matCam);
@@ -2336,7 +2331,7 @@ class Engine3D {
   }
 
   /** FOV da câmera de RENDER (`camera3`) — fixo em 72° sempre, EXCETO
-   *  enquanto "assistindo" uma câmera fixa (ver view3d.js _camMode), que
+   *  enquanto "vendo através" de um orb de foto (ver view3d.js _fotoCamMode), que
    *  pode dar zoom dentro de um alcance limitado (pedido do usuário: "é
    *  possível dar zoom... de forma limitada"). `deg` já vem clampado de
    *  quem chama; aqui só aplica de verdade. */
@@ -2389,7 +2384,7 @@ class Engine3D {
    *  foto pra direita" deve parecer), entao aqui a cena desloca na MESMA
    *  direcao do arrasto do mouse. xFrac=0/yFrac=0 limpa o offset
    *  (camera3.clearViewOffset()) -- sempre chamado ao entrar/sair de
-   *  '_fotoCamMode'/'_orbCamMode' (ver view3d.js _resetCamZoom) pra nunca
+   *  '_fotoCamMode' (ver view3d.js _resetCamZoom) pra nunca
    *  vazar pan pra a navegacao normal/Modelador (que reaproveitam o
    *  MESMO 'camera3'). */
   setCamPanFrac(xFrac, yFrac) {
@@ -2403,23 +2398,21 @@ class Engine3D {
   }
 
   /** Liga a exclusão de pick (ver comentário grande em `this._pickExclude`,
-   *  constructor) — chamado por view3d.js ao ENTRAR em `_fotoCamMode`/
-   *  `_orbCamMode` com o `type`/`id` do próprio orb/câmera sendo visto
+   *  constructor) — chamado por view3d.js ao ENTRAR em `_fotoCamMode` com o `type`/`id` do próprio orb sendo visto
    *  através. */
   setPickExclude(type, id) {
     this._pickExclude = (type && id != null) ? { type, id } : null;
   }
 
-  /** Desliga a exclusão de pick — chamado ao SAIR de `_fotoCamMode`/
-   *  `_orbCamMode` (ver view3d.js `_resetCamZoom`), senão o próprio
-   *  orb/câmera ficaria pra sempre impossível de selecionar depois. */
+  /** Desliga a exclusão de pick — chamado ao SAIR de `_fotoCamMode` (ver view3d.js `_resetCamZoom`), senão o próprio
+   *  orb ficaria pra sempre impossível de selecionar depois. */
   clearPickExclude() {
     this._pickExclude = null;
   }
 
   /** true quando `type`/`id` batem com a exclusão ativa no momento (ver
    *  `setPickExclude`) — usado por `pickFromRay`/`hoverPick`/
-   *  `_hoverPickPixelPerfect` pra pular o próprio orb/câmera calibrado. */
+   *  `_hoverPickPixelPerfect` pra pular o próprio orb calibrado. */
   _isPickExcluded(type, id) {
     const ex = this._pickExclude;
     return !!(ex && ex.type === type && ex.id === id);
@@ -2428,7 +2421,7 @@ class Engine3D {
   /** Liga/desliga o ponto de tela usado por `_updateHoverHighlight` (ver
    *  comentário grande em `this._hoverScreenNdc`, constructor) — chamado
    *  por view3d.js `_pickAtClientPoint` (mousemove/click reais) enquanto
-   *  `_fotoCamMode`/`_orbCamMode` ativos, e limpo (`clearHoverScreenPoint`)
+   *  `_fotoCamMode` ativos, e limpo (`clearHoverScreenPoint`)
    *  ao sair desses modos (ver `_resetCamZoom`). */
   setHoverScreenPoint(ndcX, ndcY) {
     this._hoverScreenNdc = { x: ndcX, y: ndcY };
@@ -2446,8 +2439,8 @@ class Engine3D {
    *  .fog" logo abaixo/updateProjectionMatrix), sobrescrevendo qualquer
    *  valor de recorte calibrado — os 2 campos `_clipNearOverride`/
    *  `_clipFarOverride` guardam a intenção explícita (setada só enquanto
-   *  "vendo através" de uma câmera/orb calibrada — ver view3d.js
-   *  _enterCameraOrbView/_exitCameraOrbView) e o bloco do fog abaixo respeita
+   *  "vendo através" de um orb calibrado — ver view3d.js
+   *  _enterFotoCameraView/_exitFotoCameraView) e o bloco do fog abaixo respeita
    *  o override quando presente. `null`/valor <= 0 em qualquer um dos dois
    *  desativa aquele override específico (mantém o comportamento padrão). */
   setClipPlanes(nearM, farM) {
@@ -2468,56 +2461,11 @@ class Engine3D {
     if (this.camera3) { this.camera3.near = 0.1; this.camera3.updateProjectionMatrix(); } // 0.1 = mesmo valor de fábrica de _initThree (new THREE.PerspectiveCamera(72, 1, 0.1, ...))
   }
 
-  /** [11/09/2026] NOVO — esconde/mostra a malha caixa+cone de UMA câmera
-   *  específica (ver índice `this._cameraMeshesById`, montado em setScene).
-   *  Chamada por view3d.js `_enterCameraOrbView`/`_exitCameraOrbView`:
-   *  quando a visão do jogador está travada exatamente na pose de uma
-   *  câmera "Câmeras", a malha DELA PRÓPRIA (que fica no mesmo ponto do
-   *  olho de render, com o cone se estendendo pra FORA na direção de
-   *  apontamento — ou seja, na direção pra onde o jogador está agora
-   *  olhando A PARTIR DE) acaba renderizando dentro do próprio frustum,
-   *  aparecendo como uma forma indevida "na frente" da câmera (mesma ideia
-   *  de um jogo em 1ª pessoa esconder a malha do próprio corpo do jogador
-   *  da câmera dele mesmo). `camId` null/inexistente é um no-op seguro. */
-  setCameraMeshVisible(camId, visible) {
-    const meshes = camId != null ? this._cameraMeshesById?.[camId] : null;
-    if (!meshes) return;
-    meshes.forEach((m) => { if (m) m.visible = visible; });
-    // [14/09/2026] CORRIGIDO — pedido verbatim: "ao clicar em uma câmera e
-    // selecionar 'Ver através desta câmera' [...] o cone da câmera
-    // selecionada acaba voltando a parecer e fica na frente da tela." BUG
-    // CONFIRMADO via Playwright (live): não era só ao entrar/sair do
-    // Modelador — a malha voltava a aparecer sozinha em MENOS DE 100ms,
-    // sempre, mesmo sem tocar no Modelador. Causa raiz de verdade:
-    // `_updateDistanceCulling` (chamada TODO QUADRO, ver `render()`) trata
-    // câmeras como qualquer outro objeto "elegível pro corte por
-    // distância" (`_setupCullMeshes`, `tipo === 'camera'`) e reatribui
-    // `mesh.visible = distância <= alcance` sem saber de
-    // `setCameraMeshVisible`/`setFotoMeshVisible` — como a câmera sendo
-    // "vista através" está a distância ZERO do próprio olho de render,
-    // `0 <= alcance` é sempre verdadeiro, então o culling FORÇAVA
-    // `visible=true` de volta no quadro seguinte, não importa quantas vezes
-    // este método fosse chamado antes. CORRIGIDO NA RAIZ (não aqui — ver
-    // `_updateDistanceCulling`/`_forcedHiddenMeshes` abaixo): este método
-    // agora também mantém um Set global `this._forcedHiddenMeshes` com toda
-    // malha atualmente escondida "à força" (por este método OU por
-    // `setFotoMeshVisible`) — é esse Set que `_updateDistanceCulling`
-    // consulta pra NUNCA reverter estas malhas de volta pra visível, não
-    // importa a distância calculada.
-    if (!this._forcedHiddenMeshes) this._forcedHiddenMeshes = new Set();
-    meshes.forEach((m) => {
-      if (!m) return;
-      if (visible) this._forcedHiddenMeshes.delete(m); else this._forcedHiddenMeshes.add(m);
-    });
-  }
-
-  /** [12/09/2026] NOVO — mesmo bug do cone "na frente da câmera" (ver
-   *  `setCameraMeshVisible` acima), agora pro "orb de foto": esconde/mostra
+  /** [12/09/2026] NOVO — bug do cone "na frente da câmera": esconde/mostra
    *  a malha esfera+cone (e a placa texturizada da foto, quando existe) de
    *  UM orb de foto específico (ver índice `this._fotoMeshesById`, montado
    *  em setScene, bloco "fotos vinculadas ao mapa"). Chamada por
-   *  view3d.js `_enterFotoCameraView`/`_exitFotoCameraView`: diferente do
-   *  "orb de câmera" (`_orbCamMode`, câmera travada DE VERDADE), "ver
+   *  view3d.js `_enterFotoCameraView`/`_exitFotoCameraView`: "ver
    *  através desta câmera" de um orb de foto é um modo ESPECTADOR
    *  (`_fotoCamMode` — só a pose RENDERIZADA é sobrescrita, `this._camera`
    *  continua livre) — mas o olho de render fica no mesmo ponto do orb do
@@ -2529,14 +2477,10 @@ class Engine3D {
     const meshes = fotoId != null ? this._fotoMeshesById?.[fotoId] : null;
     if (!meshes) return;
     meshes.forEach((m) => { if (m) m.visible = visible; });
-    // [14/09/2026] NOVO — mesmo mecanismo de `setCameraMeshVisible` (ver
-    // comentário grande lá), espelhado aqui por consistência/segurança:
-    // `_setupCullMeshes` hoje só inclui `tipo 'object'/'item'/'camera'` no
-    // corte por distância (orb de foto é `tipo:'fotoPin'`, de fora dessa
-    // lista) — então este orb, sozinho, não sofre o bug de "reaparecer"
-    // sozinho HOJE, mas registrar aqui do mesmo jeito custa nada e blinda
-    // contra qualquer mudança futura em `_setupCullMeshes` que passe a
-    // incluir `'fotoPin'`.
+    // `_forcedHiddenMeshes`: malhas escondidas "à força", que
+    // `_updateDistanceCulling` nunca reverte pra visível (`_setupCullMeshes`
+    // hoje só inclui `tipo 'object'/'item'`; registrar aqui blinda contra
+    // uma mudança futura que passe a incluir `'fotoPin'`).
     if (!this._forcedHiddenMeshes) this._forcedHiddenMeshes = new Set();
     meshes.forEach((m) => {
       if (!m) return;
@@ -2600,9 +2544,7 @@ class Engine3D {
    *  MESMA fórmula usada lá (mantida em sincronia de propósito: qualquer
    *  mudança numa precisa ser espelhada na outra). Chamada por
    *  view3d.js `_activeCamPropsEditTarget()` a cada edição em
-   *  "Propriedades", tanto pra `_fotoCamMode` (orb de foto) quanto pra
-   *  `_orbCamMode` (câmera legada — vira no-op inofensivo, já que esse
-   *  tipo nunca teve gizmo de frustum, ver `hasCameraFrustum` acima). */
+   *  "Propriedades" (`_fotoCamMode`, orb de foto). */
   updateCameraFrustumGeometry(fotoId, camProps) {
     const meshes = this._fotoFrustumMeshesById?.[fotoId];
     const basis = this._fotoFrustumBasisById?.[fotoId];
@@ -2974,14 +2916,14 @@ class Engine3D {
       this.scene.fog.near = this._fogNear(rd);
       this.scene.fog.far = rd;
       // [10/09/2026] NOVO — respeita `setClipPlanes` (ver comentário grande
-      // lá) enquanto um override de recorte estiver ativo (câmera/orb
-      // calibrada "Camera Match"), em vez de sobrescrever `far` sempre a
+      // lá) enquanto um override de recorte estiver ativo (orb
+      // calibrado), em vez de sobrescrever `far` sempre a
       // partir da distância de renderização/neblina.
       // [13/09/2026] NOVO — pedido verbatim: "controles de plano de corte
       // próximo/distante (z_near/z_far)... em 'Desempenho 3D'... deve ser
       // atualizado em tempo real". `cfg.cameraZNear`/`cameraZFar` (ver
       // mapconfig.js DEFAULTS) são o 2º nível de prioridade, ABAIXO do
-      // override de câmera/orb calibrada (`_clipFarOverride`/
+      // override de orb calibrado (`_clipFarOverride`/
       // `_clipNearOverride`, que continua vencendo enquanto "vendo através"
       // de uma câmera — este painel novo não deve brigar com aquele recurso
       // já existente) — só entram quando não há override de câmera ativo.
@@ -3064,26 +3006,6 @@ class Engine3D {
     this._caboMoldarAtivo = false; // [19/09/2026 UTC] RODADA 190 -- ver `caboMoldarSetAtivo`
     this._cabosInfo = new Map(); this._feixes = []; this._redeCarga = null; // RODADA 167 -- cabos (percurso), feixes
     this._rackRuntime = new Map(); // [18/09/2026 UTC] RODADA 164 — portas animadas dos Racks (ver _buildRackMesh)
-    // [11/09/2026] NOVO — item 1 do pedido "parte do cone aparece na frente
-    // da câmera" em "Ver através desta câmera": índice camId -> [malhas
-    // caixa+cone] daquela câmera, repovoado do zero a cada setScene (mesmo
-    // padrão de `_itemBadgeGroups`/`_hybridMeshes` acima) — usado por
-    // `setCameraMeshVisible` (ver mais abaixo, chamada por
-    // `_enterCameraOrbView`/`_exitCameraOrbView` em view3d.js) pra
-    // esconder/mostrar a malha da PRÓPRIA câmera cujo ponto de vista está
-    // sendo usado como a câmera de render — sem isto, o cone (que se
-    // estende do centro da caixa PARA FORA, na direção de apontamento —
-    // exatamente a direção onde o olho de render agora está posicionado)
-    // acaba entre o near plane e o resto da cena, aparecendo como uma forma
-    // indevida "na frente" de tudo.
-    this._cameraMeshesById = {};
-    // [13/09/2026] NOVO — índice camId -> refs de malhas/luz do modelo "PS1"
-    // de câmera (ver bloco "câmeras" logo abaixo e `_updateCamerasLive`,
-    // chamado por view3d.js `_updateScriptLifecycle` a cada quadro). Só
-    // câmeras com `cam.modeloVisual==='ps1'` entram aqui — o modelo PADRÃO
-    // (caixa+cone, sem mudança nenhuma nesta rodada) não usa este índice.
-    // Repovoado do zero a cada setScene, mesmo padrão de `_cameraMeshesById`.
-    this._camPs1RefsById = {};
     // [correção 13/09/2026] índice objId -> `THREE.Group` do carro (ver
     // `_buildCarroMesh` mais abaixo) — MESMO problema/MESMA correção da
     // porta (ver comentário grande logo acima, sobre `_doorRuntime`): antes
@@ -3092,12 +3014,12 @@ class Engine3D {
     // assim que o carro era construído em cena (achado pelo usuário: erro
     // "onRotationChange... could not be cloned", causado pelo Euler de
     // rotação do próprio Group anexado à entidade). Repovoado do zero a
-    // cada setScene, mesmo padrão de `_camPs1RefsById`.
+    // cada setScene, mesmo padrão dos demais índices.
     this._carroRefsById = {};
     // [15/09/2026] NOVO — lista de relógios de parede/mesa montados nesta
     // cena (ver `_buildRelogioMesh` mais abaixo e `_updateRelogiosParede`,
     // chamado por view3d.js a cada quadro, MESMO padrão de
-    // `_camPs1RefsById`/`_updateCamerasLive` acima): cada entrada guarda os
+    // `_updateDoorAnimations`): cada entrada guarda os
     // 3 meshes-filho dos ponteiros (hora/minuto/segundo) pra girar a
     // `rotation.z` deles conforme `window.RelogioMundo.getHoraAtual()`,
     // sem precisar varrer `_group.children` procurando por tipo a cada
@@ -3105,26 +3027,24 @@ class Engine3D {
     // (trocar de andar/reconstruir a cena descarta as malhas antigas).
     this._relogiosParede = [];
     // [14/09/2026] NOVO — `this._forcedHiddenMeshes` (ver
-    // `setCameraMeshVisible`/`setFotoMeshVisible`/`_updateDistanceCulling`)
+    // `setFotoMeshVisible`/`_updateDistanceCulling`)
     // guarda REFERÊNCIAS às malhas antigas — sem limpar aqui, um `setScene`
     // (troca de andar, edição, saída do Modelador) deixaria o Set cheio de
     // malhas ÓRFÃS (já descartadas, nunca mais no `_group`) pra sempre,
     // crescendo sem limite. Quem ainda estiver "vendo através" de uma
-    // câmera/orb quando este `setScene` rodar reconstrói o Set do zero (com
+    // orb quando este `setScene` rodar reconstrói o Set do zero (com
     // as malhas NOVAS) logo em seguida — ver view3d.js `_rebuildScene`.
     this._forcedHiddenMeshes = new Set();
-    // [12/09/2026] NOVO — mesma ideia de `_cameraMeshesById` acima, agora
-    // pro "orb de foto": índice fotoId -> [malhas esfera+cone(+placa)]
+    // [12/09/2026] NOVO — índice fotoId -> [malhas esfera+cone(+placa)]
     // daquele orb, repovoado do zero a cada setScene. Usado por
     // `setFotoMeshVisible` (ver mais abaixo) pra esconder a malha do
     // PRÓPRIO orb de foto sendo visto através dele em `_enterFotoCameraView`
-    // (view3d.js) — mesmo bug do cone "na frente da câmera" já corrigido
-    // pro orb de câmera (`_cameraMeshesById`/`setCameraMeshVisible`).
+    // (view3d.js).
     this._fotoMeshesById = {};
     // [10/09/2026] NOVO — índice fotoId -> [linha do retângulo, linhas dos
     // 4 cantos] do gizmo de "enquadramento" (retângulo amarelo, ver
     // `setCameraFrustumsVisible` acima) — MESMO padrão de índice de
-    // `_fotoMeshesById`/`_cameraMeshesById`, repovoado do zero a cada
+    // `_fotoMeshesById`, repovoado do zero a cada
     // `setScene`. Visibilidade inicial de cada mesh já sai de
     // `this._frustumGizmosEnabled` (ver bloco "fotos vinculadas ao mapa"),
     // então trocar de andar/reabrir o mapa preserva o estado do botão "🟨".
@@ -3476,7 +3396,7 @@ class Engine3D {
       if (segLen <= 1e-4 || segH <= 1e-4) return;
       const ux = dx / len, uz = dz / len;
       const midT = (t0 + t1) / 2;
-      const geo = new THREE.BoxGeometry(wallThickness, segH, segLen);
+      const geo = this._moldeGeoAjustada('parede', wallThickness, segH, segLen) || new THREE.BoxGeometry(wallThickness, segH, segLen);
       let mat;
       if (wireframe) {
         mat = new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true });
@@ -3491,7 +3411,7 @@ class Engine3D {
       const wRotY = Math.atan2(dx, dz);
       // NOVO (01/09/2026), item GRANDE #9 — "andares de verdade": cada
       // parede empilha na altura do seu próprio piso (mesmo `piso*2.8` que
-      // objetos/câmeras já usavam, ver `baseY` em `_buildOneObjectMesh`)
+      // objetos já usavam, ver `baseY` em `_buildOneObjectMesh`)
       // — ver comentário grande em Mapping.addWall (js/mapping.js).
       const pisoY = (w.piso || 0) * (mapData.alturaPiso || 2.8);
       mesh.position.set(cx, pisoY + y0 + segH / 2, cz);
@@ -3658,189 +3578,6 @@ class Engine3D {
       this._pickMeshes.push(mesh);
     });
 
-    // --- câmeras: corpo + "lente" apontando na direção configurada (ver
-    // mapview.js — a MESMA convenção de ângulo do 2D: 0 = eixo X). Altura de
-    // montagem fixa (câmera de parede/teto). As duas malhas são adicionadas
-    // DIRETO em this._group (nada de Group aninhado) porque _disposeGroupContents
-    // só percorre um nível — um Group aninhado vazaria a geometria/material
-    // dos filhos dele a cada troca de modo. Por isso a posição da "lente" é
-    // calculada em coordenadas do MUNDO (deslocada na direção da câmera), em
-    // vez de depender de um pai com transformação local. ---
-    const ALTURA_CAMERA = 1.6;
-    (mapData.cameras || []).forEach((cam) => {
-      const baseY = (cam.piso || 0) * (mapData.alturaPiso || 2.8);
-      // [11/09/2026] CORRIGIDO — pedido verbatim, com repro exato: "crie um
-      // câmera, então o desenho 2D dela tem uma seta que aponta para
-      // norte. Depois, vou para o 'Ver em 3D' e a câmera (modelo 3D) e
-      // também o 'Ver através dessa câmera' estão apontando para o sul."
-      // A malha 3D (caixa+lente, abaixo) usava `cos(angulo)`/`sin(angulo)`
-      // direto — o mapa 2D (`Map2DRenderer._drawCameraShape`, mapview.js,
-      // referência que NÃO muda) também usa `cam.angulo` puro, mas com
-      // sinal invertido (`-cos`/`-sin`, mesma correção aplicada em
-      // view3d.js `_computeWatchCameraPose`/`_enterCameraOrbView` —
-      // ver comentário grande lá pro contexto completo) — os 3
-      // consumidores de `cam.angulo` (mapa 2D, esta malha, e a pose de
-      // "assistir"/"ver através") precisam apontar pro MESMO lado.
-      const dirX = -Math.cos(cam.angulo || 0), dirZ = -Math.sin(cam.angulo || 0);
-      const rotY = Math.atan2(dirX, dirZ); // mesma convenção das paredes (atan2(dx,dz))
-
-      // [13/09/2026] NOVO — modelo "PS1" de câmera de vigilância (pedido
-      // verbatim: "novo modelo de câmera, assim como no jogo '007 the world
-      // is not enough' para Play Station 1 [...] uma cúpula/base fixa +
-      // uma cabeça/lente que gira horizontalmente num arco limitado, com uma
-      // lucezinha vermelha piscando quando ativa"). Ativado por câmera via
-      // `cam.modeloVisual==='ps1'` (campo NOVO, opcional — ausente/qualquer
-      // outro valor mantém o modelo PADRÃO caixa+cone abaixo, ZERO mudança
-      // pras câmeras já existentes de mapas antigos). HONESTIDADE DE ESCOPO:
-      // isto é uma VARIANTE VISUAL do mesmo tipo "câmera" já existente
-      // (`map.cameras`, dispatch fixo pela chave 'camera' em
-      // js/objectassets.js) — não um tipo de catálogo novo/separado. O
-      // dispatch de clique de TODA câmera é uma chave fixa hoje
-      // (`dispatchClick3D('camera', ...)`), então criar um 2º TIPO de
-      // catálogo de verdade exigiria mudar esse dispatch pra ler um campo
-      // por-câmera em vários lugares do motor — risco maior de regressão
-      // sem poder testar ao vivo nesta rodada. Um campo de dado
-      // (`modeloVisual`) só trocando a GEOMETRIA é a via mais segura pro
-      // pedido ("novo modelo" = nova aparência) sem tocar no sistema de
-      // clique/card 3D já testado em produção (continua sendo o MESMO
-      // `_showCameraCard3D`, agora com botões novos — ver view3d.js).
-      //
-      // GEOMETRIA (3-4 formas THREE básicas, nenhuma customizada):
-      // - "base": CylinderGeometry curta, fixa (não gira) — o suporte de
-      //   parede/teto.
-      // - "cúpula": esfera achatada (scale.y reduzido) sobre a base, cor
-      //   escura semi-opaca — a "bolha" translúcida clássica dessas câmeras.
-      // - "cabeça/lente" (`lensHead`, um Group): cilindro fino saliente, que
-      //   é o que GIRA (yaw) no vai-e-volta — ver `cam.anguloLente` abaixo e
-      //   `Engine3D._updateCamerasLive`, chamado todo quadro por view3d.js.
-      // - LED vermelho: esferinha pequena na cúpula + PointLight de
-      //   intensidade baixíssima, ambos piscando (também em
-      //   `_updateCamerasLive`) enquanto a câmera está "ativa".
-      //
-      // ÂNGULOS — dois campos DISTINTOS de propósito (evita reaproveitar
-      // `cam.angulo` pra duas coisas ao mesmo tempo, o que quebraria o
-      // modelo PADRÃO que já usa `cam.angulo` como o apontamento inteiro da
-      // câmera): `cam.angulo` continua sendo a orientação FIXA de MONTAGEM
-      // (pra onde a base/cúpula ficam viradas, escolhida ao criar a câmera,
-      // igual sempre foi) — `cam.anguloLente` (NOVO, radianos, padrão 0) é o
-      // desvio ADICIONAL da cabeça/lente em relação a essa orientação de
-      // montagem, tipicamente escrito por um Script (ver assets/modelos/
-      // _exemplo-script-camera-vigilancia.txt) fazendo o vai-e-volta entre
-      // um mínimo e um máximo configuráveis.
-      if (cam.modeloVisual === 'ps1') {
-        const matCorpo = wireframe
-          ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-          : new THREE.MeshLambertMaterial({ color: 0x50565f }); // cinza-metálico — "equipamento", não "objeto de cena"
-        const matCupula = wireframe
-          ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-          : new THREE.MeshPhongMaterial({ color: 0x1c2430, transparent: true, opacity: 0.55, shininess: 90 }); // cúpula escura semi-translúcida
-        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.05, 12), matCorpo);
-        base.position.set(cam.x, baseY + ALTURA_CAMERA + 0.05, cam.y);
-        base.rotation.y = rotY; // só estética (cilindro é simétrico no eixo Y) — mantém consistência com a direção de montagem
-        this._group.add(base);
-        const dome = new THREE.Mesh(new THREE.SphereGeometry(0.085, 14, 10), matCupula);
-        dome.scale.set(1, 0.62, 1); // "achatada" — cúpula, não bola inteira
-        dome.position.set(cam.x, baseY + ALTURA_CAMERA - 0.02, cam.y);
-        this._group.add(dome);
-        // Cabeça/lente: Group próprio pra girar (yaw) sem mexer em base/cúpula.
-        const lensHead = new THREE.Group();
-        lensHead.position.set(cam.x, baseY + ALTURA_CAMERA - 0.015, cam.y);
-        lensHead.rotation.y = rotY; // ponto de partida = mesma orientação de montagem (offset 0)
-        const lensMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.14, 12), matCorpo);
-        lensMesh.rotation.x = Math.PI / 2; // cilindro nasce "de pé" (eixo Y) — deitado (eixo Z local) pra apontar pra frente
-        lensMesh.position.set(0, 0, 0.07); // saliente à frente do centro da cúpula
-        lensHead.add(lensMesh);
-        // LED vermelho — esferinha emissiva + luz pontual bem fraca (não
-        // deve iluminar o cômodo, só "ler" como uma lucezinha de status).
-        const ledMat = new THREE.MeshBasicMaterial({ color: 0xff2020 });
-        const ledMesh = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), ledMat);
-        ledMesh.position.set(0.05, 0.03, 0.1);
-        lensHead.add(ledMesh);
-        const ledLight = new THREE.PointLight(0xff2222, 0, 0.6); // intensidade 0 = começa apagada; `_updateCamerasLive` pisca
-        ledLight.position.copy(ledMesh.position);
-        lensHead.add(ledLight);
-        this._group.add(lensHead);
-        const camPosPs1 = { x: cam.x, y: baseY + ALTURA_CAMERA, z: cam.y };
-        const camPickPs1 = { id: cam.id, type: 'camera', pos: camPosPs1, center: camPosPs1, radius: 0.3, ref: cam, obb: { half: { x: 0.11, y: 0.1, z: 0.11 }, rotY, shape: 'box' } };
-        this.pickables.push(camPickPs1);
-        base.userData.pick = camPickPs1; dome.userData.pick = camPickPs1; lensMesh.userData.pick = camPickPs1;
-        this._pickMeshes.push(base, dome, lensMesh);
-        this._cameraMeshesById[cam.id] = [base, dome, lensHead]; // visibilidade (setCameraMeshVisible) cobre o grupo inteiro
-        this._camPs1RefsById[cam.id] = { lensHead, ledMesh, ledMat, ledLight, montagemRotY: rotY };
-        return; // NÃO monta o modelo padrão (caixa+cone) pra esta câmera
-      }
-
-      const matCam = wireframe
-        ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
-        : new THREE.MeshLambertMaterial({ color: 0x4fd1ff });
-      const body = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.16), matCam);
-      body.position.set(cam.x, baseY + ALTURA_CAMERA, cam.y);
-      body.rotation.y = rotY;
-      this._group.add(body);
-      // [10/09/2026] RE-DERIVADO DO ZERO (3ª tentativa — pedido verbatim:
-      // "a ponta do cone deve ficar alinhado ao centro da caixa e dentro
-      // dela [...] a base do cone deve apontar para a direção de
-      // apontamento [...] a superfície da base do cone deve ficar paralela
-      // com a superfície da lateral da caixa em que a ponta do cone
-      // 'entrou'"). As 2 tentativas anteriores (ver histórico logo acima,
-      // mantido só como referência) usavam ângulos de Euler manuais
-      // (`rotation.x`/`rotation.y` combinados à mão) — frágil, alto risco
-      // de sinal trocado (foi exatamente o que já deu errado 2x aqui, e o
-      // mesmo tipo de bug já tinha acontecido no "orb de foto" logo abaixo
-      // antes de ser trocado por quaternion). Reaproveitando aqui o MESMO
-      // padrão já verificado correto no "orb de foto" (`cone.quaternion.
-      // setFromUnitVectors`, ver comentário grande mais abaixo neste
-      // arquivo) em vez de inventar uma 3ª variação de Euler.
-      //
-      // Geometria, derivada explicitamente:
-      // - `ConeGeometry` nasce com a PONTA em +Y local e a BASE em −Y local
-      //   (raio no plano XZ em Y=−altura/2) — documentado no comentário do
-      //   orb de foto, confirmado na doc do Three.js.
-      // - `body.rotation.y = rotY` já faz o eixo local +Z da caixa (a face
-      //   "da frente") apontar exatamente para `dirVec` no mundo (mesma
-      //   conta que `rotY = atan2(dirX, dirZ)` já usava pra `dirX,dirZ` — ver
-      //   comentário grande acima, "mesma convenção das paredes"). Ou seja,
-      //   a face da caixa por onde a câmera "aponta" já tem sua NORMAL
-      //   exatamente igual a `dirVec` — não precisa recalcular nada extra
-      //   pra achar "a face certa".
-      // - `setFromUnitVectors((0,-1,0), dirVec)` gira o cone de forma que o
-      //   eixo local (0,-1,0) — a direção do CENTRO até a BASE — passe a
-      //   apontar pra `dirVec` no mundo. Como o eixo do cone é uma reta só,
-      //   isso automaticamente deixa o eixo do cone PARALELO a `dirVec` —
-      //   logo perpendicular à face da caixa (já que a normal da face É
-      //   `dirVec`) — a base fica PARALELA a essa face, exatamente o pedido.
-      // - Só falta posicionar: quer-se a PONTA (não o centro do cone, que é
-      //   o que `mesh.position` de fato ancora) exatamente no centro da
-      //   caixa. Depois da rotação, o deslocamento LOCAL da ponta
-      //   (0,+altura/2,0) vira, no mundo, `-dirVec * altura/2` (sinal
-      //   invertido — a ponta é o lado OPOSTO ao eixo usado no
-      //   `setFromUnitVectors`). Pra ponta = centro da caixa:
-      //   `posição do mesh = centroCaixa − (−dirVec·altura/2) = centroCaixa + dirVec·altura/2`.
-      //   A base cai em `posição do mesh + dirVec·altura/2 = centroCaixa + dirVec·altura`.
-      // - Com `altura = 0.16` (mesma medida de antes, proporção já lida como
-      //   "lente" razoável pro corpo de 0.22×0.16×0.16) e meia-profundidade
-      //   da caixa = 0.08: a ponta fica EXATAMENTE no centro (0.08 dentro da
-      //   face — "dentro dela", não só na superfície) e a base sobra ~0.08
-      //   além da face (pra fora, lendo como uma lente saliente, sem ficar
-      //   nem grande nem pequena demais em relação à caixa).
-      const lensH = 0.16;
-      const lens = new THREE.Mesh(new THREE.ConeGeometry(0.07, lensH, 10), matCam);
-      const dirVecCam = new THREE.Vector3(dirX, 0, dirZ).normalize();
-      const camCenter = new THREE.Vector3(cam.x, baseY + ALTURA_CAMERA, cam.y);
-      lens.position.copy(camCenter).addScaledVector(dirVecCam, lensH / 2);
-      lens.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dirVecCam);
-      this._group.add(lens);
-      const camPos = { x: cam.x, y: baseY + ALTURA_CAMERA, z: cam.y };
-      const camPick = { id: cam.id, type: 'camera', pos: camPos, center: camPos, radius: 0.3, ref: cam, obb: { half: { x: 0.11, y: 0.08, z: 0.08 }, rotY, shape: 'box' } };
-      this.pickables.push(camPick);
-      body.userData.pick = camPick;
-      lens.userData.pick = camPick;
-      this._pickMeshes.push(body, lens);
-      // [11/09/2026] registra as 2 malhas desta câmera pro índice usado por
-      // `setCameraMeshVisible` (ver comentário grande no topo de setScene).
-      this._cameraMeshesById[cam.id] = [body, lens];
-    });
-
     // --- fotos vinculadas ao mapa (Parte 5, mapview.js this._map.fotos) —
     // NOVO (03/09/2026), pedido do usuário: "Faltou a setinha... esta
     // setinha representa o apontamento da câmera a partir do ponto de vista
@@ -3876,17 +3613,14 @@ class Engine3D {
       // — `THREE.Object3D.lookAt` aponta o +Y do cone pro alvo (`ponta`)
       // quando construído a partir de um "up" alinhado ao próprio eixo do
       // cone; mais simples/direto aqui é só orientar via matriz olhando na
-      // direção `dir` (mesmo truque de `body.rotation.y = rotY` da câmera
-      // logo acima, generalizado pros 3 eixos com atan2/asin em vez de só Y).
+      // direção `dir` (generalizado pros 3 eixos com atan2/asin em vez de só Y).
       const cone = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.22, 10), matFoto);
       // [09/09/2026] Bug relatado pelo usuário: "o orb de foto é
       // representado no 3D como uma caixa e um cone, mas as posições não
       // parecem uma câmera [...] a ponta do cone deve ficar voltada para
       // dentro da caixa (encaixada), e a base do cone (que representa a
-      // lente) deve apontar para o horizonte" — MESMO pedido/MESMA correção
-      // de alinhamento já aplicada à ferramenta "Câmeras" logo acima (a
-      // "caixa" aqui é a esfera do orb, ver `orb` acima — geometria
-      // diferente, mesma ideia de "corpo da câmera"). Antes, a PONTA do
+      // lente) deve apontar para o horizonte" — (a
+      // "caixa" aqui é a esfera do orb, ver `orb` acima — "corpo da câmera"). Antes, a PONTA do
       // cone (+Y local, offset 0.16 do centro + meia-altura 0.11 = 0.27)
       // apontava pra FORA (no sentido de `dir`, ou seja, pro horizonte) e a
       // BASE ficava a 0.05 do centro do orb — DENTRO do raio da esfera
@@ -4467,8 +4201,28 @@ class Engine3D {
   _buildOneObjectMesh(obj, wireframe, colWireframe) {
     const childrenBefore = this._group.children.length;
     const baseYExtra = (obj.piso || 0) * (this.mapData?.alturaPiso || 2.8) + (obj.elevacao || 0);
+    this._assocDestaqueFeito = false;
     this._buildOneObjectMeshCore(obj, wireframe, colWireframe);
     this._applyObjectExtraTransform(obj, baseYExtra, childrenBefore);
+    // Destaque de "item associado" (contorno azul, raio, anel dourado, selo): só o caminho genérico o desenhava; os
+    // objetos que saem por outros construtores (malha do Modelador, molde editado, .glb, objeto importado...) ficavam
+    // sem efeito. Aqui cobre todos eles a partir da caixa delimitadora do que acabou de ser montado.
+    if (!this._assocDestaqueFeito && !wireframe && obj.itemIds && obj.itemIds.length && this._group.children.length > childrenBefore) {
+      try {
+        const THREE = this.THREE;
+        const box = new THREE.Box3();
+        for (let i = childrenBefore; i < this._group.children.length; i++) {
+          const ch = this._group.children[i];
+          ch.updateMatrixWorld(true);
+          box.expandByObject(ch);
+        }
+        if (!box.isEmpty()) {
+          const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
+          const objBox = Object.assign({}, obj, { x: c.x, y: c.z, angulo: 0 });
+          this._addItemAssociadoDestaque(objBox, { w: sz.x, d: sz.z, h: sz.y, y0: 0 }, box.min.y);
+        }
+      } catch (e) { console.warn('[Engine3D] destaque de item associado (caixa delimitadora):', e); }
+    }
   }
 
   /** Aplica `obj.customMeshXform.{rotX,rotZ,scaleX,scaleY,scaleZ}` (rotY
@@ -5080,6 +4834,24 @@ class Engine3D {
       meshesAdded.forEach((m) => { m.userData.pick = pick; this._pickMeshes.push(m); });
   }
 
+  /** Molde editado em "Acessar modelos" para Porta/Janela/Parede (elementos gerados por código): devolve a geometria do
+   *  molde (nível detalhado, senão low poly) centralizada e esticada para caber em `w` x `h` x `d` (largura, altura,
+   *  espessura/comprimento), ou null quando não há molde salvo — nesse caso vale o desenho padrão por código. */
+  _moldeGeoAjustada(tipo, w, h, d) {
+    const THREE = this.THREE;
+    const m = this._objectModelsByTipo && this._objectModelsByTipo[tipo];
+    const src = m && (m.detalhado || m.lowpoly);
+    if (!src || !src.vertices || !src.vertices.length) return null;
+    const geo = buildSmoothedTriGeometry(THREE, src.vertices, src.faces || []);
+    if (!geo.attributes.position) return null;
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    const c = bb.getCenter(new THREE.Vector3());
+    geo.translate(-c.x, -c.y, -c.z);
+    geo.scale(w / Math.max(1e-4, bb.max.x - bb.min.x), h / Math.max(1e-4, bb.max.y - bb.min.y), d / Math.max(1e-4, bb.max.z - bb.min.z));
+    return geo;
+  }
+
   _buildDoorOrWindowMesh(el, kind, mapData) {
     const THREE = this.THREE;
     const wireframe = this.mode === 'wireframe';
@@ -5135,7 +4907,14 @@ class Engine3D {
       // janela de verdade (não é um bloco maciço) e mais barato (o vidro não
       // pinta quase nada da própria área, ver _buildGlassShineTexture).
       const partsLocal = []; // { mesh, lx, ly, lz } — mesma convenção de buildFrameRingParts/buildJanelaCorrer2Folhas acima
-      if (kind === 'porta') {
+      const geoMolde = this._moldeGeoAjustada(kind, largura, altura, espMesh);
+      if (geoMolde) {
+        // Molde editado em "Acessar modelos" (Porta/Janela): substitui o desenho por código, esticado ao tamanho deste elemento.
+        const matM = wireframe
+          ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
+          : new THREE.MeshLambertMaterial({ color: corHex });
+        partsLocal.push({ mesh: new THREE.Mesh(geoMolde, matM), lx: 0, ly: 0, lz: 0 });
+      } else if (kind === 'porta') {
         const geo = new THREE.BoxGeometry(largura, altura, espMesh);
         const mat = wireframe
           ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
@@ -5624,8 +5403,8 @@ class Engine3D {
    *  decisão de design já usada pelos robôs de copa/limpeza/recepcionista,
    *  que também consultam o relógio do MUNDO, não `new Date()`, pra saber
    *  se é hora do almoço etc.). Chamado TODO QUADRO por view3d.js
-   *  `_updateScriptLifecycle`, mesmo lugar/padrão de `_updateCamerasLive`/
-   *  `_updateDoorAnimations` logo abaixo/acima.
+   *  `_updateScriptLifecycle`, mesmo lugar/padrão de
+   *  `_updateDoorAnimations`.
    *
    *  Guard barato: sem relógio nenhum na cena (`_relogiosParede` vazio,
    *  populado só em `_buildRelogioMesh`) ou sem `RelogioMundo` carregado
@@ -5676,8 +5455,7 @@ class Engine3D {
     // vinham SEMPRE, sem excecao, de RelogioMundo - nenhum Script
     // conseguia influenciar o relogio de jeito nenhum (nem parar,
     // adiantar, atrasar, ou mostrar outro fuso). Corrigido com o MESMO
-    // padrao ja usado por cam.anguloLente (camera PS1, escrita por
-    // _exemplo-script-camera-vigilancia.txt) e por entity.anguloAbertura/
+    // padrao ja usado por entity.anguloAbertura/
     // obj.elevacao (porta/elevador): 3 campos SIMPLES e OPCIONAIS no
     // objeto - horaPonteiro/minutoPonteiro/segundoPonteiro (numeros
     // comuns, 0-23/0-59/0-59, NAO radianos - nenhum Script precisa saber
@@ -5704,56 +5482,6 @@ class Engine3D {
       if (r.ponteiroHora) r.ponteiroHora.rotation.y = -angHora;
       if (r.ponteiroMinuto) r.ponteiroMinuto.rotation.y = -angMinuto;
       if (r.ponteiroSegundo) r.ponteiroSegundo.rotation.y = -angSegundo;
-    }
-  }
-
-  /** [13/09/2026] NOVO — parte "viva" do modelo de câmera "PS1" (ver bloco
-   *  "câmeras" em `setScene`, `cam.modeloVisual==='ps1'`): gira a
-   *  cabeça/lente conforme `cam.anguloLente` (tipicamente escrito por um
-   *  Script, ex.: assets/exemplos/_exemplo-script-camera-vigilancia.txt) e
-   *  faz a lucezinha vermelha de status piscar. Chamado TODO QUADRO por
-   *  view3d.js `_updateScriptLifecycle`, logo depois de `Components.
-   *  tickEntity` já ter rodado o `Update()` de cada Script (mesma ordem de
-   *  `_syncScriptedObjectTransforms`/`_updateDoorAnimations` acima — dado
-   *  muda no Script, malha reflete aqui em seguida). Guard barato: só
-   *  câmeras com entrada em `_camPs1RefsById` (só as PS1 — a imensa maioria
-   *  das câmeras comuns nem entra no `for`) fazem qualquer trabalho.
-   *
-   *  PISCAR — mesmo espírito de "tempo real do navegador" já usado nos
-   *  scripts de robô (`Date.now()`, ver _exemplo-script-robo-copa.txt): sem
-   *  depender de nenhum "relógio simulado do prédio" que este motor não
-   *  expõe, um ciclo de 500ms ligado / 500ms apagado, calculado direto de
-   *  `Date.now()` (nunca dessincroniza entre câmeras, todas piscam juntas —
-   *  aceitável pro efeito pedido, "lucezinha piscando"). Só pisca enquanto
-   *  `cam.varreduraAtiva !== false` (mesmo campo que liga/desliga o
-   *  vai-e-volta — ver botão "🔄" em view3d.js `_showCameraCard3D`); com a
-   *  varredura desligada, a luz fica ACESA FIXA em baixa intensidade (lida
-   *  como "câmera ligada, mas parada"), não apagada de propósito (uma
-   *  câmera de segurança "morta" seria uma informação enganosa). */
-  _updateCamerasLive(dt) {
-    const refsById = this._camPs1RefsById;
-    if (!refsById) return;
-    const ids = Object.keys(refsById);
-    if (!ids.length) return;
-    const camIndex = new Map((this.mapData?.cameras || []).map((c) => [String(c.id), c]));
-    const piscaLigada = Math.floor(Date.now() / 500) % 2 === 0;
-    for (const id of ids) {
-      const refs = refsById[id];
-      const cam = camIndex.get(String(id));
-      if (!refs || !cam) continue;
-      // Cabeça/lente: orientação de montagem + desvio do Script.
-      refs.lensHead.rotation.y = refs.montagemRotY + (cam.anguloLente || 0);
-      // LED — intensidade da PointLight e cor do material da esferinha
-      // (a esferinha em si não "brilha" sozinha sem luz de cena incidindo
-      // nela com um material Basic — por isso a PointLight junto faz o
-      // trabalho de "acender" de verdade; o MeshBasicMaterial já é vermelho
-      // sempre, então alternar entre vermelho vivo/vermelho escuro no
-      // material dá o contraste aceso/apagado mesmo pra quem olhar de perto
-      // sem a luz "vazar" muito no ambiente).
-      const varreduraAtiva = cam.varreduraAtiva !== false;
-      const aceso = !varreduraAtiva || piscaLigada;
-      refs.ledLight.intensity = aceso ? 0.15 : 0;
-      refs.ledMat.color.setHex(aceso ? 0xff2020 : 0x4a0808);
     }
   }
 
@@ -5943,6 +5671,7 @@ class Engine3D {
    *  Chamado por `_buildOneObjectMesh` pra QUALQUER objeto com `obj.itemId`
    *  (mesa/luminária inclusive, via o mesmo `perfil` aproximado). */
   _addItemAssociadoDestaque(obj, perfil, baseY) {
+    this._assocDestaqueFeito = true;
     if (!obj.itemIds || !obj.itemIds.length) return;
     const THREE = this.THREE;
     const cfg = this._config;
@@ -6149,7 +5878,7 @@ class Engine3D {
    *  Investigando: sim — antes, colocar QUALQUER objeto (mesmo um único)
    *  disparava `view3d.js _afterMapMutated` → `_rebuildScene` → `setScene`,
    *  que DESCARTA E RECONSTRÓI a cena 3D INTEIRA do zero (todas as paredes,
-   *  portas, janelas, câmeras E objetos — ver `_disposeGroupContents` no
+   *  portas, janelas E objetos — ver `_disposeGroupContents` no
    *  início de `setScene`), só pra acrescentar UMA peça nova. Recriar
    *  centenas de malhas/materiais de uma vez é caro o bastante (geometria +
    *  compilação de shader pela primeira vez de cada material nesta
@@ -6314,7 +6043,7 @@ class Engine3D {
     this._cullChunksTam = null;
     this._group.children.forEach((m) => {
       const tipo = m.userData?.pick?.type;
-      if (tipo !== 'object' && tipo !== 'item' && tipo !== 'camera') return;
+      if (tipo !== 'object' && tipo !== 'item') return;
       const p = m.userData.pick.pos;
       // [13/09/2026 UTC] NOVO — `piso` guardado junto (mesmo campo de
       // sempre, `ref.piso`, já usado pra empilhar andares — ver `baseY` em
@@ -6599,7 +6328,7 @@ class Engine3D {
   }
 
   /** Chamado a cada quadro (ver render() abaixo) — decide, por distância até
-   *  a câmera, o que fica visível entre os objetos/itens/câmeras do mapa.
+   *  a câmera, o que fica visível entre os objetos/itens do mapa.
    *  Hoje (antes deste pedido) a "Distância de renderização" configurada em
    *  ⚙️ só afetava a neblina (scene.fog) e o far-plane da câmera — tudo
    *  continuava sendo desenhado de verdade (draw call + vértices na GPU),
@@ -6645,22 +6374,9 @@ class Engine3D {
     // visível, só evita processar cedo demais o que já seria cortado.
     const rd = Math.min(this._renderDistance(), this.camera3?.far ?? Infinity);
     const modo = this._config.objetoRenderModo || 'objeto';
-    // [14/09/2026] CORRIGIDO — pedido verbatim: "ao clicar em uma câmera e
-    // selecionar 'Ver através desta câmera' [...] o cone da câmera
-    // selecionada acaba voltando a parecer e fica na frente da tela." BUG
-    // CONFIRMADO (via Playwright, live): este método roda TODO QUADRO e
-    // trata câmeras como qualquer objeto normal sujeito a corte por
-    // distância (`_setupCullMeshes`, `tipo === 'camera'`) — a câmera "vista
-    // através" está a distância ZERO do olho de render, então `0 <= rd`
-    // sempre dá verdadeiro, e este método reatribuía `mesh.visible = true`
-    // TODO QUADRO, desfazendo `setCameraMeshVisible(camId,false)`
-    // (view3d.js `_enterCameraOrbView`) segundos (na prática, quadros)
-    // depois de chamado — nunca ficava escondido por muito tempo, só
-    // parecia "sumir e voltar". CORRIGIDO: `this._forcedHiddenMeshes` (Set
-    // mantido por `setCameraMeshVisible`/`setFotoMeshVisible`, ver
-    // comentário grande lá) tem prioridade ABSOLUTA sobre o cálculo de
-    // distância — uma malha nele NUNCA é marcada visível por este método,
-    // não importa a distância.
+    // `this._forcedHiddenMeshes` (Set mantido por `setFotoMeshVisible`) tem
+    // prioridade ABSOLUTA sobre o cálculo de distância — uma malha nele
+    // NUNCA é marcada visível por este método, não importa a distância.
     const forcado = this._forcedHiddenMeshes;
     if (modo === 'chunk') {
       const tam = Math.max(2, Number(this._config.objetoChunkTamanho) || 10);
@@ -6736,9 +6452,9 @@ class Engine3D {
    *  `mesh.visible` (e a instância correspondente, via
    *  `_syncInstanceVisibility`), exatamente como os outros dois cortes
    *  acima — nunca em `this.mapData`/nos dados do objeto, nem pausa
-   *  `_updateScriptLifecycle`/`_updateCamerasLive` (chamados à parte, ver
-   *  `render()`, e sempre percorrem os dados de script/câmera do mapa
-   *  inteiro, não a lista de malhas visíveis) — um NPC/câmera fora do
+   *  `_updateScriptLifecycle` (chamado à parte, ver
+   *  `render()`, e sempre percorre os dados de script do mapa
+   *  inteiro, não a lista de malhas visíveis) — um NPC fora do
    *  orçamento deste quadro continua avançando o roteiro dele normalmente,
    *  só a malha não é desenhada.
    *
@@ -7051,7 +6767,7 @@ class Engine3D {
     const COR_WIREFRAME_HIBRIDO = 0x78c8ff;
     this._group.children.forEach((m) => {
       const tipo = m.userData?.pick?.type;
-      if (tipo !== 'object' && tipo !== 'item' && tipo !== 'camera') return;
+      if (tipo !== 'object' && tipo !== 'item') return;
       // NOVO (01/09/2026), item GRANDE #5: um THREE.LOD (ver
       // _buildTypeMoldeMesh) não tem `.material` PRÓPRIO — só os filhos (um
       // Mesh por nível) têm — então trocar `m.material` mais abaixo em
@@ -7618,6 +7334,39 @@ class Engine3D {
     mesh.userData.pick = objPick;
     this._pickMeshes.push(mesh);
     if (ehRack && Object.keys(doorFaces).length && !wireframe) this._buildRackDoorsFromCustomMesh(obj, mesh, verts, doorFaces, objPick, wireframe, colWireframe);
+    if (!wireframe && window.RedeEquip && window.RedeEquip.ehEquipRede(obj.tipo)) this._buildRedeInteractiveOverlay(obj, mesh, baseY, colWireframe);
+  }
+
+  /** Equipamento de rede (switch, patch panel, DIO...) já modelado no Modelador: a malha editada é o CORPO; por baixo
+   *  continua o objeto original (invisível, mas clicável, com o runtime de portas/LEDs/cabos), e só as partes vivas
+   *  (LEDs animados e serigrafia) ficam visíveis. O original segue a mesma transformação (escala/rotação) da malha. */
+  _buildRedeInteractiveOverlay(obj, mesh, baseY, colWireframe) {
+    const THREE = this.THREE;
+    const perfil = (window.OBJECT3D_PROFILES && window.OBJECT3D_PROFILES[obj.tipo]) || {};
+    const nPick0 = this.pickables.length;
+    this._buildRedeMesh(obj, perfil, baseY, false, colWireframe);
+    const rt = this._redeRuntime && this._redeRuntime.get(obj.id);
+    const root = rt && rt.root;
+    if (!root) return;
+    const led = rt.view && rt.view._ledMalha;
+    root.traverse((n) => { if (n.isMesh && n !== led && n.name !== 'serigrafia') n.visible = false; });
+    const xf = obj.customMeshXform || {};
+    const sx = xf.scaleX || 1, sy = xf.scaleY || 1, sz = xf.scaleZ || 1;
+    root.position.copy(mesh.position);
+    root.rotation.set(xf.rotX || 0, root.rotation.y + (xf.rotY || 0), xf.rotZ || 0);
+    root.scale.set(sx, sy, sz);
+    root.updateMatrixWorld(true);
+    // Guardado pra o modo "pegar com E": a malha editada passa a ser filha da raiz (segue a mira e recebe a tinta verde/azul).
+    rt.custom = mesh;
+    rt.customLocalY = (mesh.position.y - baseY) / (sy || 1);
+    rt.customRotY = xf.rotY || 0;
+    for (let i = nPick0; i < this.pickables.length; i++) {
+      const p = this.pickables[i];
+      if (p.ref !== obj || !p.obb) continue;
+      p.obb.half.x *= sx; p.obb.half.y *= sy; p.obb.half.z *= sz;
+      p.center.y = baseY + (p.center.y - baseY) * sy;
+      if (p.pos !== p.center) p.pos.y = p.center.y;
+    }
   }
 
   /** NOVO (01/09/2026), item GRANDE #5 do pedido de 12 itens — monta um
@@ -8972,6 +8721,7 @@ class Engine3D {
     // reconciliar manualmente a convenção de sinal de yaw/pitch do motor
     // antigo com a do Three.js.
     this.camera3.lookAt(camera.x + dir.x, camera.y + dir.y, camera.z + dir.z);
+    if (camera.roll) this.camera3.rotateZ(-camera.roll);   // roll (rad, + = horário visto da câmera) — só usado por "Ver através desta câmera"
     // Bug relatado pelo usuário: o contorno pontilhado ("outline2d", ver
     // _drawOutline2D) parecia atrasado em relação ao resto da cena — um
     // delay só perceptível com FPS baixo. Causa: `_updateHoverHighlight`
@@ -9305,9 +9055,9 @@ class Engine3D {
    *  ponto QUALQUER da tela (coordenadas normalizadas -1..1, mesma
    *  convenção de `THREE.Raycaster.setFromCamera`) — usado por view3d.js
    *  `_pickAtClientPoint` (mousemove/click do mouse de verdade, não a mira
-   *  central) enquanto `_fotoCamMode`/`_orbCamMode` estão ativos (os 2
+   *  central) enquanto `_fotoCamMode` estão ativos (os 2
    *  únicos modos que hoje saem do Pointer Lock e mostram o cursor de
-   *  verdade — ver `_enterFotoCameraView`/`_enterCameraOrbView`). Usa
+   *  verdade — ver `_enterFotoCameraView`). Usa
    *  `this.camera3` (a câmera Three.js de verdade, já com FOV/aspect/pose
    *  do quadro mais recente — ver `render()`) em vez de reimplementar a
    *  trigonometria de FOV/aspect manualmente; `updateMatrixWorld` explícito
@@ -9593,9 +9343,9 @@ class Engine3D {
         // `this.pickables`/OBB em vez desta lista) portas já funcionavam.
         // CORRIGIDO: 'porta' e 'janela' adicionados à lista de tipos
         // aceitos — mesmo critério de "clicável de verdade" que
-        // item/câmera/objeto/fotoPin já tinham.
-        if (t !== 'item' && t !== 'camera' && t !== 'object' && t !== 'fotoPin' && t !== 'porta' && t !== 'janela') return false;
-        // [10/09/2026] NOVO — pula o próprio orb/câmera sendo visto
+        // item/objeto/fotoPin já tinham.
+        if (t !== 'item' && t !== 'object' && t !== 'fotoPin' && t !== 'porta' && t !== 'janela') return false;
+        // [10/09/2026] NOVO — pula o próprio orb sendo visto
         // através (ver this._pickExclude/setPickExclude) — pedido
         // verbatim: "o clique está pegando a própria câmera [...] deve
         // ser desativado".
@@ -9656,7 +9406,7 @@ class Engine3D {
   }
 
   /** Interseção raio-caixa ORIENTADA (rotacionada só no eixo Y — nunca
-   *  inclinada, igual toda malha deste app: paredes/câmeras/objetos). Passo
+   *  inclinada, igual toda malha deste app: paredes/objetos). Passo
    *  1: transforma o raio pro espaço LOCAL da caixa desfazendo a translação
    *  e a MESMA rotação usada pra posicionar a malha de verdade em setScene
    *  (`mesh.rotation.y = rotY`) — como essa rotação é ortogonal, desfazer é
@@ -9696,7 +9446,7 @@ class Engine3D {
       new THREE.Vector3(ray.origin.x, ray.origin.y, ray.origin.z),
       new THREE.Vector3(ray.dir.x, ray.dir.y, ray.dir.z).normalize(),
     );
-    // [10/09/2026] NOVO — pula o próprio orb/câmera sendo visto através
+    // [10/09/2026] NOVO — pula o próprio orb sendo visto através
     // (ver this._pickExclude/setPickExclude): sem isto o destaque de mira
     // (contorno pontilhado etc.) enquanto "vendo através" de uma câmera
     // ficaria sempre preso na própria câmera, que fica bem na frente da
@@ -9837,8 +9587,7 @@ class Engine3D {
     if (!this._config.raycastEnabled) return;
     // [10/09/2026] NOVO — pedido verbatim: "Ao mirar em um objeto, ele deve
     // ter o mesmo destaque que tem quando não se está nesse modo, por
-    // exemplo, 'contorno pontilhado'". Enquanto `_fotoCamMode`/
-    // `_orbCamMode` ativos, view3d.js mantém `this._hoverScreenNdc`
+    // exemplo, 'contorno pontilhado'". Enquanto `_fotoCamMode` ativos, view3d.js mantém `this._hoverScreenNdc`
     // atualizado com a posição real do MOUSE (não há crosshair central
     // nesses modos — o cursor de verdade fica visível, ver
     // `_pickAtClientPoint`) — usa esse ponto pra construir o raio de

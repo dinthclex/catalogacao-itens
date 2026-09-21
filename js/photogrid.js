@@ -47,8 +47,8 @@ const PhotoGrid = {
     // aqui/no badge da tela de entrada do Mapa.
     const fotos = todasFotos.filter((f) => f.tipo !== 'patrimonio');
     const linkedIds = await this._linkedItemIdsSet(fotos);
-    const itemsSemLugar = items.filter((it) => typeof it.mapaX !== 'number' && !linkedIds.has(it.id));
-    const fotosSemLugar = fotos.filter((f) => typeof f.mapaX !== 'number' || typeof f.mapaY !== 'number');
+    const itemsSemLugar = items.filter((it) => (typeof it.mapaX !== 'number' || it.mapaAuto === true) && !linkedIds.has(it.id));
+    const fotosSemLugar = fotos.filter((f) => typeof f.mapaX !== 'number' || typeof f.mapaY !== 'number' || f.mapaAuto === true); // mapaAuto = posição de reserva: continua na Caixa até vínculo deliberado
     return { items: itemsSemLugar, fotos: fotosSemLugar, total: itemsSemLugar.length + fotosSemLugar.length };
   },
 

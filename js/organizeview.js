@@ -1586,7 +1586,7 @@ const OrganizeView = {
 
   _drawnCount(map) {
     return (map.walls?.length || 0) + (map.objects?.length || 0) + (map.portas?.length || 0)
-      + (map.janelas?.length || 0) + (map.textos?.length || 0) + (map.trilha?.length || 0) + (map.cameras?.length || 0);
+      + (map.janelas?.length || 0) + (map.textos?.length || 0) + (map.trilha?.length || 0);
   },
 
   async reload() {
@@ -5684,7 +5684,6 @@ const OrganizeView = {
     (map.walls || []).forEach((w) => { consider(w.x1, w.y1); consider(w.x2, w.y2); });
     (map.points || []).forEach((p) => consider(p.x, p.y));
     (map.trilha || []).forEach((p) => consider(p.x, p.y));
-    (map.cameras || []).forEach((c) => consider(c.x, c.y));
     (map.objects || []).forEach((o) => consider(o.x, o.y));
     (map.textos || []).forEach((t) => consider(t.x, t.y));
     [...(map.portas || []), ...(map.janelas || [])].forEach((el) => {
@@ -7219,7 +7218,7 @@ const OrganizeView = {
         const m = e.map;
         return `<label class="organize-merge-row">
           <input type="radio" name="organize-merge-survivor" value="${m.id}">
-          <span><strong>${Utils.escapeHtml(this._mapDisplayName(m))}</strong> — ${this._drawnCount(m)} elemento(s) na planta (paredes ${m.walls?.length || 0}, objetos ${m.objects?.length || 0}, portas ${m.portas?.length || 0}, janelas ${m.janelas?.length || 0}, textos ${m.textos?.length || 0}, câmeras ${m.cameras?.length || 0}), ${e.itens.length} patrimônio(s), ${e.fotos.length} foto(s)</span>
+          <span><strong>${Utils.escapeHtml(this._mapDisplayName(m))}</strong> — ${this._drawnCount(m)} elemento(s) na planta (paredes ${m.walls?.length || 0}, objetos ${m.objects?.length || 0}, portas ${m.portas?.length || 0}, janelas ${m.janelas?.length || 0}, textos ${m.textos?.length || 0}), ${e.itens.length} patrimônio(s), ${e.fotos.length} foto(s)</span>
         </label>`;
       }).join('');
       const vazios = entries.filter((e) => e.isEmpty);

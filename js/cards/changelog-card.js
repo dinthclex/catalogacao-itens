@@ -80,6 +80,44 @@ window.ModalCards.register('changelog', () => `
             <li>Importar objeto: botão '⬇ Baixar .bat' (ativo ao escolher os arquivos) que instala o objeto por dois cliques na pasta do index.html, com verificação de pasta, progresso no prompt e texto do manifesto exibido; campos de nome com contraste corrigido e dicas nos botões; conversor web atualizado.</li>
             <li>Acessar modelos: 'Excluir' objeto (com confirmação, janela de arquivos/alterações e .bat de exclusão) e 'Restaurar objetos'.</li>
             <li>Selo 'novo' também em modelos criados por 'Criar novo modelo' e objetos carregados; importação antiga substituída pela janela nova também no Ver em 3D.</li>
+            <li>Ctrl+Z/Ctrl+Y mostram um aviso 'Aplicando desfazer/refazer' enquanto a ação é processada; o widget ↶/↷ 'Sempre mostrar' agora aparece também no Mapa e acima das janelas (registrado no windowmanager).</li>
+            <li>Modelador: Patch panel e Switch mantêm interação (tecla E, portas, LEDs piscando) e não ganham mais textura de vidro na frente; a serigrafia deixou de ser tratada como vidro.</li>
+            <li>Modelador: ao mover o Rack, os equipamentos instalados acompanham (desfazer também os restaura).</li>
+            <li>Selo 'novo' também em 'Acessar modelos', com opção em Configurações 2D → Objeto; botão Excluir mais à direita e janela de exclusão (.bat e instruções) sempre exibida.</li>
+            <li>Importar objeto: método manual em passos numerados; área 'Manifesto' com só a linha a copiar, em aspecto de editor de texto.</li>
+            <li>Mapa: 'Excluir todos os mapas' na troca de mapa.</li>
+            <li>Configurações do app: novo botão 'Carregar Configurações de Fábrica' (restaura tudo e desvincula os dados do IndexedDB do app).</li>
+            <li>Foto 'Deixar sem vínculo por enquanto': a foto (posição de reserva) agora aparece de fato na Caixa até ser vinculada a um lugar.</li>
+            <li>Modelador: ao pegar com E um switch/patch panel modelado, o ghost mantém a forma editada e recebe a tinta verde/azul/vermelha como os demais.</li>
+            <li>Acessar modelos: rolagem vertical sempre disponível (eventos de roda não vão mais para o mapa por baixo); janela de exclusão mostra o nome dado ao objeto e usa verbos no imperativo ('apague', 'altere', 'remova').</li>
+            <li>Configurações do app: a seção 'Workspace — abrir em tela cheia?' só aparece no layout Workspace.</li>
+            <li>Janela 'Ferramentas' (Mapa 2D) e rodapé do 'Ver em 3D': distribuição editável (✏️) — arrastar para mudar de lugar, remover e adicionar botões, com 'Padrão' para restaurar.</li>
+            <li>Porta, Janela, Piso e Parede continuam na janela 'Ferramentas' e agora também aparecem em 'Objetos' e 'Acessar modelos'.</li>
+            <li>2D: 'Guardar apontamento da câmera e posição do personagem' agora guarda também a posição do personagem.</li>
+            <li>'Acessar modelos': barra de rolagem igual à da janela 'Ferramentas'; Porta, Janela, Piso e Parede têm modelo (gerado por código) como a escada.</li>
+            <li>O layout da janela 'Ferramentas' e do rodapé do 'Ver em 3D' agora é editado nas configurações 2D/3D (arrastar, remover e adicionar objetos do catálogo); ícones iguais aos de 'Objetos'.</li>
+            <li>3D: propriedades do objeto abrem expandidas e centralizadas; destaque de 'Item associado' aplicado a todos os objetos; no 2D, os destaques valem para todos os patrimônios.</li>
+            <li>Lista de patrimônios associados a um objeto não é mais espremida em uma linha só.</li>
+            <li>Colisão de topo dos objetos: agora vem marcada por padrão e, quando desmarcada, o personagem não sobe/pisa no objeto.</li>
+            <li>Apontamento da câmera e posição do personagem passam a ser guardados automaticamente (só depois de parados pelo tempo de salvamento configurado e só se mudaram), sobrevivendo ao F5.</li>
+            <li>'Acessar modelos': a porta nasce com maçanetas e a janela com moldura e vidro, iguais ao 'Ver em 3D'.</li>
+            <li>Propriedades do objeto: removido o campo 'Patrimônio' digitável (use o ✏️).</li>
+            <li>Propriedades da câmera (mapa 2D): 'Anexar foto' aceita um arquivo do aparelho ou uma foto já tirada em 'Mapa' → 'Fotos' (com botão para voltar às propriedades da câmera).</li>
+            <li>Toda janela ativada por um botão agora toma a frente das demais.</li>
+            <li>Painel e gimbal de 'Ver através desta câmera' ficam sempre na frente e dentro da área visível.</li>
+            <li>Câmera (Ferramentas): 'Anexar foto' agora pergunta se a foto vem do aparelho ou de 'Mapa → Fotos' (com botão de retorno às propriedades).</li>
+            <li>'Ver através desta câmera': a dica 'Clique para interagir com o cenário 3D' não aparece mais; o painel de controle da câmera é criado antes do overlay e com logs '[CamControl3D]' + linha de debug visível no painel.</li>
+            <li>'Ver em 3D': HUD de debug do controle de câmera sempre visível (canto inferior esquerdo) e logs [CamControl3D] no console.</li>
+            <li>'Ver através desta câmera' (objeto Câmera/orb de foto): agora abre o painel Pitch/Yaw/Roll/Altura + gimbal. Também 'Anexar foto' no cartão 3D da câmera oferece aparelho ou Mapa → Fotos.</li>
+            <li>Controle de câmera: yaw agora é rumo de bússola (0° = norte do mundo, horário +) e a câmera do personagem gira no mesmo sentido do gimbal (que ganhou marca 'N'); novo anel + barras de pitch/roll + direcional em vidro; botões '🎥 Controle' e '◎ Anéis' para ocultar; HUD e informações de debug agora são opções em Configurações 3D → Debug (desligadas por padrão).</li>
+            <li>Controle de câmera: sem bandeja; anel circular = roll, barra inferior = yaw, barra vertical = pitch (4× maior, centralizados, cursor infinito via Pointer Lock); yaw da cena espelhado em relação ao gimbal (e D-pad acompanha).</li>
+            <li>Controle de câmera: roll do anel corrigido (sentido) e só na faixa do anel; miolo do anel controla yaw+pitch como o gimbal; só gira enquanto o botão está apertado; mão aberta/fechada como cursor; cliques nos anéis não atravessam para a cena; D-pad centralizado abaixo da caixa do Controle.</li>
+            <li>Controle de câmera: botão '🎯 Fino' (×1 / ×10 / ×100 mais devagar na mesma passada); botões Controle/Anéis/Fino no canto inferior direito da área do Ver em 3D; marcadores das barras não saltam mais ao ocultar/mostrar os anéis.</li>
+            <li>Controle de câmera: os 4 valores (Pitch, Yaw, Roll, Altura) agora são o botão triplo (setas, arrastar, clicar para digitar); 'Controle' e 'Anéis' trazem a janela para a frente ao serem ligados (e clicar na janela/anel também); removido o desfoque do miolo do anel.</li>
+            <li>Removido do app o antigo objeto de câmera do mapa (câmera de vigilância / orb de câmera / modo assistindo): dados do mapa, painel 2D, cartão 3D, modelo 3D, ferramenta da hotbar 3D e script de exemplo. Resta só a Câmera (foto) de Ferramentas.</li>
+            <li>Removido do app o Camera Match (perspmatch.js e perspmatch-math.js, armazenamento de sessões no db.js e o bloco comentado no index.html).</li>
+            <li>'Acessar modelos': porta e janela usam exatamente a malha do 'Ver em 3D' (maçanetas reais; vidro com um só reflexo). O painel/gimbal de 'Ver através desta câmera' foi movido para a camada correta da tela.</li>
+            <li>'Ver através desta câmera' (3D, Modo Edição): novo painel com Pitch, Yaw, Roll e Altura (campos, botões − / +, segurar para repetir) e um gimbal 3D para clicar e arrastar.</li>
           </ul>
           <p style="font-weight:600; color:var(--text); margin-bottom:4px">19/09/2026</p>
           <ul style="margin:0 0 14px; padding-left:18px">

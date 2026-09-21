@@ -63,19 +63,13 @@
  * - _captureFreeRotatePivot() — pivô usado ao girar livremente um objeto
  *   já colocado.
  *
- * Modos de câmera especiais ("assistir"/"ver através"/"Camera Match"):
- * - _enterCameraView(camId)/_exitCameraView()/_computeWatchCameraPose() —
- *   modo ESPECTADOR assistindo uma câmera de segurança fixa (pan/tilt/
- *   zoom por cima; jogador anda sozinho por trás, ver _updateAutopilot).
+ * Modo de câmera especial ("ver através"):
  * - _cameraExitViewMode() — [12/09/2026, NOVO; FUNDIDA NESTA RODADA; ver
  *   15/09/2026 UTC abaixo] lê a config "Configurações 3D" seção única "Ver
  *   através desta câmera" (MapConfig.cameraExitViewMode) que decide o que
  *   "Sair da câmera" faz: manter o ponto de vista travado (padrão) ou
  *   voltar ao ponto de vista original do personagem — usada DIRETO por
- *   `_exitCameraOrbView` E por `_exitFotoCameraView` (histórico: chegou a
- *   ser 1 chave única, depois 2 chaves independentes — correção por "orb
- *   de câmera" ser sinônimo de "orb de foto", não de "Câmeras" —, voltou a
- *   ser 1 chave única em 12/09/2026 por pedido explícito do usuário, e em
+ *   `_exitFotoCameraView` (histórico: em
  *   15/09/2026 UTC o wrapper `_fotoOrbExitViewMode()`, que só delegava pra
  *   esta função, foi removido — pedido verbatim: "Remova todas as
  *   referências de duplicidade [...] Não considere compatibilidade com
@@ -85,14 +79,14 @@
  * - _enterFotoCameraView(fotoId)/_exitFotoCameraView()/
  *   _computeFotoCamPose()/_fotoCamFovFor(foto) — modo ESPECTADOR "ver
  *   através desta foto" (vanishCam/orb de foto — TAMBÉM chamado de "orb de
- *   câmera" na fala do usuário), mesmo espírito do anterior. [12/09/2026:
+ *   câmera" na fala do usuário). [12/09/2026:
  *   entrada esconde a malha esfera+cone(+placa) do próprio orb de foto
  *   vista através — `setFotoMeshVisible`; saída posiciona `this._camera`
  *   na pose travada OU na pose original, conforme `_cameraExitViewMode()`
  *   — antes desta rodada não tocava `this._camera` nenhuma, deixando-o
  *   onde o passeio automático de fundo tivesse levado.]
  * - _getFotoCamOpacidade()/_setFotoCamOpacidade(v) — opacidade do guia
- *   visual (foto sobreposta) nos 2 modos de foto/orb acima.
+ *   visual (foto sobreposta) no modo de foto/orb acima.
  * - [12/09/2026, NOVO — ITEM D; 19/09/2026 SIMPLIFICADO; 22/09/2026
  *   RODADA SEGUINTE — RESTAURADO, ver nota abaixo]
  *   _getFotoCamBackdropConfig()/_setFotoCamBackdropConfig(patch) — config
@@ -131,19 +125,8 @@
  *   de antes, mas `_activeCamFrameRectPx` agora usa
  *   `_activeCamPropsVFovRad()` (não mais "encaixar por proporção no
  *   canvas") pra bater com o retângulo amarelo de verdade.
- * - _renderFotoCamOverlay(foto,onExit)/_removeFotoCamOverlay() — overlay
- *   compartilhado (guia visual + botão sair) reaproveitado pelos 3 modos
- *   de câmera (watch/foto/orb).
- * - _enterCameraOrbView(camId)/_exitCameraOrbView()/_camOrbFovDeg(cam)/
- *   _renderCameraOrbOverlay(cam) — objeto "Câmeras"/Camera Match: TRAVA a
- *   câmera de verdade do jogador (não é espectador) na pose calibrada de
- *   uma câmera "Câmeras", permitindo selecionar/posicionar objetos
- *   alinhados com a foto de referência. [11/09/2026: entrada esconde a
- *   malha caixa+cone da própria câmera vista através —
- *   `setCameraMeshVisible`; saída copia a pose travada exata pra dentro
- *   da câmera livre. 12/09/2026: saída agora respeita
- *   `_cameraExitViewMode()` — pose travada (padrão) OU pose original
- *   salva na entrada.]
+ * - _renderFotoCamOverlay(foto)/_removeFotoCamOverlay() — overlay
+ *   (guia visual + botão sair) do modo "ver através".
  * - _toggleGlobalXRay(flags)/_playXRayGlassesAnimation() — "óculos de
  *   raio-X" (ver através de paredes, global).
  *
@@ -162,7 +145,7 @@
  *
  * Movimento do jogador/autopilot:
  * - _updateAutopilot(delta) — movimento automático do "boneco" quando a
- *   câmera de render está presa a um modo espectador (watch/foto).
+ *   câmera de render está presa ao modo espectador (foto).
  * - _resolveCollision(nx,nz,feetY)/_surfaceHeightAt(x,z,feetY) — colisão
  *   básica contra paredes e altura de piso/superfície sob os pés.
  * - _jump() — física de pulo.
@@ -170,9 +153,7 @@
  * Colocar/remover no mapa (ferramenta ativa da hotbar):
  * - _placeWithBuildTool() — MÉTODO PRINCIPAL de colocação, despacha
  *   conforme `this._buildTool` (objeto/item/parede/porta/janela/
- *   câmera-novo/orbfoto-novo/tijolo) — sempre lê `this._camera` de
- *   verdade (por isso o "orb de câmera" acima funciona sem duplicar
- *   nada).
+ *   orbfoto-novo/tijolo) — sempre lê `this._camera` de verdade.
  * - _removeWithTool()/_openDeleteConfirmPopup()/_confirmDeleteHit(hit) —
  *   ferramenta de apagar (raio-X de mira + confirmação).
  * - _addOrbWithTool()/_refreshOrbHud() — colocação de "orb" (pino de
@@ -191,10 +172,10 @@
  * - _tryPick() — raycast de seleção a partir de `this._camera` (mira
  *   central), despacha pro cartão certo conforme o tipo do alvo.
  * - _showTijoloAglomeradoCard3D()/_showObjectCard3D(obj)/
- *   _showCameraCard3D(cam)/_showFotoPinCard3D(foto)/
+ *   _showFotoPinCard3D(foto)/
  *   _showOrphanPatrimonioCard3D(obj)/_showFlashcard3D(itemRef)/
  *   _showMultiFlashcard3D(itemIds) — um cartão 3D por TIPO de alvo
- *   selecionado (aglomerado de tijolos, objeto genérico, câmera, orb de
+ *   selecionado (aglomerado de tijolos, objeto genérico, orb de
  *   foto, patrimônio órfão, item único, múltiplos itens no mesmo ponto).
  *
  * Carro dirigível (NOVO, 13/09/2026 — "entrar/sair, inércia real"):
@@ -378,9 +359,9 @@ const View3D = {
         <!-- [10/09/2026] NOVO — embrulho só do <canvas> (não do resto da UI
              solta dentro de .view3d-wrap: HUD/botões/painéis continuam
              FORA, tamanho normal) pro zoom "lupa" da roda do mouse em
-             _fotoCamMode/_orbCamMode (ver onWheel em _bindDesktopControls,
+             _fotoCamMode (ver onWheel em _bindDesktopControls,
              mais abaixo) — CSS transform:scale aplicado aqui por JS.
-             _renderFotoCamOverlay/_renderCameraOrbOverlay anexam o
+             _renderFotoCamOverlay anexa o
              overlay da foto DENTRO deste mesmo elemento (em vez de
              this._container) — hoje só como agrupador estável, sem
              nenhum transform: o zoom "lupa" original (CSS scale) foi
@@ -534,14 +515,6 @@ const View3D = {
                _renderFotoCamOverlay/Engine3D.setCameraFrustumVisible,
                sem crase aqui de proposito -- risco documentado de crase
                dentro de comentario HTML dentro de template literal). -->
-          <!-- [10/09/2026] Botão "📐 Camera Match" REMOVIDO por pedido
-               verbatim do usuário: "Remova o 'camera match' do projeto por
-               enquanto." O script que definia PerspMatch não carrega mais
-               (ver index.html), e o listener correspondente também foi
-               removido logo abaixo (procurar por "v3d-perspmatch" no
-               histórico/backup se precisar reverter) — js/perspmatch.js/
-               js/perspmatch-math.js continuam intactos em disco, só não são
-               mais chamados daqui. -->
           <!-- [14/09/2026] NOVO — pedido verbatim: botão habilitador
                "🛠️ Modelar objetos" no rodapé de "Ver em 3D". Quando LIGADO,
                o cartão de clique de um objeto (função _showObjectCard3D)
@@ -1078,8 +1051,7 @@ const View3D = {
         // (`_updateFotoCamOverlayZoomScale`) e sincroniza o botão "🟨
         // Enquadramento" da aba Propriedades (que reflete só a câmera
         // ATUAL, não o estado global).
-        const fotoIdAtivo = this._fotoCamMode?.fotoId
-          ?? (this._orbCamMode ? (this._map?.cameras || []).find((cm) => cm.id === this._orbCamMode.camId)?.fotoId : null);
+        const fotoIdAtivo = this._fotoCamMode?.fotoId;
         if (fotoIdAtivo != null && this._engine?.hasCameraFrustum?.(fotoIdAtivo)) {
           this._updateFotoCamOverlayZoomScale?.(); // redesenha o traço no canvas 2D (ver comentário grande em _renderPropriedadesPanel, botão "🟨 Enquadramento")
           this._container?.querySelector('#v3d-proppanel-frustum-toggle')?.classList.toggle('active', novoAtivo);
@@ -1113,7 +1085,7 @@ const View3D = {
     this._map = id ? await DB.getMap(id) : null;
     if (!this._map) { Utils.toast('Nenhum ambiente/mapa selecionado ainda.', { type: 'warn' }); }
     else {
-      Mapping.ensureNewFields(this._map); // ambientes salvos antes desta versão não têm cameras[]/objects[] ainda
+      Mapping.ensureNewFields(this._map); // ambientes salvos antes desta versão não têm objects[] ainda
       // Pedido do usuário (22/08/2026): "só pode haver itens na grade
       // associados a alguma camada" — cura paredes/objetos/etc. SEM camada
       // válida (mapas salvos antes desta correção) ANTES de montar a cena,
@@ -1153,42 +1125,19 @@ const View3D = {
     // `_camada3DConfig`: _updateBuildGhost roda a cada quadro, sem `await`.
     this._paredeConfig = cfgInicial || {};
 
-    // Ponto de partida: por padrão, uma posição fixa genérica — mas se
-    // alguma câmera do mapa estiver marcada como "ativa para o 3D" (botão
-    // "🎥 Ver em 3D a partir desta câmera" no submenu da câmera, mapview.js —
-    // só uma por vez), a visualização já abre a partir da posição/direção
-    // dela, em vez do ponto fixo. `yaw` usa a MESMA conversão ângulo->direção
-    // já usada pra desenhar a malha da câmera em 3D (engine3d.js setScene),
-    // pra a visão inicial apontar exatamente pra onde o ícone da câmera
-    // aponta no mapa 2D.
+    // Ponto de partida: por padrão, uma posição fixa genérica.
     this._camera = { x: 0, y: this.EYE_HEIGHT, z: -3, yaw: 0, pitch: 0 };
     // Pedido do usuário: alternar gravidade com Shift+Espaço (ver onKeyDown)
     // — padrão LIGADA no modo normal de navegação (mantém o comportamento
     // de sempre: andar gruda no chão/sobe em objetos, pular funciona).
     this._gravityEnabled = true;
-    const camAtiva = (this._map?.cameras || []).find((c) => c.ativo3D);
-    if (camAtiva) {
-      const baseY = (camAtiva.piso || 0) * (this._map?.alturaPiso || 2.8);
-      // Conversão ângulo (convenção 2D: 0 = eixo X, ver mapview.js) -> yaw do
-      // jogador. NÃO é `Math.atan2(dirX, dirZ)` (essa fórmula é a certa só
-      // pra orientar MALHAS do Three.js via mesh.rotation.y — ver a câmera/
-      // paredes em engine3d.js setScene) — o cameraForward/cameraForwardFlat
-      // deste app (Cam3DMath.rotY, usado por lookAt/movimento) gira no
-      // sentido CONTRÁRIO ao mesh.rotation.y nativo do Three.js (ver o
-      // comentário grande sobre "handedness" em cameraRightFlat, no topo de
-      // engine3d.js). Resolvendo forward(yaw) = (cos(angulo), sin(angulo))
-      // com a rotação PRÓPRIA deste app dá yaw = angulo - 90°, não atan2.
-      const yaw = (camAtiva.angulo || 0) - Math.PI / 2;
-      this._camera = { x: camAtiva.x, y: baseY + this.EYE_HEIGHT, z: camAtiva.y, yaw, pitch: 0 };
-    } else if (window.MapView && window.MapView._personagem2D) {
+    if (window.MapView && window.MapView._personagem2D) {
       // Pedido do usuário: "A posição e a direção do boneco no 2D deve
       // corresponder a posição e a direção do boneco no 3D [...] Ambas do
-      // mesmo boneco (player ou personagem)." Sem uma câmera marcada como
-      // "ativa para o 3D" (prioridade continua sendo dela, acima), usa a
+      // mesmo boneco (player ou personagem)." Usa a
       // posição/direção do personagem 2D (MapView._personagem2D, só existe
       // depois de o "🧭 Modo Navegação" ter sido usado ao menos uma vez no
-      // Mapa) como ponto de partida do 3D — mesma conversão ângulo->yaw do
-      // ramo camAtiva acima (mesma convenção: 0 = eixo X, sentido anti-
+      // Mapa) como ponto de partida do 3D (convenção: 0 = eixo X, sentido anti-
       // horário no 2D). `this._syncPersonagem2DAoSair`, mais abaixo em
       // unmount(), faz o caminho INVERSO ao sair do 3D, pra o personagem 2D
       // continuar de onde o jogador parou de andar no 3D — os dois sempre
@@ -1203,38 +1152,21 @@ const View3D = {
       // (`this._camera.yaw/pitch`, a mesma dupla mexida pelo mouse-look em pointer lock, ver
       // `_camera.yaw += .../_camera.pitch = ...` no handler de `mousemove` mais abaixo neste arquivo).
       // Se o checkbox estiver marcado E houver um yaw salvo (gravado por `unmount()`, ver comentário
-      // grande lá), sobrescreve o yaw/pitch calculado acima -- SÓ neste ramo (entrada via personagem 2D;
-      // não se aplica à entrada por "câmera ativa pro 3D" logo acima, que já tem seu próprio apontamento
-      // fixo vindo do ícone da câmera no mapa).
+      // grande lá), sobrescreve o yaw/pitch calculado acima -- SÓ neste ramo (entrada via personagem 2D).
       if (cfgInicial && cfgInicial.mapa2DPersistirApontamentoPersonagem === true && Number.isFinite(cfgInicial.mapa2DApontamentoRecargaYaw)) {
         this._camera.yaw = cfgInicial.mapa2DApontamentoRecargaYaw;
         this._camera.pitch = Number.isFinite(cfgInicial.mapa2DApontamentoRecargaPitch) ? cfgInicial.mapa2DApontamentoRecargaPitch : 0;
       }
     }
-    // [10/09/2026] NOVO — consumo do pedido de entrada direta na visão de um
-    // "orb de câmera" (ver `this._pendingEnterCamOrbId`, campo declarado
-    // acima, e o botão que o seta em mapview.js `_openCameraPanel`). Feito
-    // aqui (mount() já terminando de montar `this._map`/`this._camera`
-    // "normais"), mas a entrada de verdade (`_enterCameraOrbView`, que
-    // também precisa de `this._engine`, criado mais abaixo neste mesmo
-    // mount()) só roda no fim da função — guarda só o id aqui pra não
-    // perdê-lo entre os `await`s deste método.
-    const pendingCamOrbId = this._pendingEnterCamOrbId;
-    this._pendingEnterCamOrbId = null;
-    if (pendingCamOrbId) {
-      // `this._engine` só existe depois do resto deste mount() terminar —
-      // em vez de caçar o ponto exato do `return` (função enorme, alto
-      // risco de editar no lugar errado), espera em pequenos passos até o
-      // engine existir (normalmente 1-2 tentativas) antes de entrar de
-      // verdade — mesmo padrão defensivo de outros "espera X ficar pronto"
-      // já usados no app (ex. _afterObjectAddedIncremental).
-      const tentarEntrarNoOrb = (tentativas) => {
-        if (!this._container) return; // tela fechada/trocada antes de terminar
-        if (this._engine && this._map) { this._enterCameraOrbView(pendingCamOrbId); return; }
-        if (tentativas > 0) setTimeout(() => tentarEntrarNoOrb(tentativas - 1), 80);
-      };
-      setTimeout(() => tentarEntrarNoOrb(40), 0);
-    }
+    // Guarda a pose do personagem só depois de parada pelo tempo configurado em "configurações do app" (ver MapConfig.autoGuardarPose).
+    if (this._stopAutoPose3D) this._stopAutoPose3D();
+    this._stopAutoPose3D = (typeof MapConfig !== 'undefined' && MapConfig.autoGuardarPose) ? MapConfig.autoGuardarPose(() => {
+      const c = this._camera;
+      if (!c || this._fotoCamMode || this._flythroughActive) return null;
+      if (![c.x, c.z, c.yaw, c.pitch].every(Number.isFinite)) return null;
+      return { mapa2DApontamentoRecargaYaw: c.yaw, mapa2DApontamentoRecargaPitch: c.pitch, mapa2DPersonagemRecargaX: c.x, mapa2DPersonagemRecargaY: c.z,
+        mapa2DApontamentoRecargaAngulo: c.yaw + Math.PI / 2 };
+    }) : null;
 
     // App.closeView3D (não App.navigate('mapa')) — volta pra Planta baixa
     // direto, de onde "Ver em 3D" foi clicado, em vez de reiniciar a pilha
@@ -1276,14 +1208,6 @@ const View3D = {
     // Modelador e não cria mais cubo nenhum, só abre o catálogo).
     container.querySelector('#v3d-newcube3d').onclick = () => this._createAndEnterNewCube3D();
     container.querySelector('#v3d-search').onclick = () => this._openView3DSearch();
-    // [10/09/2026] Listener do botão "📐 Camera Match" REMOVIDO junto com o
-    // botão em si (ver comentário grande no HTML dele acima) — pedido
-    // verbatim: "Remova o 'camera match' do projeto por enquanto." O
-    // elemento '#v3d-perspmatch' não existe mais no HTML, então este
-    // listener ficaria sem efeito de qualquer forma; removido por clareza.
-    // js/perspmatch.js/js/perspmatch-math.js continuam intactos em disco,
-    // só não carregam mais (ver index.html) — reversível re-adicionando os
-    // 2 scripts, o botão e este listener.
 
     await this._initBuildHotbar();
     container.querySelector('#v3d-objcat-toggle').onclick = () => this._toggleObjectCatalogPanel();
@@ -1330,6 +1254,7 @@ const View3D = {
       addObjBtnLeft.onclick = () => ModelerUI.toggleSidebar(this);
     }
     this._bindDesktopControls(canvas);
+    try { window.CamControl3D ? window.CamControl3D.debugHud(this) : console.error('[CamControl3D] window.CamControl3D NÃO existe no mount (js/camcontrol3d.js não carregou / index.html desatualizado?)'); } catch (e) { console.error('[CamControl3D] debugHud', e); }
     this._bindMobileControls(container);
 
     // [16/09/2026 UTC] RODADA 101 -- CORRIGIDO bug verbatim: "Acabou
@@ -1401,7 +1326,7 @@ const View3D = {
       // callback disparar) — sem proteção própria, isso ficava só no
       // console, sem nenhum aviso na tela.
       if (alvo && window.Modeler3D) setTimeout(() => {
-        try { window.Modeler3D.enter(this, alvo, { enterOrbital: !(this._orbCamMode || this._fotoCamMode) }); } // [12/09/2026 — ITEM C]
+        try { window.Modeler3D.enter(this, alvo, { enterOrbital: !this._fotoCamMode }); } // [12/09/2026 — ITEM C]
         catch (err) {
           if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError('Modelador 3D', err);
           else console.error('Falha ao entrar no Modelador 3D:', err);
@@ -1411,6 +1336,7 @@ const View3D = {
   },
 
   unmount() {
+    if (this._stopAutoPose3D) { this._stopAutoPose3D(); this._stopAutoPose3D = null; }
     // [18/09/2026 UTC] RODADA 167 -- devolve o item carregado / remove overlays (view3d-rede.js)
     try {
       this._menuFecharRede?.(); this._redeCancelar?.(false); this._redeHint?.(null);
@@ -1428,7 +1354,7 @@ const View3D = {
     // `document.body` DE PROPÓSITO (`position:fixed`, ver comentário grande
     // logo abaixo/`_trena3DRebuildLines`) — só removidos manualmente aqui em
     // `unmount()`, já que não são filhos de `this._container`. Esta função é
-    // uma sequência longa de vários passos (Modelador/câmeras especiais/
+    // uma sequência longa de vários passos (Modelador/câmera especial/
     // sobrevoo/sincronização com MapView._personagem2D/dispose do
     // Engine3D/etc.) — ESTE bloco de limpeza da Trena 3D era o ÚLTIMO de
     // todos: se QUALQUER passo anterior lançasse uma exceção (mais provável
@@ -1459,32 +1385,30 @@ const View3D = {
     // evitam para os controles do próprio View3D).
     if (window.Modeler3D?.isActive?.()) window.Modeler3D.exit({ skipRebuild: true });
     // [13/09/2026] NOVO — pedido verbatim (pilha de "Sair", ver comentário
-    // grande em `_exitModeladorSeAtivo`/`_exitCameraView`): "Ao clicar em
+    // grande em `_exitModeladorSeAtivo`): "Ao clicar em
     // 'Sair do 3D', estando no modo 'Ver através desta câmera' [...] a
     // posição em que o personagem estava ao se entrar no modo 'Ver através
     // de uma câmera' deve ser preservada." CAUSA RAIZ do bug relatado: sair
     // "de uma vez" pelo "✕ Sair do 3D" nunca passava por
-    // `_exitFotoCameraView`/`_exitCameraOrbView`/`_exitCameraView` (só por
-    // este `unmount()`, direto) — são essas 3 funções (ver cada uma) que
-    // reposicionam `this._camera` de volta pra pose travada da câmera OU
+    // `_exitFotoCameraView` (só por
+    // este `unmount()`, direto) — é ela que
+    // reposiciona `this._camera` de volta pra pose travada da câmera OU
     // pra pose original de antes de entrar (conforme a preferência em
     // Configurações), desfazendo o passeio do "piloto automático" que roda
-    // por baixo o tempo todo enquanto um desses modos está ativo (ver
+    // por baixo o tempo todo enquanto esse modo está ativo (ver
     // `_updateAutopilot`, chamado a cada quadro por `_loop` enquanto
-    // `_camMode`/`_fotoCamMode`/`_fotoCamMode` estiver setado). Sem chamar
+    // `_fotoCamMode` estiver setado). Sem chamar
     // a função de saída certa primeiro, a sincronização abaixo (`this.
     // _camera.x/y/z` -> `MapView._personagem2D`) gravava a posição ATUAL do
     // piloto automático (podendo estar "mais longe" do que o personagent
     // deveria) em vez da pose corrigida. Chamado ANTES da sincronização,
     // igual ao Sobrevoo automático logo abaixo (mesmo motivo/mesmo
-    // padrão) — cada função já cuida de zerar o próprio modo (`_camMode`/
-    // `_fotoCamMode`/`_orbCamMode`) e, por sua vez, chama
+    // padrão) — a função já cuida de zerar o próprio modo (`_fotoCamMode`)
+    // e, por sua vez, chama
     // `_exitModeladorSeAtivo()` de novo no próprio topo (idempotente, já
     // não há mais nada pra sair a essa altura — Modelador já foi encerrado
     // na linha acima).
-    if (this._camMode) this._exitCameraView();
     if (this._fotoCamMode) this._exitFotoCameraView();
-    if (this._orbCamMode) this._exitCameraOrbView();
     // Sobrevoo automático (rodada 48) ainda rodando ao sair do 3D — encerra
     // AGORA (grava a pose atual em `this._camera`) antes da sincronização
     // com `MapView._personagem2D` logo abaixo, senão ela gravaria a posição
@@ -1498,8 +1422,7 @@ const View3D = {
     // ao sair do 3D, grava a posição/direção final do jogador de volta em
     // MapView._personagem2D, pra o pino do personagem no 2D aparecer onde a
     // pessoa realmente parou de andar no 3D (mesmo boneco, pedido do
-    // usuário) — e pra uma próxima abertura do 3D (sem câmera "ativa"
-    // marcada) continuar exatamente daqui. Só grava se havia mesmo uma
+    // usuário) — e pra uma próxima abertura do 3D continuar exatamente daqui. Só grava se havia mesmo uma
     // câmera montada (`this._camera` existe desde o início de mount(), mas
     // só faz sentido escrever de volta se chegou a haver mapa/cena de
     // verdade — `this._map`).
@@ -1510,8 +1433,8 @@ const View3D = {
       window.MapView._personagem2D = { x: this._camera.x, y: this._camera.z, angulo };
       // [20/09/2026 UTC] NOVO (RODADA 228) -- ver comentário grande em mount() (ramo `_personagem2D`,
       // acima) explicando a correção de escopo. Grava o yaw/pitch DE VERDADE da câmera livre 3D
-      // (`this._camera.yaw/pitch`, já finalizado aqui pelas correções de pose acima -- exitCameraView/
-      // exitFotoCameraView/exitCameraOrbView/finishFlythrough) via o MESMO `MapConfig.set()` já usado
+      // (`this._camera.yaw/pitch`, já finalizado aqui pelas correções de pose acima -- exitFotoCameraView/
+      // finishFlythrough) via o MESMO `MapConfig.set()` já usado
       // pra tudo mais desta seção (js/mapview.js `_unmountPlanta`), só que disparado daqui -- é só em
       // view3d.js que o yaw/pitch da câmera livre existe de verdade. Só grava se o checkbox
       // `mapa2DPersistirApontamentoPersonagem` estiver marcado; sem `await` de propósito (mesmo padrão
@@ -1522,6 +1445,8 @@ const View3D = {
           MapConfig.set({
             mapa2DApontamentoRecargaYaw: this._camera.yaw,
             mapa2DApontamentoRecargaPitch: this._camera.pitch,
+            mapa2DPersonagemRecargaX: this._camera.x,
+            mapa2DPersonagemRecargaY: this._camera.z,
           }).catch((e) => console.warn('Falha ao persistir yaw/pitch da câmera livre 3D:', e));
         }
       }
@@ -1683,27 +1608,19 @@ const View3D = {
     // selecionar 'Ver através desta câmera', no Modelador, ao entrar e sair
     // do Modelador, o cone da câmera selecionada acaba voltando a parecer e
     // fica na frente da tela." BUG CONFIRMADO: `Engine3D.setScene` (linha
-    // acima) reconstrói `_cameraMeshesById`/`_fotoMeshesById` DO ZERO a
-    // cada chamada (ver comentário grande no topo desses índices, em
+    // acima) reconstrói `_fotoMeshesById` DO ZERO a
+    // cada chamada (ver comentário grande no topo desse índice, em
     // engine3d.js) — toda malha nasce visível por padrão, sem nenhuma
-    // memória de que `_enterCameraOrbView`/`_enterFotoCameraView` já tinha
-    // escondido a malha da câmera/orb ATUAL (o "olho" de render fica bem
+    // memória de que `_enterFotoCameraView` já tinha
+    // escondido a malha do orb ATUAL (o "olho" de render fica bem
     // no ponto dela, então a malha dela mesma cobre a tela inteira "na
     // frente da câmera" — exatamente o sintoma relatado). `Modeler3D.exit()`
     // chama `view3d._rebuildScene?.()` (aqui) sempre que sai do Modelador
     // (skipRebuild não usado nesse caminho) — antes desta correção, sair do
-    // Modelador enquanto ainda em `_orbCamMode`/`_fotoCamMode` sempre
+    // Modelador enquanto ainda em `_fotoCamMode` sempre
     // perdia esse esconder. CORRIGIDO: reaplica o mesmo esconder, agora
-    // DEPOIS do `setScene`, sempre que ainda estiver num desses 2 modos —
-    // mesmo par de chamadas usado em `_enterCameraOrbView`/
-    // `_enterFotoCameraView` (inclusive a foto VINCULADA de uma câmera
-    // "Câmeras", `cam.fotoId` — mesma causa raiz do bug "duas fotos" já
-    // corrigido antes, ver `_enterCameraOrbView`).
-    if (this._orbCamMode) {
-      const cam = (this._map.cameras || []).find((c) => c.id === this._orbCamMode.camId);
-      this._engine?.setCameraMeshVisible?.(this._orbCamMode.camId, false);
-      if (cam?.fotoId != null) this._engine?.setFotoMeshVisible?.(cam.fotoId, false);
-    }
+    // DEPOIS do `setScene`, sempre que ainda estiver nesse modo —
+    // mesma chamada usada em `_enterFotoCameraView`.
     if (this._fotoCamMode) {
       this._engine?.setFotoMeshVisible?.(this._fotoCamMode.fotoId, false);
     }
@@ -1896,12 +1813,11 @@ const View3D = {
     await MapConfig.open(this._map, {
       context: '3d',
       onSelect: (kind, entity) => {
-        const nomes = { wall: 'Parede', camera: 'Câmera', object: 'Objeto', itemPin: 'Item' };
+        const nomes = { wall: 'Parede', object: 'Objeto', itemPin: 'Item' };
         Utils.toast(`${nomes[kind] || kind}: ${entity.label || entity.id}`, { type: 'ok' });
       },
       onDelete: async (kind, entity) => {
         if (kind === 'wall') Mapping.removeWall(this._map, entity.id);
-        else if (kind === 'camera') Mapping.removeCamera(this._map, entity.id);
         else if (kind === 'object') Mapping.removeObject(this._map, entity.id);
         else if (kind === 'itemPin') {
           await DB.updateItem(entity.id, { mapaX: null, mapaY: null, mapaPiso: 0 });
@@ -2113,11 +2029,6 @@ const View3D = {
     // `mapaAuto`), ignorando vínculo de foto de propósito.
     this._unsortedItems = (typeof PhotoGrid !== 'undefined') ? await PhotoGrid.getItemsSemPosicaoNoMapa() : [];
     this._itemIndex = 0;
-    // Roleta de câmeras fixas (pedido do usuário: "dá para fazer a roleta
-    // para as câmeras também") — vem direto de `this._map.cameras`, sem
-    // busca assíncrona (já faz parte do mapa carregado).
-    this._cameraIndex = 0;
-    this._camMode = null; // { camId, pan, tilt, zoomFov } quando "assistindo" uma câmera fixa — ver _enterCameraView
     // [10/09/2026] RESTAURADO — todo o recurso "ver através desta câmera"/
     // vanishCam (este campo + _enterFotoCameraView/_exitFotoCameraView/
     // _computeFotoCamPose/_fotoCamFovFor/_renderFotoCamOverlay mais abaixo,
@@ -2127,12 +2038,9 @@ const View3D = {
     // _openFotoPinWheel). Pedido verbatim original (09/09/2026): "No 'Ver
     // em 3D', deve ser possível clicar na câmera do orb de câmera e 'entrar
     // nela' [...] assim como no blender é possível 'ver através da câmera'
-    // [...]" — MESMO padrão arquitetural de `_camMode`/
-    // `_computeWatchCameraPose` acima (câmeras de segurança fixas), só que
-    // pra fotos vinculadas ao mapa (orbs de foto/câmera, ver mapview.js/
-    // engine3d.js). Nunca ativo ao mesmo tempo que `_camMode` (um sempre
-    // sai do outro antes de entrar — ver _enterFotoCameraView).
-    this._fotoCamMode = null; // { fotoId } quando "vendo através" de um orb de foto/câmera
+    // [...]" — pra fotos vinculadas ao mapa (orbs de foto/câmera, ver
+    // mapview.js/engine3d.js).
+    this._fotoCamMode = null; // { fotoId } quando "vendo através" de um orb de foto
     // [10/09/2026] NOVO — pedido verbatim: "Com o shift+b deve ser possível
     // mover panoramicamente, quando se está no 'Ver através desta
     // câmera'." CORRIGIDO 2x na mesma rodada: (a) usuário esclareceu que o
@@ -2151,46 +2059,17 @@ const View3D = {
     // partir do movimento do mouse (ver onMouseMove) enquanto Shift +
     // botão do meio do mouse estiver segurado; `_resetCamZoom` zera isto
     // (e o offset de verdade em `camera3` via `setCamPanFrac(0,0)`) ao
-    // entrar/sair de `_fotoCamMode`/`_orbCamMode`.
+    // entrar/sair de `_fotoCamMode`.
     this._camViewPanOffset = { x: 0, y: 0 };
     this._fotoCamSavedPose = null; // [12/09/2026] pose livre de `this._camera` no instante de `_enterFotoCameraView` — restaurada em _exitFotoCameraView se "Sair da câmera" estiver configurado como "voltar ao ponto de vista original" (ver _cameraExitViewMode)
     // [12/09/2026 — ITEM A] FOV do personagem capturado no instante de
-    // `_enterFotoCameraView`/`_enterCameraOrbView` (ANTES de aplicar o FOV
-    // calibrado da câmera/foto) — pedido verbatim: "o FOV [...] do
-    // personagem deve voltar a ser o que era antes de clicar em 'Ver
-    // através desta câmera' [...] deve ser preservado e não ficar o FOV da
-    // câmera em que ele está vendo através", mesmo com "Permanece com o
-    // ponto de vista da câmera" marcada. Diferente de `_fotoCamSavedPose`/
-    // `_orbCamSavedPose` (só usados quando a opção é "voltar ao original"),
-    // o FOV salvo aqui é restaurado SEMPRE em `_exitFotoCameraView`/
-    // `_exitCameraOrbView`, independente da opção "Sair da câmera"
-    // escolhida — só posição/orientação seguem a opção configurada, o FOV
-    // nunca fica sendo o da câmera vista através.
+    // `_enterFotoCameraView` (ANTES de aplicar o FOV calibrado da foto) —
+    // pedido verbatim: "o FOV [...] do personagem deve voltar a ser o que
+    // era antes de clicar em 'Ver através desta câmera'", mesmo com
+    // "Permanece com o ponto de vista da câmera" marcada. Diferente de
+    // `_fotoCamSavedPose` (só usado quando a opção é "voltar ao original"),
+    // o FOV salvo aqui é restaurado SEMPRE em `_exitFotoCameraView`.
     this._fotoCamSavedFov = null;
-    this._orbCamSavedFov = null;
-    // [10/09/2026] NOVO — redesenho do "Camera Match" pedido verbatim: "não
-    // deve ser uma tela a parte [...] deve ser no próprio cenário 3D [...]
-    // com um 'orb de câmera' deve dar para ver através dele. Com a câmera do
-    // personagem fixa pela visão do 'orb de câmera' deve ser possível
-    // continuar interagindo com o mapa do mesmo jeito que antes." Diferente
-    // de `_camMode`/`_fotoCamMode` acima (que são modos de ESPECTADOR: só
-    // sobrescrevem a pose RENDERIZADA — ver `renderCam` em `_loop` — enquanto
-    // `this._camera`, usado por TODO o raycasting de seleção/posicionamento
-    // de objetos, continua livre/andando sozinho por trás), este modo trava
-    // `this._camera` DE VERDADE na pose calibrada da câmera — é por isso que
-    // toda a interação (raycastFloor/raycastWall/seleção, todas em cima de
-    // `this._camera`) continua funcionando sem duplicar nenhuma lógica: elas
-    // já usam a câmera "de verdade", que agora É a do orb. Ver
-    // _enterCameraOrbView/_exitCameraOrbView mais abaixo (perto de
-    // _enterFotoCameraView, mesma vizinhança) e o re-trava-a-cada-quadro em
-    // `_loop` (busca por "_orbCamLockedPose" lá).
-    this._orbCamMode = null; // { camId } quando travado na visão de um objeto "Câmeras" (orb de câmera)
-    this._orbCamLockedPose = null; // pose {x,y,z,yaw,pitch} travada — reaplicada todo quadro em _loop
-    this._orbCamSavedPose = null; // pose livre de antes de entrar, restaurada ao sair
-    // Setado pelo painel 2D da câmera (mapview.js _openCameraPanel, botão
-    // "👁️ Ver em 3D através desta câmera") ANTES de navegar pra cá — ver uso
-    // logo depois de `camAtiva`/`p2d` acima neste mesmo mount().
-    if (this._pendingEnterCamOrbId === undefined) this._pendingEnterCamOrbId = null;
     this._renderHotbar();
   },
 
@@ -2201,13 +2080,8 @@ const View3D = {
     { tool: 'janela', icon: '🪟', label: 'Janela' },
     { tool: 'objeto', icon: '📦', label: 'Objeto' },
     { tool: 'item', icon: '🏷️', label: 'Item' },
-    // "Dá para fazer a roleta para as câmeras também" / "deve ser possível
-    // 'olhar' no 3D por câmeras fixas no cenário" — roleta pra escolher QUAL
-    // câmera do mapa, clique CONFIRMA (entra/sai de "assistir" ela, ver
-    // _placeWithBuildTool/_enterCameraView/_exitCameraView).
-    { tool: 'camera', icon: '📷', label: 'Câmeras' },
     // "Recolhedor" estilo Minecraft (pedido do usuário) — clique REMOVE o
-    // que estiver mirado (item/câmera/objeto/parede/porta/janela), com uma
+    // que estiver mirado (item/objeto/parede/porta/janela), com uma
     // animação (ver _removeWithTool/Engine3D.spawnCollectEffect/
     // spawnDemolishEffect). Sem roleta própria — não há "o que escolher",
     // só mirar e clicar.
@@ -2251,44 +2125,95 @@ const View3D = {
     // ('Mirar', ...)." Em vez de arbitrar z-index entre a hotbar de
     // construção e a barra de controles do overlay de câmera (ver
     // css/style.css `.v3d-hotbar`/`.v3d-fotocam-overlay-controls`), a
-    // hotbar simplesmente não faz sentido nenhum durante `_fotoCamMode`/
-    // `_orbCamMode` (não dá pra trocar de ferramenta de construção
+    // hotbar simplesmente não faz sentido nenhum durante `_fotoCamMode`
+    // (não dá pra trocar de ferramenta de construção
     // enquanto "vendo através" de uma câmera travada) — escondida aqui,
     // as duas barras nunca mais disputam a mesma área da tela. Chamada de
-    // novo automaticamente ao entrar/sair desses modos (`_renderHotbar()`
-    // já é chamada em `_enterCameraOrbView`/`_exitCameraOrbView`/
-    // `_enterFotoCameraView`/`_exitFotoCameraView`).
-    const escondida = !!(this._fotoCamMode || this._orbCamMode);
+    // novo automaticamente ao entrar/sair desse modo (`_renderHotbar()`
+    // já é chamada em `_enterFotoCameraView`/`_exitFotoCameraView`).
+    const escondida = !!this._fotoCamMode;
     bar.classList.toggle('hidden', escondida);
     if (escondida) { bar.innerHTML = ''; return; }
-    const objEntry = this._objectCatalog[this._objectIndex];
-    const itemEntry = this._unsortedItems[this._itemIndex];
-    const camEntry = (this._map?.cameras || [])[this._cameraIndex];
-    // [RODADA 139] o slot `trena3d` mostra ícone/rótulo conforme o modo
-    // (`trena3DModo`, ver mapconfig.js) — "📏 Trena 3D" (padrão) ou
-    // "➰ Polilinha 3D", sem duplicar entrada na hotbar.
-    const trena3DModo = this._trena3D._trena3DModo();
-    const trena3DPoli = trena3DModo === 'poli';
-    bar.innerHTML = this._HOTBAR_SLOTS.map((slot) => {
-      const active = this._buildTool === slot.tool;
-      let sub = '';
-      let icon = slot.icon, label = slot.label;
+    // Distribuição do rodapé (js/botoeslayout.js): a edição fica nas "configurações 3D"; aqui só se lê o estado salvo.
+    if (!this._hotbarLayout && window.BotoesLayout) {
+      this._hotbarLayout = window.BotoesLayout.criar(Object.assign(this._hotbarLayoutBase(), {
+        grid: () => this._container?.querySelector('#v3d-hotbar'),
+        htmlBotao: (d) => this._hotbarBtnHtml(d),
+        ligar: (g) => g.querySelectorAll('.v3d-hotbar-slot').forEach((btn) => { btn.onclick = () => this._ativarSlotRodape(btn.dataset.blid); }),
+      }));
+    }
+    if (this._hotbarLayout) {
+      this._hotbarLayout.renderizar();
+    } else {
+      bar.innerHTML = this._HOTBAR_SLOTS.map((sl) => this._hotbarBtnHtml(Object.assign({ id: sl.tool ?? 'mirar' }, sl))).join('');
+      bar.querySelectorAll('.v3d-hotbar-slot').forEach((btn) => {
+        btn.onclick = () => this._selectBuildTool(btn.dataset.tool || null);
+      });
+    }
+  },
+
+  /** Ícone de cada botão do rodapé = o mesmo da ferramenta equivalente da janela "Ferramentas" do Mapa 2D. */
+  _hotbarIcone(slot) {
+    const mapa = { parede: 'parede', porta: 'porta', janela: 'janela', objeto: 'objects', remover: 'apagar', orb: 'itens', trena3d: 'medida' };
+    const id = mapa[slot.tool];
+    const t = id && window.MapView && window.MapView.PTOOLS ? window.MapView.PTOOLS.find((x) => x.id === id) : null;
+    return t ? t.icon : slot.icon;
+  },
+
+  /** HTML de um botão do rodapé (definição padrão ou extra `obj:<tipo>`). `preview`: para as configurações 3D. */
+  _hotbarBtnHtml(slot, preview) {
+    let sub = '';
+    let icon = slot.extra ? slot.icon : this._hotbarIcone(slot), label = slot.label;
+    let active = !preview && !slot.extra && this._buildTool === slot.tool;
+    if (slot.extra) {
+      sub = Utils.escapeHtml(slot.label);
+      active = !preview && this._buildTool === 'objeto' && this._objectCatalog[this._objectIndex]?.key === slot.objKey;
+    } else if (!preview) {
+      const objEntry = this._objectCatalog[this._objectIndex];
+      const itemEntry = this._unsortedItems[this._itemIndex];
+      const trena3DPoli = this._trena3D && this._trena3D._trena3DModo && this._trena3D._trena3DModo() === 'poli';
       if (slot.tool === 'trena3d' && trena3DPoli) { icon = '➰'; label = 'Polilinha 3D'; }
       if (slot.tool === 'objeto') sub = objEntry ? Utils.escapeHtml(objEntry.label) : (this._objectCatalog.length ? '' : '(nenhum)');
       if (slot.tool === 'item') sub = itemEntry ? Utils.escapeHtml(itemEntry.patrimonio || itemEntry.descricao || '—') : '(nenhum sem lugar)';
-      if (slot.tool === 'camera') {
-        const n = (this._map?.cameras || []).length;
-        sub = camEntry ? `Câmera ${this._cameraIndex + 1}${this._camMode ? ' 🔴' : ''}` : (n ? '' : '(nenhuma no mapa)');
-      }
-      return `
-        <button type="button" class="v3d-hotbar-slot ${active ? 'active' : ''}" data-tool="${slot.tool ?? ''}" title="${label}${sub ? ` — ${sub}` : ''}">
+    }
+    return `
+        <button type="button" class="v3d-hotbar-slot ${active ? 'active' : ''}" data-blid="${slot.id}" data-tool="${slot.tool ?? ''}" title="${Utils.escapeHtml(label)}${sub ? ` — ${sub}` : ''}">
           <span class="v3d-hotbar-icon">${icon}</span>
           ${sub ? `<span class="v3d-hotbar-sub">${sub}</span>` : ''}
         </button>`;
-    }).join('');
-    bar.querySelectorAll('.v3d-hotbar-slot').forEach((btn) => {
-      btn.onclick = () => this._selectBuildTool(btn.dataset.tool || null);
-    });
+  },
+
+  _hotbarDefExtra(id) {
+    if (!String(id).startsWith('obj:')) return null;
+    const key = String(id).slice(4);
+    const o = ((typeof Icons !== 'undefined') ? Icons.mapObjectCatalog() : []).find((x) => x.key === key);
+    return o ? { id, extra: true, tool: 'objeto', objKey: key, icon: o.svg, label: o.label } : null;
+  },
+
+  /** Parte comum da configuração do rodapé (barra real e seção das "configurações 3D"). */
+  _hotbarLayoutBase() {
+    return {
+      chave: 'view3dRodape',
+      defs: () => this._HOTBAR_SLOTS.map((sl) => Object.assign({ id: sl.tool ?? 'mirar' }, sl, { icon: this._hotbarIcone(sl) })),
+      defExtra: (id) => this._hotbarDefExtra(id),
+      catalogoExtras: () => ((typeof Icons !== 'undefined') ? Icons.mapObjectCatalog() : []).map((o) => ({ id: 'obj:' + o.key, label: o.label, icon: o.svg })),
+      eixo: 'x',
+      rotulo: (d) => d.label,
+      iconeHtml: (d) => `<span class="v3d-hotbar-icon">${d.icon}</span>`,
+      aoMudar: () => { const c = this._hotbarLayout; if (c && this._container) { c._carregado = false; this._renderHotbar(); } },
+    };
+  },
+
+  /** Clique num botão do rodapé: ferramenta normal ou objeto do catálogo acrescentado (`obj:<tipo>`). */
+  _ativarSlotRodape(id) {
+    if (String(id).startsWith('obj:')) {
+      this._refreshObjectCatalog();
+      const idx = this._objectCatalog.findIndex((e) => e.key === String(id).slice(4));
+      if (idx >= 0) this._objectIndex = idx;
+      if (this._buildTool !== 'objeto') this._selectBuildTool('objeto'); else this._renderHotbar();
+      return;
+    }
+    this._selectBuildTool(id === 'mirar' ? null : id);
   },
 
   _selectBuildTool(tool) {
@@ -2305,15 +2230,8 @@ const View3D = {
         Utils.toast('Parede concluída ✓', { type: 'ok', duration: 1500 });
         this._renderHotbar();
       }
-      // Clicar de novo em 📷 já com uma câmera sendo "assistida" agora SAI
-      // dela — mesmo espírito de "re-clicar conclui" da Parede acima.
-      if (tool === 'camera' && this._camMode) this._exitCameraView();
       return;
     }
-    // Trocar pra QUALQUER outra ferramenta enquanto se está "assistindo" uma
-    // câmera fixa devolve o controle ao jogador — mouse/roda passam a
-    // significar olhar/roleta de novo, não pan/tilt/zoom da câmera.
-    if (this._camMode) this._exitCameraView();
     this._buildTool = tool;
     this._wallChainStart = null; // trocar de ferramenta cancela uma cadeia de parede pendente
     this._buildManualRot = 0; // idem — cada troca de ferramenta começa a rotação manual do zero
@@ -2338,11 +2256,11 @@ const View3D = {
     // `isToolActive`.
     this._trena3D._trena3DEnsurePainelRapido();
     this._renderHotbar();
-    if (tool === 'objeto' || tool === 'item' || tool === 'camera') this._showRoulette(); else this._hideRoulette();
+    if (tool === 'objeto' || tool === 'item') this._showRoulette(); else this._hideRoulette();
     // HUD "estilo jogo" da ferramenta "📍 Adicionar orb" — mostra/esconde e
     // recalcula os números ao entrar/sair da ferramenta (ver _refreshOrbHud).
     this._refreshOrbHud();
-    const nomes = { parede: 'Parede — clique no chão pra marcar o 1º ponto, de novo pro 2º (e segue encadeando); botão do meio, Enter ou clicar em 🧱 de novo conclui', porta: 'Porta — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', janela: 'Janela — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', objeto: 'Objeto — role o mouse pra escolher o tipo, clique pra colocar', item: 'Item — role o mouse pra escolher o patrimônio sem lugar, clique pra colocar', camera: 'Câmeras — role o mouse pra escolher qual câmera fixa, clique pra "assistir" por ela (mova o mouse pra olhar em volta, limitado; role pra zoom); clique em 📷 de novo pra sair', 'orbfoto-novo': 'Orb de foto — clique no chão, escolha uma foto sem vínculo pra colocar ali; pode ir clicando pra colocar várias seguidas', remover: 'Remover — mire em item/câmera/objeto/parede/porta/janela e clique pra remover da cena', orb: 'Adicionar orb — mire num objeto e clique pra abrir a busca de patrimônio e associá-lo a ele', tijolo: 'Blocos de construção — clique pra colocar 1 tijolo em cima da superfície mirada; segure Ctrl + botão esquerdo pra ir colocando vários seguidos no mesmo nível', 'tijolo-pintar': '🎨 Pintar tijolos — mire num tijolo já colocado e clique pra aplicar a cor/textura atual do menu nele', trena3d: 'Trena 3D — clique em 2 pontos pra medir a distância; segure Ctrl no 2º clique pra medir "no ar" (estabelece uma referência vertical no 1º ponto — o clique seguinte, sem Ctrl, sobe/desce por ela)' };
+    const nomes = { parede: 'Parede — clique no chão pra marcar o 1º ponto, de novo pro 2º (e segue encadeando); botão do meio, Enter ou clicar em 🧱 de novo conclui', porta: 'Porta — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', janela: 'Janela — mire numa parede pra encaixar, ou em outro lugar pra deixar solta no ar', objeto: 'Objeto — role o mouse pra escolher o tipo, clique pra colocar', item: 'Item — role o mouse pra escolher o patrimônio sem lugar, clique pra colocar', 'orbfoto-novo': 'Orb de foto — clique no chão, escolha uma foto sem vínculo pra colocar ali; pode ir clicando pra colocar várias seguidas', remover: 'Remover — mire em item/objeto/parede/porta/janela e clique pra remover da cena', orb: 'Adicionar orb — mire num objeto e clique pra abrir a busca de patrimônio e associá-lo a ele', tijolo: 'Blocos de construção — clique pra colocar 1 tijolo em cima da superfície mirada; segure Ctrl + botão esquerdo pra ir colocando vários seguidos no mesmo nível', 'tijolo-pintar': '🎨 Pintar tijolos — mire num tijolo já colocado e clique pra aplicar a cor/textura atual do menu nele', trena3d: 'Trena 3D — clique em 2 pontos pra medir a distância; segure Ctrl no 2º clique pra medir "no ar" (estabelece uma referência vertical no 1º ponto — o clique seguinte, sem Ctrl, sobe/desce por ela)' };
     if (tool) Utils.toast(nomes[tool] || tool, { duration: 2600 });
   },
 
@@ -2405,11 +2323,6 @@ const View3D = {
       this._itemIndex = (this._itemIndex + dir + this._unsortedItems.length) % this._unsortedItems.length;
       this._renderHotbar();
       this._renderRoulette({ wake: true });
-    } else if (this._buildTool === 'camera' && (this._map?.cameras || []).length) {
-      const n = this._map.cameras.length;
-      this._cameraIndex = (this._cameraIndex + dir + n) % n;
-      this._renderHotbar();
-      this._renderRoulette({ wake: true });
     }
   },
 
@@ -2446,11 +2359,10 @@ const View3D = {
     const track = this._container?.querySelector('#v3d-roulette-list');
     if (!el || !track || el.classList.contains('hidden')) return;
     const isObjeto = this._buildTool === 'objeto';
-    const isCamera = this._buildTool === 'camera';
-    const lista = isObjeto ? this._objectCatalog : (isCamera ? (this._map?.cameras || []) : this._unsortedItems);
-    const idx = isObjeto ? this._objectIndex : (isCamera ? this._cameraIndex : this._itemIndex);
+    const lista = isObjeto ? this._objectCatalog : this._unsortedItems;
+    const idx = isObjeto ? this._objectIndex : this._itemIndex;
     if (!lista.length) {
-      track.innerHTML = `<div class="v3d-roulette-item center">${isObjeto ? 'Nenhum tipo de objeto' : (isCamera ? 'Nenhuma câmera no mapa' : 'Nenhum patrimônio sem lugar')}</div>`;
+      track.innerHTML = `<div class="v3d-roulette-item center">${isObjeto ? 'Nenhum tipo de objeto' : 'Nenhum patrimônio sem lugar'}</div>`;
     } else {
       const RAIO = 2; // 2 entradas antes/depois da selecionada, no meio
       let html = '';
@@ -2462,14 +2374,6 @@ const View3D = {
           html += `<div class="v3d-roulette-item ${center ? 'center' : ''}">
             <span class="v3d-roulette-ic">${entry.svg || '📦'}</span>
             <span class="v3d-roulette-label">${Utils.escapeHtml(entry.label || entry.key)}</span>
-          </div>`;
-        } else if (isCamera) {
-          // "Dá para fazer a roleta para as câmeras também" — mesmo componente,
-          // uma entrada por câmera do mapa (sem foto/nome próprio, só a ordem).
-          const assistindo = this._camMode?.camId === entry.id;
-          html += `<div class="v3d-roulette-item ${center ? 'center' : ''}">
-            <span class="v3d-roulette-ic">${assistindo ? '🔴' : '📷'}</span>
-            <span class="v3d-roulette-label">Câmera ${i + 1}</span>
           </div>`;
         } else {
           const svg = (typeof Icons !== 'undefined' && Icons.svgForAnyKey(entry.tipo)) || '🏷️';
@@ -2604,7 +2508,7 @@ const View3D = {
    *  "ℹ️ Informações do vanishCam" (idem, mesma lógica, só realocados) + o
    *  fieldset "⚙️ Propriedades" de verdade (`_wireLiveCamPropsPanel`,
    *  idem). Chamada (a) com `opts.rebuild:true` ao entrar em "Ver através
-   *  desta câmera" (`_renderFotoCamOverlay`/`_renderCameraOrbOverlay`) --
+   *  desta câmera" (`_renderFotoCamOverlay`) --
    *  reconstrói do zero pra câmera/foto nova -- e (b) sem forçar
    *  reconstrução ao clicar na aba (`_setV3dRightTab`) ou ao sair
    *  (`_removeFotoCamOverlay`) -- nesse caso só é reconstruído se ainda não
@@ -2624,7 +2528,7 @@ const View3D = {
     if (opts?.temFrustum !== undefined) this._fotoCamActiveTemFrustum = opts.temFrustum;
     if (opts?.hasImage !== undefined) this._fotoCamActiveHasImage = opts.hasImage;
     const foto = this._fotoCamActiveFoto;
-    const emCameraView = !!(this._fotoCamMode || this._orbCamMode) && !!foto && !!this._fotoCamOverlayEl;
+    const emCameraView = !!this._fotoCamMode && !!foto && !!this._fotoCamOverlayEl;
     if (!emCameraView) {
       fundoBody.innerHTML = '<div class="v3d-proppanel-empty">Disponível dentro de "Ver através desta câmera".</div>';
       cameraBody.innerHTML = '<div class="v3d-proppanel-empty">Disponível dentro de "Ver através desta câmera".</div>';
@@ -3056,30 +2960,6 @@ const View3D = {
       });
       list.innerHTML = html;
     }
-    // [10/09/2026] DUPLICATA CORRIGIDA — bug relatado pelo usuário: "no
-    // botão lateral direito, nos objetos, ainda estão coexistindo o 'Orb
-    // de foto' e a 'Câmera'." Causa raiz: esta lista (aparentemente escrita
-    // por outra sessão nesta mesma data) tinha 2 linhas fixas separadas —
-    // uma chamando a ferramenta ANTIGA `'camera-novo'` (cria um registro no
-    // array legado `map.cameras[]`, o sistema "Câmeras" que uma rodada
-    // ANTERIOR desta mesma base já tinha unificado com o "Orb de foto" e
-    // pedido explicitamente pra remover do projeto — "Depois das trocas
-    // todas, então o 'Orb de foto' passa a se chamar 'Câmera' e o objeto
-    // 'Câmeras' [...] deve ser removido do projeto"), e outra chamando a
-    // ferramenta ATUAL `'orbfoto-novo'` (cria a entrada unificada de
-    // verdade, em `map.fotos[]`, com nome/scripts/camProps — ver
-    // `_openFotoPinPopover` em mapview.js). Ou seja: a unificação pedida
-    // antes tinha sido desfeita sem querer, voltando a expor os 2 sistemas
-    // lado a lado de novo. CORRIGIDO removendo a linha "Câmera"/
-    // `'camera-novo'` (legada) e deixando só UMA linha — a de
-    // `'orbfoto-novo'` — agora com ícone 📷 e rótulo "Câmera" (pedido
-    // original: "Fica o ícone de 'Câmeras', mas fica a janela de
-    // propriedades do 'Orb de foto'"). `_placeWithBuildTool`'s ramo
-    // `'camera-novo'` (código morto/inalcançável desde então) foi
-    // finalmente REMOVIDO em 15/09/2026 UTC — pedido verbatim: "Remova
-    // todas as referências de duplicidade [...] Não considere
-    // compatibilidade com código legado" — ver o antigo local do bloco
-    // `if (tool === 'camera-novo')`, mais abaixo.
     html += `<div class="v3d-objcat-row v3d-objcat-camera-row ${this._buildTool === 'orbfoto-novo' ? 'active' : ''}" id="v3d-objcat-neworbfoto">
       <span class="v3d-objcat-ic">📷</span>
       <span class="v3d-objcat-label">Câmera</span>
@@ -3097,9 +2977,6 @@ const View3D = {
         this._toggleObjectCatalogPanel();
       };
     });
-    // [10/09/2026] Linha "#v3d-objcat-newcam" (ferramenta legada
-    // 'camera-novo') REMOVIDA — ver comentário grande acima, no HTML desta
-    // lista.
     const newOrbFotoRow = list.querySelector('#v3d-objcat-neworbfoto');
     if (newOrbFotoRow) {
       newOrbFotoRow.onclick = () => {
@@ -4172,45 +4049,12 @@ const View3D = {
       return;
     }
 
-    if (tool === 'camera') {
-      // "Deve ser possível 'olhar' no 3D por câmeras fixas no cenário... Dá
-      // para fazer a roleta para as câmeras também" — a roleta já escolhe
-      // QUAL câmera (this._cameraIndex); o clique aqui CONFIRMA: entra na
-      // visão dela, ou sai se já for a que está sendo assistida agora (mesmo
-      // toggle de re-clicar em 📷, ver _selectBuildTool).
-      const camEntry = (this._map.cameras || [])[this._cameraIndex];
-      if (!camEntry) { Utils.toast('Nenhuma câmera no mapa pra assistir.', { type: 'warn' }); return; }
-      if (this._camMode && this._camMode.camId === camEntry.id) this._exitCameraView();
-      else this._enterCameraView(camEntry.id);
-      return;
-    }
-
-    // [15/09/2026 UTC] REMOVIDO — ramo `tool === 'camera-novo'` (criava uma
-    // câmera nova via `Mapping.addCamera` a partir de um clique no chão,
-    // ferramenta dedicada `'camera-novo'`). Pedido verbatim: "Há
-    // resquícios no código para manter compatibilidade. Remova todas as
-    // referências de duplicidade [...] Não considere compatibilidade com
-    // código legado." CONFIRMADO 100% MORTO/inalcançável (grep em toda
-    // `js/`): a ÚNICA linha de HTML que setava `this._buildTool =
-    // 'camera-novo'` já tinha sido removida em 10/09/2026 (ver comentário
-    // grande em `_renderObjectCatalogPanel`, "DUPLICATA CORRIGIDA" — a
-    // linha "Câmera"/`'camera-novo'` foi trocada pela linha única
-    // `'orbfoto-novo'`); nenhum outro ponto do projeto seta `_buildTool`
-    // pra `'camera-novo'`. Câmeras de vigilância REAIS continuam podendo
-    // ser criadas normalmente pela hotbar (ver ramo `tool === 'camera'`
-    // acima, que ASSISTE uma câmera já existente, e os geradores
-    // automáticos de sala/`js/geradores-salas.js`) — só este ponto de
-    // entrada morto (clique único criando câmera nova a partir do "+") foi
-    // removido, não o sistema de câmeras em si.
-
-    // [10/09/2026→11/09/2026] "orb de foto" na lista do "+", MESMO padrão
-    // de colocação contínua da Câmera logo acima.
+    // [10/09/2026→11/09/2026] "orb de foto" na lista do "+" (colocação contínua).
     // [11/09/2026] REESCRITO — pedido verbatim do usuário: "A inserção de
     // objetos no 'Ver em 3D' deve ser como no mapa 2D [...] deve ser
     // possível adicioná-lo à cena, mesmo que ele não tenha foto vinculada.
     // Não deve aparecer uma janela para selecionar a foto. É só inserir
-    // direto o elemento no cenário 3D." A versão anterior (comentário
-    // removido, ver histórico) abria `window.MapView._pickPhotoFromList`
+    // direto o elemento no cenário 3D." A versão anterior abria um seletor
     // pra escolher uma foto JÁ existente sem vínculo — o que, além de
     // contrariar o pedido direto, também travava a "colocação contínua"
     // pedida no mesmo item (o modal interrompia o fluxo de cliques
@@ -4228,7 +4072,7 @@ const View3D = {
     // irmã em engine3d.js `setScene`, bloco "fotos vinculadas ao mapa")
     // e vincular uma foto de verdade a qualquer momento, como qualquer
     // outra propriedade. Ferramenta continua ativa entre cliques (mesmo
-    // espírito contínuo de Câmera/Objeto/Item) — cada clique cria mais um
+    // espírito contínuo de Objeto/Item) — cada clique cria mais um
     // orb sem foto, no ponto clicado.
     if (tool === 'orbfoto-novo') {
       const hit = this._engine.raycastFloor(ray.origin, ray.dir);
@@ -4251,105 +4095,24 @@ const View3D = {
     }
   },
 
-  // ---------- "Assistir" uma câmera fixa (pedido do usuário: "deve ser
-  // possível 'olhar' no 3D por câmeras fixas no cenário... Essa câmera deve
-  // corresponder a projeção mostrada na tela do app, alinhada e a altura
-  // correta... Dá para colocar uma rotina de movimentação padrão para o
-  // player... Nas câmeras fixas, é possível mover de um lado para o outro
-  // (limitado)... zoom e também inclinar para cima e para baixo de forma
-  // limitada"). Enquanto ativo, `this._camera` continua sendo a posição DE
-  // VERDADE do jogador (agora andando sozinho — ver _updateAutopilot), só
-  // que quem é renderizado/visto na tela passa a ser a câmera fixa (ver
-  // _computeWatchCameraPose, chamado em _loop) — é assim que o boneco palito
-  // (cabeça de câmera) aparece andando pelo cenário: ele é o próprio
-  // jogador, só visto de fora agora. ----------
   _CAM_VIEW_DEFAULT_FOV: 60,
   _CAM_VIEW_FOV_MIN: 20,
   _CAM_VIEW_FOV_MAX: 80,
-  _CAM_VIEW_PAN_MAX: Math.PI * 45 / 180, // "mover de um lado para o outro (limitado tanto para um lado quanto para o outro)"
-  _CAM_VIEW_TILT_MAX: Math.PI * 25 / 180, // "inclinar para cima e para baixo de forma limitada"
-
-  _enterCameraView(camId) {
-    this._camMode = { camId, pan: 0, tilt: 0, zoomFov: this._CAM_VIEW_DEFAULT_FOV };
-    this._autopilotTarget = null; // força escolher um novo destino de passeio já no 1º _updateAutopilot
-    this._playerWalking = false;
-    // Boneco palito só aparece "quando é outra câmera sendo usada para
-    // observar o cenário" (pedido do usuário) — ligado só aqui/desligado só
-    // em _exitCameraView, nunca durante o andar normal em 1ª pessoa.
-    this._engine?.setPlayerFigureVisible?.(true);
-    this._engine?.setFov?.(this._camMode.zoomFov);
-    this._renderHotbar();
-  },
 
   // [13/09/2026] NOVO — pedido verbatim: "Deve haver uma pilha de 'Sair',
-  // para não gerar inconsistências na estrutura do projeto. Por exemplo,
-  // ao entrar no 'Ver em 3D', deve ser um nível da pilha, ao entrar no
-  // modo 'Ver através desta câmera' [...] deve ser mais um nível na pilha.
-  // Depois, estando no modo 'Ver através desta câmera', entra-se no
-  // Modelador, então, deve ser mais um nível na pilha. [...] Se clicar em
-  // 'Sair do 3D' (nível 1 da pilha), então, deve-se ser executado 3
+  // para não gerar inconsistências na estrutura do projeto. [...] Se clicar
+  // em 'Sair do 3D' (nível 1 da pilha), então, deve-se ser executado 3
   // saídas: 'Sair do Modelador', depois, 'Sair da câmera' e, depois,
-  // 'Sair do 3D'. Implemente isto para todo o 'Ver em 3D'." Em vez de uma
-  // estrutura de pilha literal (array de níveis), a "pilha" já existe
-  // IMPLICITAMENTE no encadeamento normal do app — `Modeler3D.isActive()`
-  // (nível mais interno possível) só pode estar `true` DENTRO de um dos
-  // modos de câmera (`_camMode`/`_fotoCamMode`/`_orbCamMode`, ver
-  // `Modeler3D.enter`, chamado só a partir daqui) ou direto do "Ver em 3D"
-  // sem câmera nenhuma — então o helper abaixo, chamado no TOPO de CADA
-  // função de saída de nível (`_exitCameraView`/`_exitFotoCameraView`/
-  // `_exitCameraOrbView`, logo abaixo, e também em `unmount()`, "Sair do
-  // 3D"), garante que o nível mais interno (Modelador) SEMPRE sai
-  // primeiro, evitando a inconsistência relatada (posição do personagem
-  // gravada ANTES da câmera "assentar" de volta na pose certa — ver
-  // também o item da posição do personagem, mesma rodada). Chamar isto
-  // sempre ANTES de zerar `_camMode`/`_fotoCamMode`/`_orbCamMode` de cada
-  // função — sair do Modelador PRIMEIRO, com a câmera ainda travada no
-  // modo de visualização, é o que garante a pose final correta (o
-  // Modelador usa a pose travada como referência pra sua própria
-  // transição de saída, ver comentário grande em `Modeler3D.exit`).
+  // 'Sair do 3D'." A "pilha" existe IMPLICITAMENTE no encadeamento normal
+  // do app — `Modeler3D.isActive()` (nível mais interno) só pode estar
+  // `true` DENTRO de `_fotoCamMode` (ver `Modeler3D.enter`) ou direto do
+  // "Ver em 3D" — então o helper abaixo, chamado no TOPO de
+  // `_exitFotoCameraView` e em `unmount()`, garante que o Modelador SEMPRE
+  // sai primeiro, com a câmera ainda travada no modo de visualização (o
+  // Modelador usa a pose travada como referência pra sua própria transição
+  // de saída, ver comentário grande em `Modeler3D.exit`).
   _exitModeladorSeAtivo() {
     if (window.Modeler3D?.isActive?.()) window.Modeler3D.exit();
-  },
-
-  _exitCameraView() {
-    this._exitModeladorSeAtivo(); // [13/09/2026] pilha de "Sair" — ver comentário grande acima
-    this._camMode = null;
-    this._engine?.setPlayerFigureVisible?.(false);
-    this._engine?.setFov?.(72); // FOV padrão do jogador em 1ª pessoa (ver Engine3D._initThree)
-    this._renderHotbar();
-  },
-
-  /** Pose (posição/ângulo) de onde renderizar enquanto "assistindo" uma
-   *  câmera fixa — MESMA conversão ângulo->yaw e altura (baseY+ALTURA_CAMERA)
-   *  já usadas pra iniciar a visão 3D a partir de uma câmera (ver mount()) e
-   *  pra desenhar a malha da câmera (engine3d.js setScene, ALTURA_CAMERA),
-   *  pra a projeção bater exatamente com o que a malha mostra no mapa —
-   *  pedido do usuário. `pan`/`tilt` (ambos limitados, ver constantes acima)
-   *  só deslocam a partir dessa base, nunca saem do intervalo permitido.
-   *
-   *  [11/09/2026] CORRIGIDO — pedido verbatim, com repro exato: "crie um
-   *  câmera, então o desenho 2D dela tem uma seta que aponta para norte.
-   *  Depois, vou para o 'Ver em 3D' e a câmera (modelo 3D) e também o 'Ver
-   *  através dessa câmera' estão apontando para o sul." O mapa 2D
-   *  (`Map2DRenderer._drawCameraShape`, mapview.js) desenha o leque/seta
-   *  usando `cam.angulo` puro, sem NENHUM offset — essa é a referência
-   *  "verdadeira" (nunca foi trocada, é o que o usuário vê primeiro e
-   *  espera que o 3D acompanhe). Este `yaw` (e o mesmo cálculo em
-   *  `_enterCameraOrbView`/engine3d.js `setScene`, ver comentários lá)
-   *  usava `angulo - π/2` — virou `angulo + π/2` (equivalente a somar +π/
-   *  180° em cima do offset antigo): os 3 consumidores de `cam.angulo`
-   *  (mapa 2D, malha 3D da câmera, pose de "assistir"/"ver através")
-   *  precisam concordar entre si, e o mapa 2D é quem NÃO muda — os outros
-   *  dois (aqui e a malha em engine3d.js) é que giram 180° pra bater com
-   *  ele. */
-  _computeWatchCameraPose() {
-    const cfg = this._camMode;
-    const cam = (this._map?.cameras || []).find((c) => c.id === cfg.camId);
-    if (!cam) return this._camera;
-    const ALTURA_CAMERA = 1.6; // mesmo valor de engine3d.js setScene
-    const baseY = (cam.piso || 0) * (this._map?.alturaPiso || 2.8);
-    const yaw = (cam.angulo || 0) + Math.PI / 2 + cfg.pan;
-    return { x: cam.x, y: baseY + ALTURA_CAMERA, z: cam.y, yaw, pitch: cfg.tilt };
   },
 
   // [10/09/2026] Bloco "ver através desta câmera"/vanishCam RESTAURADO — ver
@@ -4375,13 +4138,12 @@ const View3D = {
    *  mapconfig.js DEFAULTS.cameraExitViewMode para o histórico completo]
    *  Lê a config "Configurações 3D" → seção única "Ver através desta
    *  câmera" (`MapConfig.DEFAULTS.cameraExitViewMode`) que decide o que
-   *  acontece ao clicar "Sair da câmera", tanto num objeto "Câmeras" quanto
-   *  num "orb de foto": `'lockedView'` (padrão) — o personagem PERMANECE
+   *  acontece ao clicar "Sair da câmera" num "orb de foto": `'lockedView'` (padrão) — o personagem PERMANECE
    *  com o ponto de vista da câmera que estava sendo vista (posição/
    *  orientação; o FOV é tratado à parte, sempre restaurado — ver ITEM A/
-   *  `_orbCamSavedFov`/`_fotoCamSavedFov`); `'originalView'` — volta pro
+   *  `_fotoCamSavedFov`); `'originalView'` — volta pro
    *  ponto de vista que o personagem tinha ANTES de "Ver através desta
-   *  câmera". Usada DIRETO por `_exitCameraOrbView` E por
+   *  câmera". Usada DIRETO por
    *  `_exitFotoCameraView` (o wrapper `_fotoOrbExitViewMode()`, que só
    *  delegava pra esta função, foi removido em 15/09/2026 UTC — pedido
    *  verbatim: "Remova todas as referências de duplicidade [...] Não
@@ -4414,8 +4176,7 @@ const View3D = {
   // recalcular NADA, ficando borrado, e (bug relatado à parte) também
   // ampliava os BOTÕES de controle junto (estavam dentro do mesmo
   // elemento escalado). Reescrito pra usar zoom de VERDADE — muda o FOV
-  // real da câmera Three.js (`Engine3D.setFov`, o MESMO mecanismo já usado
-  // pelo `_camMode` legado) a cada "tick" da roda do mouse: o motor
+  // real da câmera Three.js (`Engine3D.setFov`) a cada "tick" da roda do mouse: o motor
   // RECALCULA a projeção e redesenha a cena inteira nesse FOV novo, sempre
   // nítida (nenhum pixel é esticado). Os botões de controle nunca foram
   // reafetados por isto (nunca estiveram dentro de nenhum elemento
@@ -4441,21 +4202,16 @@ const View3D = {
   _CAMVIEW_ZOOM_FOV_MAX: 110,
 
   /** Config ativa de zoom (`{calibFov, zoomFov}`) — `_fotoCamMode`/
-   *  `_orbCamMode` ganham esses 2 campos ao entrar (ver
-   *  `_enterFotoCameraView`/`_enterCameraOrbView`); nunca os dois ativos
-   *  ao mesmo tempo, então basta devolver o que existir. */
+   *  ganha esses 2 campos ao entrar (ver `_enterFotoCameraView`). */
   _activeCamZoomCfg() {
-    return this._fotoCamMode || this._orbCamMode || null;
+    return this._fotoCamMode || null;
   },
 
   /** [13/09/2026 — ITEM D] Proporção (largura/altura) do enquadramento
-   *  calibrado da câmera ativa (`_fotoCamMode`/`_orbCamMode`) — 16/9 se não
+   *  calibrado da câmera ativa (`_fotoCamMode`) — 16/9 se não
    *  houver `camProps`/`Resolução` salva ainda. `_fotoCamMode` só guarda
    *  `fotoId` (ver `_enterFotoCameraView`), então precisa buscar o registro
-   *  em `this._map.fotos`; `_orbCamMode` só guarda `camId`
-   *  (`_enterCameraOrbView`), busca em `this._map.cameras` — os campos
-   *  ficam SOLTOS no próprio objeto câmera (não aninhados em `camProps`,
-   *  diferente do orb de foto — ver `Mapping.addCamera`).
+   *  em `this._map.fotos`.
    *  [11/09/2026] REESCRITO — pedido verbatim: "apague todas as
    *  propriedades [da câmera]. Deixe apenas FOV. [...] uma seção de
    *  'Resolução' [...] Estes [...] valores influenciam no tamanho do
@@ -4508,10 +4264,6 @@ const View3D = {
       const foto = (this._map?.fotos || []).find((f) => f.id === this._fotoCamMode.fotoId);
       resX = foto?.camProps?.resolutionX ?? resX;
       resY = foto?.camProps?.resolutionY ?? resY;
-    } else if (this._orbCamMode) {
-      const cam = (this._map?.cameras || []).find((c) => c.id === this._orbCamMode.camId);
-      resX = cam?.resolutionX ?? resX;
-      resY = cam?.resolutionY ?? resY;
     }
     return resX / Math.max(1, resY);
   },
@@ -4532,7 +4284,7 @@ const View3D = {
    *  `cam3.fov` (o FOV do RENDER, `zcfg.zoomFov` — um valor totalmente
    *  diferente, vindo de `_fotoCamFovFor`/vanishCam ou do padrão fixo 60°)
    *  em vez do FOV calibrado do `camProps` que o retângulo amarelo
-   *  realmente usa. Câmera "Câmeras" sem `camProps.focalLengthMm` salvo
+   *  realmente usa. Foto sem `camProps.focalLengthMm` salvo
    *  ainda cai nos mesmos padrões de fábrica do fieldset "Propriedades da
    *  câmera" (50mm, sensor 36x24mm) — igual ao engine3d.js. */
   /** [11/09/2026] REESCRITO — ver comentário grande em `_activeCamFrameAspect`
@@ -4562,11 +4314,6 @@ const View3D = {
       cp = foto?.camProps || null;
       resX = cp?.resolutionX ?? resX;
       resY = cp?.resolutionY ?? resY;
-    } else if (this._orbCamMode) {
-      const cam = (this._map?.cameras || []).find((c) => c.id === this._orbCamMode.camId) || null;
-      cp = cam;
-      resX = cam?.resolutionX ?? resX;
-      resY = cam?.resolutionY ?? resY;
     }
     // [11/09/2026] CORRIGIDO — pedido verbatim: "O enquadramento deve ter
     // medidas limite que são a forma do quadrado (assim como no Blender)
@@ -5832,10 +5579,10 @@ const View3D = {
 
   /** Zera o zoom (volta ao FOV calibrado desta câmera/orb) E o
    *  deslocamento panorâmico (`_camViewPanOffset`, Shift+botão-do-meio — ver
-   *  onMouseMove) — chamada ao ENTRAR em `_fotoCamMode`/`_orbCamMode`
+   *  onMouseMove) — chamada ao ENTRAR em `_fotoCamMode`
    *  (nunca herda zoom/pan de uma sessão anterior) e ao SAIR (os pontos de
    *  saída já restauram o FOV/pose de navegação normal por conta própria —
-   *  ver `_exitFotoCameraView`/`_exitCameraOrbView` — esta chamada só
+   *  ver `_exitFotoCameraView` — esta chamada só
    *  limpa a compensação da foto-guia/o cursor residual/o offset de pan).
    *  [10/09/2026] Também limpa o deslocamento de "lente" de verdade em
    *  `camera3` (`Engine3D.setCamPanFrac(0,0)` → `clearViewOffset()`) — sem
@@ -5850,9 +5597,9 @@ const View3D = {
     // Engine3D.setPickExclude/this._pickExclude) e o ponto de tela do
     // destaque de mira (ver Engine3D.setHoverScreenPoint/
     // this._hoverScreenNdc) — chamado tanto ao ENTRAR (reset limpo antes
-    // de _enterFotoCameraView/_enterCameraOrbView religarem a exclusão com
+    // de _enterFotoCameraView religar a exclusão com
     // o id certo, logo abaixo) quanto ao SAIR (nenhum dos dois deve
-    // continuar ativo fora de _fotoCamMode/_orbCamMode).
+    // continuar ativo fora de _fotoCamMode).
     this._engine?.clearPickExclude?.();
     this._engine?.clearHoverScreenPoint?.();
     const canvas = this._container?.querySelector('#v3d-canvas');
@@ -5862,7 +5609,6 @@ const View3D = {
   _enterFotoCameraView(fotoId) {
     const foto = (this._map?.fotos || []).find((f) => f.id === fotoId);
     if (!foto) return;
-    if (this._camMode) this._exitCameraView(); // nunca os dois modos ativos ao mesmo tempo
     document.exitPointerLock?.();
     this._resetCamZoom();
     // [10/09/2026] `calibFov`/`zoomFov` NOVOS — ver onWheel (zoom de
@@ -5917,8 +5663,7 @@ const View3D = {
     // exata de `this._camera` NESTE instante, ANTES de qualquer coisa
     // mexer nela (autopilot incluso, ver `_updateAutopilot`/`_playerWalking`
     // logo abaixo) — restaurada em `_exitFotoCameraView` se a config estiver
-    // em `'originalView'`. MESMO padrão de `_orbCamSavedPose` em
-    // `_enterCameraOrbView`.
+    // em `'originalView'`.
     this._fotoCamSavedPose = { x: this._camera.x, y: this._camera.y, z: this._camera.z, yaw: this._camera.yaw, pitch: this._camera.pitch };
     // [12/09/2026 — ITEM A] captura o FOV do personagem ANTES de aplicar o
     // FOV calibrado da foto logo abaixo (`setFov(calibFovFoto)`) — ver
@@ -5926,33 +5671,35 @@ const View3D = {
     // SEMPRE em `_exitFotoCameraView`, independente da opção "Sair da
     // câmera" escolhida.
     this._fotoCamSavedFov = this._engine?.camera3?.fov ?? this._CAM_VIEW_DEFAULT_FOV;
-    this._autopilotTarget = null; // mesmo motivo de _enterCameraView acima
+    this._autopilotTarget = null; // força escolher um novo destino de passeio já no 1º _updateAutopilot
     this._playerWalking = false;
-    this._engine?.setPlayerFigureVisible?.(true); // mesmo comportamento de _enterCameraView: o jogador vira o boneco palito visto de fora
+    this._engine?.setPlayerFigureVisible?.(true); // o jogador vira o boneco palito visto de fora
     this._engine?.setFov?.(calibFovFoto);
-    // [12/09/2026] NOVO — mesmo bug do cone "na frente da câmera" já
-    // corrigido pro orb de câmera (ver engine3d.js
-    // setCameraMeshVisible/_cameraMeshesById): o olho de render fica bem no
+    // [12/09/2026] NOVO — o olho de render fica bem no
     // ponto deste orb de foto, então a malha esfera+cone(+placa) DELE
     // PRÓPRIO precisa ficar invisível enquanto "vendo através" dele.
     // Restaurada em `_exitFotoCameraView`.
     this._engine?.setFotoMeshVisible?.(fotoId, false);
     // [15/09/2026] NOVO — pedido verbatim: "coloque duas opções para o
     // corte da câmera [...] Uma seção chamada 'Corte', botão para 'Início',
-    // por padrão, 0.1. E botão para 'Fim', por padrão, 100." Mesmo padrão
-    // já usado pelo orb "Câmeras" (`_enterCameraOrbView`, ver
-    // `cam.clipStartM/clipEndM`) — aqui faltava por completo pro "orb de
-    // foto"/"Câmera". `?? 0.1`/`?? 100` cobrem fotos ainda sem
+    // por padrão, 0.1. E botão para 'Fim', por padrão, 100." `?? 0.1`/`?? 100` cobrem fotos ainda sem
     // `clipStartM/clipEndM` salvo (mesmo default do novo campo "Corte").
     this._engine?.setClipPlanes?.(foto.camProps?.clipStartM ?? 0.1, foto.camProps?.clipEndM ?? 100);
-    this._renderFotoCamOverlay(foto);
-    this._renderHotbar();
+    try { this._onModelerToggleForLockBadge?.(); } catch (e) { /* ignora */ }
+    // [20/09/2026] Painel Pitch/Yaw/Roll/Altura + gimbal também para o objeto Câmera (orb de foto), criado ANTES do overlay.
+    console.log('[CamControl3D] _enterFotoCameraView → criando painel', { fotoId });
+    try { if (window.CamControl3D) { this._camCtl?.destroy(); this._camCtl = window.CamControl3D.create(this, foto, { foto: true }); } else console.error('[CamControl3D] window.CamControl3D NÃO existe'); } catch (e) { console.error('[CamControl3D] falha ao abrir o painel (foto):', e); }
+    try { this._renderFotoCamOverlay(foto); } catch (e) { console.error('[CamControl3D] _renderFotoCamOverlay falhou:', e); }
+    try { this._renderHotbar(); } catch (e) { console.error('[CamControl3D] _renderHotbar falhou:', e); }
   },
 
   _exitFotoCameraView() {
-    this._exitModeladorSeAtivo(); // [13/09/2026] pilha de "Sair" — ver comentário grande em _exitCameraView
+    if (this._camCtl) { this._camCtl.destroy(); this._camCtl = null; }
+    if (this._camCtlSujo) { this._camCtlSujo = false; setTimeout(() => this._rebuildScene?.(), 0); }
+    setTimeout(() => { try { this._onModelerToggleForLockBadge?.(); } catch (e) { /* ignora */ } }, 0);
+    this._exitModeladorSeAtivo(); // [13/09/2026] pilha de "Sair" — ver comentário grande em _exitModeladorSeAtivo
     // [12/09/2026] captura tudo que precisa do `_fotoCamMode`/foto ANTES de
-    // zerá-lo (mesmo cuidado de `_exitCameraOrbView`, comentário grande lá):
+    // zerá-lo:
     // `_computeFotoCamPose()` lê `this._fotoCamMode` internamente, e
     // `fotoIdSaindo` precisa sobreviver pra restaurar a malha certa.
     const fotoIdSaindo = this._fotoCamMode?.fotoId;
@@ -5968,8 +5715,7 @@ const View3D = {
     // câmera" e navegando livremente. `fotoIdSaindo` continua capturado
     // acima (usado por outro trecho deste método).
     // [10/09/2026] capturado ANTES de `this._fotoCamMode = null;` logo
-    // abaixo — mesma correção feita em `_exitCameraOrbView` (ver comentário
-    // grande lá): "a perspectiva que o personagem tinha deve ser
+    // abaixo: "a perspectiva que o personagem tinha deve ser
     // preservada" vale pro zoom "de verdade" (FOV, ver onWheel) também, não
     // só posição/orientação.
     const zoomFovSaindo = this._fotoCamMode?.zoomFov;
@@ -5984,7 +5730,7 @@ const View3D = {
     const modo = this._cameraExitViewMode();
     // [12/09/2026] item "a perspectiva que o personagem tinha [...] deve ser
     // preservada" — 2 opções configuráveis (ver _cameraExitViewMode acima):
-    // `'lockedView'` (padrão, MESMA ideia já aplicada ao orb de câmera) —
+    // `'lockedView'` (padrão) —
     // teleporta `this._camera` pra pose EXATA que estava sendo renderizada
     // (`_computeFotoCamPose()`) — antes desta rodada a saída simplesmente
     // não tocava `this._camera`, deixando-o onde quer que o passeio
@@ -6013,7 +5759,7 @@ const View3D = {
       this._camera.yaw = lockedPose.yaw; this._camera.pitch = lockedPose.pitch;
     } else if (savedPose) {
       // Rede de segurança (foto apagada nesse meio-tempo, sem pose travada
-      // pra copiar) — mesmo padrão de _exitCameraOrbView.
+      // pra copiar).
       this._camera.x = savedPose.x; this._camera.y = savedPose.y; this._camera.z = savedPose.z;
       this._camera.yaw = savedPose.yaw; this._camera.pitch = savedPose.pitch;
     }
@@ -6034,8 +5780,7 @@ const View3D = {
     this._engine?.setFov?.(fovSaindo);
     this._fotoCamSavedFov = null;
     this._engine?.setFotoMeshVisible?.(fotoIdSaindo, true); // [12/09/2026] restaura a visibilidade da malha deste orb de foto (ver _enterFotoCameraView)
-    // [15/09/2026] NOVO — mesmo padrão de `_exitCameraOrbView`
-    // (`clearClipPlanes()` abaixo): desliga o override de near/far
+    // [15/09/2026] NOVO — `clearClipPlanes()` abaixo: desliga o override de near/far
     // aplicado em `_enterFotoCameraView`/a cada edição de "Corte" (ver
     // `_activeCamPropsEditTarget`), senão ficaria vazando pro resto da
     // cena 3D fora do modo "Ver através desta câmera".
@@ -6120,7 +5865,7 @@ const View3D = {
     // chamado em `_loop`, logo antes de `this._engine.render(renderCam)`.
     // [15/09/2026 UTC] Sinal de dirAngulo invertido, mesma convencao (horario) usada nos
     // demais pontos: 'Ver atraves desta camera' deve manter a mesma direcao do cone/seta.
-    return { x: foto.x, y: baseY, z: foto.y, yaw: Math.PI + (foto.dirAngulo || 0), pitch: foto.rotPerp || 0 };
+    return { x: foto.x, y: baseY, z: foto.y, yaw: Math.PI - (foto.dirAngulo || 0), pitch: foto.rotPerp || 0, roll: foto.roll || 0 };
   },
 
   /** FOV vertical (graus, mesma unidade de Engine3D.setFov/_CAM_VIEW_
@@ -6131,7 +5876,7 @@ const View3D = {
    *  nesse JSON — ver vanishCam js/project-io.js exportCameraJSON), não a
    *  da tela — a foto pode ter proporção diferente do canvas do app.
    *  Sem JSON do vanishCam (só rotações manuais definidas), cai no FOV
-   *  padrão do modo câmera (mesmo de _enterCameraView). */
+   *  padrão do modo câmera (`_CAM_VIEW_DEFAULT_FOV`). */
   _fotoCamFovFor(foto) {
     const vc = foto.vanishCam;
     const h = vc?.horizontalFieldOfView;
@@ -6241,21 +5986,13 @@ const View3D = {
    *  controles) — pedido verbatim acima. Um `<img>` simples cobrindo o
    *  canvas (não uma textura 3D) já resolve o pedido ("aparece transparente
    *  na frente") sem precisar mexer em engine3d.js.
-   *  [10/09/2026] GENERALIZADO — pedido verbatim: "O vanishCam será útil
-   *  para isso [o novo 'orb de câmera']." Recebe agora um 2º parâmetro
-   *  opcional `onExit` (o botão "✖ Sair da câmera" chama ele em vez de
-   *  `_exitFotoCameraView` fixo) — assim `_enterCameraOrbView` (mais abaixo)
-   *  reaproveita este MESMO overlay/painel de opacidade/JSON do vanishCam
-   *  sem duplicar HTML/lógica nenhuma, só trocando pra onde o "Sair" volta.
    *  `foto` só precisa ter `.id` (id da AmbientePhoto de verdade, pra
    *  salvar o JSON)/`.dataUrl`/`.thumbDataUrl`/`.vanishCam` — mesmo shape
-   *  usado por `this._map.fotos` (orbs de foto) OU montado na hora a partir
-   *  de `DB.getAmbientePhoto(cam.fotoId)` (câmeras "Câmeras" com foto
-   *  associada, ver _enterCameraOrbView). */
-  _renderFotoCamOverlay(foto, onExit) {
+   *  usado por `this._map.fotos` (orbs de foto). */
+  _renderFotoCamOverlay(foto) {
     this._removeFotoCamOverlay();
     if (!this._container) return;
-    const sair = onExit || (() => this._exitFotoCameraView());
+    const sair = () => this._exitFotoCameraView();
     const imgSrc = foto.dataUrl || foto.thumbDataUrl || '';
     const opacidade = this._getFotoCamOpacidade();
     // [16/09/2026 — RODADA SEGUINTE] NOVO — `this._fotoCamImgEl` substitui
@@ -6293,13 +6030,8 @@ const View3D = {
     // atual, deve aparecer junto na barra em baixo (onde tem o botão
     // 'Sair da câmera')." Só existe gizmo de enquadramento (retângulo
     // amarelo) pra `map.fotos[]` de verdade (ver
-    // Engine3D._fotoFrustumMeshesById/hasCameraFrustum, engine3d.js) —
-    // `_orbCamMode` sem foto vinculada, ou com uma foto vinculada cujo
-    // `.id` não bate com nenhum orb do mapa (o caso comum: o `foto` aqui
-    // vem de `DB.getAmbientePhoto(cam.fotoId)`, um registro do BANCO, não
-    // um orb do MAPA — ver `_renderCameraOrbOverlay`), não têm gizmo
-    // nenhum pra ligar/desligar — o botão simplesmente não aparece nesse
-    // caso, em vez de existir sem fazer nada.
+    // Engine3D._fotoFrustumMeshesById/hasCameraFrustum, engine3d.js) — sem
+    // gizmo o botão simplesmente não aparece, em vez de existir sem fazer nada.
     const temFrustum = !!this._engine?.hasCameraFrustum?.(foto.id);
     // [11/09/2026] NOVO — pedido verbatim: "Nas 'configurações 3D', na seção
     // 'debug', coloque mais uma opção na lista de ativações deste modo que é
@@ -6453,10 +6185,8 @@ const View3D = {
         if (!photoFull) throw new Error('Foto não encontrada.');
         await DB.saveAmbientePhoto({ ...photoFull, mapaVanishCam: json });
         foto.vanishCam = json; // atualiza a cópia local desta vista, sem esperar recarregar o mapa inteiro
-        // Só o modo "ver através de um orb de FOTO" deriva o FOV do
-        // vanishCam salvo aqui (ver _fotoCamFovFor) — no modo "orb de
-        // CÂMERA" (_orbCamMode) o FOV vem da própria câmera (Blender-style
-        // focalLength/fov, ver _enterCameraOrbView), então não mexe nele.
+        // O modo "ver através de um orb de FOTO" deriva o FOV do
+        // vanishCam salvo aqui (ver _fotoCamFovFor).
         // [10/09/2026] Recalibrar o vanishCam com o zoom "lupa" ativo
         // recomeça o zoom do zero (novo calibFov = novo zoomFov) — senão a
         // compensação da foto-guia (_updateFotoCamOverlayZoomScale) ficaria
@@ -6520,8 +6250,8 @@ const View3D = {
     // [15/09/2026] NOVO — reseta as seções "Fundo"/"Câmera" (aba lateral
     // "Propriedades") pro aviso padrão sempre que o overlay de "Ver
     // através desta câmera" é removido (tanto ao SAIR de verdade quanto no
-    // início de `_renderFotoCamOverlay`/`_renderCameraOrbOverlay`, que
-    // reconstroem logo em seguida chamando `_renderPropriedadesPanel` de
+    // início de `_renderFotoCamOverlay`, que
+    // reconstrói logo em seguida chamando `_renderPropriedadesPanel` de
     // novo com `rebuild:true`).
     this._renderPropriedadesPanel();
     // [19/09/2026 — RODADA SEGUINTE] REMOVIDO — chamava
@@ -6642,111 +6372,12 @@ const View3D = {
    *  janela de propriedades da câmera no modo 'Ver através desta câmera'
    *  [...] A mudança dos valores devem ter efeito imediato." Devolve QUEM
    *  editar (o objeto de verdade que guarda `fov`/`resolutionX`/
-   *  `resolutionY`) e COMO salvar, dependendo de qual dos 2 modos de
-   *  câmera especial está ativo agora — MESMA distinção já usada por
-   *  `_activeCamFrameAspect`/`_activeCamPropsVFovRad` (acima): orb "Câmeras"
-   *  guarda esses campos DIRETO no objeto (`cam.fov`/`cam.resolutionX/Y`,
-   *  ver mapping.js `addCamera`); orb de "foto" guarda dentro de
+   *  `resolutionY`) e COMO salvar: o orb de "foto" guarda dentro de
    *  `foto.camProps`/`AmbientePhoto.mapaCamProps`. `null` se nenhum modo
    *  especial estiver ativo (nunca deveria acontecer — só chamado de
    *  dentro do overlay de "Ver através desta câmera" — mas protegido do
-   *  mesmo jeito que o resto do arquivo faz pra estas 2 flags). */
+   *  mesmo jeito que o resto do arquivo faz pra esta flag). */
   _activeCamPropsEditTarget() {
-    if (this._orbCamMode) {
-      const cam = (this._map?.cameras || []).find((c) => c.id === this._orbCamMode.camId);
-      if (!cam) return null;
-      return {
-        idPrefix: 'v3dlivecam',
-        props: cam,
-        onSave: (patch) => {
-          Mapping.updateCamera(this._map, cam.id, patch);
-          Object.assign(cam, patch);
-          // Efeito imediato (pedido verbatim: "mudar o FOV, ajustando/
-          // aproximando o enquadramento da câmera"): o retângulo amarelo já
-          // recalcula sozinho a cada quadro a partir de `cam.fov`/
-          // `resolutionX/Y` (ver `_activeCamPropsVFovRad`/
-          // `_activeCamFrameAspect`, que leem o objeto `cam` ao vivo — já
-          // mutado acima) — só falta reaplicar o FOV na câmera de RENDER
-          // de verdade (o "orb de câmera" É a câmera do jogo nesse modo,
-          // diferente do orb de foto — ver comentário grande em
-          // `_enterCameraOrbView`), reiniciando o zoom "lupa" do zero
-          // (mesmo padrão já usado ao recalibrar o vanishCam, ver
-          // `#v3d-fotocam-info-salvar` acima) pra não ficar calculado
-          // contra um FOV calibrado que não existe mais.
-          // [16/09/2026] CORRIGIDO — pedido verbatim: "Ao variar a resolução
-          // da câmera em [...] 'Propriedades da câmera', o zoom deve
-          // permanecer como está. Atualmente o zoom acaba mudando ao
-          // variar a resolução da câmera." CAUSA RAIZ: `salvar()` (ver
-          // mapview.js `_wireCamPropsFieldset`) sempre manda o PATCH
-          // INTEIRO (fov + resolutionX/Y + clipStartM/Y juntos) — este
-          // trecho reagia a QUALQUER chamada de `onSave` reatribuindo
-          // `zoomFov = fovDeg` incondicionalmente, mesmo quando só
-          // Resolução X/Y (ou Corte) mudou e o FOV calibrado (`cam.fov`)
-          // continuava exatamente o mesmo — isso jogava fora qualquer zoom
-          // manual (roda do mouse) que o usuário já tivesse aplicado,
-          // voltando pro "0% de zoom" sem pedido nenhum. CORRIGIDO: só
-          // reseta `zoomFov`/reaplica `setFov` quando o FOV CALIBRADO
-          // (`fovDeg`) realmente mudou desde a última vez — editar só
-          // Resolução/Corte não mexe mais no zoom atual.
-          const fovDeg = this._camOrbFovDeg(cam);
-          const fovMudou = !this._orbCamMode || Math.abs(fovDeg - this._orbCamMode.calibFov) > 0.001;
-          if (this._orbCamMode) {
-            this._orbCamMode.calibFov = fovDeg;
-            if (fovMudou) this._orbCamMode.zoomFov = fovDeg;
-          }
-          if (fovMudou) this._engine?.setFov?.(fovDeg);
-          // [15/09/2026] NOVO — pedido verbatim: "Ao vivo e imediatamente,
-          // devem ser aplicadas as alterações no retângulo amarelo."
-          // Recalcula a malha 3D de verdade do frustum (engine3d.js
-          // `updateCameraFrustumGeometry`, ver comentário grande lá) com o
-          // `cam` já mutado (Object.assign acima) — sem isso só o quadro
-          // CSS 2D (`_activeCamFrameRectPx`) reagia; a malha 3D ficava
-          // congelada até o próximo `setScene()` completo.
-          this._engine?.updateCameraFrustumGeometry?.(cam.id, cam);
-          // [15/09/2026] NOVO — pedido verbatim: "coloque duas opções para
-          // o corte da câmera [...] Uma seção chamada 'Corte', botão para
-          // 'Início', por padrão, 0.1. E botão para 'Fim', por padrão, 100."
-          // Aplica ao vivo o near/far do frustum de RENDER de verdade
-          // (Engine3D.setClipPlanes) — antes só era aplicado na ENTRADA
-          // deste modo (`_enterCameraOrbView`, `cam.clipStartM/clipEndM`);
-          // agora também a cada edição do fieldset "Propriedades"→"Câmera"
-          // (campos "Início"/"Fim" da seção "Corte").
-          this._engine?.setClipPlanes?.(cam.clipStartM ?? 0.1, cam.clipEndM ?? 100);
-          // [14/09/2026] CORRIGIDO — pedido verbatim: "Ao variar o valor da
-          // resolução, por exemplo, em X (...) a imagem está esticando. Isto
-          // não deve acontecer. É o retângulo amarelo que deve ter o seu
-          // tamanho modificado." BUG CONFIRMADO via Playwright (live, ver
-          // sessão de testes): faltava esta chamada aqui — `cam.fov`/
-          // `resolutionX/Y` já ficavam corretos no objeto de dados (mutado 2
-          // linhas acima) e `_activeCamFrameRectPx()` já recalculava certo
-          // SE chamado, mas nada disparava um novo cálculo — o retângulo
-          // amarelo (`#v3d-fotocam-vignette`) e a foto-guia
-          // (`#v3d-fotocam-overlay-img`) ficavam com o `left/top/width/
-          // height` CSS "congelados" no tamanho antigo até a PRÓXIMA
-          // interação não relacionada (zoom da roda, pan, etc.) disparar
-          // `_updateFotoCamOverlayZoomScale` por conta própria — nesse
-          // instante os dois (moldura recalculada x DOM desatualizado)
-          // ficavam fora de sincronia por um instante e o salto súbito de
-          // tamanho parecia a IMAGEM "esticando" sozinha. O branch
-          // `_fotoCamMode` (logo abaixo) já fazia esta chamada corretamente
-          // desde a correção de 11/09/2026 — só faltava espelhar aqui no
-          // branch do orb "Câmeras" (`_orbCamMode`), que usa este MESMO
-          // `_activeCamPropsEditTarget()` mas tinha ficado sem ela.
-          this._updateFotoCamOverlayZoomScale();
-          // [19/09/2026 — RODADA SEGUINTE] REMOVIDO — havia aqui uma 2ª
-          // chamada, `_redrawFotoCamBackdropCanvas()`, que existia só pra
-          // manter em sincronia uma TEXTURA OFF-SCREEN separada usada pelo
-          // modo 'Trás' (`this._fotoCamBackdropCanvas`, plano 3D do
-          // backdrop) — essa textura (e toda a classe de bugs de cache
-          // dessincronizado da Resolução/FOV que ela causava, ver histórico
-          // de correções acima) deixou de existir por completo nesta
-          // rodada: a foto agora é SEMPRE desenhada fresca, a partir da
-          // imagem original, direto no `<canvas>` de overlay 2D
-          // (`_updateFotoCamOverlayZoomScale`, chamada acima) — nos 2 modos
-          // ('Trás' e 'Frente') — nenhuma segunda chamada é necessária.
-        },
-      };
-    }
     if (this._fotoCamMode) {
       const foto = (this._map?.fotos || []).find((f) => f.id === this._fotoCamMode.fotoId);
       if (!foto) return null;
@@ -6766,8 +6397,7 @@ const View3D = {
           // mudava de tamanho (já que ela segue o quadro, ver
           // `_updateFotoCamOverlayZoomScale`/`_activeCamFrameRectPx`), não a
           // câmera. CORRIGIDO: agora também reaplica o FOV na câmera de
-          // render (mesmo padrão já usado pelo orb "Câmeras", acima),
-          // reiniciando o zoom "lupa" do zero — a imagem/foto-guia SEGUE o
+          // render, reiniciando o zoom "lupa" do zero — a imagem/foto-guia SEGUE o
           // quadro automaticamente (ela é sempre desenhada EM RELAÇÃO a
           // `_activeCamFrameRectPx()`/`_activeCamPropsVFovRad()`, nunca tem
           // tamanho/perspectiva própria), então "fica fixa em relação ao
@@ -6784,9 +6414,7 @@ const View3D = {
           // segundo), as chamadas assíncronas se acumulavam/desordenavam
           // (cada uma esperando 2 round-trips de banco) e a atualização
           // visual do retângulo amarelo ficava atrasada, ou nunca
-          // "alcançava" o valor mais recente. O branch `_orbCamMode`
-          // (acima) nunca teve este bug por ser 100% síncrono — pista
-          // decisiva pro diagnóstico. CORRIGIDO: `onSave` volta a ser
+          // "alcançava" o valor mais recente. CORRIGIDO: `onSave` volta a ser
           // síncrono — `foto.camProps`/FOV/frustum/corte/overlay são
           // aplicados IMEDIATAMENTE (nesta mesma função, sem `await`) — a
           // gravação no banco (`DB.getAmbientePhoto`/
@@ -6809,14 +6437,13 @@ const View3D = {
             // câmera de render, não só o retângulo amarelo. Pedido verbatim:
             // "Em 'Propriedades da câmera', os valores de resolução não
             // devem alterar a resolução da imagem, mas sim o retângulo
-            // amarelo." Agora usa `patch.fov` DIRETO (mesmo padrão do orb
-            // "Câmeras", ver `_camOrbFovDeg` acima) — só o campo FOV mexe na
+            // amarelo." Agora usa `patch.fov` DIRETO — só o campo FOV mexe na
             // câmera de verdade; Resolução X/Y continuam mudando só o
             // retângulo amarelo (`_activeCamPropsVFovRad`/
             // `_activeCamFrameAspect`, usados só pelo cálculo do quadro,
             // intocados).
-            // [16/09/2026] CORRIGIDO — MESMO motivo/pedido do branch
-            // `_orbCamMode` acima (ver comentário grande lá): só reseta o
+            // [16/09/2026] CORRIGIDO — pedido verbatim: "Ao variar a resolução
+            // da câmera [...] o zoom deve permanecer como está." Só reseta o
             // zoom quando o FOV calibrado de verdade mudou, nunca só por
             // causa de Resolução X/Y ou Corte terem sido editados no MESMO
             // patch (`salvar()` sempre manda tudo junto).
@@ -6827,9 +6454,9 @@ const View3D = {
               this._fotoCamMode.zoomFov = novoFovDeg;
               this._engine?.setFov?.(novoFovDeg);
             }
-            // [15/09/2026] NOVO — MESMO motivo/pedido do branch `_orbCamMode`
-            // acima (ver comentário grande lá): recalcula a malha 3D de
-            // verdade do retângulo amarelo ao vivo, a cada edição em
+            // [15/09/2026] NOVO — pedido verbatim: "Ao vivo e imediatamente,
+            // devem ser aplicadas as alterações no retângulo amarelo."
+            // Recalcula a malha 3D de verdade do retângulo amarelo ao vivo, a cada edição em
             // "Propriedades" (FOV OU Resolução X/Y).
             this._engine?.updateCameraFrustumGeometry?.(foto.id, patch);
             // [15/09/2026] NOVO — pedido verbatim: "coloque duas opções para
@@ -6840,8 +6467,7 @@ const View3D = {
             // `_enterFotoCameraView` abaixo); agora também a cada edição.
             this._engine?.setClipPlanes?.(patch.clipStartM ?? 0.1, patch.clipEndM ?? 100);
             this._updateFotoCamOverlayZoomScale();
-            // [19/09/2026 — RODADA SEGUINTE] REMOVIDO — MESMA remoção do
-            // branch `_orbCamMode` acima: a chamada extra a
+            // [19/09/2026 — RODADA SEGUINTE] REMOVIDO — a chamada extra a
             // `_redrawFotoCamBackdropCanvas()` (textura off-screen do plano
             // 3D do backdrop 'Trás') não é mais necessária — essa textura,
             // e toda a classe de bugs de cache dessincronizado da Resolução/
@@ -6861,7 +6487,7 @@ const View3D = {
   /** [11/09/2026] NOVO — constrói + liga o fieldset "⚙️ Propriedades" dentro
    *  de `#v3d-fotocam-props-panel` (ver botão/HTML em `_renderFotoCamOverlay`),
    *  reaproveitando o MESMO `_camPropsFieldsetHtml`/`_wireCamPropsFieldset`
-   *  de mapview.js já usado em `_showCameraCard3D`/`_showFotoPinCard3D` —
+   *  de mapview.js já usado em `_showFotoPinCard3D` —
    *  nunca um fieldset PRÓPRIO/duplicado, sempre a mesma fonte única de
    *  verdade dos campos FOV/Resolução X/Y. */
   _wireLiveCamPropsPanel(panel) {
@@ -6872,302 +6498,6 @@ const View3D = {
     }
     panel.innerHTML = window.MapView._camPropsFieldsetHtml(target.idPrefix, target.props) || '';
     window.MapView._wireCamPropsFieldset(panel, target.idPrefix, target.props, target.onSave);
-  },
-
-  // ---------- "Orb de câmera" / redesenho do "Camera Match" — [10/09/2026]
-  // NOVO, pedido verbatim: "Sobre o 'câmera match' [...] não deve ser uma
-  // tela a parte como estava antes, deve ser no próprio cenário 3D. Não é
-  // simular um 3D fictício com linhas estático como antes, o próprio 'Ver em
-  // 3D' já é o 3D em perspectiva necessário [...] com um 'orb de câmera'
-  // deve dar para ver através dele. Com a câmera do personagem fixa pela
-  // visão do 'orb de câmera' deve ser possível continuar interagindo com o
-  // mapa do mesmo jeito que antes. As duas únicas diferenças são que: 1, não
-  // dá para olhar em volta pois a câmera fica fixa; e 2, tem uma imagem na
-  // frente da câmera como um 'guia visual' [...]". "Orb de câmera" aqui é o
-  // objeto "Câmeras" já existente (`this._map.cameras`, mapping.js
-  // addCamera) — já tinha `fotoId` opcional (mesma ideia de "orb de foto
-  // vinculada"), então nenhum objeto/tipo novo foi inventado, só esta nova
-  // forma interativa de "entrar" nele. Diferente de `_enterFotoCameraView`/
-  // `_camMode` (modos de ESPECTADOR — ver comentário grande em
-  // `this._orbCamMode`, mount()), aqui `this._camera` é travado DE VERDADE,
-  // então toda a interação existente (seleção/posicionamento via
-  // `_placeWithBuildTool`, que sempre lê `this._camera`) continua
-  // funcionando sem duplicar nada. ----------
-  _enterCameraOrbView(camId) {
-    const cam = (this._map?.cameras || []).find((c) => c.id === camId);
-    if (!cam) { Utils.toast('Câmera não encontrada neste mapa.', { type: 'warn' }); return; }
-    // Nunca 2+ modos de câmera especial ativos ao mesmo tempo — mesma regra
-    // já usada entre _camMode/_fotoCamMode.
-    if (this._camMode) this._exitCameraView();
-    if (this._fotoCamMode) this._exitFotoCameraView();
-    document.exitPointerLock?.();
-    this._resetCamZoom(); // [10/09/2026] — ver comentário grande em _resetCamZoom
-    // Guarda a pose LIVRE atual pra restaurar ao sair (pedido implícito: o
-    // usuário volta a andar de onde estava, não teleporta pro ponto onde a
-    // câmera calibrada ficava) — só na 1ª entrada (reentrar sem sair não
-    // deveria sobrescrever o "de onde vim" de verdade, mas _exitCameraOrbView
-    // sempre limpa este campo, então nunca fica "preso" num valor velho).
-    this._orbCamSavedPose = { x: this._camera.x, y: this._camera.y, z: this._camera.z, yaw: this._camera.yaw, pitch: this._camera.pitch };
-    // [12/09/2026 — ITEM A] captura o FOV do personagem ANTES de aplicar o
-    // FOV calibrado da câmera logo abaixo (`setFov(fovDeg)`) — ver
-    // comentário grande em `this._fotoCamSavedFov` (mount()). Restaurado
-    // SEMPRE em `_exitCameraOrbView`, independente da opção "Sair da
-    // câmera" escolhida.
-    this._orbCamSavedFov = this._engine?.camera3?.fov ?? this._CAM_VIEW_DEFAULT_FOV;
-    // Mesma pose/convenção ângulo->yaw de `_computeWatchCameraPose` acima
-    // (ALTURA_CAMERA=1.6) — a câmera do "orb" É a câmera do jogo agora, não
-    // uma renderCam à parte (ver comentário grande em `this._orbCamMode`).
-    // [11/09/2026] CORRIGIDO — MESMA correção/motivo de `_computeWatchCameraPose`
-    // acima (ver comentário grande lá): `- Math.PI/2` virou `+ Math.PI/2`.
-    const ALTURA_CAMERA = 1.6;
-    const baseY = (cam.piso || 0) * (this._map?.alturaPiso || 2.8);
-    const pose = { x: cam.x, y: baseY + ALTURA_CAMERA, z: cam.y, yaw: (cam.angulo || 0) + Math.PI / 2, pitch: cam.pitch || 0 };
-    this._orbCamLockedPose = pose;
-    this._camera.x = pose.x; this._camera.y = pose.y; this._camera.z = pose.z;
-    this._camera.yaw = pose.yaw; this._camera.pitch = pose.pitch;
-    // [10/09/2026] `calibFov`/`zoomFov` NOVOS — ver comentário grande em
-    // `_resetCamZoom`/`onWheel`: zoom de verdade (recalcula o FOV real),
-    // não mais um CSS scale. `calibFov` é a referência "0% de zoom" desta
-    // câmera (nunca muda enquanto o modo estiver ativo).
-    const fovDeg = this._camOrbFovDeg(cam);
-    // [18/09/2026] REMOVIDO `calibResX`/`calibResY` — MESMO motivo/pedido
-    // do `_enterFotoCameraView` (ver comentário grande em
-    // `_activeCamFrameAspect`).
-    this._orbCamMode = { camId, calibFov: fovDeg, zoomFov: fovDeg };
-    // [12/09/2026 — RODADA "certifique-se que só quando a imagem for
-    // pintada"] NOVO — MESMO reset síncrono de `_enterFotoCameraView` (ver
-    // comentário grande lá pra causa raiz completa da "piscada" magenta):
-    // uma câmera "Câmeras" com `cam.fotoId` associado também usa o backdrop
-    // 'Trás' (via `_renderCameraOrbOverlay` -> `_renderFotoCamOverlay`,
-    // logo abaixo), então precisa do MESMO cuidado ao entrar.
-    if (this._fotoCamBackdropMesh) this._fotoCamBackdropMesh.visible = false;
-    this._engine?.clearFotoCamBackdropMask?.();
-    this._engine?.setFotoCamBackdropMaskActive?.(false);
-    this._fotoCamBackdropReady = false;
-    // [10/09/2026] NOVO — MESMO motivo/pedido do _enterFotoCameraView (ver
-    // comentário grande lá): a própria câmera sendo vista através nunca
-    // deve ser pega pelo clique/destaque de mira.
-    this._engine?.setPickExclude?.('camera', camId);
-    // Diferente de _enterCameraView/_enterFotoCameraView (boneco palito
-    // visível — modos de ESPECTADOR, "o jogador anda sozinho, visto de
-    // fora"): aqui a câmera do personagem É a do orb (pedido verbatim: "a
-    // câmera do personagem fixa pela visão do 'orb de câmera'"), então o
-    // boneco continua invisível (1ª pessoa normal), só travado.
-    this._engine?.setPlayerFigureVisible?.(false);
-    // FOV/near/far vêm de verdade das propriedades "estilo Blender" da
-    // câmera (ver js/mapping.js addCamera e js/mapview.js
-    // _openCameraPanel/_camPropsFieldsetHtml) — é o cerne do "camera match":
-    // a perspectiva do 3D deve bater com a da foto calibrada.
-    this._engine?.setFov?.(fovDeg);
-    this._engine?.setClipPlanes?.(cam.clipStartM, cam.clipEndM);
-    // [11/09/2026] NOVO — item "parte do cone aparece na frente da câmera":
-    // esconde a malha caixa+cone da PRÓPRIA câmera que está sendo vista
-    // através (ver engine3d.js setCameraMeshVisible/_cameraMeshesById) —
-    // senão o cone dela (que se estende do centro da caixa pra fora, na
-    // mesma direção de apontamento pra onde o olho de render agora está)
-    // acaba dentro do próprio frustum, como se estivesse "na frente" de
-    // tudo. Restaurada em _exitCameraOrbView.
-    this._engine?.setCameraMeshVisible?.(camId, false);
-    // [11/09/2026] CORRIGIDO — pedido verbatim: "Parece que há duas fotos,
-    // quando alternar entre 'Trás' e 'Frente'." CAUSA RAIZ ENCONTRADA: uma
-    // câmera "Câmeras" com `cam.fotoId` associado (ver `_renderCameraOrbOverlay`
-    // abaixo — é essa foto que vira o backdrop/imagem-guia dentro de "Ver
-    // através desta câmera") tinha só a PRÓPRIA malha da câmera escondida
-    // (`setCameraMeshVisible` acima) — a malha do ORB DE FOTO vinculado
-    // (esfera+cone+"placa" com a MESMA imagem, ver engine3d.js
-    // `_fotoMeshesById`/`setFotoMeshVisible`, já usado por
-    // `_enterFotoCameraView` pro caso "orb de foto" direto) nunca era
-    // escondida aqui — se esse orb de foto ficasse dentro do campo de visão
-    // (comum: ele fica pertinho de onde a câmera aponta, já que é a MESMA
-    // foto), a "placa" dele (0,42x0,3m, textura = a MESMA foto do backdrop)
-    // aparecia na cena AO MESMO TEMPO que o backdrop/imagem-guia — exatamente
-    // a impressão de "duas fotos" relatada. CORRIGIDO: esconde também a
-    // malha do orb de foto vinculado (restaurada em `_exitCameraOrbView`,
-    // MESMO padrão já usado pro caso "orb de foto" direto).
-    if (cam.fotoId != null) this._engine?.setFotoMeshVisible?.(cam.fotoId, false);
-    this._renderCameraOrbOverlay(cam);
-    this._renderHotbar();
-  },
-
-  _exitCameraOrbView() {
-    this._exitModeladorSeAtivo(); // [13/09/2026] pilha de "Sair" — ver comentário grande em _exitCameraView
-    // [11/09/2026] restaura a malha da câmera escondida ao entrar (ver
-    // comentário grande em _enterCameraOrbView acima) ANTES de limpar
-    // `this._orbCamMode` (guarda o camId antigo pra saber qual mostrar de
-    // volta — depois de limpar não teríamos mais como saber qual era).
-    const camIdSaindo = this._orbCamMode?.camId;
-    // [11/09/2026] CORRIGIDO — mesma correção de `_exitFotoCameraView` (ver
-    // comentário grande lá): "Ao 'Sair da câmera', o enquadramento ainda
-    // fica ativado." O gizmo do retângulo amarelo é indexado pelo id da
-    // FOTO associada (`cam.fotoId`, ver `_renderCameraOrbOverlay` acima —
-    // `fotoLike.id`), não pelo id da câmera em si — busca a câmera de novo
-    // aqui (ainda com `this._orbCamMode` intacto, antes de zerá-lo mais
-    // abaixo) só pra pegar esse id e desligar o gizmo dela ao sair.
-    // [11/09/2026] CORRIGIDO (na época) — desligava o retângulo amarelo ao
-    // sair de "Ver através desta câmera" (`setCameraFrustumVisible(...,
-    // false)`, mesmo padrão de `_exitFotoCameraView`).
-    // [15/09/2026] REVERTIDO — MESMO pedido/motivo documentado no
-    // comentário grande de `_exitFotoCameraView` (ver lá): "deixe, pelo
-    // momento, o enquadramento [...] de todas as câmeras sempre ativo." A
-    // busca por `camSaindo` e a chamada `setCameraFrustumVisible(...,
-    // false)` foram removidas (não usadas em mais nada neste método).
-    this._resetCamZoom(); // [10/09/2026] — ver comentário grande em _resetCamZoom
-    // [11/09/2026] item "a câmera do personagem deve assumir a pose EXATA
-    // que estava sendo vista": copia a última pose TRAVADA (posição +
-    // orientação, `this._orbCamLockedPose`) — a que estava de fato sendo
-    // renderizada neste exato instante — pra dentro da câmera livre, em vez
-    // de restaurar `_orbCamSavedPose` (de onde o jogador estava ANTES de
-    // entrar).
-    // RE-INVESTIGADO nesta rodada (pedido explícito pra não confiar cegamente
-    // num relato de sessão anterior): diferente do que um relato antigo
-    // presumia, o comportamento ATUAL já trava posição E orientação —
-    // `_updatePlayerOrAutopilot` (por volta da linha 6522, busca por
-    // "this._orbCamMode) {" logo antes de "camOrbAinda") faz um `return`
-    // antecipado que PULA todo processamento de WASD/gravidade/pulo enquanto
-    // `_orbCamMode` está ativo (não é só orientação/FOV travados — o
-    // personagem simplesmente não anda nenhum pixel enquanto "vendo através"
-    // de uma câmera), e o re-trava-a-cada-quadro em `_loop` (~linha 5799,
-    // busca por "_orbCamLockedPose" lá) reforça a mesma pose todo frame como
-    // rede de segurança redundante. Ou seja, na prática
-    // `_orbCamLockedPose` já é idêntico a `{x,y,z,yaw,pitch}` de
-    // `this._camera` em TODO instante enquanto travado — copiar explicitamente
-    // aqui não muda o comportamento observável hoje, mas é a correção
-    // CORRETA e sem custo de qualquer forma: deixa a saída explicitamente
-    // independente de qualquer suposição sobre o que fica livre/preso
-    // durante o modo travado (se essa regra de "personagem não anda" mudar
-    // numa rodada futura, esta linha continua garantindo a pose exata sem
-    // precisar ser revisitada). FOV também copiado (ver logo abaixo) pra não
-    // haver nenhum "salto" perceptível de campo de visão no mesmo instante.
-    const lp = this._orbCamLockedPose;
-    // [10/09/2026] CORRIGIDO — antes recalculava o FOV CALIBRADO da câmera
-    // de novo aqui, ignorando qualquer zoom "de verdade" (ver onWheel/
-    // `_orbCamMode.zoomFov`) que estivesse ativo no instante da saída —
-    // "a câmera do personagem deve assumir a pose EXATA que estava sendo
-    // vista" vale pro FOV também, não só posição/orientação. Usa
-    // `zoomFov` (o FOV de fato sendo renderizado agora, calibrado OU
-    // ampliado/reduzido pela roda do mouse) em vez de recalcular do zero.
-    const fovDegSaindo = this._orbCamMode ? (this._orbCamMode.zoomFov ?? this._camOrbFovDeg((this._map?.cameras || []).find((c) => c.id === camIdSaindo) || {})) : null;
-    // [12/09/2026, FUNDIDA NESTA RODADA] item "Sair da câmera": configurável
-    // (ver `_cameraExitViewMode()` acima, seção única "Ver através desta
-    // câmera" em Configurações 3D — chave `cameraExitViewMode`, também usada
-    // DIRETO por `_exitFotoCameraView` desde 15/09/2026 UTC (ver nota grande
-    // em mapconfig.js DEFAULTS.cameraExitViewMode). `'lockedView'`
-    // (padrão) é EXATAMENTE o comportamento acima (já implementado em
-    // rodada anterior, sem mudança); `'originalView'` restaura
-    // `_orbCamSavedPose` (a pose livre capturada em `_enterCameraOrbView`,
-    // ANTES de travar na câmera) em vez da pose travada, mesmo com `lp`
-    // disponível.
-    const modo = this._cameraExitViewMode();
-    const savedPose = this._orbCamSavedPose;
-    this._orbCamMode = null;
-    this._orbCamLockedPose = null;
-    if (modo === 'originalView' && savedPose) {
-      this._camera.x = savedPose.x; this._camera.y = savedPose.y; this._camera.z = savedPose.z;
-      this._camera.yaw = savedPose.yaw; this._camera.pitch = savedPose.pitch;
-    } else if (lp) {
-      this._camera.x = lp.x; this._camera.y = lp.y; this._camera.z = lp.z;
-      this._camera.yaw = lp.yaw; this._camera.pitch = lp.pitch;
-    } else if (savedPose) {
-      // Rede de segurança (nunca deveria acontecer em uso normal — só entra
-      // aqui se _exitCameraOrbView for chamado sem uma entrada válida
-      // correspondente): sem pose travada pra copiar, cai de volta na pose
-      // livre salva na entrada, mesmo comportamento de antes desta rodada.
-      const p = savedPose;
-      this._camera.x = p.x; this._camera.y = p.y; this._camera.z = p.z;
-      this._camera.yaw = p.yaw; this._camera.pitch = p.pitch;
-    }
-    this._orbCamSavedPose = null;
-    // [12/09/2026 — ITEM A, CORRIGIDO] pedido verbatim: o FOV do personagem
-    // deve SEMPRE voltar ao que era ANTES de "Ver através desta câmera",
-    // mesmo com "Permanece com o ponto de vista da câmera" marcada (posição/
-    // orientação seguem `modo` acima, mas o FOV NUNCA deve ficar sendo o FOV
-    // calibrado da câmera). Antes desta correção, 'lockedView' mantinha
-    // `fovDegSaindo`/o FOV calibrado (ou ampliado/reduzido por zoom) da
-    // câmera — agora usa sempre `this._orbCamSavedFov` (capturado em
-    // `_enterCameraOrbView`, ANTES de aplicar o FOV calibrado), independente
-    // de `modo`. `fovDegSaindo` continua calculado acima só por
-    // documentação/rastreabilidade do zoom que estava ativo no instante da
-    // saída (sem uso restante aqui).
-    const fovSaindo = (this._orbCamSavedFov != null) ? this._orbCamSavedFov : this._CAM_VIEW_DEFAULT_FOV;
-    this._engine?.setFov?.(fovSaindo);
-    this._orbCamSavedFov = null;
-    this._engine?.clearClipPlanes?.();
-    this._engine?.setCameraMeshVisible?.(camIdSaindo, true); // [11/09/2026] restaura a visibilidade da malha desta câmera (ver _enterCameraOrbView)
-    // [11/09/2026] restaura a malha do orb de foto vinculado (`cam.fotoId`),
-    // escondida ao entrar — ver comentário grande em `_enterCameraOrbView`
-    // ("duas fotos" ao alternar Trás/Frente). `camSaindo` já foi capturado
-    // acima (antes de `this._orbCamMode` ser zerado), mesma referência
-    // usada pro `setCameraFrustumVisible` alguns passos atrás.
-    if (camSaindo?.fotoId != null) this._engine?.setFotoMeshVisible?.(camSaindo.fotoId, true);
-    this._removeFotoCamOverlay();
-    this._renderHotbar();
-  },
-
-  /** FOV vertical (graus) DE VERDADE pra câmera de render (`THREE.
-   *  PerspectiveCamera.fov`, SEMPRE vertical, independente de resolução —
-   *  convenção fixa do Three.js).
-   *  [11/09/2026 — REVERTIDO em 11/09/2026] A versão anterior (comentário
-   *  removido, ver git blame) passava `cam.fov` por `Cam3DMath.
-   *  camPropsVFovRad` (a conversão "Sensor Fit: Auto" que também dá forma
-   *  ao retângulo amarelo) ANTES de aplicar na câmera de render de
-   *  verdade — ou seja, mudar a Resolução X/Y também mudava a perspectiva
-   *  real da câmera renderizada (o "Ver através desta câmera" de verdade),
-   *  não só o retângulo amarelo. CORRIGIDO — pedido verbatim: "Em
-   *  'Propriedades da câmera', os valores de resolução não devem alterar
-   *  a resolução da imagem, mas sim o retângulo amarelo." A câmera de
-   *  render agora usa `cam.fov` DIRETO (só ele controla a perspectiva de
-   *  verdade — mesmo espírito do pedido anterior "ao mudar o FOV da
-   *  câmera é a câmera que deve ter a sua perspectiva mudada, não a
-   *  imagem"); Resolução X/Y continuam mudando SÓ o retângulo amarelo
-   *  (`_activeCamFrameAspect`/`_activeCamPropsVFovRad`/engine3d.js
-   *  `_fotoFrustumMeshesById` — nenhum dos três foi tocado, continuam
-   *  aplicando o "Sensor Fit: Auto" só no cálculo do quadro). Clamp de
-   *  segurança (1°-170°) preservado. */
-  _camOrbFovDeg(cam) {
-    const g = (cam?.fov ?? Math.PI / 3) * 180 / Math.PI;
-    return (isFinite(g) && g > 0) ? Math.max(1, Math.min(170, g)) : 60;
-  },
-
-  /** Busca a foto vinculada (se houver, `cam.fotoId`) e monta/mostra o MESMO
-   *  overlay do vanishCam (_renderFotoCamOverlay, generalizado acima) — sem
-   *  foto associada, o "guia visual" simplesmente não aparece (só os botões
-   *  de sair/opacidade fariam sentido, então mostra só um overlay mínimo
-   *  com o botão de sair, sem forçar o usuário a associar uma foto só pra
-   *  poder usar a câmera travada). */
-  async _renderCameraOrbOverlay(cam) {
-    if (!cam.fotoId) {
-      this._removeFotoCamOverlay();
-      if (!this._container) return;
-      const wrap = document.createElement('div');
-      wrap.className = 'v3d-fotocam-overlay';
-      wrap.id = 'v3d-fotocam-overlay';
-      // [15/09/2026] CORRIGIDO -- pedido verbatim (Parte B): "Sair da
-      // câmera" no topo/centro (mesma classe .v3d-fotocam-sair-topcenter
-      // de `_renderFotoCamOverlay`, ver comentário grande lá) — este
-      // ramo (câmera "Câmeras" SEM foto vinculada) nunca teve a barra
-      // .v3d-fotocam-overlay-controls cheia, só este único botão, então
-      // segue o mesmo padrão de posição.
-      wrap.innerHTML = `
-        <button type="button" class="btn secondary sm v3d-fotocam-sair-topcenter" id="v3d-fotocam-sair" title="Sair da visão desta câmera">✖ Sair da câmera</button>`;
-      // [10/09/2026] mesmo motivo do appendChild em _renderFotoCamOverlay —
-      // ver comentário grande lá.
-      (this._container?.querySelector('#v3d-camzoom-wrap') || this._container)?.appendChild(wrap);
-      wrap.querySelector('#v3d-fotocam-sair').onclick = () => this._exitCameraOrbView();
-      this._fotoCamOverlayEl = wrap;
-      // [15/09/2026] NOVO — sem foto vinculada não há imagem/frustum pra
-      // configurar ("Fundo" mostra aviso), mas o fieldset de "⚙️
-      // Propriedades" (FOV/Resolução da câmera) continua fazendo sentido
-      // (não depende de foto nenhuma) — ver `_renderPropriedadesPanel`.
-      this._renderPropriedadesPanel({ rebuild: true, foto: { id: null }, temFrustum: false, hasImage: false });
-      return;
-    }
-    const photo = await DB.getAmbientePhoto(cam.fotoId);
-    // Ainda no mesmo orb ao terminar de carregar? (usuário pode ter saído
-    // enquanto a Promise resolvia — mesma checagem de segurança usada em
-    // _openCameraPanel/_pickPhotoForCamera pra evitar aplicar overlay velho.)
-    if (this._orbCamMode?.camId !== cam.id) return;
-    const fotoLike = photo ? { id: photo.id, dataUrl: photo.dataUrl, thumbDataUrl: photo.thumbDataUrl, vanishCam: photo.mapaVanishCam || null } : { id: cam.fotoId };
-    this._renderFotoCamOverlay(fotoLike, () => this._exitCameraOrbView());
   },
 
   // ---------- Raio X global (rodada 48) — pedido do usuário: "deve ter um
@@ -7220,8 +6550,7 @@ const View3D = {
   // momento [...] dá para apertar qualquer botão ou o mouse e o personagem é
   // 'ativado' no modo normal de navegação. Se estiver no alto, então, começa
   // a cair." Botão em "configurações 3D" (#mc-scene-flythrough).
-  // MESMO padrão arquitetural de `_camMode`/`_computeWatchCameraPose`: uma
-  // pose calculada à parte (`_computeFlythroughPose`) substitui só a câmera
+  // Uma pose calculada à parte (`_computeFlythroughPose`) substitui só a câmera
   // RENDERIZADA (ver `_loop`), sem tocar `this._camera`/física, enquanto
   // `_update` fica em pausa total (ver o retorno antecipado lá) — ao
   // terminar (ou cancelar), `this._camera` É finalmente atualizado pra pose
@@ -7415,7 +6744,6 @@ const View3D = {
     const targetY = (typeof worldY === 'number' && !isNaN(worldY)) ? worldY : this.EYE_HEIGHT;
     const alvo = { x: worldX, y: targetY, z: worldZ };
     if (this._flythroughActive) this._cancelFlythrough();
-    if (this._camMode) this._exitCameraView();
     if (window.Modeler3D?.isActive?.()) return; // sem sentido voar com o modelador aberto por cima
     if (mode === 'direto') {
       this._flyToActive = false;
@@ -7447,7 +6775,6 @@ const View3D = {
     const targetY = (typeof worldY === 'number' && !isNaN(worldY)) ? worldY : this.EYE_HEIGHT;
     const alvo = { x: worldX, y: targetY, z: worldZ };
     if (this._flythroughActive) this._cancelFlythrough();
-    if (this._camMode) this._exitCameraView();
     if (window.Modeler3D?.isActive?.()) return;
     const origem = { x: this._camera.x, y: this._camera.y, z: this._camera.z };
     const dist = Math.hypot(alvo.x - origem.x, alvo.z - origem.z);
@@ -7659,9 +6986,9 @@ const View3D = {
   // ---------- fim NOVO (03/09/2026) flyCameraTo/flyCameraToArc ----------
 
   /** Rotina de movimentação padrão do player enquanto ele não está sendo
-   *  controlado (assistindo por uma câmera fixa) — pedido do usuário: "dá
+   *  controlado (vendo através de um orb de foto) — pedido do usuário: "dá
    *  para colocar uma rotina de movimentação padrão para o player, quando se
-   *  está 'olhando' pelas câmeras fixas". Passeio simples: escolhe um ponto
+   *  está 'olhando' pelas câmeras". Passeio simples: escolhe um ponto
    *  aleatório dentro dos limites do mapa (map.bounds) e anda até lá (com a
    *  MESMA colisão de parede/vão de porta aberta do andar controlado — ver
    *  _resolveCollision), escolhendo outro assim que chega perto; ao mover,
@@ -7821,7 +7148,7 @@ const View3D = {
    *  objetos que vão para o render foi atualizada? Essa piscada não deve
    *  ocorrer." Confirmado: `_afterMapMutated` (acima) reconstrói a cena 3D
    *  INTEIRA (`_rebuildScene` → `Engine3D.setScene`, que descarta e recria
-   *  TODAS as paredes/portas/janelas/câmeras/objetos) mesmo quando só UM
+   *  TODAS as paredes/portas/janelas/objetos) mesmo quando só UM
    *  objeto novo foi colocado — caro o bastante (geometria + 1ª compilação
    *  de shader de cada material recriado) pra ocasionalmente perder um
    *  quadro bem na hora da troca, visto como a cena inteira "piscando".
@@ -7847,7 +7174,7 @@ const View3D = {
    *  no Minecraft, deve ter algum recolhedor de itens (removê-los da cena)
    *  no 3D... deve haver alguma animação"). Ferramenta 🗑️ Remover da hotbar
    *  — mira em algo (mesma detecção da mira normal, `Engine3D.hoverPick`,
-   *  que já cobre item/câmera/objeto/parede/porta/janela — ver
+   *  que já cobre item/objeto/parede/porta/janela — ver
    *  engine3d.js) e o clique remove, sempre com uma animação (nunca
    *  silenciosamente, ver Engine3D.spawnCollectEffect/spawnDemolishEffect).
    *  Item/câmera/objeto ("pequenos", pedido do usuário) ganham a animação
@@ -7884,13 +7211,13 @@ const View3D = {
    *  usuário, rodada 52, com screenshot do Blender em anexo: "Ao pressionar
    *  DEL no 3D, deve aparecer uma janelinha, como no Blender, com um botão
    *  para deletar o objeto"). MESMA mira de _removeWithTool logo acima
-   *  (Engine3D.hoverPick — cobre item/câmera/objeto/parede/porta/janela),
+   *  (Engine3D.hoverPick — cobre item/objeto/parede/porta/janela),
    *  mas em vez de excluir na hora (como a ferramenta 🗑️ Remover da hotbar
    *  já faz, com animação), a tecla DEL/Backspace primeiro pede confirmação
    *  — igual o Blender faz (tecla X, Delete de novo ou Enter confirmam;
    *  Esc ou clicar fora cancela). `document.exitPointerLock` — mesmo padrão
-   *  de qualquer outro cartão aberto aqui (ver _showObjectCard3D/
-   *  _showCameraCard3D acima) — devolve o cursor pra dar pra clicar no
+   *  de qualquer outro cartão aberto aqui (ver _showObjectCard3D
+   *  acima) — devolve o cursor pra dar pra clicar no
    *  botão; volta a andar sozinho ao clicar de novo no canvas, como
    *  qualquer outro cartão. */
   _openDeleteConfirmPopup() {
@@ -7915,7 +7242,7 @@ const View3D = {
     // aglomerado inteiro (hit.id === 'tijolos-merged', ver
     // engine3d.js _rebuildTijolos) quanto um tijolo individual (cunha/com
     // textura) -- ver _confirmDeleteHit abaixo pro tratamento de cada caso.
-    const nomes = { object: 'objeto', camera: 'câmera', item: 'item', wall: 'parede', porta: 'porta', janela: 'janela', tijolo: 'tijolo' };
+    const nomes = { object: 'objeto', item: 'item', wall: 'parede', porta: 'porta', janela: 'janela', tijolo: 'tijolo' };
     const el = document.createElement('div');
     el.className = 'v3d-del-confirm';
     el.innerHTML = `
@@ -7950,9 +7277,9 @@ const View3D = {
 
   /** Efetiva a exclusão confirmada (pelo popup do DEL acima, ou direto pela
    *  ferramenta 🗑️ Remover da hotbar, que nunca pediu confirmação) — MESMA
-   *  animação de sempre (spawnCollectEffect pros "pequenos" — item/câmera/
+   *  animação de sempre (spawnCollectEffect pros "pequenos" — item/
    *  objeto —, spawnDemolishEffect pros "grandes" — parede/porta/janela) e
-   *  MESMA remoção de dados (Mapping.removeObject/removeCamera/removeWall/
+   *  MESMA remoção de dados (Mapping.removeObject/removeWall/
    *  removeDoor/removeWindow, DB.updateItem pra soltar patrimônio do mapa
    *  sem excluir o item do catálogo). */
   async _confirmDeleteHit(hit) {
@@ -7981,11 +7308,10 @@ const View3D = {
       Utils.toast('Removido 🗑️', { type: 'ok', duration: 1400 });
       return;
     }
-    if (hit.type === 'object' || hit.type === 'camera' || hit.type === 'item') {
-      const cor = hit.type === 'object' ? (hit.ref?.cor || '#8a92a3') : hit.type === 'camera' ? '#33383f' : '#4f8cff';
+    if (hit.type === 'object' || hit.type === 'item') {
+      const cor = hit.type === 'object' ? (hit.ref?.cor || '#8a92a3') : '#4f8cff';
       this._engine.spawnCollectEffect(pos, cor, Math.max(half.x, half.y, half.z) * 2);
       if (hit.type === 'object') Mapping.removeObject(this._map, hit.ref.id);
-      else if (hit.type === 'camera') Mapping.removeCamera(this._map, hit.ref.id);
       else if (hit.type === 'item') await DB.updateItem(hit.ref.id, { mapaX: null, mapaY: null, mapaPiso: 0 }); // solta o patrimônio do mapa, mesma ação de "Remover do mapa" — não exclui o item do catálogo
       Utils.toast('Removido 🗑️', { type: 'ok', duration: 1400 });
       await this._afterMapMutated({ reloadItems: hit.type === 'item' });
@@ -8012,7 +7338,7 @@ const View3D = {
    *  a `hit.type === 'object'` — mesmo escopo do botão "🔗 Associar a um
    *  item" do painel do objeto no editor 2D (mapview.js `#obj-item-associar`,
    *  ver o comentário lá: só objetos têm essa associação, não paredes/
-   *  portas/janelas/câmeras). `Utils.pickItem` é a MESMA janela de busca de
+   *  portas/janelas). `Utils.pickItem` é a MESMA janela de busca de
    *  patrimônio usada ali E em ambientephotos.js ("Adicionar orb" das
    *  Fotos) — reaproveitada tal e qual, sem nenhuma cópia. Sem roleta
    *  própria (ver comentário em _HOTBAR_SLOTS) — a escolha do patrimônio
@@ -8027,7 +7353,7 @@ const View3D = {
     const obj = hit.ref;
     // Sai do pointer lock ANTES de abrir a janela de busca — mesmo padrão de
     // qualquer outro modal aberto de dentro do 3D (ver _showFlashcard3D/
-    // _showObjectCard3D/_showCameraCard3D acima), senão o teclado/mouse do
+    // _showObjectCard3D acima), senão o teclado/mouse do
     // modal ficaria capturado pelo canvas em vez de navegar a busca.
     document.exitPointerLock?.();
     const jaTinha = obj.itemIds && obj.itemIds.length;
@@ -8729,23 +8055,14 @@ const View3D = {
         return;
       }
       // Atalhos numéricos da hotbar (1 Mirar, 2 Parede, 3 Porta, 4 Janela, 5
-      // Objeto, 6 Item, 7 Câmeras, 8 Remover) — mesmo espírito de hotbar
+      // Objeto, 6 Item, 8 Remover) — mesmo espírito de hotbar
       // numerada de jogo. Esc
       // cancela uma parede em cadeia pendente (1º ponto já clicado, ainda
       // esperando o 2º) sem sair da ferramenta.
-      // Esc também sai de "assistir" uma câmera fixa (pedido do usuário
-      // implícito no fluxo — mesma tecla que já cancela outras coisas
-      // pendentes nesta tela) — checado ANTES da cadeia de parede abaixo,
-      // já que os dois nunca acontecem ao mesmo tempo (ferramentas
-      // diferentes) mas por clareza de prioridade.
-      if (e.code === 'Escape' && this._camMode) { this._exitCameraView(); return; }
       // [10/09/2026] RESTAURADO junto com o resto do bloco "ver através
       // desta câmera"/vanishCam (ver comentário grande em this._fotoCamMode,
       // mount()).
       if (e.code === 'Escape' && this._fotoCamMode) { this._exitFotoCameraView(); return; }
-      // [10/09/2026] NOVO — mesmo padrão pro "orb de câmera" (ver
-      // this._orbCamMode, mount()).
-      if (e.code === 'Escape' && this._orbCamMode) { this._exitCameraOrbView(); return; }
       if (e.code === 'Escape' && this._wallChainStart) { this._wallChainStart = null; Utils.toast('Parede: cadeia cancelada.', { duration: 1500 }); return; }
       // [16/09/2026 UTC] NOVO — pedido verbatim: "Ao pressionar esc no meio
       // de uma medida, então, ela deve ser desfeita." Mesmo padrão da
@@ -8844,7 +8161,7 @@ const View3D = {
         this._openDeleteConfirmPopup();
         return;
       }
-      const numTool = { Digit1: null, Digit2: 'parede', Digit3: 'porta', Digit4: 'janela', Digit5: 'objeto', Digit6: 'item', Digit7: 'camera', Digit8: 'remover' }[e.code];
+      const numTool = { Digit1: null, Digit2: 'parede', Digit3: 'porta', Digit4: 'janela', Digit5: 'objeto', Digit6: 'item', Digit8: 'remover' }[e.code];
       if (numTool !== undefined && document.pointerLockElement === canvas) this._selectBuildTool(numTool);
 
       // "Giro Livre" (tecla R — pedido do usuário, 25/08/2026: "Ativar Giro
@@ -8988,9 +8305,9 @@ const View3D = {
       // [10/09/2026] NOVO — pedido verbatim: "ao clicar em uma câmera e
       // selecionar 'Ver através desta câmera', deve ser possível interagir
       // com o cenário [...] ao clicar em um objeto com o botão esquerdo do
-      // mouse, abre-se a janela em tamanho normal mesmo". `_fotoCamMode`/
-      // `_orbCamMode` SAEM do Pointer Lock ao entrar (ver
-      // _enterFotoCameraView/_enterCameraOrbView) — o resto deste handler,
+      // mouse, abre-se a janela em tamanho normal mesmo". `_fotoCamMode`
+      // SAI do Pointer Lock ao entrar (ver
+      // _enterFotoCameraView) — o resto deste handler,
       // daqui pra baixo, pressupõe navegação em 1ª pessoa TRAVADA (mira
       // central, requestPointerLock ao clicar destravado, ferramentas de
       // construção etc.) — nada disso faz sentido aqui. Usa o clique REAL
@@ -9001,7 +8318,7 @@ const View3D = {
       // porque nunca esteve dentro de nenhum elemento com zoom aplicado
       // (ver onWheel — o zoom passou a recalcular o FOV de verdade, não
       // mais um `transform:scale()` do CSS que pudesse afetar isto).
-      if (this._fotoCamMode || this._orbCamMode) {
+      if (this._fotoCamMode) {
         const hit = this._pickAtClientPoint(e.clientX, e.clientY, canvas);
         if (hit) this._tryPick(hit);
         return;
@@ -9471,7 +8788,7 @@ const View3D = {
       // esquerdo do mouse pressionado." CAUSA RAIZ: o guard
       // `window.Modeler3D?.isActive?.()` já existia mais abaixo nesta MESMA
       // função (ver comentário "38a rodada" perto do fim), mas só depois do
-      // bloco `if (this._fotoCamMode || this._orbCamMode)` logo abaixo —
+      // bloco `if (this._fotoCamMode)` logo abaixo —
       // ou seja, com a câmera-vista combinada com o Modelador, esse bloco
       // rodava SEM guard nenhum, em TODO `mousemove`, e terminava sempre em
       // `canvas.style.cursor = 'move'` ou `canvas.style.cursor = ''` (ver
@@ -9491,8 +8808,8 @@ const View3D = {
       if (window.Modeler3D?.isActive?.()) return;
       // [10/09/2026] NOVO — pedido verbatim: "o cursor do mouse deve
       // aparecer para ir apontando para as coisas, poder selecioná-las".
-      // `_fotoCamMode`/`_orbCamMode` SAEM do Pointer Lock ao entrar (ver
-      // _enterFotoCameraView/_enterCameraOrbView) — todo o resto desta
+      // `_fotoCamMode` SAI do Pointer Lock ao entrar (ver
+      // _enterFotoCameraView) — todo o resto desta
       // função (girar a câmera arrastando o mouse travado, cursor virtual
       // etc.) não se aplica aqui, por isso este bloco fica ANTES de
       // qualquer guard de `pointerLockElement` e sempre retorna cedo. A
@@ -9507,7 +8824,7 @@ const View3D = {
       // (contorno pontilhado/hitbox/tightbox, conforme a config) já
       // comunica "isto está mirado" — o cursor NUNCA mais vira "mão"
       // aqui, fica sempre a seta padrão do sistema (`''`).
-      if (this._fotoCamMode || this._orbCamMode) {
+      if (this._fotoCamMode) {
         // [10/09/2026] Gatilho: Shift + BOTÃO DO MEIO DO MOUSE segurado
         // (`e.buttons & 4`, bit do botão do meio em `MouseEvent.buttons` —
         // sempre disponível em `mousemove`, com ou sem Pointer Lock; aqui
@@ -9641,7 +8958,7 @@ const View3D = {
       // (`this._lockCursorX/Y`, iniciado em `onClick` na hora de travar —
       // ver lá), sem limite (pode passar longe dos limites da tela sem
       // problema — só usado pra hit-test do botão "+", nunca desenhado).
-      // Feito ANTES de qualquer `return` cedo abaixo (câmera fixa etc.) pra
+      // Feito ANTES de qualquer `return` cedo abaixo (câmera de foto etc.) pra
       // nunca ficar "parado" enquanto esses modos especiais estão ativos.
       this._lockCursorX = (this._lockCursorX ?? e.clientX) + (e.movementX || 0);
       this._lockCursorY = (this._lockCursorY ?? e.clientY) + (e.movementY || 0);
@@ -9650,18 +8967,6 @@ const View3D = {
       // passa por cima do botão — única pista de "mira" possível já que o
       // cursor de verdade do SO fica escondido pelo Pointer Lock.
       this._addObjBtnEl?.classList.toggle('active', this._isVirtualCursorOverAddObjBtn());
-      if (this._camMode) {
-        // "Assistindo" uma câmera fixa: mouse não gira o JOGADOR (que anda
-        // sozinho — ver _updateAutopilot), gira/inclina a câmera fixa em
-        // volta da direção original dela, dentro de um limite fixo pros dois
-        // lados — pedido do usuário: "é possível mover de um lado para o
-        // outro (limitado tanto para um lado quanto para o outro)... e
-        // também inclinar para cima e para baixo de forma limitada".
-        const cfg = this._camMode;
-        cfg.pan = Utils.clamp(cfg.pan + (e.movementX || 0) * 0.0022, -this._CAM_VIEW_PAN_MAX, this._CAM_VIEW_PAN_MAX);
-        cfg.tilt = Utils.clamp(cfg.tilt + (e.movementY || 0) * 0.0022, -this._CAM_VIEW_TILT_MAX, this._CAM_VIEW_TILT_MAX);
-        return;
-      }
       // Pedido do usuário: Shift + arrastar com o botão do MEIO desloca a
       // câmera lateralmente (esquerda/direita) e verticalmente (cima/baixo)
       // NUM PLANO PARALELO À TELA DA CÂMERA — ou seja, translada, não gira
@@ -9719,7 +9024,7 @@ const View3D = {
       // suas ações programadas (ver `this._yawPitchFrozen`, ligada/desligada
       // em `onKeyDown`). Guard colocado bem no ponto exato da mutação (não
       // mais cedo na função) — as demais coisas que `onMouseMove` já fazia
-      // antes de chegar aqui (cursor virtual, hover, pan de câmera fixa,
+      // antes de chegar aqui (cursor virtual, hover, pan de câmera de foto,
       // etc.) continuam rodando normalmente, só o giro yaw/pitch em si fica
       // suspenso.
       if (this._yawPitchFrozen) {
@@ -9765,24 +9070,19 @@ const View3D = {
       // botões de controle nunca foram tocados por nenhum `transform`
       // (só a foto-guia recebe uma compensação própria, ver
       // `_updateFotoCamOverlayZoomScale`). Vale tanto pro "ver através" de
-      // um orb de foto (`_fotoCamMode`) quanto pro "orb de câmera" travado
-      // de verdade (`_orbCamMode`) — os 2 únicos modos onde a visão fica
-      // "presa" a uma câmera calibrada.
-      // ANTES desta guarda: `_camMode`/`_fotoCamMode`/`_orbCamMode` SAEM do
-      // Pointer Lock ao entrar (`document.exitPointerLock?.()`, ver
-      // `_enterCameraView`/`_enterFotoCameraView`/`_enterCameraOrbView`),
+      // um orb de foto (`_fotoCamMode`), onde a visão fica "presa" a uma
+      // câmera calibrada.
+      // ANTES desta guarda: `_fotoCamMode` SAI do Pointer Lock ao entrar
+      // (`document.exitPointerLock?.()`, ver `_enterFotoCameraView`),
       // então o `if (document.pointerLockElement !== e.currentTarget)
       // return;` logo abaixo (guarda de TODO o resto desta função, pensada
       // pra navegação em 1ª pessoa travada) sempre barraria a roda do mouse
-      // nesses 3 modos — por isso este bloco novo fica ANTES dela, não
-      // depois.
-      if (this._fotoCamMode || this._orbCamMode) {
+      // nesse modo — por isso este bloco novo fica ANTES dela, não depois.
+      if (this._fotoCamMode) {
         e.preventDefault();
-        const cfg = this._fotoCamMode || this._orbCamMode;
-        // Rolar "pra frente" (deltaY<0, longe de quem usa o mouse — mesma
-        // convenção já usada pelo `_camMode` legado logo abaixo) = zoom IN
-        // = FOV MENOR. Fator multiplicativo (não aditivo, ao contrário do
-        // `_camMode` legado) pra sentir consistente tanto perto de 5° (zoom
+        const cfg = this._fotoCamMode;
+        // Rolar "pra frente" (deltaY<0) = zoom IN = FOV MENOR. Fator
+        // multiplicativo pra sentir consistente tanto perto de 5° (zoom
         // in extremo) quanto perto de 140° (zoom out extremo).
         const fator = e.deltaY < 0 ? (1 / 1.12) : 1.12;
         cfg.zoomFov = Utils.clamp(cfg.zoomFov * fator, this._CAMVIEW_ZOOM_FOV_MIN, this._CAMVIEW_ZOOM_FOV_MAX);
@@ -9801,8 +9101,7 @@ const View3D = {
         // deslocamento de "lente" já usado pelo pan Shift+botão-do-meio
         // (`_camViewPanOffset`/`Engine3D.setCamPanFrac`, ver onMouseMove/
         // _loop acima) em vez de girar `yaw`/`pitch` da câmera de verdade —
-        // evita reabrir a lógica de pose travada (`_orbCamLockedPose`/
-        // `_computeFotoCamPose`, recalculada do zero todo quadro) e continua
+        // evita reabrir a lógica de pose travada (`_computeFotoCamPose`, recalculada do zero todo quadro) e continua
         // 100% compatível com a foto-guia (que já lê `_camViewPanOffset` em
         // `_updateFotoCamOverlayZoomScale`).
         {
@@ -9873,19 +9172,7 @@ const View3D = {
       // invocação) em vez da variável fechada é estritamente mais robusto —
       // nunca pode divergir do canvas que realmente recebeu o evento.
       if (document.pointerLockElement !== e.currentTarget) return;
-      if (this._camMode) {
-        // "É possível dar zoom" (pedido do usuário) — enquanto se assiste
-        // uma câmera fixa, a roda passa a ser zoom (campo de visão) em vez
-        // de passear pela roleta, limitado nos dois extremos (ver
-        // _CAM_VIEW_FOV_MIN/MAX) pra não virar um "olho de peixe" nem um
-        // zoom absurdo.
-        e.preventDefault();
-        const cfg = this._camMode;
-        cfg.zoomFov = Utils.clamp(cfg.zoomFov + Math.sign(e.deltaY) * 3, this._CAM_VIEW_FOV_MIN, this._CAM_VIEW_FOV_MAX);
-        this._engine.setFov?.(cfg.zoomFov);
-        return;
-      }
-      if (this._buildTool !== 'objeto' && this._buildTool !== 'item' && this._buildTool !== 'camera') return;
+      if (this._buildTool !== 'objeto' && this._buildTool !== 'item') return;
       e.preventDefault();
       this._cycleHotbarList(Math.sign(e.deltaY) || 1);
     };
@@ -10032,7 +9319,9 @@ const View3D = {
       // hooks em `Modeler3D.enter`/`exit` (modeler-core.js).
       const modelerActive = !!window.Modeler3D?.isActive?.();
       if (!lockBadge) return;
-      lockBadge.classList.toggle('m3d-hidden', modelerActive);
+      // [20/09/2026] "Ver através desta câmera"/câmera de foto: a câmera fica travada e já houve clique — a dica não faz sentido.
+      const camTravada = !!this._fotoCamMode;
+      lockBadge.classList.toggle('m3d-hidden', modelerActive || camTravada);
       lockBadge.classList.toggle('locked', document.pointerLockElement === canvas);
     };
     document.addEventListener('pointerlockchange', onPointerLockChange);
@@ -10152,7 +9441,7 @@ const View3D = {
     // é capturável por quem chamou esta função, então precisa da própria
     // proteção.
     setTimeout(() => {
-      try { Modeler3D.enter(this, novo, { enterOrbital: !(this._orbCamMode || this._fotoCamMode) }); } // [12/09/2026 — ITEM C]
+      try { Modeler3D.enter(this, novo, { enterOrbital: !this._fotoCamMode }); } // [12/09/2026 — ITEM C]
       catch (err) {
         if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError('Modelador 3D', err);
         else console.error('Falha ao entrar no Modelador 3D:', err);
@@ -10207,7 +9496,7 @@ const View3D = {
     // é capturável por quem chamou esta função, então precisa da própria
     // proteção.
     setTimeout(() => {
-      try { Modeler3D.enter(this, novo, { enterOrbital: !(this._orbCamMode || this._fotoCamMode) }); } // [12/09/2026 — ITEM C]
+      try { Modeler3D.enter(this, novo, { enterOrbital: !this._fotoCamMode }); } // [12/09/2026 — ITEM C]
       catch (err) {
         if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError('Modelador 3D', err);
         else console.error('Falha ao entrar no Modelador 3D:', err);
@@ -10251,7 +9540,7 @@ const View3D = {
    *  (`Engine3D.rayFromScreenPoint`) e devolve o pickable sob ele
    *  (`Engine3D.pickFromRay`, MESMA função usada pela mira central de
    *  sempre — só o raio de entrada é diferente). Usado só enquanto
-   *  `_fotoCamMode`/`_orbCamMode` estão ativos (ver onMouseMove/onClick
+   *  `_fotoCamMode` está ativo (ver onMouseMove/onClick
    *  em `_bindDesktopControls`) — a navegação normal em 1ª pessoa continua
    *  100% com a mira central (`_tryPick` sem argumento, `centerRay`).
    *  [10/09/2026] Também atualiza `Engine3D.setHoverScreenPoint` (mesmo
@@ -10332,7 +9621,7 @@ const View3D = {
   },
 
   /** [10/09/2026] `hitOverride` NOVO — quando fornecido (mousedown/click
-   *  real dentro de `_fotoCamMode`/`_orbCamMode`, ver `_pickAtClientPoint`
+   *  real dentro de `_fotoCamMode`, ver `_pickAtClientPoint`
    *  acima), usa ESSE hit em vez de recalcular pela mira central — deixa o
    *  resto da função (o "o que fazer com o hit", cartões/scripts/etc.)
    *  100% compartilhado entre os 2 jeitos de mirar. */
@@ -10381,7 +9670,7 @@ const View3D = {
         hit.ref._rackPortaAcertada = rackParte.slice(6);
       }
     }
-    const chave = hit.type === 'camera' ? 'camera' : hit.type === 'fotoPin' ? 'fotopin'
+    const chave = hit.type === 'fotoPin' ? 'fotopin'
       : hit.type === 'porta' ? 'porta' : hit.type === 'janela' ? 'janela' : (hit.ref.tipo || '_generic');
     window.ObjectAssets?.dispatchMouseEvent3D(evento, chave, hit.ref, _v3dCtx);
     // [14/09/2026] NOVO — pedido: expor `onDoubleClick` pro sistema de
@@ -10532,7 +9821,7 @@ const View3D = {
     // Objeto) nunca tinham chance de disparar o script ao clicar, mesmo
     // com o campo salvo. Movido pra ANTES de qualquer `hit.type`
     // específico e generalizado pra `hit.ref` (existe em todo tipo de
-    // pickable — object/camera/wall/porta/janela/fotoPin, ver os vários
+    // pickable — object/wall/porta/janela/fotoPin, ver os vários
     // `userData.pick = {...ref...}` em engine3d.js) — mesma prioridade de
     // sempre (um elemento-botão nunca mostra o cartão informativo comum
     // dele, roda o script NO LUGAR), agora valendo pra qualquer tipo.
@@ -10555,32 +9844,15 @@ const View3D = {
         return;
       }
     }
-    // [12/09/2026 REESCRITO] pedido verbatim: "reescrita completa dos
-    // cartões 3D hardcoded de câmera/foto para rotearem 100% pelo sistema
-    // genérico de componentes [...] todos os objetos [...] devem seguir a
-    // mesma organização." Este `if` fixo (`hit.type==='camera' ? ... :
-    // hit.type==='fotoPin' ? ...`) SUMIU — quem decide agora é
-    // `ObjectAssets.dispatchClick3D` (js/objectassets.js), lendo o arquivo
-    // de assets/modelos/camera.model.js / assets/modelos/fotopin.model.js
-    // (pré-carregados em `mount()`, ver `warmupModelsForMap`) — e, se o
-    // objeto específico tiver um assets/instancias/<nome>.instance.js
-    // próprio, ELE tem prioridade sobre o Modelo do tipo. `_showCameraCard3D`/
-    // `_showFotoPinCard3D` continuam existindo (o Modelo padrão delega pra
-    // elas, ver os arquivos acima) — só deixaram de ser chamadas
-    // DIRETAMENTE daqui. O `return false` de `dispatchClick3D` (nem
-    // instância nem modelo, nem sequer `_generic`, souberam o que fazer —
-    // só aconteceria numa corrida bem no 1º instante, antes do warmup
-    // terminar) cai num último fallback idêntico ao comportamento antigo,
-    // pra nunca deixar o clique sem reação nenhuma.
+    // Quem decide o cartão é `ObjectAssets.dispatchClick3D` (js/objectassets.js),
+    // lendo o Modelo do tipo (assets/modelos/*.model.js) ou a instância própria
+    // do objeto (assets/instancias/*.instance.js).
     const _v3dCtx = { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map };
-    if (hit.type === 'camera') {
-      if (!window.ObjectAssets?.dispatchClick3D('camera', hit.ref, _v3dCtx)) this._showCameraCard3D(hit.ref);
-    }
     // NOVO (03/09/2026), pedido verbatim: "deve ser possível interagir com
     // o objeto da foto tirada" — ver o retângulo texturizado + pickable
     // 'fotoPin' criados em engine3d.js setScene (bloco "fotos vinculadas ao
     // mapa").
-    else if (hit.type === 'fotoPin') {
+    if (hit.type === 'fotoPin') {
       if (!window.ObjectAssets?.dispatchClick3D('fotopin', hit.ref, _v3dCtx)) this._showFotoPinCard3D(hit.ref);
     }
     // Objeto associado a um ou mais patrimônios catalogados (obj.itemIds, ver
@@ -10670,20 +9942,7 @@ const View3D = {
   // de mount(), junto de onde o botão ficava, pra explicação completa.
 
   /** [13/09/2026] REFATORADO — mesma extração documentada em
-   *  `_showTijoloAglomeradoCard3D` acima e no comentário grande no topo de
-   *  `js/cardsystem.js`. Conteúdo/estilo/wiring completo agora em
-   *  `cards/camera-card.js`. Continua `async` só por retrocompatibilidade
-   *  de assinatura com quem chama (nada aqui precisa mais de `await`). */
-  async _showCameraCard3D(cam) {
-    document.exitPointerLock?.();
-    const ctx = window.ObjectAssets?.buildCtx
-      ? window.ObjectAssets.buildCtx({ view3d: this, DB: window.DB, Utils: window.Utils, map: this._map })
-      : { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map };
-    window.CardSystem?.mount(this._container, 'camera', cam, ctx);
-  },
-
-  /** [13/09/2026] REFATORADO — mesma extração documentada em
-   *  `_showTijoloAglomeradoCard3D`/`_showCameraCard3D` acima e no
+   *  `_showTijoloAglomeradoCard3D` acima e no
    *  comentário grande no topo de `js/cardsystem.js`. Conteúdo/estilo/
    *  wiring completo agora em `cards/foto-pin-card.js`. */
   async _showFotoPinCard3D(foto) {
@@ -10697,7 +9956,7 @@ const View3D = {
   /** NOVO (12/09/2026), pedido verbatim: "ele deve ter uma folha de
    *  histórico [...] Tanto no 2D quanto no 3D deve ser possível
    *  acrescentar informações [...] por objeto individual". Liga o botão
-   *  colapsável "📜 Histórico deste objeto" de um cartão 3D (câmera/objeto/
+   *  colapsável "📜 Histórico deste objeto" de um cartão 3D (objeto/
    *  foto — mesmo botão em todos, só o `toggleId`/`hostId` mudam) ao HTML
    *  compartilhado de `window.ObjectStandard` (js/objectstandard.js) — o
    *  MESMO usado no painel 2D (`js/mapview.js`
@@ -10705,7 +9964,7 @@ const View3D = {
    *  dois jeitos de mostrar/editar a mesma lista. `hostId` é tanto o botão
    *  quanto o `<div>` que ele expande — convenção: `${hostId}-toggle` é o
    *  botão, `${hostId}` é o container (ver os dois `id`s vizinhos nos
-   *  `innerHTML` acima, em `_showCameraCard3D`/`_showObjectCard3D`/
+   *  `innerHTML` acima, em `_showObjectCard3D`/
    *  `_showFotoPinCard3D`). Persiste com `DB.saveMap(this._map)` — mesma
    *  função que o resto do 3D já usa pra qualquer mutação de objeto. */
   _wireHistoricoCard(cardEl, hostId, entity) {
@@ -10766,7 +10025,7 @@ const View3D = {
    *  ficar dentro do try/catch de lá sem duplicar o `document.exitPointerLock`.
    *
    *  [13/09/2026] REFATORADO — mesma extração documentada em
-   *  `_showTijoloAglomeradoCard3D`/`_showCameraCard3D`/`_showFotoPinCard3D`
+   *  `_showTijoloAglomeradoCard3D`/`_showFotoPinCard3D`
    *  acima e no comentário grande no topo de `js/cardsystem.js`. TODA a
    *  lógica de montar o título/emoji/lista de botões (incluindo o ponto de
    *  extensão `onModelCardButtons`, ver `js/objectassets.js`) agora mora em
@@ -10996,7 +10255,27 @@ const View3D = {
     const existing = this._container.querySelector('.flashcard3d-overlay');
     if (existing) existing.remove();
     this._ensureObjectPanelInfraFromMapView();
-    return this._openObjectPanel(entity, { modoVer3D: true });
+    // A janela de propriedades sempre abre EXPANDIDA (nunca minimizada por uma abertura anterior) e no CENTRO da tela.
+    this._objPanelCollapsed = false;
+    const abrir = this._openObjectPanel(entity, { modoVer3D: true });
+    Promise.resolve(abrir).then(() => {
+      const panel = this._panelEl || document.querySelector('.map2d-props-panel');
+      if (!panel) return;
+      this._objPanelCollapsed = false;
+      panel.classList.remove('collapsed');
+      const tb = panel.querySelector('#obj-panel-toggle');
+      if (tb) { tb.textContent = '▾'; tb.title = 'Ocultar os campos deste painel'; }
+      requestAnimationFrame(() => {
+        const r = panel.getBoundingClientRect();
+        const w = r.width || 320, h = r.height || 200;
+        panel.classList.add('dragged');
+        panel.style.right = 'auto'; panel.style.bottom = 'auto';
+        panel.style.width = w + 'px';
+        panel.style.left = Math.max(10, (window.innerWidth - w) / 2) + 'px';
+        panel.style.top = Math.max(10, (window.innerHeight - h) / 2) + 'px';
+      });
+    }).catch((e) => console.warn('[View3D] centralizar propriedades:', e));
+    return abrir;
   },
 
   /** Copia, 1x (`this._objectPanelInfraReady`), as funções de
@@ -11822,7 +11101,7 @@ const View3D = {
   },
 
   /** [13/09/2026] REFATORADO — mesma extração documentada em
-   *  `_showTijoloAglomeradoCard3D`/`_showCameraCard3D`/`_showFotoPinCard3D`/
+   *  `_showTijoloAglomeradoCard3D`/`_showFotoPinCard3D`/
    *  `_showObjectCard3DBody` acima e no comentário grande no topo de
    *  `js/cardsystem.js`. Conteúdo/estilo/wiring completo agora em
    *  `cards/orphan-patrimonio-card.js` — a checagem "sem entradas, não
@@ -12015,6 +11294,7 @@ const View3D = {
     if (!Mapping) return best;
     const objects = this._map?.objects || [];
     for (const o of objects) {
+      if (o.colisaoTopo === false) continue;   // 'Colisão (serve de chão visto de cima)' desmarcada: não vira degrau/chão
       if (!Mapping.pointInObjectFootprint(o, x, z)) continue;
       Mapping.applyDefaultShapeToObject?.(o); // garante o.altura calculada, se ainda não tiver forma explícita
       // Mapping.objectTopHeight — "imagem" (decalque chato no chão, sem
@@ -12167,48 +11447,14 @@ const View3D = {
     const TOLERANCIA_JITTER_MS = 1;
     if (desdeUltimoRender >= intervaloMin - TOLERANCIA_JITTER_MS) {
       Perf.markFrameStart();
-      // [10/09/2026] NOVO — "orb de câmera" (ver this._orbCamMode, mount()):
-      // re-trava `this._camera` na pose calibrada TODO quadro, ANTES de
-      // qualquer outra coisa mexer nela (mouse-look, WASD, gravidade,
-      // sobrevoo) — pedido verbatim: "não dá para olhar em volta pois a
-      // câmera fica fixa". Como `this._camera` é a MESMA usada por todo o
-      // raycasting de seleção/posicionamento (_placeWithBuildTool etc — ver
-      // comentário grande em _enterCameraOrbView), travar aqui, no único
-      // lugar, é suficiente — sem precisar caçar/gatear cada handler de
-      // mouse/teclado que toca `this._camera` espalhado pelo arquivo
-      // (onMouseMove, o loop de WASD logo abaixo, `_updateAutopilot`, etc.):
-      // qualquer mutação que aconteça entre um quadro e outro é desfeita
-      // aqui antes da cena ser desenhada — nunca acumula/deriva.
-      if (this._orbCamMode && this._orbCamLockedPose) {
-        const lp = this._orbCamLockedPose;
-        // [10/09/2026] CORRIGIDO — `_camViewPanOffset` NÃO é mais somado à
-        // posição aqui (ver comentário grande em `_computeFotoCamPose`,
-        // mesmo motivo: deslocar a posição real muda a perspectiva de
-        // verdade, o oposto do pedido do usuário). A pose travada (`lp`)
-        // é reaplicada 100% pura; o pan vira um deslocamento de "lente" em
-        // `camera3`, aplicado à parte logo antes de `this._engine.render`.
-        this._camera.x = lp.x; this._camera.y = lp.y; this._camera.z = lp.z;
-        this._camera.yaw = lp.yaw; this._camera.pitch = lp.pitch;
-      }
       this._updateBuildGhost();
-      // "Assistindo" uma câmera fixa (ver _enterCameraView): quem é
-      // renderizado passa a ser ELA (pan/tilt/zoom aplicados em cima —
-      // _computeWatchCameraPose), não o jogador — que continua andando
-      // sozinho por trás (_updateAutopilot) e aparece em cena como o boneco
-      // palito (updatePlayerFigure), já que agora há outra câmera olhando
-      // pra ele.
-      // Sobrevoo automático (rodada 48) tem prioridade sobre tudo — MESMO
-      // padrão de "pose renderizada substituída sem tocar this._camera" já
-      // usado por _camMode/_computeWatchCameraPose logo abaixo.
+      // Sobrevoo automático (rodada 48) tem prioridade sobre tudo — pose
+      // renderizada substituída sem tocar this._camera.
       // NOVO (03/09/2026) — voos "Ver no mapa 3D"/busca 3D (flyCameraTo/
-      // flyCameraToArc) têm prioridade sobre o Sobrevoo automático/câmera
-      // assistida: MESMO padrão (pose calculada à parte substitui só a
-      // câmera renderizada), mas na prática nunca competem de verdade — os
-      // dois outros são cancelados no INÍCIO de qualquer flyCameraTo* (ver
-      // lá), então só um destes três está ativo por vez.
+      // flyCameraToArc) têm prioridade sobre o Sobrevoo automático: MESMO
+      // padrão (pose calculada à parte substitui só a câmera renderizada).
       let renderCam = this._flyToActive ? this._computeFlyToPose()
         : this._flythroughActive ? this._computeFlythroughPose()
-        : this._camMode ? this._computeWatchCameraPose()
         // [10/09/2026] RESTAURADO — "ver através" de um orb de foto/câmera,
         // MESMO padrão de pose calculada à parte substituindo só a câmera
         // renderizada (ver _computeFotoCamPose acima e comentário grande em
@@ -12222,7 +11468,7 @@ const View3D = {
       // Modelador estava aberto — ver o retorno antecipado no topo deste
       // `_loop`), então só a pose RENDERIZADA (`renderCam`) é interpolada
       // aqui, sem mexer em `this._camera` nem no resto da física/input.
-      if (this._camTransition && !this._camMode && !this._fotoCamMode) {
+      if (this._camTransition && !this._fotoCamMode) {
         const tr = this._camTransition;
         const t = Math.min(1, (performance.now() - tr.t0) / tr.dur);
         const ease = t * t * (3 - 2 * t);
@@ -12235,7 +11481,7 @@ const View3D = {
         };
         if (t >= 1) this._camTransition = null;
       }
-      if (this._camMode || this._fotoCamMode) {
+      if (this._fotoCamMode) {
         this._engine.updatePlayerFigure?.(this._camera.x, this._camera.y, this._camera.z, this._camera.yaw, !!this._playerWalking, this._playerWalkT || 0);
       }
       // Só as luzes de luminária mais próximas ficam acesas (ver
@@ -12243,8 +11489,8 @@ const View3D = {
       // MAX_LUMINARIAS_ATIVAS) — resolve "mesmo olhando para uma parede, o
       // FPS não está aumentando" (o custo de luz é por PIXEL da tela, não
       // por objeto/direção da câmera). Usa a câmera DE VERDADE sendo
-      // renderizada (renderCam), não sempre this._camera — senão, assistindo
-      // por uma câmera fixa longe do jogador, as luzes "acesas" seriam as
+      // renderizada (renderCam), não sempre this._camera — senão, vendo através
+      // de uma câmera de foto longe do jogador, as luzes "acesas" seriam as
       // mais próximas do JOGADOR (fora de tela), não do que está sendo visto.
       this._engine.updateActiveLights?.(renderCam);
       // Modo "Sólido+wireframe para desempenho" (pedido do usuário: "vai
@@ -12267,7 +11513,7 @@ const View3D = {
       // deles, zerado por `_resetCamZoom` ao sair) não precisa reaplicar
       // nada: `camera3.clearViewOffset()` já foi chamado na saída e
       // continua limpo até a próxima sessão de câmera-vista.
-      if (this._fotoCamMode || this._orbCamMode) {
+      if (this._fotoCamMode) {
         const off = this._camViewPanOffset || { x: 0, y: 0 };
         this._engine.setCamPanFrac(off.x, off.y);
         // [12/09/2026 — RODADA "mesma imagem"] `_updateFotoCamOverlayZoomScale()`
@@ -12603,7 +11849,6 @@ const View3D = {
       }
     };
     (this._map.objects || []).forEach((o) => checar(o, o.x, o.y));
-    (this._map.cameras || []).forEach((c) => checar(c, c.x, c.y));
     (this._map.textos || []).forEach((t) => checar(t, t.x, t.y));
     if (typeof Mapping !== 'undefined') {
       (this._map.portas || []).forEach((d) => { const p = Mapping.resolveDoorWindowPos(this._map, d); checar(d, p.x, p.y); });
@@ -12630,7 +11875,6 @@ const View3D = {
     const ctx = { map: this._map, view3d: this };
     const tick = (entidade) => { if (entidade) window.Components.tickEntity(entidade, ctx, dt); };
     (this._map.objects || []).forEach(tick);
-    (this._map.cameras || []).forEach(tick);
     (this._map.textos || []).forEach(tick);
     (this._map.portas || []).forEach(tick);
     (this._map.janelas || []).forEach(tick);
@@ -12642,12 +11886,6 @@ const View3D = {
     // disto ser necessário (objetos animados por Script são excluídos do
     // pool de InstancedMesh bem ali, exatamente por causa disto).
     this._engine?._syncScriptedObjectTransforms?.(this._map);
-    // [13/09/2026] NOVO — parte "viva" do modelo de câmera "PS1" (gira a
-    // cabeça/lente conforme `cam.anguloLente` + pisca o LED vermelho) — ver
-    // comentário grande em `Engine3D._updateCamerasLive` (js/engine3d.js).
-    // Mesmo lugar/ordem de sempre: depois do Update() dos scripts já ter
-    // rodado neste quadro (pode ter mudado `cam.anguloLente`).
-    this._engine?._updateCamerasLive?.(dt);
     // [14/09/2026] NOVO — anima a folha de qualquer porta cujo
     // `el.anguloAbertura` esteja sendo controlado por um Script (ver
     // `Engine3D._updateDoorAnimations`/js/components.js) — mesmo lugar de
@@ -12898,7 +12136,7 @@ const View3D = {
    *  que o pointer-lock/renderer de sempre já leem pra desenhar o quadro —
    *  não precisa de nenhuma THREE.Camera nem lógica de render separada,
    *  só reposiciona os mesmos 5 números todo quadro (mesmo truque já usado
-   *  por `_orbCamMode`/`_camMode`/`_fotoCamMode` acima, que também
+   *  por `_fotoCamMode` acima, que também
    *  "sequestram" `this._camera` temporariamente). SEM colisão de câmera
    *  contra paredes atrás do carro — ver LIMITAÇÕES no comentário grande
    *  de `_updateCarrosControlados`. */
@@ -13304,7 +12542,7 @@ const View3D = {
     this._renderTijoloPanel();
     Utils.toast(`Aglomerado convertido em objeto modelável (${convertiveis.length} tijolo(s) fundido(s)) 🧊`, { type: 'ok' });
     setTimeout(() => {
-      try { Modeler3D.enter(this, (this._map.objects || []).find((o) => o.id === novo.id) || novo, { enterOrbital: !(this._orbCamMode || this._fotoCamMode) }); } // [12/09/2026 — ITEM C]
+      try { Modeler3D.enter(this, (this._map.objects || []).find((o) => o.id === novo.id) || novo, { enterOrbital: !this._fotoCamMode }); } // [12/09/2026 — ITEM C]
       catch (err) {
         if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError('Modelador 3D', err);
         else console.error('Falha ao entrar no Modelador 3D:', err);
@@ -13405,36 +12643,13 @@ const View3D = {
     // só de `_computeFlyToPose` (ver `_loop`).
     if (this._flyToActive) { this._updateFlyTo(delta); return; }
     if (this._flythroughActive) { this._updateFlythrough(delta); return; }
-    if (this._camMode) {
-      // A câmera assistida pode ter sido apagada enquanto era assistida
-      // (não deveria dar pra apagar com o 3D aberto, mas por segurança) —
-      // sai sozinho da visão em vez de travar apontando pro nada.
-      const camAinda = (this._map?.cameras || []).some((c) => c.id === this._camMode.camId);
-      if (!camAinda) { this._exitCameraView(); }
-      else { this._updateAutopilot(delta); return; }
-    }
-    // [10/09/2026] RESTAURADO — MESMA proteção acima, agora pro orb de
-    // foto/câmera sendo "visto através" (ver comentário grande em
-    // this._fotoCamMode, mount()). NOVO (09/09/2026) — sai sozinho se a
+    // Proteção do orb de foto sendo "visto através" (ver comentário grande em
+    // this._fotoCamMode, mount()): sai sozinho se a
     // foto foi apagada/desvinculada do mapa enquanto estava sendo vista.
     if (this._fotoCamMode) {
       const fotoAinda = (this._map?.fotos || []).some((f) => f.id === this._fotoCamMode.fotoId);
       if (!fotoAinda) { this._exitFotoCameraView(); }
       else { this._updateAutopilot(delta); return; }
-    }
-    // [10/09/2026] NOVO — MESMA proteção acima, pro "orb de câmera" (ver
-    // this._orbCamMode, mount()/_enterCameraOrbView). Diferente dos dois
-    // ramos acima (modos de espectador, que chamam _updateAutopilot pro
-    // boneco continuar andando sozinho): aqui `return` simplesmente PULA
-    // todo o processamento de movimento/gravidade/WASD abaixo — pedido
-    // verbatim: "a câmera do personagem fixa" — a pose já é garantida todo
-    // quadro pelo re-trava em `_loop` (ver "_orbCamLockedPose" lá), este
-    // `return` só evita processamento e efeitos colaterais (queda/pulo)
-    // inúteis enquanto travado.
-    if (this._orbCamMode) {
-      const camOrbAinda = (this._map?.cameras || []).some((c) => c.id === this._orbCamMode.camId);
-      if (!camOrbAinda) { this._exitCameraOrbView(); }
-      else { return; }
     }
     // Pedido do usuário (03/09/2026): transição suave de yaw disparada pelo
     // clique num rótulo do anel de bússola (ver _giroBussola3DParaDirecao).
@@ -13471,7 +12686,7 @@ const View3D = {
     // [13/09/2026] NOVO — "carro dirigível": enquanto `_carroControlado`
     // estiver ativo, o controle NORMAL do jogador (WASD/gravidade/pulo,
     // todo o resto desta função abaixo) fica CONGELADO — mesmo espírito
-    // do guard `_orbCamMode` mais acima (`return` antecipado evita
+    // do guard do Modelador mais acima (`return` antecipado evita
     // processamento/efeitos colaterais inúteis) — e em vez disso a física
     // de inércia do carro + a câmera de terceira pessoa são atualizadas
     // por `_updateCarrosControlados`/`_updateCarroCamera` (ver comentário
@@ -13480,7 +12695,7 @@ const View3D = {
     // sem suspensão/inclinação em curva, câmera sem colisão contra
     // paredes atrás do carro). Colocado DEPOIS de `_updateScriptLifecycle`
     // de propósito — scripts de outros objetos (portas automáticas,
-    // relógios, câmeras PS1 etc.) continuam rodando normalmente enquanto
+    // relógios etc.) continuam rodando normalmente enquanto
     // o jogador dirige, só o PRÓPRIO jogador para de responder a WASD.
     if (this._carroControlado) {
       this._updateCarrosControlados(delta);

@@ -259,6 +259,12 @@ const OBJECT3D_PROFILES = {
   // entidade é DERIVADO da posição dela em relação a estes objetos, ao
   // invés de ser um campo manual.
   piso: { shape: 'box', w: 10, d: 10, h: 0.2, y0: 0, color: 0xb0b0b0 },
+  // Porta, Janela e Parede são criadas por ferramentas próprias e desenhadas por código (como a escada); estes perfis existem
+  // para aparecerem em "Acessar modelos" e terem molde editável (esticado ao tamanho de cada elemento — ver
+  // Engine3D._moldeGeoAjustada). Nenhum objeto do mapa tem estes tipos: o perfil só define o ponto de partida do editor.
+  porta: { shape: 'box', w: 0.8, d: 0.1, h: 2.1, y0: 0, color: 0x8a5a34 },
+  janela: { shape: 'box', w: 1.2, d: 0.1, h: 1.2, y0: 0, color: 0xbfe3ff },
+  parede: { shape: 'box', w: 0.15, d: 1.0, h: 2.8, y0: 0, color: 0xcfd6e0 },
   // [13/09/2026] NOVO — "Teto modular" e "Teto de gesso", pedido do usuário:
   // "chão lajotado, teto modular (escritórios), teto de gesso com rodelas
   // de acesso (gabinete/chefia)". Mesmo raciocínio de design do "Piso"
@@ -309,7 +315,7 @@ const OBJECT3D_PROFILES = {
   // _drawFormaShape) — a partir de `window.RelogioMundo.getHoraAtual()`
   // (hora do MUNDO, não do aparelho do usuário — js/relogio-mundo.js),
   // via `Engine3D._updateRelogiosParede`, chamado todo quadro por
-  // view3d.js, mesmo padrão de `_updateCamerasLive`/`_updateDoorAnimations`.
+  // view3d.js, mesmo padrão de `_updateDoorAnimations`.
   relogio: { shape: 'cylinder', r: 0.15, h: 0.04, y0: 0, color: 0xf2ede0 },
   // NOVO (01/09/2026), item #11 do pedido de 12 itens, verbatim: "Faça um
   // novo objeto 3D, o poste de iluminação pública." `shape:'cylinder'` aqui
