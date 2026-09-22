@@ -405,6 +405,10 @@ const MAP_OBJECT_EXTRAS = {
     <rect x="1.5" y="8.5" width="21" height="7" rx="0.8"/>
     <circle cx="8" cy="12" r="2.6"/><circle cx="16" cy="12" r="2.6"/><path d="M8 9.6v4.8M5.6 12h4.8M16 9.6v4.8M13.6 12h4.8"/>
   `) },
+  access_point: { label: 'Access Point Wi-Fi (AP)', svg: _iconSvg(`
+    <rect x="6" y="11" width="12" height="8" rx="1.6"/><circle cx="12" cy="15" r="0.8"/>
+    <path d="M8.5 8.5a5 5 0 0 1 7 0M6.2 6.2a8.2 8.2 0 0 1 11.6 0"/>
+  `) },
   espelho1: { label: 'Espelho de parede 1 módulo', svg: _iconSvg(`
     <rect x="6" y="6" width="12" height="12" rx="1.4"/>
     <path d="M10 10h4v4h-4z"/>

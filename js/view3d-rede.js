@@ -167,8 +167,31 @@
     },
 
     /** Por quadro: posiciona o item carregado, atualiza a faixa, guarda-costas do traçado e rotulos. */
+    /** [21/09/2026] Faixa DESTACADA no meio da tela, logo abaixo da linha de botões do cabeçalho, informando o modo
+     *  ativo (E = carregar equipamento · L = ligar cabo · M = moldar cabo). Some quando nenhum modo está ativo. */
+    _modoBannerTick() {
+      const ct = this._container; if (!ct) return;
+      let modo = null;
+      if (this._redeCargaSt) modo = { t: '✋ MODO E — Carregando equipamento', d: 'E solta · Q devolve · R gira 90°', c: '#1f8f4a' };
+      else if (this._caboLigSt) modo = { t: '🔌 MODO L — Ligar cabo', d: 'clique nas portas · Q desmarca · L sai', c: '#2f6fdb' };
+      else if (this._caboMoldarSt) modo = { t: '✏️ MODO M — Moldar cabo', d: 'arraste os nós · B reta/curva · X exclui · Q solta · M sai', c: '#d98a1a' };
+      let el = this._modoBannerEl;
+      if (!modo) { if (el) { el.remove(); this._modoBannerEl = null; } return; }
+      if (!el || !el.isConnected) {
+        el = document.createElement('div'); el.className = 'v3d-modo-banner';
+        el.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);z-index:60;pointer-events:none;text-align:center;color:#fff;border-radius:10px;padding:7px 18px;box-shadow:0 4px 18px rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.35);white-space:nowrap;max-width:94%;';
+        ct.appendChild(el); this._modoBannerEl = el;
+      }
+      const key = modo.t + '|' + modo.d;
+      if (el._k !== key) { el._k = key; el.style.background = modo.c; el.innerHTML = '<div style="font-weight:700;font-size:15px;letter-spacing:.3px">' + modo.t + '</div><div style="font-size:11.5px;opacity:.92">' + modo.d + '</div>'; }
+      const tb = ct.querySelector('.camera-topbar');
+      const top = tb ? (tb.getBoundingClientRect().bottom - ct.getBoundingClientRect().top + 8) : 56;
+      const t = Math.round(top) + 'px'; if (el.style.top !== t) el.style.top = t;
+    },
+
     _updateRedeInteracao(dt) {
       const eng = this._engine; if (!eng || !eng._ready) return;
+      try { this._modoBannerTick(); } catch (e) { /* faixa é só visual */ }
       const c = this._redeCargaSt;
       if (c) {
         try {
@@ -190,6 +213,26 @@
       if (this._caboMoldarSt) { this._caboMoldarAtualizar(); return; }
       this._hoverRotulo3D(dt);
       this._rotulosSempreAtualizar(); // [20/09/2026 UTC] RODADA 221 -- etiquetas 'always' (ver método abaixo)
+      // [22/09/2026] MUDADO -- pedido verbatim: remover "a caixa de texto que aparece próxima ao
+      // AP" (a etiqueta flutuante em Sprite/canvas), sem mexer no AP em si nem no resto da
+      // funcionalidade de Wi-Fi. Chamada removida; `_atualizarEtiquetasAP` (abaixo) fica sem uso.
+    },
+
+    // ======================================================================
+    // 3c) ETIQUETA (Sprite/canvas) de todo Access Point do mapa
+    // ======================================================================
+    /** [22/09/2026] DESATIVADO -- pedido verbatim: "a caixa de texto que aparece próxima ao AP,
+     *  não o AP e tudo dele [deve ser removida]." Método mantido (não é mais chamado por
+     *  `_updateRedeInteracao` acima) só para não quebrar nada que porventura ainda referencie
+     *  `WifiSignal.AccessPoint#atualizarEtiqueta`/`#removerEtiqueta` diretamente. */
+    _atualizarEtiquetasAP() {
+      const WS = raiz.WifiSignal, RE = raiz.RedeEquip, eng = this._engine;
+      if (!WS || !RE || !this._map || !Array.isArray(this._map.objects)) return;
+      this._map.objects.forEach((o) => {
+        if (!WS.ehAP(o)) return;
+        const ap = WS.para(o, eng), r = RE.garantirRede(o);
+        ap.atualizarEtiqueta(r.labelID || RE.especificar(o.tipo).rotulo);
+      });
     },
 
     // ======================================================================
@@ -1120,27 +1163,54 @@
     // 4) MENUS DO MODO EDICAO
     // ======================================================================
 
-    /** Menu de qualquer equipamento de rede (switch, patch panel, DIO, espelho, PDU, guia...). */
-    _openRedeMenu(obj, ray) {
-      if (!this._container || !raiz.RedeEquip) return;
+    /**
+     * Menu de qualquer equipamento de rede (switch, patch panel, DIO, espelho, PDU, guia, Access Point...).
+     * [21/09/2026 UTC] `opts.container`/`opts.map` -- pedido verbatim: "No mapa 2D, nas propriedades do
+     * Access Point, deve ter um botão que faz aparecer a mesma janela que aparece no 'Ver em 3D', no 'Modo
+     * Edição', quando aponta-se para um AP e clica nele." Fora do "Ver em 3D", `this._container`/`this._map`
+     * (a cena/mapa da sessão 3D) podem não existir ainda nesta sessão -- `opts` permite ao chamador (o mapa
+     * 2D, ver `abrirPainelEquipamento` mais abaixo) fornecer um container DOM próprio e o `mapData` do mapa
+     * 2D. `this._engine` NUNCA é substituído (fica `null`/o que já era) -- todo trecho que dependeria dele
+     * (varredura 3D, "Pegar", mirar portas, etc.) já está guardado com `if (this._engine)` neste método.
+     */
+    _openRedeMenu(obj, ray, opts) {
+      opts = opts || {};
+      const container = opts.container || this._container;
+      if (!container || !raiz.RedeEquip) return;
+      if (opts.map && !this._map) this._map = opts.map;   // só preenche se ainda não houver um mapa "vivo" da sessão 3D
       const RE = raiz.RedeEquip, RP = raiz.RedePassiva, DB = raiz.DB;
       if (this._menuFecharRede) this._menuFecharRede();
-      this._container.querySelectorAll('.v3d-rede-menu').forEach((n) => n.remove());
+      container.querySelectorAll('.v3d-rede-menu').forEach((n) => n.remove());
       document.exitPointerLock && document.exitPointerLock();
-      const sp = RE.especificar(obj.tipo), ehSw = RE.ehSwitch(obj.tipo), temPortas = sp.portas.length > 0;
+      const sp = RE.especificar(obj.tipo), ehSw = RE.ehSwitch(obj.tipo), ehAp = RE.ehAP(obj.tipo) && !!raiz.WifiSignal, temPortas = sp.portas.length > 0;
       // [19/09/2026 UTC] NOVO (RODADA 174) -- Storage (baias) e No-break (tomadas de energia) usam
       // o mesmo mecanismo de "portas" do catálogo (RE.especificar), mas NÃO fazem sentido no
       // fluxo genérico de "Ligar a"/cabeamento estruturado (uma baia não é uma porta de rede) --
       // `ehBaia` desliga esse fluxo genérico e liga o painel próprio de baias mais abaixo.
       const ehBaia = sp.familia === 'storage', ehNobreak = RE.ehNobreak(obj.tipo);
       let sel = (ray && temPortas) ? (this._engine.redePortaSob(obj, ray.origin, ray.dir) || null) : null;
+      if (!sel && ehAp && sp.portas.length === 1) sel = sp.portas[0].n;   // AP: só há 1 porta RJ-45, já vem selecionada
       const el = document.createElement('div'); el.className = 'v3d-rede-menu';
       el.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;min-width:340px;max-width:92vw;max-height:86vh;overflow:auto;background:rgba(20,24,32,.96);color:#e8ecf2;border:1px solid #3a4250;border-radius:10px;padding:12px;font:13px system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.5)';
-      const fechar = () => { el.remove(); window.removeEventListener('keydown', onKey, true); document.removeEventListener('mousedown', onFora, true); if (this._menuFecharRede === fechar) this._menuFecharRede = null; };
+      // [21/09/2026 UTC] NOVO -- pedido verbatim: "O 'fechar' desta janela deve ser acima e à direita, não"
+      // "um botão 'fechar' lá em baixo e à direita." `el` vira só a MOLDURA (posição/tamanho/scroll fica no
+      // `corpo` -- um filho por dentro), com um botão ✕ fixo no canto superior direito que NÃO rola junto
+      // com o conteúdo (`corpo` é quem tem `overflow:auto`, não `el`).
+      el.style.padding = '0';
+      const corpo = document.createElement('div');
+      corpo.style.cssText = 'overflow:auto;max-height:86vh;padding:12px 34px 12px 12px';
+      const btnX = document.createElement('button');
+      btnX.type = 'button'; btnX.setAttribute('aria-label', 'Fechar'); btnX.textContent = '✕';
+      btnX.style.cssText = 'position:absolute;top:6px;right:8px;z-index:2;background:transparent;border:none;color:#9aa3ad;font-size:18px;line-height:1;cursor:pointer;padding:4px 7px;border-radius:6px';
+      btnX.onmouseenter = () => { btnX.style.background = 'rgba(255,255,255,.1)'; btnX.style.color = '#e8ecf2'; };
+      btnX.onmouseleave = () => { btnX.style.background = 'transparent'; btnX.style.color = '#9aa3ad'; };
+      el.appendChild(btnX); el.appendChild(corpo);
+      const fechar = () => { if (ehAp) { const a0 = raiz.WifiSignal.para(obj, this._engine); a0.onProgress = null; a0.onDone = null; } el.remove(); window.removeEventListener('keydown', onKey, true); document.removeEventListener('mousedown', onFora, true); if (this._menuFecharRede === fechar) this._menuFecharRede = null; };
+      btnX.onclick = () => fechar();
       const salvar = () => { DB.saveMap(this._map); };
-      const reconstruir = () => { DB.saveMap(this._map); this._engine.rebuildObjectIncremental(obj); };
+      const reconstruir = () => { DB.saveMap(this._map); if (this._engine) this._engine.rebuildObjectIncremental(obj); };
       const nomeDe = (o) => (o.nome || RE.especificar(o.tipo).rotulo || o.tipo);
-      const ICONE = { switch: '🔀', patchpanel: '🧷', dio: '💡', tomada: '🔌', pdu: '⚡', guia: '〰️', bandeja: '🗄️', ventilacao: '🌀', frente: '⬛', abracadeira: '🪢' };
+      const ICONE = { ap: '📡', switch: '🔀', patchpanel: '🧷', dio: '💡', tomada: '🔌', pdu: '⚡', guia: '〰️', bandeja: '🗄️', ventilacao: '🌀', frente: '⬛', abracadeira: '🪢' };
       const CABOS = RE.REDE_CATALOGO.CABOS;
       // [20/09/2026 UTC] NOVO (RODADA 219) -- paleta rápida de cores de mercado p/ cabeamento
       // estruturado (pedido verbatim do usuário) -- usada no seletor de cor por-cabo abaixo.
@@ -1160,7 +1230,7 @@
         const ativas = estados.filter((x) => x === 'active').length;
         let html = '<style>' + RE.REDE_LED_CSS + '</style><div style="font-weight:600;margin-bottom:2px">' + (ICONE[sp.familia] || '📦') + ' ' + esc(sp.rotulo) + ' — ' + esc(nomeDe(obj)) + '</div>';
         html += '<div style="opacity:.7;font-size:12px;margin-bottom:6px">' + (sp.alturaU ? sp.alturaU + 'U' : sp.alturaMm + ' mm') + (ehBaia ? ' · ' + sp.nPortas + ' baias' : (temPortas ? ' · ' + sp.nPortas + ' portas · ' + cabosObj.length + ' cabo(s)' : '')) + (obj.rackId && obj.rackU ? ' · rack, U' + obj.rackU : ' · fora de rack') + (ehSw ? ' · ' + ativas + ' porta(s) ativa(s)' : '') + '</div>';
-        if (ehSw) html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span class="rede-led ' + (r.ligado ? 'idle' : 'off') + '"></span><b>' + (r.ligado ? 'Ligado' : 'Desligado') + '</b><button type="button" data-rp="1" style="' + BTN + '">⏻ ' + (r.ligado ? 'Desligar' : 'Ligar') + '</button><input data-rh="1" placeholder="hostname" value="' + esc(r.hostname) + '" style="' + INP + ';flex:1;min-width:80px"></div>';
+        if (ehSw || ehAp) html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span class="rede-led ' + (r.ligado ? 'idle' : 'off') + '"></span><b>' + (r.ligado ? 'Ligado' : 'Desligado') + '</b><button type="button" data-rp="1" style="' + BTN + '">⏻ ' + (r.ligado ? 'Desligar' : 'Ligar') + '</button><input data-rh="1" placeholder="hostname" value="' + esc(r.hostname) + '" style="' + INP + ';flex:1;min-width:80px"></div>';
         // configuracao fisica das portas (DIO: conector/fibra; keystones: categoria/blindagem)
         let cfg = '';
         if (sp.familia === 'dio') {
@@ -1172,6 +1242,39 @@
         }
         cfg += '<span>labelID</span><input data-lb="1" value="' + esc(r.labelID || '') + '" placeholder="ex.: PP-A01 / TOM-12" style="' + INP + '">';
         html += '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;padding:2px 0">' + cfg + '</div>';
+        // [21/09/2026 UTC] NOVO -- painel do Access Point: faixa, potência, densidade da varredura, botão
+        // "Refazer Varredura de Sinal" e barra de progresso animada (`scanProgress` 0-100, some ao chegar em 100%).
+        if (ehAp) {
+          const WS = raiz.WifiSignal, ap = WS.para(obj, this._engine), emite = ap.emiteSinal, res = ap.ultimoResultado;
+          const opts = (mapa, atual) => Object.keys(mapa).map((k) => '<option value="' + k + '"' + (atual === k ? ' selected' : '') + '>' + esc(mapa[k].rotulo) + '</option>').join('');
+          html += '<style>' + WS.CSS + '</style><div style="border-top:1px solid #3a4250;margin-top:6px;padding-top:6px">'
+            + '<div style="font-size:12px;margin-bottom:4px">📡 <b style="color:' + (emite ? '#3ecb6e' : '#ffb454') + '">' + (emite ? 'Emitindo sinal' : (!ap.isOn ? 'Desligado — sem sinal' : 'Sem cabo na porta RJ-45 — sem sinal')) + '</b> · ' + (ap.hasCableConnected ? 'cabo conectado' : 'sem cabo') + '</div>'
+            + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center"><span>Faixa</span><select data-wf="frequencia" style="' + INP + '">' + opts(WS.FAIXAS, ap.signalFrequency) + '</select>'
+            // [21/09/2026 UTC] CORRIGIDO -- pedido verbatim: "coloque valores reais de potência de sinal de
+            // dispositivos wi-fi do mercado. Por exemplo, 28 dBm (630 mW) em 2,4 GHz e 27 dBm (501 mW) em
+            // 5 GHz." O campo continua em Watts (unidade que o motor de física usa), mas agora mostra o
+            // equivalente em dBm ao lado (`WS.wattsParaDbm`) e o teto (`max`) foi de 100 W (irreal pra RF de
+            // Wi-Fi) pra 2 W -- bem acima de qualquer faixa comercial, só pra não travar valores customizados.
+            + '<span>Potência (W)</span><div style="display:flex;gap:6px;align-items:center"><input data-wf="potencia" type="number" min="0.01" max="2" step="0.001" value="' + ap.powerWatts + '" style="' + INP + ';flex:1"><span data-wf-dbm="1" style="font-size:11px;opacity:.7;white-space:nowrap">≈ ' + ap.powerDbm.toFixed(1).replace('.', ',') + ' dBm</span></div>'
+            + '<span>Densidade da varredura</span><select data-wf="densidade" style="' + INP + '">' + opts(WS.DENSIDADES, ap.densidade) + '</select></div>'
+            + '<div style="font-size:11px;opacity:.6;margin-top:3px">Mais detalhada = mais raios = mais precisa e mais lenta (não trava a tela: roda em lotes por quadro). Potência padrão baseada em APs comerciais reais (28 dBm/630 mW em 2,4 GHz; 27 dBm/501 mW em 5 GHz).</div>'
+            + '<div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap"><button type="button" data-wf-scan="1" style="' + BTN + (emite ? '' : ';opacity:.5') + '"' + (ap.scanning ? ' disabled' : '') + '>🔄 Refazer Varredura de Sinal</button>'
+            + (ap.scanning ? '<button type="button" data-wf-cancel="1" style="' + BTN + '">Cancelar</button>' : '')
+            + '<label style="font-size:12px"><input type="checkbox" data-wf-show="1"' + (ap.mostrar || !ap.temMalha ? ' checked' : '') + '> mostrar mapa</label></div>'
+            + '<div class="wf-bar' + (ap.scanning ? '' : ' wf-fim') + '" data-wf-bar="1"><div class="wf-fill" data-wf-fill="1" style="width:' + ap.scanProgress + '%"></div></div>'
+            + '<div data-wf-txt="1" style="font-size:11px;opacity:.8;min-height:14px">' + (ap.scanning ? 'Varrendo… ' + ap.scanProgress + '%' : '') + '</div>'
+            + '<div style="font-size:11px;margin-top:2px"><span class="wf-leg" style="background:#22c55e;margin-left:0"></span>excelente<span class="wf-leg" style="background:#facc15"></span>médio<span class="wf-leg" style="background:#ef4444"></span>fraco/sem sinal'
+            + (res ? ' · última varredura: ' + res.raios + ' raios em ' + res.tempoMs + ' ms · alcance ' + res.alcanceM.toFixed(1).replace('.', ',') + ' m' : '') + '</div>'
+            // [21/09/2026 UTC] NOVO -- projeção do mapa de calor sobre o mapa 2D (Planta Baixa): método
+            // ('fatiamento' = Opção A, corte vetorial da própria malha 3D, padrão; 'textura' = Opção B,
+            // bitmap renderizado por câmera ortográfica) e opacidade (0–100%, equivalente ao pedido
+            // "heatmap2D.material.opacity"). Ver comentário grande em wifi-signal.js (`METODOS2D`).
+            + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:6px;border-top:1px solid #3a4250;padding-top:6px">'
+            + '<span>Mapa 2D — método</span><select data-wf="metodo2D" style="' + INP + '">' + opts(WS.METODOS2D, ap.metodo2D) + '</select>'
+            + '<span>Mapa 2D — opacidade</span><input data-wf-opacidade="1" type="range" min="0" max="100" step="5" value="' + Math.round(ap.opacidade2D * 100) + '" style="width:100%">'
+            + '</div>'
+            + '<div style="font-size:11px;opacity:.6;margin-top:3px">O mapa 2D (Planta Baixa) reaproveita a malha 3D já varrida acima — mesmos obstáculos (paredes, portas, janelas, pilares, vigas, piso/teto, escada).</div></div>';
+        }
         if (temPortas && !ehBaia) {
           const opcoes = sp.portas.map((p) => { const c = RE.caboDaPorta(this._map, obj.id, p.n, 'frente'); return '<option value="' + p.n + '"' + (p.n === sel ? ' selected' : '') + '>' + (p.tipo === 'sfp' ? 'SFP ' : '') + p.n + ((r.portas[p.n] && r.portas[p.n].rotulo) ? ' — ' + esc(r.portas[p.n].rotulo) : '') + (c ? '  ● cabeada' : '') + '</option>'; }).join('');
           html += '<div style="border-top:1px solid #3a4250;margin-top:6px;padding-top:6px"><label>Porta: <select data-rs="1" style="' + INP + '"><option value="">— escolha (ou mire) —</option>' + opcoes + '</select></label></div>';
@@ -1218,21 +1321,20 @@
           if (ehSw) html += '<span>LED</span><select data-rst="1" style="' + INP + '">' + ['auto', 'active', 'idle', 'off'].map((v) => '<option value="' + v + '"' + ((pr.status || 'auto') === v ? ' selected' : '') + '>' + (v === 'auto' ? 'Automático (segue o cabo)' : RE.LED_ESTILOS[v].rotulo) + '</option>').join('') + '</select>';
           html += '</div>';
           if (cabo) {
-            const lado = RE.outroLado(cabo, obj.id, sel), outro = this._map.objects.find((o) => o.id === lado.obj), info = this._engine._cabosInfo && this._engine._cabosInfo.get(cabo.id);
+            const lado = RE.outroLado(cabo, obj.id, sel), outro = this._map.objects.find((o) => o.id === lado.obj), info = this._engine && this._engine._cabosInfo && this._engine._cabosInfo.get(cabo.id);
             html += '<div style="padding:6px 8px;background:#1b2a3d;border-radius:6px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span>🔌 ' + esc((CABOS[cabo.tipo] || {}).rotulo || cabo.tipo) + ' → ' + esc(outro ? nomeDe(outro) : '?') + ' · porta ' + lado.porta + '</span><button type="button" data-rdc="' + cabo.id + '" style="' + BTN + '">Desconectar</button></div>'
               + '<div style="font-size:12px;opacity:.8;margin-top:3px">Percurso ' + (info ? info.comprimentoM.toFixed(2).replace('.', ',') + ' m' : '—') + (cabo.length > 0 ? ' · cabo de ' + cabo.length + ' m' : ' · comprimento automático') + (cabo.labelID ? ' · 🏷️ ' + esc(cabo.labelID) : '') + '</div>'
               + (info && info.esticado ? '<div style="color:#ff8787;font-size:12px">⚠ Cabo curto: o percurso é maior que o comprimento do cabo.</div>' : '')
               + (cabo.avisos || []).map((a) => '<div style="color:#ffb454;font-size:12px">⚠ ' + esc(a) + '</div>').join('')
               + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:5px"><span>Comprimento (m)</span><input data-cl="' + cabo.id + '" type="number" min="0" step="0.5" value="' + (cabo.length || 0) + '" style="' + INP + '" title="0 = automático"><span>labelID do cabo</span><input data-cb="' + cabo.id + '" value="' + esc(cabo.labelID || '') + '" style="' + INP + '">'
               + '</div>'
-              // [20/09/2026 UTC] NOVO (RODADA 219) -- cor individual do cabo (`cabo.cor`, campo já
+              // [22/09/2026] MUDADO -- cor individual do cabo (`cabo.cor`, campo já
               // existente e já usado por `Engine3D.rebuildCabos` -- ver comentário da rodada mais
-              // abaixo) + modo de exibição da etiqueta flutuante (`cabo.etiquetaModo`).
+              // abaixo). A opção "Etiqueta (rótulo flutuante)" (cabo.etiquetaModo) foi removida
+              // a pedido: não faz mais parte do painel de propriedades do equipamento.
               + '<div style="margin-top:6px"><span style="font-size:12px;opacity:.8">Cor do cabo</span><div style="display:flex;gap:4px;align-items:center;margin-top:3px;flex-wrap:wrap">'
               + PALETA_CORES_CABO.map((p) => '<button type="button" data-ccorswatch="' + cabo.id + '" data-hex="' + p.hex + '" title="' + p.nome + '" style="width:20px;height:20px;border-radius:4px;border:2px solid ' + (String(cabo.cor || '').toLowerCase() === p.hex ? '#fff' : 'transparent') + ';background:' + p.hex + ';cursor:pointer;padding:0"></button>').join('')
-              + '<input data-ccor="' + cabo.id + '" type="color" value="' + esc(cabo.cor || (CABOS[cabo.tipo] || {}).cor || '#2f6fdb') + '" style="width:26px;height:22px;padding:0;border:none;border-radius:4px;cursor:pointer" title="Cor personalizada"></div></div>'
-              + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:6px"><span>Etiqueta (rótulo flutuante)</span><select data-cem="' + cabo.id + '" style="' + INP + '">'
-              + ['hover', 'always', 'hidden'].map((m) => '<option value="' + m + '"' + ((cabo.etiquetaModo || 'hover') === m ? ' selected' : '') + '>' + (m === 'hover' ? 'Ao passar o mouse (padrão)' : m === 'always' ? 'Sempre visível' : 'Oculta') + '</option>').join('') + '</select></div></div>';
+              + '<input data-ccor="' + cabo.id + '" type="color" value="' + esc(cabo.cor || (CABOS[cabo.tipo] || {}).cor || '#2f6fdb') + '" style="width:26px;height:22px;padding:0;border:none;border-radius:4px;cursor:pointer" title="Cor personalizada"></div></div>';
           } else {
             const outros = this._map.objects.filter((o) => RE.ehEquipRede(o.tipo) && RE.especificar(o.tipo).portas.length);
             const padrao = pd.tipo === 'sfp' ? 'fibra_om3' : pd.tipo === 'lc' ? ('fibra_' + String(r.fibra || 'SMF').toLowerCase()) : (pd.tipo === 'keystone' ? (r.categoria || 'cat6') : 'cat6');
@@ -1245,30 +1347,69 @@
               + '<div style="margin-top:6px"><button type="button" data-rcn="1" style="' + BTN + '">🔌 Conectar cabo</button></div>';
           }
         }
-        html += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">' + (temPortas && !ehBaia ? '<button type="button" data-lig="1" style="' + BTN + '">🔌 Ligar clicando nas portas (L)</button>' : '') + '<button type="button" data-pg="1" style="' + BTN + '">✋ Pegar (E)</button>';
-        if (obj.rackId) html += '<button type="button" data-rret="1" style="' + BTN + '">Retirar do rack</button>';
-        html += '<button type="button" data-rf="1" style="' + BTN + '">Ficha do objeto</button><span style="flex:1"></span><button type="button" data-rc="1" style="' + BTN + '">Fechar</button></div>'
+        // [21/09/2026 UTC] NOVO -- estas ações (mirar/clicar portas, "Pegar", retirar do rack, "Ficha do
+        // objeto") dependem da cena 3D viva (`this._engine`) -- quando este painel é aberto pelo mapa 2D
+        // (ver `abrirPainelEquipamento`), não fazem sentido e ficam OCULTAS (o resto do painel -- estado
+        // ligado/desligado, config do AP, conectar cabo por nome -- continua funcionando normalmente).
+        if (this._engine) {
+          html += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">' + (temPortas && !ehBaia ? '<button type="button" data-lig="1" style="' + BTN + '">🔌 Ligar clicando nas portas (L)</button>' : '') + '<button type="button" data-pg="1" style="' + BTN + '">✋ Pegar (E)</button>';
+          if (obj.rackId) html += '<button type="button" data-rret="1" style="' + BTN + '">Retirar do rack</button>';
+          html += '<button type="button" data-rf="1" style="' + BTN + '">Ficha do objeto</button></div>';
+        }
           + '<div style="opacity:.55;margin-top:6px;font-size:11px">Esc fecha. “Pegar” leva o item com você e permite encaixá-lo numa U do rack. “Ligar clicando nas portas” fecha este menu e deixa mirar/clicar direto nas portas (2 cliques por ponta) pra ligar o cabo, sem menu nenhum — tecla L liga/desliga esse modo a qualquer momento. No Modo Navegação, dois cliques ' + (ehSw ? 'ligam/desligam o switch' : 'mostram o resumo do item') + '.</div>';
-        el.innerHTML = html;
-        const q = (s2) => el.querySelector(s2);
-        if (q('[data-rp]')) q('[data-rp]').onclick = () => { r.ligado = !r.ligado; salvar(); render(); };
+        corpo.innerHTML = html;
+        const q = (s2) => corpo.querySelector(s2);
+        // Access Point: sincroniza malha de sinal + LED do corpo do AP (ligado/cabo) e liga a UI à varredura.
+        // [21/09/2026 UTC] `this._engine` guardado (`&&`) -- este painel agora também pode ser aberto pelo
+        // mapa 2D (Planta Baixa), sem nenhuma engine 3D viva (ver `abrirPainelEquipamento`/botão "⚙️
+        // Configurações" no mapa 2D); sem engine, só o estado (`ligado`, config do AP) é sincronizado, a
+        // malha 3D em si (se existir) é atualizada na próxima vez que "Ver em 3D" for aberto.
+        const apSync = () => { if (!ehAp) return; raiz.WifiSignal.para(obj, this._engine).atualizarVisibilidade(); if (this._engine) this._engine.rebuildObjectIncremental(obj); };
+        if (q('[data-rp]')) q('[data-rp]').onclick = () => { r.ligado = !r.ligado; salvar(); apSync(); render(); };
+        if (ehAp) {
+          const ap = raiz.WifiSignal.para(obj, this._engine);
+          ap.onProgress = (p) => {
+            const bar = corpo.querySelector('[data-wf-bar]'), fill = corpo.querySelector('[data-wf-fill]'), txt = corpo.querySelector('[data-wf-txt]');
+            if (!fill) return;
+            fill.style.width = p + '%'; if (txt) txt.textContent = p < 100 ? 'Varrendo… ' + p + '%' : '';
+            if (bar) bar.classList.toggle('wf-fim', p >= 100);
+          };
+          ap.onDone = () => { render(); };
+          corpo.querySelectorAll('[data-wf]').forEach((c) => { c.onchange = (e) => {
+            const k = c.getAttribute('data-wf');
+            if (k === 'frequencia') ap.signalFrequency = e.target.value;
+            else if (k === 'potencia') ap.powerWatts = e.target.value;
+            else if (k === 'metodo2D') ap.metodo2D = e.target.value;   // [21/09/2026] Opção A (fatiamento) / B (textura), ver wifi-signal.js
+            else ap.densidade = e.target.value;
+            salvar(); render();
+          }; });
+          // [21/09/2026 UTC] NOVO -- slider de opacidade do mapa 2D (não recria o painel a cada `input`,
+          // só salva -- `render()` reconstruiria o slider no meio do arraste do usuário, perdendo o foco).
+          if (q('[data-wf-opacidade]')) q('[data-wf-opacidade]').oninput = (e) => { ap.opacidade2D = Number(e.target.value) / 100; salvar(); };
+          if (q('[data-wf-scan]')) q('[data-wf-scan]').onclick = () => {
+            const res = ap.startScan({ densidade: ap.densidade });
+            if (!res.ok) toast(res.erro, { type: 'warn', duration: 3000 });
+            render();
+          };
+          if (q('[data-wf-cancel]')) q('[data-wf-cancel]').onclick = () => { ap.cancelScan(); render(); };
+          if (q('[data-wf-show]')) q('[data-wf-show]').onchange = (e) => { ap.mostrar = e.target.checked; };
+        }
         if (q('[data-rh]')) q('[data-rh]').onchange = (e) => { r.hostname = e.target.value.trim(); salvar(); };
-        el.querySelectorAll('[data-cc]').forEach((s2) => { s2.onchange = (e) => { r[s2.getAttribute('data-cc')] = e.target.value; reconstruir(); render(); }; });
+        corpo.querySelectorAll('[data-cc]').forEach((s2) => { s2.onchange = (e) => { r[s2.getAttribute('data-cc')] = e.target.value; reconstruir(); render(); }; });
         q('[data-lb]').onchange = (e) => { r.labelID = e.target.value.trim(); salvar(); };
         if (q('[data-rs]')) q('[data-rs]').onchange = (e) => { sel = Number(e.target.value) || null; render(); };
         if (q('[data-rr]')) q('[data-rr]').onchange = (e) => { r.portas[sel] = r.portas[sel] || {}; r.portas[sel].rotulo = e.target.value.trim(); RE.notificarMudanca(this._map, {}); render(); };
         if (q('[data-rst]')) q('[data-rst]').onchange = (e) => { r.portas[sel] = r.portas[sel] || {}; r.portas[sel].status = e.target.value; salvar(); };
-        if (q('[data-rdc]')) q('[data-rdc]').onclick = () => { RE.desconectar(this._map, q('[data-rdc]').getAttribute('data-rdc')); render(); };
-        el.querySelectorAll('[data-cl]').forEach((i) => { i.onchange = (e) => { const c = this._map.cabos.find((x) => x.id === i.getAttribute('data-cl')); if (c) { c.length = Math.max(0, Number(e.target.value) || 0); RE.notificarMudanca(this._map, { cabos: true }); render(); } }; });
-        el.querySelectorAll('[data-cb]').forEach((i) => { i.onchange = (e) => { const c = this._map.cabos.find((x) => x.id === i.getAttribute('data-cb')); if (c) { c.labelID = e.target.value.trim(); c.rotulo = c.labelID; salvar(); } }; });
+        if (q('[data-rdc]')) q('[data-rdc]').onclick = () => { RE.desconectar(this._map, q('[data-rdc]').getAttribute('data-rdc')); apSync(); render(); };
+        corpo.querySelectorAll('[data-cl]').forEach((i) => { i.onchange = (e) => { const c = this._map.cabos.find((x) => x.id === i.getAttribute('data-cl')); if (c) { c.length = Math.max(0, Number(e.target.value) || 0); RE.notificarMudanca(this._map, { cabos: true }); render(); } }; });
+        corpo.querySelectorAll('[data-cb]').forEach((i) => { i.onchange = (e) => { const c = this._map.cabos.find((x) => x.id === i.getAttribute('data-cb')); if (c) { c.labelID = e.target.value.trim(); c.rotulo = c.labelID; salvar(); } }; });
         // [20/09/2026 UTC] NOVO (RODADA 219) -- cor individual (swatch da paleta ou picker livre) e
         // modo de exibição da etiqueta flutuante, por cabo. `reconstruir(true)` chama
         // `Engine3D.rebuildCabos()` (a malha/material do tubo é recriada do zero -- não há, hoje,
         // um material MUTÁVEL persistente por-cabo que permita só trocar `.color` sem reconstruir;
         // ver ressalva no changelog) -- é o mesmo padrão já usado por `data-cl`/`data-cp` acima.
-        el.querySelectorAll('[data-ccorswatch]').forEach((b) => { b.onclick = () => { const c = this._map.cabos.find((x) => x.id === b.getAttribute('data-ccorswatch')); if (c) { c.cor = b.getAttribute('data-hex'); RE.notificarMudanca(this._map, { cabos: true }); this._engine.rebuildCabos(); render(); } }; });
-        el.querySelectorAll('[data-ccor]').forEach((i) => { i.onchange = (e) => { const c = this._map.cabos.find((x) => x.id === i.getAttribute('data-ccor')); if (c) { c.cor = e.target.value; RE.notificarMudanca(this._map, { cabos: true }); this._engine.rebuildCabos(); render(); } }; });
-        el.querySelectorAll('[data-cem]').forEach((s2) => { s2.onchange = (e) => { const c = this._map.cabos.find((x) => x.id === s2.getAttribute('data-cem')); if (c) { c.etiquetaModo = e.target.value; salvar(); } }; });
+        corpo.querySelectorAll('[data-ccorswatch]').forEach((b) => { b.onclick = () => { const c = this._map.cabos.find((x) => x.id === b.getAttribute('data-ccorswatch')); if (c) { c.cor = b.getAttribute('data-hex'); RE.notificarMudanca(this._map, { cabos: true }); if (this._engine) this._engine.rebuildCabos(); render(); } }; });
+        corpo.querySelectorAll('[data-ccor]').forEach((i) => { i.onchange = (e) => { const c = this._map.cabos.find((x) => x.id === i.getAttribute('data-ccor')); if (c) { c.cor = e.target.value; RE.notificarMudanca(this._map, { cabos: true }); if (this._engine) this._engine.rebuildCabos(); render(); } }; });
         if (q('[data-ro]')) {
           const preencher = () => {
             const alvo = this._map.objects.find((o) => o.id === q('[data-ro]').value), sa = alvo && RE.especificar(alvo.tipo);
@@ -1279,34 +1420,51 @@
             const res = RE.conectar(this._map, obj, sel, q('[data-ro]').value, Number(q('[data-rop]').value), { tipo: q('[data-rct]').value, conector: q('[data-rcx]').value || undefined, length: Number(q('[data-rcl]').value) || 0, labelID: q('[data-rcb]').value.trim() });
             if (!res.ok) toast(res.erro || 'Não foi possível conectar.', { type: 'warn', duration: 3400 });
             else toast(res.avisos && res.avisos.length ? ('Cabo conectado com aviso: ' + res.avisos[0]) : 'Cabo conectado 🔌', { type: res.avisos && res.avisos.length ? 'warn' : 'ok', duration: res.avisos && res.avisos.length ? 4200 : 1400 });
+            if (res.ok) apSync();
             render();
           };
         }
         // [19/09/2026 UTC] NOVO (RODADA 174) -- botão inserir/remover de cada baia. Config simples
         // (HDD_SATA 4TB por padrão) -- não há, ainda, uma lista pra escolher tecnologia/capacidade
         // na hora de inserir; remover sempre funciona.
-        el.querySelectorAll('[data-baia]').forEach((b) => {
+        corpo.querySelectorAll('[data-baia]').forEach((b) => {
           b.onclick = () => {
             const slot = Number(b.getAttribute('data-baia'));
             const jaTem = RE.garantirRede(obj).baias[slot];
             const res = jaTem ? RE.baiaRemover(obj, slot) : RE.baiaInserir(obj, slot, { tecnologia: 'HDD_SATA', capacidadeTB: 4 });
             if (!res.ok) { toast(res.erro || 'Não foi possível.', { type: 'warn', duration: 2200 }); return; }
-            salvar(); this._engine.rebuildObjectIncremental(obj);
+            salvar(); if (this._engine) this._engine.rebuildObjectIncremental(obj);
             toast(jaTem ? ('💽 Disco removido da baia ' + (slot + 1) + '.') : ('💽 Disco inserido na baia ' + (slot + 1) + ' (HDD_SATA 4 TB).'), { duration: 1600 });
             render();
           };
         });
         if (q('[data-lig]')) q('[data-lig]').onclick = () => { fechar(); this._caboLigIniciar(); };
-        q('[data-pg]').onclick = () => { fechar(); this._redePegar(obj); };
-        if (q('[data-rret]')) q('[data-rret]').onclick = () => { RE.retirarDoRack(this._map, obj); salvar(); this._engine.rebuildObjectIncremental(obj); fechar(); };
-        q('[data-rf]').onclick = () => { fechar(); const pk = this._engine.pickables && this._engine.pickables.find((p) => p.ref === obj && p.type === 'object'); if (pk) this._tryPick(pk); };
-        q('[data-rc]').onclick = fechar;
+        if (q('[data-pg]')) q('[data-pg]').onclick = () => { fechar(); this._redePegar(obj); };
+        if (q('[data-rret]')) q('[data-rret]').onclick = () => { RE.retirarDoRack(this._map, obj); salvar(); if (this._engine) this._engine.rebuildObjectIncremental(obj); fechar(); };
+        if (q('[data-rf]')) q('[data-rf]').onclick = () => { fechar(); const pk = this._engine.pickables && this._engine.pickables.find((p) => p.ref === obj && p.type === 'object'); if (pk) this._tryPick(pk); };
       };
       const onKey = (e) => { if (e.code === 'Escape') { e.preventDefault(); e.stopPropagation(); fechar(); } };
       const onFora = (e) => { if (!el.contains(e.target)) fechar(); };
-      this._container.appendChild(el); render(); this._menuFecharRede = fechar;
+      container.appendChild(el); render(); this._menuFecharRede = fechar;
       window.addEventListener('keydown', onKey, true);
       setTimeout(() => document.addEventListener('mousedown', onFora, true), 0);
+    },
+
+    /**
+     * [21/09/2026 UTC] NOVO -- ponto de entrada público usado pelo mapa 2D (Planta Baixa) pra abrir a MESMA
+     * janela de propriedades de equipamento de rede (`_openRedeMenu`) que aparece no "Ver em 3D" ao mirar
+     * num equipamento e clicar -- pedido verbatim: "No mapa 2D, nas propriedades do Access Point, deve ter
+     * um botão que faz aparecer a mesma janela que aparece no 'Ver em 3D' [...] quando aponta-se para um AP
+     * e clica nele." `container` é o elemento onde a janela será anexada (o mapa 2D passa `document.body`,
+     * já que a janela se auto-centraliza via `position:absolute;left:50%;top:50%` -- funciona em qualquer
+     * container posicionado ou no próprio body) e `mapa` é o `mapData` do mapa 2D (só usado se ainda não
+     * houver um `this._map` "vivo" de uma sessão "Ver em 3D" já aberta).
+     * @param {object} obj        Objeto do mapa (equipamento de rede -- switch, AP, patch panel...).
+     * @param {HTMLElement} container
+     * @param {object} mapa
+     */
+    abrirPainelEquipamento(obj, container, mapa) {
+      this._openRedeMenu(obj, null, { container, map: mapa });
     },
   };
 

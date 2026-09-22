@@ -344,12 +344,31 @@ const AmbientePhotos = {
     // masters ("📏 Medidas"/"✏️ Traço guia") nascem LIGADOS a cada abertura
     // da tela (antes nasciam `false`, exigindo tocar o botão da bandeja 1x
     // antes das fileiras "Adicionar/Apagar" aparecerem).
-    this._medidasVisiveis = true;
+    // [22/09/2026] MUDADO — pedido verbatim: "Se for selecionado 'Conferência
+    // de patrimônios' [...] o padrão é o botão 'Marcações de patrimônio'
+    // ficar ativo apenas. Não ficam ativos os botões 'Medidas' e 'Traço
+    // guia'. Se for selecionado 'Mapeamento de ambientes' [...] o padrão é
+    // os botões 'Medidas' e 'Traço guia' ficarem ativos apenas. Não fica
+    // ativo o botão 'Marcações de patrimônio'. Se nenhum botão de modo de
+    // operação for clicado, o padrão do app é ficar no modo 'Mapeamento de
+    // ambientes'." Antes os 3 masters nasciam sempre `true` juntos, sem
+    // olhar pro modo de operação escolhido na Tela de Abertura
+    // (`ClassicMode._OPMODE_KEY`/'classicOperationMode', valores
+    // 'conferencia'/'mapeamento' — ver js/classicmode.js). Usa o cache
+    // síncrono em localStorage (`ClassicMode.readCachedOpMode()`, já
+    // espelhado toda vez que o modo muda/é lido do banco no boot — ver
+    // `_syncOpModeLSCache`) em vez de `DB.getSetting` (assíncrono) porque
+    // este bloco roda sem `await` no meio da abertura da tela; qualquer
+    // valor que NÃO seja explicitamente 'conferencia' (inclusive `null`,
+    // instalação nova/splash fechada sem escolher nada) cai no padrão
+    // "Mapeamento de ambientes", como pedido.
+    const _opModoConferencia = (() => { try { return window.ClassicMode && window.ClassicMode.readCachedOpMode() === 'conferencia'; } catch (e) { return false; } })();
+    this._medidasVisiveis = !_opModoConferencia;
     this._placingMedida = false;
     this._deletingMedida = false;
     this._medidaDraft = null;
     this._medidaDragging = null;
-    this._tracosVisiveis = true;
+    this._tracosVisiveis = !_opModoConferencia;
     this._placingTraco = false;
     this._deletingTraco = false;
     this._tracoDraft = null;
@@ -366,7 +385,10 @@ const AmbientePhotos = {
     // `#ambphotos-controls`, ver HTML mais abaixo); o switch só alterna a
     // classe `hidden` de cada um dos 2 individualmente, ver
     // `_toggleMarcacoesPatrimonioVisiveis`/`_updateMarcacoesPatrimonioVisibility`.
-    this._marcacoesPatrimonioVisiveis = true;
+    // [22/09/2026] MUDADO — ver comentário grande junto de `_opModoConferencia`
+    // acima: só nasce ligado no modo 'Conferência de patrimônios' (nos
+    // demais casos, incl. nenhum modo escolhido, nasce desligado).
+    this._marcacoesPatrimonioVisiveis = _opModoConferencia;
     // Defensivo: um open() "normal" (não vindo de enterOrbPlacementForItem)
     // nunca deve herdar um pedido pendente de rodadas anteriores. Quando ESTA
     // chamada de open() é a própria enterOrbPlacementForItem, ela roda ANTES
@@ -430,7 +452,7 @@ const AmbientePhotos = {
         <div class="ambphotos-topbar-row">
           <button class="icon-btn ambphotos-btn-close" id="ambphotos-close" title="${this._returnToLabel ? `Voltar para ${Utils.escapeHtml(this._returnToLabel)}` : 'Fechar e voltar para o mapa'}">${this._returnToLabel ? `← Voltar para ${Utils.escapeHtml(this._returnToLabel)}` : '✕ Fechar'}</button>
           <div class="ambphotos-topbar-center">
-            ${this._pickPhoto ? '<button class="icon-btn" id="ambphotos-pick" title="Anexar a foto que está aberta e voltar">✔ Usar esta foto</button>' : ''}
+            ${this._pickPhoto ? '<button class="icon-btn ambphotos-btn-pick" id="ambphotos-pick" title="Anexar a foto que está aberta e voltar">✔ Usar esta foto</button>' : ''}
             <button class="icon-btn" id="ambphotos-add" title="Tirar/adicionar uma foto deste ambiente (no celular, use o modo panorama da câmera para fotos mais amplas)">📷 Adicionar foto</button>
             <button type="button" class="ambphotos-caption hidden" id="ambphotos-caption" title="Toque para dar um nome a esta foto">
               <span id="ambphotos-caption-text">Sem nome</span>
@@ -731,7 +753,18 @@ const AmbientePhotos = {
     this._onKeyDown = (e) => { if (e.key === 'Escape') this.close(); };
     document.addEventListener('keydown', this._onKeyDown);
 
-    this._photos = await DB.getPhotosByAmbiente(map.id);
+    // [22/09/2026] Pedido verbatim: "Não deve gerar um ícone de imagem
+    // automaticamente. Colocar um objeto câmera na grade do mapa 2D e não
+    // anexar foto, não deve fazer nada em 'Mapa'->'Fotos'... é só um objeto
+    // que pode receber uma imagem anexada em algum momento." Um objeto
+    // "Câmera" (ferramenta 'foto-orb') É um registro de AmbientePhoto por
+    // baixo (mesmo mecanismo, ver mapview.js _placeFotoOrbAtWorld), só que
+    // sem `dataUrl`/`thumbDataUrl` até alguém anexar uma foto — esta tela
+    // ('Mapa'->'Fotos') é sobre FOTOS de verdade, então filtra fora
+    // qualquer registro ainda sem imagem nenhuma (a Câmera continua
+    // existindo/editável normalmente no mapa 2D/3D, só não aparece aqui
+    // enquanto não tiver foto).
+    this._photos = (await DB.getPhotosByAmbiente(map.id)).filter((p) => p.dataUrl || p.thumbDataUrl);
     this._renderStrip();
     if (this._photos.length) {
       // Prioridade: uma foto explicitamente pedida (ex: atalho vindo de uma
@@ -1437,13 +1470,25 @@ const AmbientePhotos = {
     const strip = this._overlayEl?.querySelector('#ambphotos-strip');
     const empty = this._overlayEl?.querySelector('#ambphotos-empty');
     if (!strip) return;
-    strip.innerHTML = this._photos.map((p) => `
-      <div class="ambphoto-thumb ${p.id === this._current?.id ? 'active' : ''}" data-id="${p.id}" title="${Utils.escapeHtml(p.nome || 'Sem nome')}">
-        <img src="${p.thumbDataUrl || p.dataUrl}" alt="${Utils.escapeHtml(p.nome || 'Foto do ambiente')}">
+    strip.innerHTML = this._photos.map((p) => {
+      // [22/09/2026] Bug relatado: "colocando uma câmera na grade do mapa 2D e
+      // não anexando foto alguma, uma imagem quebrada surge em 'Mapa'->
+      // 'Fotos'." Causa raiz: um objeto "Câmera" (ferramenta 'foto-orb', ver
+      // mapview.js _placeFotoOrbAtWorld) nasce como um registro de
+      // AmbientePhoto de propósito (é o mesmo objeto por baixo, só sem
+      // dataUrl/thumbDataUrl ainda) — mas esta faixa sempre montava um <img>
+      // com `src` vazio quando não havia foto, virando o ícone de "imagem
+      // quebrada" do navegador. Agora mostra um placeholder de câmera em vez
+      // de tentar carregar um <img> sem src.
+      const src = p.thumbDataUrl || p.dataUrl || '';
+      return `
+      <div class="ambphoto-thumb ${p.id === this._current?.id ? 'active' : ''}" data-id="${p.id}" title="${Utils.escapeHtml(p.nome || 'Sem nome')}${src ? '' : ' (sem foto anexada ainda)'}">
+        ${src ? `<img src="${src}" alt="${Utils.escapeHtml(p.nome || 'Foto do ambiente')}">` : `<div class="ambphoto-thumb-placeholder" aria-label="Câmera sem foto anexada">📷</div>`}
         ${p.orbs?.length ? `<span class="ambphoto-thumb-count">📍${p.orbs.length}</span>` : ''}
         <button type="button" class="ambphoto-thumb-del" data-id="${p.id}" title="Excluir esta foto (e os orbs marcados nela)">✕</button>
       </div>
-    `).join('');
+    `;
+    }).join('');
     empty?.classList.toggle('hidden', this._photos.length > 0);
     strip.classList.toggle('hidden', this._photos.length === 0);
     this._overlayEl?.querySelector('#ambphotos-controls')?.classList.toggle('hidden', this._photos.length === 0);
@@ -1821,9 +1866,84 @@ const AmbientePhotos = {
   async _deletePhoto(id) {
     const photo = this._photos.find((p) => p.id === id);
     if (!photo) return;
+    // [22/09/2026] Pedido verbatim: "Em 'Mapa'->'Fotos', ao excluir uma
+    // imagem que está associada a uma Câmera deve aparecer uma janela
+    // perguntando se deseja excluir o Câmera, no mapa 2D, que tem ela
+    // associada." Uma foto POSICIONADA (mapaX/mapaY definidos) é sempre o
+    // mesmo registro do objeto "Câmera" no mapa (ver mapview.js
+    // _placeFotoOrbAtWorld/_placePhotoPinAtWorld) — excluir o registro
+    // inteiro (`DB.deleteAmbientePhoto`, ver `_deletePhotoInternal` abaixo)
+    // apaga a Câmera junto. Antes disso acontecia sempre, sem avisar; agora
+    // pergunta (a não ser que a nova opção "Excluir também o objeto Câmera
+    // automaticamente", em Configurações 2D → seção "📷 Câmera", esteja
+    // ligada — ver DEFAULTS.cameraExcluirObjetoAoExcluirFotoAtivo).
+    // [22/09/2026] MUDADO — Câmera agora pode ser um objeto NOVO e
+    // independente de foto (`map.cameras`, ver js/objecttypes/camera.js
+    // `CameraPin`), onde a foto é só um "acessório" (`fotoId`) — nesse caso
+    // a Câmera NUNCA deve ser oferecida pra exclusão junto (ela é
+    // independente por definição, pedido verbatim do usuário: "o objeto
+    // Câmera é um objeto independente de foto"): excluir a foto aqui SEMPRE
+    // só desvincula o acessório, sem perguntar nada. O diálogo "excluir a
+    // Câmera também?" abaixo continua existindo só pra linha LEGADA
+    // (foto+câmera fundida no mesmo registro, criada por "Tirar
+    // foto"->"Marcar aqui", onde apagar o registro apaga as duas coisas de
+    // fato, sem jeito de separar).
+    const camNova = typeof CameraPin !== 'undefined' ? CameraPin.findCameraByFotoId(this._map, photo.id) : null;
+    if (camNova) {
+      await CameraPin.detachPhoto(this._map, camNova.id);
+      this._photos = this._photos.filter((p) => p.id !== photo.id);
+      if (this._current?.id === photo.id) {
+        this._current = null; this._img = null;
+        if (this._photos.length) await this._selectPhoto(this._photos[0].id);
+        else { this._updateTitle(); this.render(); }
+      }
+      this._renderStrip();
+      Utils.toast('Foto removida — a Câmera continua no mapa.', { type: 'warn' });
+      return;
+    }
+    const temCameraAssociada = typeof photo.mapaX === 'number' && typeof photo.mapaY === 'number';
+    if (temCameraAssociada) {
+      const cfg = typeof MapConfig !== 'undefined' ? await MapConfig.get() : {};
+      if (!cfg.cameraExcluirObjetoAoExcluirFotoAtivo) {
+        const escolha = await Utils.showChoiceModal({
+          title: 'Excluir foto da Câmera',
+          message: `Esta foto está associada a um objeto Câmera no mapa 2D.${photo.orbs?.length ? ` Ela também tem ${photo.orbs.length} orb(s) marcados.` : ''} O que você quer excluir?`,
+          choices: [
+            { value: 'so-foto', label: '🖼️ Só a foto (mantém a Câmera no mapa, sem imagem)' },
+            { value: 'tudo', label: '🗑️ A foto e o objeto Câmera' },
+            { value: 'cancelar', label: 'Cancelar', secondary: true },
+          ],
+        });
+        if (!escolha || escolha === 'cancelar') return;
+        if (escolha === 'so-foto') {
+          await DB.saveAmbientePhoto({ ...photo, dataUrl: null, thumbDataUrl: null });
+          // Sem foto, este registro sai da lista desta tela (ver filtro em
+          // open()/_restorePhotoInternal) — a Câmera continua existindo/
+          // editável normalmente no mapa 2D/3D.
+          this._photos = this._photos.filter((p) => p.id !== photo.id);
+          if (this._current?.id === photo.id) {
+            this._current = null; this._img = null;
+            if (this._photos.length) await this._selectPhoto(this._photos[0].id);
+            else { this._updateTitle(); this.render(); }
+          }
+          this._renderStrip();
+          Utils.toast('Foto removida — a Câmera continua no mapa.', { type: 'warn' });
+          return;
+        }
+        // escolha === 'tudo' → segue pro fluxo de exclusão completa abaixo, sem pedir confirm() de novo.
+        const snapshot = await this._deletePhotoInternal(photo);
+        Utils.toast('Foto e Câmera excluídas.', { type: 'warn' });
+        History.push({
+          label: 'excluir foto e câmera',
+          undo: async () => { await this._restorePhotoInternal(snapshot); },
+          redo: async () => { await this._deletePhotoInternal(snapshot); },
+        });
+        return;
+      }
+    }
     const aviso = photo.orbs?.length
-      ? `Excluir esta foto e os ${photo.orbs.length} orb(s) marcados nela? (dá para desfazer logo em seguida, com Ctrl+Z ou pelo botão ↶)`
-      : 'Excluir esta foto?';
+      ? `Excluir esta foto${temCameraAssociada ? ' e o objeto Câmera associado' : ''} e os ${photo.orbs.length} orb(s) marcados nela? (dá para desfazer logo em seguida, com Ctrl+Z ou pelo botão ↶)`
+      : `Excluir esta foto${temCameraAssociada ? ' e o objeto Câmera associado' : ''}?`;
     if (!confirm(aviso)) return;
     const snapshot = await this._deletePhotoInternal(photo);
     Utils.toast('Foto excluída.', { type: 'warn' });
@@ -1860,7 +1980,7 @@ const AmbientePhotos = {
   async _restorePhotoInternal(snapshot) {
     await DB.saveAmbientePhoto(snapshot);
     if (this._map?.id === snapshot.ambienteId) {
-      this._photos = await DB.getPhotosByAmbiente(this._map.id);
+      this._photos = (await DB.getPhotosByAmbiente(this._map.id)).filter((p) => p.dataUrl || p.thumbDataUrl);
       this._renderStrip();
       await this._selectPhoto(snapshot.id);
     }

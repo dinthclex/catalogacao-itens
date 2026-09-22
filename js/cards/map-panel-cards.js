@@ -83,6 +83,14 @@ window.MapPanelCards.objectPickerPanel = () => `
             <option value="livre">Livre (arraste para reordenar)</option>
           </select>
         </div>
+        <!-- [21/09/2026] NOVO -- pedido verbatim: "No mapa 2D, na janela 'Ferramentas', em
+             'Objetos', deve ter um campo para buscar o nome de um objeto." Filtra a grade abaixo
+             pelo rótulo (ver renderGrid em mapview.js _openObjectPickerPanel); some por completo
+             com o modo "Livre" desabilitado enquanto há busca (arrastar pra reordenar não faz
+             sentido numa lista já filtrada) -- ver mesmo trecho. -->
+        <div class="map-obj-picker-busca-row" style="padding:6px 10px 0 10px">
+          <input type="search" id="map-obj-picker-busca" placeholder="🔎 Buscar objeto…" style="width:100%; font-size:12px; box-sizing:border-box">
+        </div>
         <div class="map-obj-picker-grid" id="map-obj-picker-grid"></div>
       </div>
     `;

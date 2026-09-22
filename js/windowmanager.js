@@ -341,7 +341,7 @@ WindowManager._nextModalZ = function _nextModalZ() {
 (function () {
   if (typeof document === 'undefined') return;
   const JANELA = /(panel|modal|overlay|card|window|popover|dialog|sheet|janela|painel|flashcard|floating|flutuante)/i;
-  const IGNORAR = /(toast|tooltip|backdrop|hud|topbar|hotbar|vignette|cc3d-gimbal)/i;
+  const IGNORAR = /(toast|tooltip|backdrop|hud|topbar|hotbar|vignette|cc3d-)/i;
   let ate = 0, obs = null;
   const cls = (el) => (typeof el.className === 'string' ? el.className : (el.getAttribute && el.getAttribute('class')) || '');
   const ehJanela = (el) => {

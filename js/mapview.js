@@ -2312,6 +2312,11 @@ class Map2DRenderer {
     // (por cima), mesmo espírito visual de um cabo passando por cima do chão/mobiliário no mapa.
     this._drawCabosRede2D(ctx, opts.hoverEl);
 
+    // [21/09/2026 UTC] NOVO -- pedido verbatim: "Sobre o objeto Access Point, se a opção 'mostrar mapa'
+    // estiver ligada, então, no mapa 2D, deve ter uma representação 2D em recorte (plano XZ) do nível do
+    // AP (em Y)." Ver comentário grande em `_drawApSinal2D` (mapview-rede-2d.js).
+    this._drawApSinal2D(ctx);
+
     // Forma DE VERDADE do rascunho em progresso da ferramenta Formas (ver
     // comentário grande no topo desta função, "formaDraftIsFloorImage") — só
     // o desenho da imagem/retângulo/polígono em si, respeitando a opacidade
@@ -7934,7 +7939,7 @@ const MapView = {
         if (kind === 'fotoPin') {
           const newX = arredondarParaSnap(ref.ref.x + dx), newY = arredondarParaSnap(ref.ref.y + dy);
           ref.ref.x = newX; ref.ref.y = newY;
-          DB.getAmbientePhoto(id).then((photo) => { if (photo) return DB.saveAmbientePhoto({ ...photo, mapaX: newX, mapaY: newY }); }).then(() => this._refreshFotosNoMapa());
+          CameraPin.save(this._map, id, { mapaX: newX, mapaY: newY }).then(() => this._refreshFotosNoMapa());
           moveu = true;
           tocarPainel('fotoPin', id);
           return;
@@ -8055,7 +8060,7 @@ const MapView = {
         const pin = (this._map.fotos || []).find((f) => f.id === this.selectedFotoId);
         if (pin) {
           pin.x = arredondarParaSnap(pin.x + dx); pin.y = arredondarParaSnap(pin.y + dy);
-          DB.getAmbientePhoto(pin.id).then((photo) => { if (photo) return DB.saveAmbientePhoto({ ...photo, mapaX: pin.x, mapaY: pin.y }); }).then(() => this._refreshFotosNoMapa());
+          CameraPin.save(this._map, pin.id, { mapaX: pin.x, mapaY: pin.y }).then(() => this._refreshFotosNoMapa());
           if (this._panelEl) this._openFotoPinPopover(pin);
           return true;
         }
@@ -8468,7 +8473,15 @@ const MapView = {
     const fotoRefs = refs.filter((r) => r.kind === 'fotoPin');
     const elRefs = refs.filter((r) => r.kind !== 'itemPin' && r.kind !== 'fotoPin');
     const elSnapshots = elRefs.map((r) => ({ kind: r.kind, data: { ...r.ref } }));
-    const fotoSnapshots = fotoRefs.map((r) => ({ id: r.id, x: r.ref.x, y: r.ref.y, piso: r.ref.piso || 0 }));
+    const fotoSnapshots = fotoRefs.map((r) => ({
+      id: r.id, x: r.ref.x, y: r.ref.y, piso: r.ref.piso || 0,
+      // [22/09/2026] NOVO — cópia INTEGRAL do objeto Câmera (se for o caso,
+      // ver CameraPin.isCameraId), pra o `undo` abaixo conseguir restaurar
+      // TUDO (direção/altura/campo de visão/scripts/histórico/foto
+      // acessório), não só a posição — uma foto legada não precisa disso
+      // (`camObj` fica `null`, undo continua só reposicionando como sempre).
+      camObj: CameraPin.isCameraId(this._map, r.id) ? { ...(this._map.cameras.find((c) => c.id === r.id)) } : null,
+    }));
     // NOVO (06/09/2026) — ver comentário grande acima (`tracoIds`/`medidaIds`):
     // snapshot de cada traço/medida ANTES de removê-los, pro undo poder
     // repor exatamente os mesmos dados (mesmo espírito de `elSnapshots`
@@ -8478,6 +8491,13 @@ const MapView = {
     const medidaSnapshots = medidaIds.map((id) => (this._map.medidas2d || []).find((m) => m.id === id)).filter(Boolean).map((m) => ({ ...m }));
     for (const r of itemRefs) await DB.updateItem(r.id, { mapaX: null, mapaY: null, mapaPiso: 0 });
     for (const r of fotoRefs) {
+      // [22/09/2026] MUDADO — uma Câmera independente nova (`map.cameras`,
+      // ver js/objecttypes/camera.js) não tem uma "📦 Caixa" pra onde
+      // voltar sem posição (isso só existe pra fotos de verdade, com
+      // dataUrl) — excluí-la aqui apaga o objeto por completo (e a foto
+      // acessório vinculada, se houver). Uma foto legada continua com o
+      // comportamento de sempre: só perde a posição, sem apagar do catálogo.
+      if (CameraPin.isCameraId(this._map, r.id)) { await CameraPin.delete(this._map, r.id); continue; }
       const photo = await DB.getAmbientePhoto(r.id);
       if (photo) await DB.saveAmbientePhoto({ ...photo, mapaX: null, mapaY: null, mapaPiso: 0 });
     }
@@ -8505,6 +8525,11 @@ const MapView = {
       undo: async () => {
         for (const r of itemRefs) await DB.updateItem(r.id, { mapaX: r.ref.x, mapaY: r.ref.y, mapaPiso: r.ref.piso || 0 });
         for (const s of fotoSnapshots) {
+          if (s.camObj) {
+            if (!this._map.cameras) this._map.cameras = [];
+            if (!this._map.cameras.find((c) => c.id === s.id)) { this._map.cameras.push({ ...s.camObj }); this._saveMap(); }
+            continue;
+          }
           const photo = await DB.getAmbientePhoto(s.id);
           if (photo) await DB.saveAmbientePhoto({ ...photo, mapaX: s.x, mapaY: s.y, mapaPiso: s.piso });
         }
@@ -8527,6 +8552,7 @@ const MapView = {
       redo: async () => {
         for (const r of itemRefs) await DB.updateItem(r.id, { mapaX: null, mapaY: null, mapaPiso: 0 });
         for (const s of fotoSnapshots) {
+          if (s.camObj) { await CameraPin.delete(this._map, s.id); continue; }
           const photo = await DB.getAmbientePhoto(s.id);
           if (photo) await DB.saveAmbientePhoto({ ...photo, mapaX: null, mapaY: null, mapaPiso: 0 });
         }
@@ -9619,84 +9645,13 @@ const MapView = {
    *  preencherem o campo direto no banco. */
   async _refreshFotosNoMapa() {
     if (!this._map) return;
-    const fotos = await DB.getAllAmbientePhotos();
-    const posicionadas = fotos.filter((f) => typeof f.mapaX === 'number' && typeof f.mapaY === 'number');
-    // NOVO (03/09/2026), pedido do usuário: "O orb de foto também deve
-    // pertencer a uma camada" — MESMA cura de `_refreshItensNoMapa` logo
-    // acima (ver comentário grande lá): resolve pra uma camada válida
-    // (Mapping.resolveLayerId — cai na camada de segurança "Recuperados..."
-    // só se a gravada já não existir mais/nunca existiu) e persiste a cura
-    // de volta no banco, não só na memória.
-    const curar = [];
-    this._map.fotos = posicionadas.map((f) => {
-      const layerId = Mapping.resolveLayerId(this._map, f.mapaLayerId);
-      if (layerId && layerId !== (f.mapaLayerId || null)) curar.push({ id: f.id, layerId });
-      return {
-        id: f.id, x: f.mapaX, y: f.mapaY, piso: f.mapaPiso || 0, nome: f.nome || '', layerId,
-        // NOVO (03/09/2026) — orientação/altura do orb (ver _openFotoPinPopover
-        // e o desenho da setinha em _renderFrame): `dirAngulo` em radianos
-        // (0 = eixo +Y do mundo, sentido horário — mesma convenção de
-        // `obj.angulo` usada no resto do mapa), `altura` em metros acima do
-        // chão, `rotPerp` em radianos (inclinação da seta pra cima/baixo — só
-        // guardado como número aqui, sem representação própria na vista de
-        // cima). Todos opcionais/0 por padrão — nada migra dados antigos.
-        // BUG CORRIGIDO (03/09/2026) — ver comentário grande em
-        // _placePhotoPinAtWorld sobre o mesmo pedido ("dentro do chão"):
-        // `?? 1.6` (não `|| 0`) cobre também as fotos JÁ vinculadas ANTES
-        // deste conserto (mapaAltura ainda `undefined`/nunca salvo no banco)
-        // — sem isso, só fotos vinculadas a partir de agora ganhariam a
-        // altura-padrão; as antigas continuariam cravadas no chão até
-        // alguém abrir o painel e mexer manualmente. `0` explícito (o
-        // usuário desceu de propósito) continua sendo respeitado (`??` só
-        // cai no padrão pra `null`/`undefined`, nunca pra `0`).
-        dirAngulo: f.mapaDirAngulo || 0, altura: f.mapaAltura ?? 1.6, rotPerp: f.mapaRotPerp || 0, roll: f.mapaRoll || 0,
-        // [10/09/2026] RESTAURADO — campo tinha se perdido nesta cópia de
-        // trabalho em relação a um backup mais completo do projeto (ver
-        // comentário grande em js/mapview.js _openFotoPinWheel/cameraRoot e
-        // js/view3d.js _enterFotoCameraView). NOVO (09/09/2026), pedido
-        // verbatim: "Todo o JSON gerado [pelo vanishCam] deve ser colocado
-        // junto no bundle de informações do orb de câmera. No 3D, a câmera
-        // assumirá essas configurações [...] a imagem que o 'orb de câmera'
-        // tem aparece transparente 'na frente'." — `vanishCam` é o JSON
-        // gerado por `_openVanishCamScreen` abaixo (campo `mapaVanishCam`
-        // no registro da foto no banco). `dataUrl`/`thumbDataUrl` precisam
-        // vir até aqui pro "ver através desta câmera" (js/view3d.js
-        // _enterFotoCameraView) conseguir mostrar a foto semitransparente.
-        dataUrl: f.dataUrl || null, thumbDataUrl: f.thumbDataUrl || null, vanishCam: f.mapaVanishCam || null,
-        // [10/09/2026] NOVO — pedido verbatim: "No 'orb da foto' deve
-        // ser possível definir as propriedades da câmera tanto no 2D quanto
-        // no 3D. São as mesmas do Blender." Ver
-        // _openFotoPinPopover (painel 2D, usa _camPropsFieldsetHtml/
-        // _wireCamPropsFieldset) e js/db.js (campo `mapaCamProps` no registro da
-        // AmbientePhoto, mesma convenção de `mapaVanishCam` acima).
-        camProps: f.mapaCamProps || null,
-        // [10/09/2026] NOVO — pedido verbatim: "Na janela de propriedades
-        // do 'Orb de foto', devem estar presentes os botões da parte de
-        // scripts da janela de propriedades dos objetos, pois deve
-        // ser scriptável também." Mesmo sistema genérico de componentes
-        // (`entity.components`, ver js/components.js Components.
-        // ensureComponents) já usado por parede/porta/janela/texto/objeto —
-        // persistido como `mapaComponents` no registro da
-        // AmbientePhoto (mesma convenção de `mapaCamProps`/`mapaVanishCam`
-        // acima, já que só faz sentido pra uma foto QUANDO ela está no mapa).
-        components: f.mapaComponents || [],
-        // [15/09/2026 UTC] NOVO — pedido verbatim: "Ao acrescentar uma
-        // entrada no 'Histórico deste objeto' (no 'Ver em 3D') e, depois,
-        // ir no mapa 2D [...] a entrada desaparece [...] a entrada não
-        // está mais ali (mesmo não tendo sido excluída)." CAUSA RAIZ
-        // ENCONTRADA: esta projeção (reconstruída do zero a cada chamada,
-        // a partir do registro cru da AmbientePhoto) nunca copiava
-        // `historico` — o campo simplesmente não existia no objeto
-        // "achatado" que o painel 2D/cartão 3D leem (`this._map.fotos[i]`),
-        // mesmo quando `DB.saveAmbientePhoto` já tinha gravado a entrada
-        // corretamente no banco (daí o usuário notar, com razão, que não
-        // fora excluída — só ficou invisível na próxima leitura). Mesma
-        // omissão espelhada em `js/view3d.js` `_buildFotosNoMapa`
-        // (corrigida junto, mesma causa). Adicionado aqui.
-        historico: f.historico || [],
-      };
-    });
-    for (const c of curar) { const photo = await DB.getAmbientePhoto(c.id); if (photo) await DB.saveAmbientePhoto({ ...photo, mapaLayerId: c.layerId }); }
+    // [22/09/2026] MUDADO — a lógica de montagem (mesclar fotos legadas
+    // posicionadas + Câmeras independentes novas) foi centralizada em
+    // `CameraPin.buildFotosArray` (js/camera-pin.js), reaproveitada também
+    // por `view3d.js _buildFotosNoMapa` — antes as duas funções duplicavam
+    // o mesmo mapeamento campo a campo (o que já tinha causado bug de
+    // dessincronia entre 2D/3D, ver histórico do campo `historico` abaixo).
+    this._map.fotos = await CameraPin.buildFotosArray(this._map);
     this._updateBbmItemCount(); // NOVO (06/09/2026) — ver comentário grande em _saveMap; pinos de foto não passam por lá, então precisam do próprio gatilho aqui.
   },
 
@@ -11899,6 +11854,33 @@ const MapView = {
         // mesmo antes desta correção, ver mais abaixo em
         // _openFotoPinPopover). Corrigido registrando aqui também, MESMO
         // padrão before/patch/undo/redo já usado em todo o resto do app.
+        // [22/09/2026] MUDADO — Câmera agora é objeto independente de foto
+        // (ver js/objecttypes/camera.js `CameraPin`). Um pino "câmera" novo
+        // (`map.cameras`) não tem "mapaX/Y" pra desvincular — a ferramenta
+        // Apagar nele apaga o OBJETO câmera de vez (com a foto acessória
+        // junto, se tiver uma). Linha legada (foto+câmera fundida, criada
+        // por "Tirar foto"->"Marcar aqui") continua com o comportamento
+        // antigo, inalterado: só desvincula a posição, nunca apaga a foto.
+        if (CameraPin.isCameraId(this._map, hitDraw.id)) {
+          const idxCam = this._map.cameras.findIndex((c) => c.id === hitDraw.id);
+          const camBefore = idxCam !== -1 ? { ...this._map.cameras[idxCam] } : null;
+          if (!camBefore) return;
+          await CameraPin.delete(this._map, hitDraw.id);
+          await this._refreshFotosNoMapa();
+          if (this.selectedFotoId === hitDraw.id) this._closePanel();
+          Utils.toast('Câmera apagada.', { type: 'ok' });
+          History.push({
+            label: 'apagar câmera (Apagar)',
+            undo: async () => {
+              if (!this._map.cameras) this._map.cameras = [];
+              if (!this._map.cameras.find((c) => c.id === camBefore.id)) this._map.cameras.push({ ...camBefore });
+              this._saveMap();
+              await this._refreshMapaIfShowing();
+            },
+            redo: async () => { await CameraPin.delete(this._map, camBefore.id); await this._refreshMapaIfShowing(); },
+          });
+          return;
+        }
         const photo = await DB.getAmbientePhoto(hitDraw.id);
         if (!photo) return;
         const before = { ...photo };
@@ -14925,10 +14907,7 @@ const MapView = {
       });
       for (const p of itemDeltas) await DB.updateItem(p.id, { mapaX: p.to.x, mapaY: p.to.y });
       if (itemDeltas.length) await this._refreshItensNoMapa();
-      for (const p of fotoDeltas) {
-        const photo = await DB.getAmbientePhoto(p.id);
-        if (photo) await DB.saveAmbientePhoto({ ...photo, mapaX: p.to.x, mapaY: p.to.y });
-      }
+      for (const p of fotoDeltas) { await CameraPin.save(this._map, p.id, { mapaX: p.to.x, mapaY: p.to.y }); }
       if (fotoDeltas.length) await this._refreshFotosNoMapa();
       if (elDeltas.length) { Mapping.recalcBounds(this._map); await this._saveMap(); }
       Utils.toast(`${drag.items.length} elemento(s) reposicionado(s) ✓`, { type: 'ok' });
@@ -14949,10 +14928,7 @@ const MapView = {
         label: 'Mover itens selecionados',
         undo: async () => {
           for (const p of itemDeltas) await DB.updateItem(p.id, { mapaX: p.from.x, mapaY: p.from.y });
-          for (const p of fotoDeltas) {
-            const photo = await DB.getAmbientePhoto(p.id);
-            if (photo) await DB.saveAmbientePhoto({ ...photo, mapaX: p.from.x, mapaY: p.from.y });
-          }
+          for (const p of fotoDeltas) { await CameraPin.save(this._map, p.id, { mapaX: p.from.x, mapaY: p.from.y }); }
           if (elDeltas.length) {
             const m = await DB.getMap(mapId);
             if (m) { applyEl(m, elDeltas, 'from'); Mapping.recalcBounds(m); await DB.saveMap(m); }
@@ -14964,10 +14940,7 @@ const MapView = {
         },
         redo: async () => {
           for (const p of itemDeltas) await DB.updateItem(p.id, { mapaX: p.to.x, mapaY: p.to.y });
-          for (const p of fotoDeltas) {
-            const photo = await DB.getAmbientePhoto(p.id);
-            if (photo) await DB.saveAmbientePhoto({ ...photo, mapaX: p.to.x, mapaY: p.to.y });
-          }
+          for (const p of fotoDeltas) { await CameraPin.save(this._map, p.id, { mapaX: p.to.x, mapaY: p.to.y }); }
           if (elDeltas.length) {
             const m = await DB.getMap(mapId);
             if (m) { applyEl(m, elDeltas, 'to'); Mapping.recalcBounds(m); await DB.saveMap(m); }
@@ -15023,10 +14996,7 @@ const MapView = {
       });
       for (const p of itemDeltas) await DB.updateItem(p.id, { mapaX: p.to.x, mapaY: p.to.y });
       if (itemDeltas.length) await this._refreshItensNoMapa();
-      for (const p of fotoDeltas) {
-        const photo = await DB.getAmbientePhoto(p.id);
-        if (photo) await DB.saveAmbientePhoto({ ...photo, mapaX: p.to.x, mapaY: p.to.y });
-      }
+      for (const p of fotoDeltas) { await CameraPin.save(this._map, p.id, { mapaX: p.to.x, mapaY: p.to.y }); }
       if (fotoDeltas.length) await this._refreshFotosNoMapa();
       if (elDeltas.length) { Mapping.recalcBounds(this._map); await this._saveMap(); }
       Utils.toast(`${drag.items.length} elemento(s) ${drag.kind === 'resize' ? 'redimensionado(s)' : 'girado(s)'} ✓`, { type: 'ok' });
@@ -15041,10 +15011,7 @@ const MapView = {
         label: kindLabel,
         undo: async () => {
           for (const p of itemDeltas) await DB.updateItem(p.id, { mapaX: p.from.x, mapaY: p.from.y });
-          for (const p of fotoDeltas) {
-            const photo = await DB.getAmbientePhoto(p.id);
-            if (photo) await DB.saveAmbientePhoto({ ...photo, mapaX: p.from.x, mapaY: p.from.y });
-          }
+          for (const p of fotoDeltas) { await CameraPin.save(this._map, p.id, { mapaX: p.from.x, mapaY: p.from.y }); }
           if (elDeltas.length) {
             const m = await DB.getMap(mapId);
             if (m) { applyEl(m, elDeltas, 'from'); Mapping.recalcBounds(m); await DB.saveMap(m); }
@@ -15054,10 +15021,7 @@ const MapView = {
         },
         redo: async () => {
           for (const p of itemDeltas) await DB.updateItem(p.id, { mapaX: p.to.x, mapaY: p.to.y });
-          for (const p of fotoDeltas) {
-            const photo = await DB.getAmbientePhoto(p.id);
-            if (photo) await DB.saveAmbientePhoto({ ...photo, mapaX: p.to.x, mapaY: p.to.y });
-          }
+          for (const p of fotoDeltas) { await CameraPin.save(this._map, p.id, { mapaX: p.to.x, mapaY: p.to.y }); }
           if (elDeltas.length) {
             const m = await DB.getMap(mapId);
             if (m) { applyEl(m, elDeltas, 'to'); Mapping.recalcBounds(m); await DB.saveMap(m); }
@@ -15114,17 +15078,31 @@ const MapView = {
       this._dragMoved = false;
       if (!moved) return; // "clique parado" — não faz mais nada sozinho (abrir o painel agora exige DOIS cliques, ver 'dblclick')
       this._suppressNextClick = true;
-      const photo = await DB.getAmbientePhoto(pin.id);
-      if (!photo) { await this._refreshFotosNoMapa(); return; }
-      const before = { ...photo };
+      // [22/09/2026] MUDADO — reposicionar via arraste passa por
+      // `CameraPin.save` (ver js/objecttypes/camera.js), que cuida tanto de
+      // câmera nova (`map.cameras`) quanto de linha legada (foto+câmera
+      // fundida) — mesmo `patch` de antes (`mapaX`/`mapaY`), traduzido
+      // internamente pro campo certo em cada caso.
       const patch = { mapaX: pin.x, mapaY: pin.y };
-      await DB.saveAmbientePhoto({ ...photo, ...patch });
+      const antesSalvar = await CameraPin.get(this._map, pin.id);
+      if (!antesSalvar) { await this._refreshFotosNoMapa(); return; }
+      const before = CameraPin.isCameraId(this._map, pin.id) ? { ...this._map.cameras.find((c) => c.id === pin.id) } : { ...antesSalvar };
+      await CameraPin.save(this._map, pin.id, patch);
       await this._refreshFotosNoMapa();
       Utils.toast('Foto reposicionada ✓', { type: 'ok' });
       History.push({
         label: 'reposicionar foto no mapa',
-        undo: async () => { await DB.saveAmbientePhoto(before); await this._refreshMapaIfShowing(); },
-        redo: async () => { await DB.saveAmbientePhoto({ ...before, ...patch }); await this._refreshMapaIfShowing(); },
+        undo: async () => {
+          if (CameraPin.isCameraId(this._map, pin.id)) {
+            const idx = this._map.cameras.findIndex((c) => c.id === pin.id);
+            if (idx !== -1) this._map.cameras[idx] = { ...before };
+            this._saveMap();
+          } else {
+            await DB.saveAmbientePhoto(before);
+          }
+          await this._refreshMapaIfShowing();
+        },
+        redo: async () => { await CameraPin.save(this._map, pin.id, patch); await this._refreshMapaIfShowing(); },
       });
       if (this.selectedFotoId === pin.id && this._panelEl) this._openFotoPinPopover(pin);
     }
@@ -15318,7 +15296,7 @@ const MapView = {
       const isShape = o.forma === 'retangulo' || o.forma === 'poligono' || o.forma === 'imagem';
       const s = this._renderer.worldToScreen(o.x, o.y);
       const d = isShape ? 0 : Math.hypot(s.x - sx, s.y - sy);
-      if (d < bestD) { bestD = d; best = { kind: 'object', id: o.id }; }
+      if (d < bestD || (isShape && d === 0 && bestD === 0)) { bestD = d; best = { kind: 'object', id: o.id }; }   // formas: o colocado por último (por cima) vence
     });
     (this._map.itens || []).forEach((it) => {
       if (!onActiveLayer(it.layerId)) return;
@@ -15545,7 +15523,10 @@ const MapView = {
 
   _hitTestObject(sx, sy, thresholdPx = 16) {
     if (!this._map) return null;
-    let best = null, bestD = Infinity;
+    let best = null;
+    // [21/09/2026] O objeto colocado DEPOIS (mais adiante em map.objects = desenhado por cima no 2D) recebe o clique/arraste
+    // quando vários se sobrepõem — antes ganhava o de centro mais perto, e a mesa (grande) acabava ficando com o clique
+    // em cima de um monitor colocado sobre ela.
     (this._map.objects || []).forEach((o) => {
       if (!this._layerVisible(o.layerId)) return;
       // NOVO (03/09/2026) — "Método de interação de camadas" (ver
@@ -15553,9 +15534,7 @@ const MapView = {
       // respeitar isolamento de camada configurável, não só visibilidade.
       if (!this._layerInteractable(o.layerId)) return;
       if (!this._pointInObjectShape(o, sx, sy, thresholdPx)) return;
-      const s = this._renderer.worldToScreen(o.x, o.y);
-      const d = Math.hypot(s.x - sx, s.y - sy);
-      if (d < bestD) { bestD = d; best = o; }
+      best = o;   // o último acerto (mais recente) vence
     });
     return best;
   },
@@ -19328,8 +19307,13 @@ const MapView = {
    *  clique simples no orb agora abre o painel novo, não mais isto direto —
    *  ver comentário grande em _onCanvasClick. */
   async _openFotoPin(pin) {
-    const photo = await DB.getAmbientePhoto(pin.id);
-    if (!photo) { Utils.toast('Esta foto não foi encontrada (pode ter sido excluída).', { type: 'warn' }); return; }
+    // [22/09/2026] MUDADO — `pin.id` pode ser uma Câmera independente sem
+    // foto nenhuma ainda (ver js/objecttypes/camera.js `CameraPin`); usa
+    // `CameraPin.get` (cobre os dois casos) e distingue "não existe mais"
+    // de "existe, só não tem foto anexada" (mensagens diferentes).
+    const photo = await CameraPin.get(this._map, pin.id);
+    if (!photo) { Utils.toast('Esta Câmera não foi encontrada (pode ter sido excluída).', { type: 'warn' }); return; }
+    if (!photo.dataUrl) { Utils.toast('Esta Câmera ainda não tem foto anexada — use "📎 Anexar foto" no painel de propriedades.', { type: 'warn', duration: 4000 }); return; }
     // AmbientePhotos.open() é uma SOBREPOSIÇÃO por cima da Planta baixa
     // (não troca de tela — ver ambientephotos.js `open`/`close`), então
     // fechá-la (o próprio "✕" dela) já volta sozinho pra exatamente onde a
@@ -19419,7 +19403,7 @@ const MapView = {
         <button type="button" class="icon-btn sm" id="fotopin-fullscreen" title="Ver em tela cheia (o painel volta ao tamanho normal ao clicar de novo)">⛶</button>
         <button type="button" class="icon-btn sm map-panel-close" title="Fechar">✕</button>
       </div>
-      <div class="map-fotopin-thumb-wrap" id="fotopin-thumb-wrap" title="Dois cliques abre a foto em 'Mapa' → 'Fotos'">
+      <div class="map-fotopin-thumb-wrap" id="fotopin-thumb-wrap" title="Clique na foto para trocá-la ou desvinculá-la">
         <img id="fotopin-thumb" class="map-fotopin-thumb hidden" alt="${Utils.escapeHtml(pin.nome || 'Foto do ambiente')}">
         <!-- NOVO (04/09/2026), pedido verbatim (item 5): "Nas propriedades,
              na área em que a foto fica, se ainda não tiver foto, deve ficar
@@ -19433,7 +19417,7 @@ const MapView = {
         <button type="button" class="btn secondary sm hidden" id="fotopin-anexar" title="Escolher uma imagem para anexar a este orb">📎 Anexar foto</button>
         <input type="file" id="fotopin-anexar-file" accept="image/*" style="display:none">
       </div>
-      <div class="map2d-toolctx-info" id="fotopin-thumb-hint" style="display:block;margin:4px 0">Dois cliques na foto acima abre ela em "Mapa" → "Fotos".</div>
+      <div class="map2d-toolctx-info" id="fotopin-thumb-hint" style="display:block;margin:4px 0">Clique na foto acima para trocá-la (arquivo ou Mapa → Fotos) ou desvinculá-la desta Câmera.</div>
       <!-- [10/09/2026] NOVO — pedido verbatim: "deve ser acrescentado o
            campo de nome (que ainda não tem, pois todo o objeto deve ter um
            nome)." Salva no MESMO campo "nome" já usado pela galeria de
@@ -19581,20 +19565,51 @@ const MapView = {
         im.src = photo.dataUrl;
       }
     };
-    DB.getAmbientePhoto(pin.id).then((photo) => atualizarThumbOuBotaoAnexar(photo));
+    // [22/09/2026] MUDADO — `CameraPin.get` resolve tanto uma Câmera nova
+    // (busca a foto acessória pelo `fotoId`, se tiver) quanto uma linha
+    // legada (mesmo objeto de sempre) — `DB.getAmbientePhoto(pin.id)` direto
+    // não encontraria nada pra uma Câmera nova (o id da foto acessória é
+    // outro, diferente do id da Câmera).
+    CameraPin.get(this._map, pin.id).then((photo) => atualizarThumbOuBotaoAnexar(photo));
     // [20/09/2026] Anexar foto: escolher entre um arquivo do aparelho e uma foto já tirada em Mapa → Fotos (com botão de retorno).
-    panel.querySelector('#fotopin-anexar').onclick = async () => {
+    panel.querySelector('#fotopin-anexar').onclick = () => abrirEscolhaFoto();
+    const abrirEscolhaFoto = async () => {
+      const imgAtual = panel.querySelector('#fotopin-thumb');
+      const temFotoAgora = !!(imgAtual && !imgAtual.classList.contains('hidden'));
       const origem = await Utils.showChoiceModal({
-        title: 'Anexar foto à câmera',
-        message: 'De onde vem a foto?',
+        title: temFotoAgora ? 'Foto da câmera' : 'Anexar foto à câmera',
+        message: temFotoAgora ? 'O que fazer com a foto desta câmera?' : 'De onde vem a foto?',
         choices: [
           { value: 'arquivo', label: '📁 Escolher um arquivo do aparelho' },
           { value: 'fotos', label: '📷 Usar uma foto já tirada (Mapa → Fotos)' },
+          ...(temFotoAgora ? [{ value: 'desvincular', label: '🔗 Desvincular foto desta Câmera' }] : []),
           { value: 'cancelar', label: 'Cancelar', secondary: true },
         ],
       });
       if (!origem || origem === 'cancelar') return;
       if (origem === 'arquivo') { panel.querySelector('#fotopin-anexar-file').click(); return; }
+      if (origem === 'desvincular') {
+        const ok = await Utils.showChoiceModal({
+          title: 'Desvincular foto', message: 'A Câmera continua no mapa (posição, direção, altura, campo de visão e scripts), mas fica sem nenhuma foto. Se a imagem só existir nesta Câmera, ela será perdida.',
+          choices: [{ value: 'sim', label: 'Desvincular' }, { value: 'nao', label: 'Cancelar', secondary: true }],
+        });
+        if (ok !== 'sim') return;
+        try {
+          // [22/09/2026] MUDADO — `CameraPin.detachPhoto` cobre os dois
+          // casos: Câmera independente nova (some só o "acessório" foto,
+          // ver js/objecttypes/camera.js) e foto legada (zera dataUrl na
+          // própria linha, como sempre).
+          const atual = await CameraPin.detachPhoto(this._map, pinIdDaAbertura);
+          if (!atual) return;
+          atualizarThumbOuBotaoAnexar(atual);
+          try { await this._refreshFotosNoMapa(); } catch (e) { /* ignora */ }
+          Utils.toast('Foto desvinculada da câmera ✓', { type: 'ok' });
+        } catch (err) {
+          console.error('Falha ao desvincular a foto da câmera:', err);
+          Utils.toast('Não foi possível desvincular a foto: ' + (err?.message || err), { type: 'danger', duration: 5000 });
+        }
+        return;
+      }
       const displayAntes = panel.style.display;
       panel.style.display = 'none';
       const volta = () => { if (panel.isConnected) { panel.style.display = displayAntes || ''; try { WindowManager.focus(panel); } catch (e) { /* ignora */ } } };
@@ -19605,10 +19620,15 @@ const MapView = {
           volta();
           try {
             const escolhida = await DB.getAmbientePhoto(idEscolhido);
-            const atual = await DB.getAmbientePhoto(pinIdDaAbertura);
-            if (!escolhida || !atual) return;
-            await DB.saveAmbientePhoto({ ...atual, dataUrl: escolhida.dataUrl, thumbDataUrl: escolhida.thumbDataUrl || escolhida.dataUrl });
-            atualizarThumbOuBotaoAnexar({ ...atual, dataUrl: escolhida.dataUrl, thumbDataUrl: escolhida.thumbDataUrl || escolhida.dataUrl });
+            if (!escolhida) return;
+            // [22/09/2026] MUDADO — `CameraPin.attachPhoto` decide sozinho
+            // se cria a linha de foto agora (Câmera independente nova, SEM
+            // foto até este exato momento — ver js/objecttypes/camera.js)
+            // ou só troca o dataUrl (foto legada, como sempre).
+            const atual = await CameraPin.attachPhoto(this._map, pinIdDaAbertura, { dataUrl: escolhida.dataUrl, thumbDataUrl: escolhida.thumbDataUrl || escolhida.dataUrl });
+            if (!atual) return;
+            atualizarThumbOuBotaoAnexar(atual);
+            await this._refreshFotosNoMapa();
             Utils.toast('Foto anexada ✓', { type: 'ok' });
           } catch (err) {
             console.error('Falha ao anexar foto de Mapa → Fotos:', err);
@@ -19628,10 +19648,10 @@ const MapView = {
         // dois pontos de entrada de foto do app.
         const dataUrl = await Utils.resizeImage(file, 2400, 0.85);
         const thumbDataUrl = await Utils.resizeImage(file, 220, 0.75);
-        const photo = await DB.getAmbientePhoto(pinIdDaAbertura);
+        const photo = await CameraPin.attachPhoto(this._map, pinIdDaAbertura, { dataUrl, thumbDataUrl });
         if (!photo) return;
-        await DB.saveAmbientePhoto({ ...photo, dataUrl, thumbDataUrl });
-        atualizarThumbOuBotaoAnexar({ ...photo, dataUrl, thumbDataUrl });
+        atualizarThumbOuBotaoAnexar(photo);
+        await this._refreshFotosNoMapa();
         Utils.toast('Foto anexada ✓', { type: 'ok' });
       } catch (err) {
         console.error('Falha ao processar foto anexada ao orb:', err);
@@ -19650,22 +19670,22 @@ const MapView = {
     panel.querySelector('#fotopin-fullscreen').onclick = () => {
       panel.classList.toggle('fullscreen');
     };
-    let clickTimer = null;
-    panel.querySelector('#fotopin-thumb').onclick = () => {
-      // Duplo clique "manual" (em vez de ondblclick) — mais confiável em
-      // telas de toque, mesmo espírito de outros duplo-toque já existentes
-      // no app (ex. miniaturas de fotos na grade principal).
-      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; this._openFotoPin(pin); return; }
-      clickTimer = setTimeout(() => { clickTimer = null; }, 350);
-    };
+    // [21/09/2026] Clique na foto: mesmas opções do botão Anexar + 'Desvincular foto desta Câmera' (substitui o antigo duplo clique que abria em Mapa → Fotos).
+    panel.querySelector('#fotopin-thumb').onclick = () => abrirEscolhaFoto();
     // Salva no banco + atualiza o mapa em memória, SEM reabrir/recriar o
     // painel (ver comentário grande no topo desta função) — só atualiza os
     // 2 widgets/preview/altura em tela através de `refresh`, chamado no
     // final com o `pin` local já atualizado.
     const salvarOrientacao = async (patch) => {
-      const photo = await DB.getAmbientePhoto(pin.id);
-      if (!photo) return;
-      await DB.saveAmbientePhoto({ ...photo, ...patch });
+      // [22/09/2026] MUDADO — `pin.id` pode ser tanto uma foto legada
+      // quanto uma Câmera independente nova (`map.cameras`, ver
+      // js/objecttypes/camera.js `CameraPin`); esta função é o ÚNICO ponto
+      // de gravação usado por TODOS os campos deste painel (altura,
+      // direção/inclinação, propriedades de câmera, scripts, histórico,
+      // nome — ver os vários `salvarOrientacao({...})` logo abaixo), então
+      // corrigir aqui cobre todos eles de uma vez.
+      const salvo = await CameraPin.save(this._map, pin.id, patch);
+      if (!salvo) return;
       await this._refreshFotosNoMapa();
       pin = {
         ...pin,
@@ -19859,6 +19879,31 @@ const MapView = {
       });
     };
     panel.querySelector('#fotopin-desvincular').onclick = async () => {
+      // [22/09/2026] MUDADO — mesma lógica já aplicada na ferramenta
+      // "Apagar" (ver acima nesta classe): uma Câmera nova (`map.cameras`)
+      // não tem "📦 Caixa" pra voltar — "Desvincular do mapa" nela apaga o
+      // objeto Câmera de vez (com a foto acessória, se tiver uma). Linha
+      // legada continua voltando pra Caixa, como sempre.
+      if (CameraPin.isCameraId(this._map, pin.id)) {
+        const idxCam = this._map.cameras.findIndex((c) => c.id === pin.id);
+        const camBefore = idxCam !== -1 ? { ...this._map.cameras[idxCam] } : null;
+        if (!camBefore) return;
+        await CameraPin.delete(this._map, pin.id);
+        await this._refreshFotosNoMapa();
+        this._closePanel();
+        Utils.toast('Câmera apagada.', { type: 'ok' });
+        History.push({
+          label: 'apagar câmera',
+          undo: async () => {
+            if (!this._map.cameras) this._map.cameras = [];
+            if (!this._map.cameras.find((c) => c.id === camBefore.id)) this._map.cameras.push({ ...camBefore });
+            this._saveMap();
+            await this._refreshMapaIfShowing();
+          },
+          redo: async () => { await CameraPin.delete(this._map, camBefore.id); await this._refreshMapaIfShowing(); },
+        });
+        return;
+      }
       const photo = await DB.getAmbientePhoto(pin.id);
       if (!photo) return;
       const before = { ...photo };
@@ -20396,7 +20441,17 @@ const MapView = {
     // lido diretamente pelos outros helpers abaixo (todos passam pelo
     // cache, ver `anguloAtual`/`redesenharPreview`).
     let fotoCache = null;
-    const lerFoto = async () => { fotoCache = await DB.getAmbientePhoto(photoId); return fotoCache; };
+    // [22/09/2026] MUDADO — `CameraPin.get` cobre tanto Câmera nova
+    // (`map.cameras`) quanto linha legada; devolve `dirAngulo`/`rotPerp`
+    // (nomes sem "mapa" na frente — ver js/objecttypes/camera.js), então
+    // este `lerFoto` traduz de volta pros nomes `mapaDirAngulo`/
+    // `mapaRotPerp` que todo o resto desta roda já espera em `fotoCache`,
+    // sem precisar reescrever cada leitura abaixo.
+    const lerFoto = async () => {
+      const r = await CameraPin.get(this._map, photoId);
+      fotoCache = r ? { ...r, mapaDirAngulo: r.dirAngulo ?? r.mapaDirAngulo, mapaRotPerp: r.rotPerp ?? r.mapaRotPerp } : null;
+      return fotoCache;
+    };
     // ATUALIZADO (05/09/2026), pedido verbatim: "Ao desligar o snap, os
     // botões triplos de definição das rotações, também, devem variar
     // normalmente (sem a submissão ao snap). Passam a variar em 1 grau." —
@@ -20578,7 +20633,9 @@ const MapView = {
       if (!photo) return;
       const patch = this._fotoPinWheelMode === 'tilt' ? { mapaRotPerp: radianos } : { mapaDirAngulo: radianos };
       fotoCache = { ...photo, ...patch };
-      await DB.saveAmbientePhoto(fotoCache);
+      // [22/09/2026] MUDADO — `CameraPin.save` (não mais `DB.saveAmbientePhoto`
+      // direto) pra também funcionar com Câmera nova independente de foto.
+      await CameraPin.save(this._map, photoId, patch);
       await this._refreshFotosNoMapa(); // sem efeito se a foto ainda não tem posição no mapa (ver getPhotosByAmbiente/filter em _refreshFotosNoMapa) -- inofensivo chamar de qualquer jeito
       redesenharPreview();
     };
@@ -21155,9 +21212,11 @@ const MapView = {
         // js/view3d.js _fotoCamFovFor e js/mapview.js _refreshFotosNoMapa):
         // "Todo o JSON gerado deve ser colocado junto no bundle de
         // informações do orb de câmera."
-        const photo = await DB.getAmbientePhoto(photoId);
-        if (!photo) throw new Error('Foto não encontrada.');
-        await DB.saveAmbientePhoto({ ...photo, mapaVanishCam: props, mapaVanishCamDefinidoEm: DB.nowISO() });
+        // [22/09/2026] MUDADO — `CameraPin.save` cobre Câmera nova E linha
+        // legada (o FIELD_MAP interno já traduz `mapaVanishCam`/
+        // `mapaVanishCamDefinidoEm`, ver js/objecttypes/camera.js).
+        const salvo = await CameraPin.save(this._map, photoId, { mapaVanishCam: props, mapaVanishCamDefinidoEm: DB.nowISO() });
+        if (!salvo) throw new Error('Foto/Câmera não encontrada.');
         EventLog?.log?.('Câmera definida por linhas de referência (vanishCam) para uma foto do mapa.', { tipo: 'ok' });
         Utils.toast?.('✅ Câmera salva.', { type: 'ok' });
       } catch (e) {
@@ -21196,7 +21255,10 @@ const MapView = {
         // `_openFotoPinWheel`) e converte o `dataUrl` (data: URL) num
         // Blob/File — `vanishCamMount`/`vanishCamLoadImage` aceitam os
         // dois (ver vanishcam/README-embed.md).
-        const photo = await DB.getAmbientePhoto(photoId);
+        // [22/09/2026] MUDADO — `CameraPin.get` (não `DB.getAmbientePhoto`
+        // direto) pra achar a foto acessória certa quando `photoId` é uma
+        // Câmera nova independente (id da foto real é outro, via `fotoId`).
+        const photo = await CameraPin.get(this._map, photoId);
         const imgSrc = photo?.dataUrl || photo?.thumbDataUrl || null;
         let imageFile = null;
         if (imgSrc) {
@@ -21218,7 +21280,7 @@ const MapView = {
         // `{skipCenter}`, ver vanishcam/js/embed-api.js e
         // vanishcam/js/project-io.js) pra poder pedir explicitamente "não
         // centralize desta vez" quando a foto já tiver algo salvo.
-        const jaTemVanishCamSalvo = !!photo?.mapaVanishCam;
+        const jaTemVanishCamSalvo = !!(photo?.mapaVanishCam || photo?.vanishCam);
         await vanishCamMount(container, imageFile ? { imageFile, skipCenterImage: jaTemVanishCamSalvo } : undefined);
       }
       if (statusEl) statusEl.textContent = '';
@@ -22335,6 +22397,10 @@ const MapView = {
     if (!['alfabetica', 'porCategoria', 'livre'].includes(organizeMode)) organizeMode = 'porCategoria';
     const cfgObj = (typeof MapConfig !== 'undefined') ? await MapConfig.get() : {};
     let ordemLivre = (await DB.getSetting('mapa2dObjPickerOrdemLivre', null)) || [];
+    // [21/09/2026] NOVO -- campo de busca por nome (ver renderGrid/wiring do input abaixo).
+    // Não persiste entre aberturas de propósito -- é um filtro de uso pontual, igual a busca
+    // de patrimônio (js/search.js), não uma preferência do painel.
+    let busca = '';
     if (!this._container) return; // painel fechado enquanto esperava os awaits acima
     const panel = document.createElement('div');
     // [15/09/2026 UTC] NOVO — classe extra `.map-obj-picker-panel-resizable`
@@ -22437,14 +22503,26 @@ const MapView = {
     const renderGrid = () => {
       const catalogo = this._organizarCatalogoObjetos(catalogoBase, organizeMode, ordemLivre, cfgObj);
       const agora = Date.now();
+      // [21/09/2026] CORRIGIDO -- pedido verbatim: "o aspecto visual das caixas dos títulos das
+      // categorias e das caixas que representam os objetos devem ser preservadas nos resultados
+      // da busca [...] Deve ser a mesma apresentação que os objetos aparecem, mas só com os que
+      // deram match na busca destacados, os outros ficando apenas ocultados." ANTES a busca tirava
+      // os itens sem match do array antes de montar o HTML -- com poucos sobrando, a grade
+      // `auto-fill` (css/style.css `.map-obj-picker-grid`) recalculava menos colunas e esticava
+      // os botões/rótulos restantes (`1fr`), distorcendo o tamanho de sempre. Agora a grade é
+      // SEMPRE montada por completo (mesmo HTML de quando não há busca) e o filtro só troca
+      // `visibility` (não `display`) dos itens sem match -- o elemento continua ocupando a MESMA
+      // célula/tamanho de grid de sempre, só fica invisível, então nada recalcula.
+      const bate = (o) => !busca || o.label.toLowerCase().includes(busca);
       const botao = (o) => {
         const selo = window.NovosObjetos ? window.NovosObjetos.seloHtml(o.key, cfgObj, agora) : '';
-        return `<button type="button" class="map-obj-pick-item${selo ? ' map-obj-pick-novo' : ''}" data-key="${o.key}" title="${Utils.escapeHtml(o.label)}">
+        const oculto = !bate(o);
+        return `<button type="button" class="map-obj-pick-item${selo ? ' map-obj-pick-novo' : ''}${oculto ? ' map-obj-pick-oculto' : ''}${busca && !oculto ? ' map-obj-pick-match' : ''}" data-key="${o.key}" title="${Utils.escapeHtml(o.label)}">
               <span class="ic">${o.svg}</span>
               <span class="t">${Utils.escapeHtml(o.label)}</span>${selo}
             </button>`;
       };
-      const rotulo = (txt, cor, icone) => `<div class="map-obj-pick-group-label" style="--cat-cor:${cor}"><span class="cat-ic">${icone}</span><span>${Utils.escapeHtml(txt)}</span></div>`;
+      const rotulo = (txt, cor, icone, oculto) => `<div class="map-obj-pick-group-label${oculto ? ' map-obj-pick-oculto' : ''}" style="--cat-cor:${cor}"><span class="cat-ic">${icone}</span><span>${Utils.escapeHtml(txt)}</span></div>`;
       if (organizeMode === 'porCategoria' && window.ObjCategorias) {
         const pos = cfgObj?.objetoNovoPosicao || 'misturado';
         const novosSep = pos !== 'misturado' && window.NovosObjetos ? catalogo.filter((o) => window.NovosObjetos.ehNovo(o.key, cfgObj, agora)) : [];
@@ -22456,12 +22534,13 @@ const MapView = {
           grupos.get(id).push(o);
         });
         const partes = [];
-        const blocoNovos = () => { if (novosSep.length) { partes.push(rotulo('Objetos novos importados', '#ffd166', '✦')); novosSep.forEach((o) => partes.push(botao(o))); } };
+        const blocoNovos = () => { if (novosSep.length) { partes.push(rotulo('Objetos novos importados', '#ffd166', '✦', !novosSep.some(bate))); novosSep.forEach((o) => partes.push(botao(o))); } };
         if (pos === 'inicio') blocoNovos();
         window.ObjCategorias.CATEGORIAS.forEach((c) => {
           const itens = grupos.get(c.id);
           if (!itens || !itens.length) return;
-          partes.push(rotulo(c.label, c.cor, c.icone));
+          // Rótulo da categoria some (mesma técnica de visibility) só quando NENHUM item dela bate.
+          partes.push(rotulo(c.label, c.cor, c.icone, !itens.some(bate)));
           itens.forEach((o) => partes.push(botao(o)));
         });
         if (pos === 'fim') blocoNovos();
@@ -22470,7 +22549,9 @@ const MapView = {
         grid.innerHTML = catalogo.map(botao).join('');
       }
       grid.querySelectorAll('.map-obj-pick-item[data-key]').forEach((b) => {
-        if (organizeMode === 'livre') objSortable.attach(b);
+        // [21/09/2026] com busca ativa não faz sentido arrastar pra reordenar ("Livre") um item
+        // escondido -- cai no clique normal até a busca ser limpa de novo.
+        if (organizeMode === 'livre' && !busca) objSortable.attach(b);
         else b.onclick = () => escolherTipo(b.dataset.key);
       });
       marcarAtivo();
@@ -22480,6 +22561,11 @@ const MapView = {
     panel.querySelector('#map-obj-picker-organize').onchange = (e) => {
       organizeMode = e.target.value;
       DB.setSetting('mapa2dObjPickerOrganizeMode', organizeMode);
+      renderGrid();
+    };
+    // [21/09/2026] NOVO -- pedido verbatim: "deve ter um campo para buscar o nome de um objeto."
+    panel.querySelector('#map-obj-picker-busca').oninput = (e) => {
+      busca = e.target.value.trim().toLowerCase();
       renderGrid();
     };
 
@@ -25769,29 +25855,39 @@ const MapView = {
     // pelo painel); agora nasce com nome padrão "OrbFoto.NNN" (mesmo
     // esquema Blender dos outros tipos), continuando 100% editável depois
     // pelo mesmo painel de propriedades.
-    const rec = await DB.addAmbientePhoto({
-      ambienteId: this._map.id, nome: Mapping._nextObjectName(this._map, 'OrbFoto'), mapaX: world.x, mapaY: world.y, mapaPiso: 0,
-      mapaAuto: false, mapaLayerId: this._activeLayerId, mapaAltura: 1.6,
+    // [22/09/2026] MUDADO — pedido verbatim: "Você está gerando uma foto
+    // quando o objeto Câmera é colocado no mapa 2D, não deve ser assim
+    // [...] não deve gerar uma imagem, apenas fica o objeto Câmera." +
+    // "faça a separação, pois o objeto Câmera é um objeto independente de
+    // foto." Antes: `DB.addAmbientePhoto` criava uma linha na tabela de
+    // fotos (sem dataUrl) só pra guardar a posição — essa linha "fantasma"
+    // vazava pra 'Mapa'->'Fotos'/contagens. Agora: `CameraPin.create` grava
+    // um objeto Câmera independente direto no mapa (`map.cameras`, ver
+    // js/camera-pin.js) — a tabela de fotos só entra em cena se/quando uma
+    // foto for de fato anexada (CameraPin.attachPhoto, ver
+    // _openFotoPinPopover "Anexar foto").
+    const cam = await CameraPin.create(this._map, {
+      x: world.x, y: world.y, piso: 0, layerId: this._activeLayerId, altura: 1.6,
     });
     await this._refreshFotosNoMapa();
-    // [10/09/2026] Texto atualizado — a ferramenta se chama "Câmera" agora
-    // (ver PTOOLS 'foto-orb'); por baixo continua sendo o mesmo Orb de foto.
     Utils.toast('Câmera colocada — anexe uma foto pelo painel de propriedades quando quiser.', { type: 'ok', duration: 4000 });
     History.push({
       label: 'colocar câmera',
-      undo: async () => {
-        const p = await DB.getAmbientePhoto(rec.id);
-        if (p) await DB.saveAmbientePhoto({ ...p, mapaX: null, mapaY: null, mapaPiso: 0 });
-        await this._refreshMapaIfShowing();
-      },
+      undo: async () => { await CameraPin.delete(this._map, cam.id); await this._refreshMapaIfShowing(); },
       redo: async () => {
-        const p = await DB.getAmbientePhoto(rec.id);
-        if (p) await DB.saveAmbientePhoto({ ...p, mapaX: world.x, mapaY: world.y, mapaPiso: 0 });
+        if (!this._map.cameras) this._map.cameras = [];
+        if (!this._map.cameras.find((c) => c.id === cam.id)) this._map.cameras.push({ ...cam });
+        this._saveMap();
         await this._refreshMapaIfShowing();
       },
     });
-    const pin = (this._map.fotos || []).find((f) => f.id === rec.id);
-    if (pin) this._openFotoPinPopover(pin);
+    // [22/09/2026] MUDADO — pedido verbatim: "ao colocar uma Câmera na
+    // grade do mapa 2D, não deve abrir a janela de propriedades em
+    // seguida." Antes, abria automaticamente logo após colocar (mesmo
+    // padrão do fluxo antigo "Foto"->"Marcar aqui", onde faz sentido
+    // revisar/confirmar a foto na hora) — mas pra uma Câmera nova, sem foto
+    // nenhuma ainda, isso interrompe o fluxo à toa; a pessoa abre o painel
+    // quando quiser, pelo próprio objeto no mapa.
   },
 
   async enterPhotoPlacementMode(photoId, { onCancel, onConfirm } = {}) {

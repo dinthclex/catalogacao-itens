@@ -29,36 +29,30 @@
   const wrap180 = (d) => { d = ((d + 180) % 360 + 360) % 360 - 180; return d; };
 
   const CSS = `
-  .cc3d-gimbal{position:fixed;top:64px;right:10px;width:150px;height:150px;z-index:2147482000;border-radius:12px;
+  .cc3d-gimbal{position:fixed;top:64px;right:10px;width:150px;height:150px;z-index:2147483001;border-radius:12px;
     background:rgba(16,20,28,.35);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
     touch-action:none;cursor:grab}
   .cc3d-gimbal canvas{width:150px;height:150px;display:block;border-radius:12px}
-  .cc3d-panel{position:fixed;top:222px;right:10px;width:262px;z-index:2147482000;color:#e8ecf2;font:12.5px system-ui,sans-serif;
+  .cc3d-panel{position:fixed;top:222px;right:10px;width:262px;z-index:2147483001;color:#e8ecf2;font:12.5px system-ui,sans-serif;
     background:rgba(16,20,28,.55);border:1px solid rgba(255,255,255,.16);border-radius:14px;padding:10px 12px;
     backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);box-shadow:0 8px 30px rgba(0,0,0,.45);user-select:none}
   .cc3d-head{display:flex;align-items:center;justify-content:space-between;font-weight:700;margin-bottom:6px}
   .cc3d-head button{background:none;border:none;color:inherit;cursor:pointer;font-size:14px;padding:0 4px}
-  .cc3d-row{display:grid;grid-template-columns:54px 30px 1fr 30px;align-items:center;gap:5px;margin:5px 0}
-  .cc3d-row label{font-size:11.5px;color:#aab3c2}
-  .cc3d-row input{width:100%;min-width:0;box-sizing:border-box;background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.2);
-    border-radius:7px;padding:5px 6px;font:12.5px ui-monospace,Consolas,monospace;text-align:right}
-  .cc3d-row input:focus{outline:1px solid #6fb1ff;border-color:#6fb1ff}
-  .cc3d-btn{height:28px;border-radius:8px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.09);color:#fff;font-size:16px;
-    line-height:1;cursor:pointer;touch-action:none}
-  .cc3d-btn:hover{background:rgba(255,255,255,.18)} .cc3d-btn:active{background:rgba(111,177,255,.4)}
+  .cc3d-row{margin:5px 0}
+  .cc3d-row .m3d-numfield{width:100%;box-sizing:border-box;height:26px;border-radius:8px}
   .cc3d-foot{display:flex;gap:6px;margin-top:8px}
   .cc3d-foot button{flex:1;height:26px;border-radius:8px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff;font-size:11.5px;cursor:pointer}
   .cc3d-foot button:hover{background:rgba(255,255,255,.17)}
   .cc3d-hint{margin-top:6px;font-size:10.5px;color:#8f99aa;line-height:1.35}
   .cc3d-panel.cc3d-min .cc3d-body{display:none}
-  .cc3d-tgl{position:fixed;right:10px;bottom:10px;z-index:2147482500;display:flex;gap:6px}
+  .cc3d-tgl{position:fixed;right:10px;bottom:10px;z-index:2147483100;display:flex;gap:6px}
   .cc3d-tgl button{height:28px;padding:0 10px;border-radius:14px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.10);color:#e8ecf2;
     font:12px system-ui,sans-serif;cursor:pointer;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);opacity:.6}
   .cc3d-tgl button.on{opacity:1;background:rgba(111,177,255,.28);border-color:rgba(111,177,255,.7)}
-  .cc3d-rings{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2147482000;user-select:none;touch-action:none;pointer-events:none}
+  .cc3d-rings{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2147483001;user-select:none;touch-action:none;pointer-events:none}
   .cc3d-rings>*{position:absolute;pointer-events:auto}
   .cc3d-ring{border-style:solid;border-color:rgba(255,255,255,.22);border-radius:50%;box-sizing:border-box;cursor:grab;
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,.4),0 0 0 1px rgba(255,255,255,.35);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.4),0 0 0 1px rgba(255,255,255,.35)}
   .cc3d-tick{position:absolute;left:50%;width:2px;margin-left:-1px;background:#ff8a3d}
   .cc3d-knob{position:absolute;border-radius:50%;background:#fff;box-shadow:0 0 8px rgba(111,177,255,.95);pointer-events:none}
   .cc3d-vbar{background:rgba(255,255,255,.22);border:1px solid rgba(255,255,255,.35);cursor:ns-resize}
@@ -69,7 +63,7 @@
   .cc3d-thumb{position:absolute;background:#fff;border-radius:3px;box-shadow:0 0 6px rgba(111,177,255,.9);pointer-events:none}
   .cc3d-vbar .cc3d-thumb{left:1px;right:1px;height:6px}
   .cc3d-hbar .cc3d-thumb{top:1px;bottom:1px;width:6px}
-  .cc3d-dpad{position:fixed;right:101px;top:520px;z-index:2147482000;width:78px;display:grid;grid-template-columns:repeat(3,26px);grid-auto-rows:26px;gap:0}
+  .cc3d-dpad{position:fixed;right:101px;top:520px;z-index:2147483001;width:78px;display:grid;grid-template-columns:repeat(3,26px);grid-auto-rows:26px;gap:0}
   .cc3d-dpad button{border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.2);color:#3a4252;font-size:11px;cursor:pointer;padding:0;touch-action:none}
   .cc3d-dpad button:hover{background:rgba(255,255,255,.35)} .cc3d-dpad button:active{background:rgba(111,177,255,.55)}
   .cc3d-dpad button[data-d="1"][data-k="pitch"]{border-radius:8px 8px 0 0}.cc3d-dpad button[data-d="-1"][data-k="pitch"]{border-radius:0 0 8px 8px}
@@ -126,16 +120,10 @@
     panel.innerHTML = `
       <div class="cc3d-head"><span>🎥 Controle da câmera</span><button type="button" data-a="min" title="Recolher/expandir">▾</button></div>
       <div class="cc3d-body">
-        ${CAMPOS.map((c) => `
-          <div class="cc3d-row" title="${c.tip}">
-            <label>${c.rot}</label>
-            <button type="button" class="cc3d-btn" data-k="${c.k}" data-d="-1">−</button>
-            <input type="number" data-k="${c.k}" step="${c.k === 'altura' ? 0.01 : 0.1}">
-            <button type="button" class="cc3d-btn" data-k="${c.k}" data-d="1">+</button>
-          </div>`).join('')}
+        ${CAMPOS.map((c) => `<div class="cc3d-row" data-k="${c.k}" title="${c.tip}"></div>`).join('')}
         <div class="cc3d-foot"><button type="button" data-a="reset" title="Volta aos valores de quando este painel abriu">↺ Restaurar</button>
           <button type="button" data-a="zero" title="Pitch e roll em 0°">⌖ Nivelar</button></div>
-        <div class="cc3d-hint">Segure − / + para mudar continuamente (Shift = ×10). Yaw = rumo da bússola (0° = norte do mundo, horário +). Na miniatura: arraste para girar a câmera; borda = roll; botão direito = só gira a vista.</div>
+        <div class="cc3d-hint">Cada valor é um botão triplo: setas ◄ ► (1 passo), arrastar no meio (contínuo) ou clicar no meio para digitar. Yaw = rumo da bússola (0° = norte do mundo, horário +). Na miniatura: arraste para girar a câmera; borda = roll; botão direito = só gira a vista.</div>
       </div>`;
     // mesmo pai dos overlays de "Ver através desta câmera" (#v3d-camzoom-wrap), para ficar no mesmo contexto de empilhamento
     const pai = document.body;   // position:fixed direto no <body>: nenhum contêiner (overflow/empilhamento) do 3D consegue cortar ou cobrir
@@ -153,7 +141,6 @@
     // Garante que fiquem na frente da foto-guia/overlays e dentro da área visível (não cortados pelo overflow do contêiner).
     const garantirVisivel = () => {
       if (!gimbal.isConnected) return;
-      try { window.WindowManager && (WindowManager.focus(gimbal), WindowManager.focus(panel)); } catch (e) { /* ignora */ }
       const cr = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight, width: window.innerWidth, height: window.innerHeight };
       panel.style.maxHeight = Math.max(120, cr.height - 232) + 'px'; panel.style.overflowY = 'auto';
       [gimbal, panel].forEach((el) => {
@@ -161,20 +148,37 @@
         if (el.style.display === 'none') return;
         if (r.width && (r.right > cr.right - 2 || r.left < cr.left)) { el.style.right = '10px'; el.style.left = 'auto'; }
         if (r.width && r.bottom > cr.bottom) el.style.top = Math.max(4, cr.height - r.height - 8) + 'px';
-        const cx = Math.min(cr.right - 4, Math.max(cr.left + 4, r.left + r.width / 2)), cy = Math.min(cr.bottom - 4, Math.max(cr.top + 4, r.top + 12));
-        const topo = document.elementFromPoint(cx, cy);
-        if (topo && !el.contains(topo) && !(topo.contains && topo.contains(el))) el.style.zIndex = '2147483000';   // algo ainda cobre: sobe de vez
       });
     };
     garantirVisivel(); requestAnimationFrame(garantirVisivel); setTimeout(garantirVisivel, 400); setTimeout(garantirVisivel, 1500);
     window.addEventListener('resize', garantirVisivel);
     // nada do que acontece aqui pode vazar para o 3D (WASD, mouse-look, ferramentas de construção…)
-    ['mousedown', 'mouseup', 'click', 'dblclick', 'wheel', 'keydown', 'keyup', 'contextmenu', 'touchstart'].forEach((ev) => {
+    ['mousedown', 'click', 'dblclick', 'wheel', 'keydown', 'keyup', 'contextmenu', 'touchstart'].forEach((ev) => {   // 'mouseup' fica livre: o botão triplo o escuta no document
       [gimbal, panel].forEach((el) => el.addEventListener(ev, (e) => { e.stopPropagation(); if (ev === 'contextmenu') e.preventDefault(); }, { passive: false }));
     });
 
-    const inputs = {};
-    panel.querySelectorAll('input[data-k]').forEach((i) => { inputs[i.dataset.k] = i; });
+    let fino = 1;   // ajuste fino: 1 = normal; 10 / 100 = a mesma passada do mouse move 10x / 100x mais devagar
+    // Campos = "botão triplo" (ModelerUI._createNumField): setas ◄ ►, arrastar no meio, clicar no meio para digitar.
+    // `step`/`minDecimals` são getters: acompanham o ajuste fino ao vivo (o widget lê cfg.step a cada clique/arraste).
+    const campos = {};
+    CAMPOS.forEach((cf) => {
+      const slot = panel.querySelector('.cc3d-row[data-k="' + cf.k + '"]');
+      const alt = cf.k === 'altura';
+      const conf = {
+        label: cf.rot, value: 0, suffix: alt ? 'm' : '°', pxPerStep: alt ? 4 : 3,
+        get step() { return cf.step / fino; },
+        get minDecimals() { return alt ? (fino > 1 ? 3 : 2) : (fino > 1 ? 2 : 1); },
+        onCommit: (v) => { deUI(cf.k, v); aplicar('input'); },
+      };
+      let api = null;
+      try { api = window.ModelerUI && ModelerUI._createNumField(conf); } catch (e) { console.warn('[CamControl3D] botão triplo', e); }
+      if (!api) {   // reserva: campo numérico simples se o ModelerUI não estiver carregado
+        const inp = document.createElement('input'); inp.type = 'number'; inp.step = String(cf.step);
+        inp.addEventListener('change', () => { const v = parseFloat(inp.value); if (Number.isFinite(v)) conf.onCommit(v); });
+        api = { el: inp, setValue(v) { if (inp !== document.activeElement) inp.value = v; } };
+      }
+      slot.appendChild(api.el); campos[cf.k] = api;
+    });
 
 
     // ---- opções (MapConfig): painel/anéis ligados por padrão; info de debug desligada por padrão ----
@@ -184,7 +188,6 @@
       try { window.MapConfig && MapConfig.set(patch); } catch (e) { console.warn('[CamControl3D] salvar opção', e); }
       sincronizar();
     };
-    let fino = 1;   // ajuste fino: 1 = normal; 10 / 100 = a mesma passada do mouse move 10x / 100x mais devagar
     const tgl = document.createElement('div');
     tgl.className = 'cc3d-tgl';
     tgl.innerHTML = '<button type="button" data-t="painel" title="Mostrar/ocultar a tela do Controle de câmera (gimbal + campos)">🎥 Controle</button><button type="button" data-t="aneis" title="Mostrar/ocultar o anel e as barras de rotação">◎ Anéis</button><button type="button" data-t="fino" title="Ajuste fino: alterna entre normal, 10× e 100× mais devagar (vale para anel, barras, gimbal e botões)">🎯 Fino ×1</button>';
@@ -205,14 +208,32 @@
     document.body.appendChild(rings);
     const sincronizar = () => {
       const c = cfg();
-      const pOn = c.camCtlPainelAtivo !== false, aOn = c.camCtlAneisAtivo !== false;
+      // [22/09/2026] MUDADO — pedido verbatim: "O padrão, ao recarregar a
+      // página, é só o botão 'Anéis' estar ativo. O botão 'Controle' fica
+      // desativado e o 'Fino x1' também." Antes, os dois nasciam LIGADOS
+      // por padrão (`!== false`, ou seja, "ligado a não ser que a pessoa já
+      // tenha desligado antes") — "Controle" agora só liga se a pessoa já
+      // tiver ligado explicitamente antes (`=== true`); "Anéis" continua
+      // ligado por padrão, como já era. "Fino ×1" já nascia desligado
+      // (variável local `fino = 1`, sem persistir estado) — nada a mudar
+      // ali.
+      const pOn = c.camCtlPainelAtivo === true, aOn = c.camCtlAneisAtivo !== false;
       gimbal.style.display = panel.style.display = pOn ? '' : 'none';
       const eraOff = rings.style.display === 'none'; rings.style.display = dpad.style.display = aOn ? '' : 'none'; if (aOn && eraOff && typeof atualizarAneis === 'function') atualizarAneis();
       tgl.querySelector('[data-t="painel"]').classList.toggle('on', pOn);
       tgl.querySelector('[data-t="aneis"]').classList.toggle('on', aOn);
       dbg.style.display = c.debugCamInfoAtivo === true ? '' : 'none';
     };
-    tgl.querySelector('[data-t="painel"]').onclick = () => setCfg({ camCtlPainelAtivo: !(cfg().camCtlPainelAtivo !== false) });
+    // ---- ordem de empilhamento: o último grupo tocado (botão, clique na janela/anel) assume a frente ----
+    const ZF = '2147483002', ZT = '2147483001';
+    const gPainel = [gimbal, panel, dpad], gAneis = [rings];
+    const frente = (grupo) => { [gPainel, gAneis].forEach((g) => g.forEach((el) => { el.style.zIndex = g === grupo ? ZF : ZT; })); };
+    [[gPainel, gPainel], [gAneis, gAneis]].forEach(([g]) => g.forEach((el) => {
+      el.addEventListener('pointerdown', () => frente(g), true);   // captura: vale mesmo que o alvo pare a propagação
+      el.addEventListener('mousedown', () => frente(g), true);
+    }));
+    frente(gPainel);
+    tgl.querySelector('[data-t="painel"]').onclick = () => { const vaiLigar = !(cfg().camCtlPainelAtivo !== false); if (vaiLigar) frente(gPainel); setCfg({ camCtlPainelAtivo: vaiLigar }); };
     tgl.querySelector('[data-t="fino"]').onclick = (e) => {
       fino = fino === 1 ? 10 : fino === 10 ? 100 : 1;
       e.currentTarget.textContent = '🎯 Fino ×' + fino; e.currentTarget.classList.toggle('on', fino > 1);
@@ -227,9 +248,21 @@
       tgl.style.right = Math.max(4, Math.round(window.innerWidth - r.right + 10)) + 'px'; tgl.style.bottom = Math.max(4, Math.round(window.innerHeight - r.bottom + 10)) + 'px';
     }
     window.addEventListener('resize', posTgl); setTimeout(posTgl, 60);
-    tgl.querySelector('[data-t="aneis"]').onclick = () => setCfg({ camCtlAneisAtivo: !(cfg().camCtlAneisAtivo !== false) });
+    tgl.querySelector('[data-t="aneis"]').onclick = () => { const vaiLigar = !(cfg().camCtlAneisAtivo !== false); if (vaiLigar) frente(gAneis); setCfg({ camCtlAneisAtivo: vaiLigar }); };
     ['mousedown', 'mouseup', 'click', 'dblclick', 'wheel', 'keydown', 'keyup', 'contextmenu', 'touchstart', 'pointerdown', 'pointerup', 'auxclick'].forEach((ev) => {
-      [tgl, rings, dpad].forEach((el) => el.addEventListener(ev, (e) => { e.stopPropagation(); if (ev === 'contextmenu') e.preventDefault(); }, { passive: false }));
+      [tgl, rings, dpad].forEach((el) => el.addEventListener(ev, (e) => {
+        // [22/09/2026] NOVO — pedido verbatim: "ao rodar a roda do mouse em cima do miolo do
+        // anel circular ou em cima de um dos 3 anéis deve ser possível continuar dando zoom."
+        // `rings` (o <div class="cc3d-rings">, que contém o anel `.cc3d-ring`/miolo `.cc3d-knob`
+        // e as 2 barras `.cc3d-vbar`/`.cc3d-hbar`) é um overlay `position:fixed` separado do
+        // `<canvas>` do "Ver em 3D" — sem isto, o `stopPropagation()` logo abaixo (necessário pro
+        // resto: WASD/clique/etc. não vazarem pro jogo) bloqueava a roda do mouse silenciosamente
+        // sempre que o cursor estivesse sobre os anéis, mesmo com "Ver através desta Câmera"
+        // ativo. `View3D._zoomFotoCamWheel` é o mesmo zoom (FOV) que já funciona ao rolar sobre o
+        // canvas; chamado direto aqui, sem depender de Pointer Lock (que os anéis nem usam).
+        if (ev === 'wheel' && el === rings) { try { view._zoomFotoCamWheel?.(e); } catch (err) { /* ignora */ } }
+        e.stopPropagation(); if (ev === 'contextmenu') e.preventDefault();
+      }, { passive: false }));
     });
 
     // ---- valores de UI <-> estado ----
@@ -259,13 +292,16 @@
         view._camCtlSujo = true;
         clearTimeout(saveT);
         saveT = setTimeout(salvarFoto, 400);
+        // [22/09/2026] NOVO — pedido verbatim: "Ao mover a câmera com os
+        // controles (botões e anéis) o aramado amarelo [...] deve ir
+        // junto." Ao vivo, sem esperar o debounce de `salvarFoto` acima —
+        // `updateCameraFrustumPose` (engine3d.js) recalcula a base
+        // (origem/direção) do aramado a partir do `cam` atual e redesenha.
+        try { view._engine?.updateCameraFrustumPose?.(cam.id, cam); } catch (e) { /* ignora */ }
       }
       // 3) UI + miniatura
       const ui = paraUI();
-      CAMPOS.forEach((cf) => {
-        const el = inputs[cf.k];
-        if (el && el !== document.activeElement) el.value = cf.k === 'altura' ? ui[cf.k].toFixed(fino > 1 ? 3 : 2) : ui[cf.k].toFixed(fino > 1 ? 2 : 1);
-      });
+      CAMPOS.forEach((cf) => { const api = campos[cf.k]; if (api && api.setValue) api.setValue(ui[cf.k]); });
       desenhar();
       atualizarAneis();
     }
@@ -283,6 +319,18 @@
     // ---- anel (roll) + barra inferior (yaw) + barra vertical (pitch), com cursor infinito (Pointer Lock) + direcional ----
     const elRing = rings.querySelector('.cc3d-ring'), elV = rings.querySelector('.cc3d-vbar'), elH = rings.querySelector('.cc3d-hbar');
     let D = 300;
+    // [22/09/2026] MUDADO — CORREÇÃO DE BUG: estas 3 constantes viviam lá embaixo, perto de
+    // `posDpad` (onde são usadas), mas `layoutAneis()` (função logo abaixo) já chama `posDpad()`
+    // e é ELA MESMA chamada de imediato (`layoutAneis();` mais abaixo, antes da declaração
+    // original) — como são `const`, isso caía em "temporal dead zone" (ReferenceError: "Cannot
+    // access 'DPAD_W' before initialization") na primeiríssima execução, interrompendo todo o
+    // resto da função de configuração no meio (nada depois disso rodava: os botões do D-Pad
+    // nunca ganhavam `addEventListener`, e `let rafPend` — usado por `desenhar()` — nunca era
+    // inicializado, quebrando também a miniatura/gimbal e, por tabela, as barrinhas de pitch/yaw
+    // — bug relatado verbatim: "as barrinhas brancas [...] não estão atualizando ao vivo. O D-pad
+    // não está funcionando, nem a renderização da câmera com o gimbal."). Bastava mover a
+    // declaração pra ANTES do 1º uso de verdade — sem outra mudança de comportamento.
+    const DPAD_W = 78, DPAD_H = 80, DPAD_GAP = 14;
     function layoutAneis() {
       D = Math.round(clamp(Math.min(window.innerWidth * 0.5, window.innerHeight * 0.55), 120, 440));   // até 4× o tamanho anterior (110 px), limitado pela tela
       const bw = Math.max(18, Math.round(D * 0.16)), gap = Math.round(D * 0.06);
@@ -292,6 +340,7 @@
       Object.assign(elH.style, { left: '0px', top: (D + gap) + 'px', width: D + 'px', height: bw + 'px', borderRadius: (bw / 2) + 'px' });
       elRing.querySelector('.cc3d-tick').style.cssText = 'top:-' + Math.round(D * 0.115) + 'px;height:' + Math.round(D * 0.115) + 'px';
       atualizarAneis();
+      if (typeof posDpad === 'function') posDpad(); // rings mudaram de tamanho/posição — D-pad acompanha (ver posDpad)
     }
     function atualizarAneis() {
       const ui = paraUI();
@@ -361,11 +410,39 @@
     arrastar(elH, () => {}, (dx) => { deUI('yaw', paraUI().yaw + dx * 360 / Math.max(1, D) / fino); aplicar('barra'); });   // largura da barra = 1 volta
     arrastar(elV, () => {}, (dx, dy) => { deUI('pitch', paraUI().pitch - dy * 180 / Math.max(1, D) / fino); aplicar('barra'); });   // altura da barra = 180°
     layoutAneis(); window.addEventListener('resize', layoutAneis);
-    // D-pad centralizado logo abaixo da caixa "Controle da câmera"
+    // [22/09/2026] MUDADO — pedido verbatim: "O D-Pad deve ficar do lado dos
+    // anéis se tiver espaço e a tela for mais horizontal do que vertical. O
+    // D-Pad deve ficar abaixo dos anéis se tiver espaço e a tela for mais
+    // vertical do que horizontal." Antes, o D-pad era posicionado relativo
+    // ao painel "Controle" (que agora nasce OCULTO por padrão, ver
+    // `sincronizar` acima) — faz mais sentido posicioná-lo relativo aos
+    // ANÉIS (`rings`), com quem já compartilha visibilidade (mesmo toggle
+    // "◎ Anéis", ver `sincronizar`). Tela "mais horizontal" = paisagem
+    // (innerWidth >= innerHeight) → tenta do LADO (direita, senão
+    // esquerda); "mais vertical" = retrato → tenta ABAIXO (senão do lado,
+    // se não houver espaço embaixo) — sempre com um resguardo pra nunca
+    // sair da tela quando o espaço preferido não existir.
+    // (DPAD_W/DPAD_H/DPAD_GAP agora declaradas lá em cima, perto de `let D` — ver comentário lá.)
     function posDpad() {
-      if (panel.style.display === 'none') { dpad.style.left = 'auto'; dpad.style.right = '101px'; dpad.style.top = '240px'; return; }
-      const r = panel.getBoundingClientRect();
-      dpad.style.right = 'auto'; dpad.style.left = Math.round(r.left + r.width / 2 - 39) + 'px'; dpad.style.top = Math.round(r.bottom + 10) + 'px';
+      const r = rings.getBoundingClientRect();
+      if (!r.width) return;
+      const paisagem = window.innerWidth >= window.innerHeight;
+      const espacoDireita = window.innerWidth - r.right, espacoEsquerda = r.left, espacoAbaixo = window.innerHeight - r.bottom;
+      let left, top;
+      const doLado = () => {
+        if (espacoDireita >= DPAD_W + DPAD_GAP) left = r.right + DPAD_GAP;
+        else if (espacoEsquerda >= DPAD_W + DPAD_GAP) left = r.left - DPAD_GAP - DPAD_W;
+        else left = clamp(r.right + DPAD_GAP, 4, window.innerWidth - DPAD_W - 4);
+        top = clamp(Math.round(r.top + r.height / 2 - DPAD_H / 2), 4, window.innerHeight - DPAD_H - 4);
+      };
+      const doAbaixo = () => {
+        left = clamp(Math.round(r.left + r.width / 2 - DPAD_W / 2), 4, window.innerWidth - DPAD_W - 4);
+        if (espacoAbaixo >= DPAD_H + DPAD_GAP) top = r.bottom + DPAD_GAP;
+        else top = clamp(r.top - DPAD_GAP - DPAD_H, 4, window.innerHeight - DPAD_H - 4);
+      };
+      if (paisagem) { if (espacoDireita >= DPAD_W + DPAD_GAP || espacoEsquerda >= DPAD_W + DPAD_GAP) doLado(); else doAbaixo(); }
+      else if (espacoAbaixo >= DPAD_H + DPAD_GAP) doAbaixo(); else doLado();
+      dpad.style.right = 'auto'; dpad.style.left = Math.round(left) + 'px'; dpad.style.top = Math.round(top) + 'px';
     }
     window.addEventListener('resize', posDpad); setTimeout(posDpad, 60);
     dpad.querySelectorAll('button').forEach((b) => {
@@ -379,22 +456,6 @@
       ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture'].forEach((ev) => b.addEventListener(ev, pararHold));
     });
 
-    panel.querySelectorAll('.cc3d-btn').forEach((b) => {
-      b.addEventListener('pointerdown', (e) => {
-        e.preventDefault(); b.setPointerCapture?.(e.pointerId);
-        const k = b.dataset.k, d = Number(b.dataset.d);
-        passo(k, d, e.shiftKey);
-        pararHold();
-        holdT = setTimeout(() => { holdI = setInterval(() => passo(k, d, e.shiftKey), 45); }, 350);
-      });
-      ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture'].forEach((ev) => b.addEventListener(ev, pararHold));
-    });
-    Object.entries(inputs).forEach(([k, el]) => {
-      el.addEventListener('input', () => { const v = parseFloat(el.value); if (Number.isFinite(v)) { deUI(k, v); aplicar('input'); } });
-      el.addEventListener('change', () => { el.blur(); aplicar('input'); });
-      el.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') el.blur(); });
-      el.addEventListener('wheel', (e) => e.stopPropagation());
-    });
     panel.querySelector('[data-a="min"]').onclick = (e) => { panel.classList.toggle('cc3d-min'); e.target.textContent = panel.classList.contains('cc3d-min') ? '▸' : '▾'; posDpad(); };
     panel.querySelector('[data-a="reset"]').onclick = () => { Object.assign(estado, inicial); aplicar('reset'); };
     panel.querySelector('[data-a="zero"]').onclick = () => { estado.pitch = 0; estado.roll = 0; aplicar('zero'); };

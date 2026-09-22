@@ -937,6 +937,14 @@ const MapConfig = {
     // o elemento conforme esta config). LIGADA por padrão (comportamento de
     // sempre, só ganhou a opção de desligar).
     bussola3DAtiva: true,
+    // [22/09/2026] NOVO — pedido verbatim: "deve ser possível alterar a
+    // posição do roda dos pontos cardeais e a caixa do tempo [...] na
+    // tela." `null` = usa a posição padrão fixa de sempre (CSS/inline de
+    // view3d.js); `{top, right}` (px, âncora no canto superior direito de
+    // `.view3d-wrap`) quando a pessoa reposiciona pelo botão "📍 Definir
+    // posição na tela" (ver `_abrirPosicionadorTela`).
+    bussola3DOffset: null,
+    relogioMundoOffset: null,
     // Pedido do usuário: "nas configurações 2D, deve haver uma opção de
     // 'miniatura 3D'. É o 3D sendo renderizado em uma janela com a largura
     // do 3D dividida por 10 [...] deve aparecer, por padrão no canto
@@ -1434,6 +1442,20 @@ const MapConfig = {
     // (sempre posicionava automaticamente, sem exceção — ver comentário lá).
     // Consumida por capture.js `_autoPlacePhoto`. ----------
     fotoAutoAtribuirCamera: 'sim',
+
+    // ---------- [22/09/2026] NOVO — pedido verbatim: "Se ainda não tem nas
+    // 'configurações 2D', uma seção para o objeto 'Câmera', deve haver.
+    // Nela, coloque uma opção para excluir o objeto Câmera ao excluir a
+    // imagem associada a Câmera." Nova seção "📷 Câmera" (separada da seção
+    // "📷 Foto" acima, que é sobre 'Mapa'->'Foto'/download). DESLIGADO por
+    // padrão — excluir uma foto (ambientephotos.js `_deletePhoto`) NUNCA
+    // apagava o objeto Câmera associado antes desta rodada (só a imagem em
+    // si, via "Desvincular"); ligar isto muda o padrão pra excluir os dois
+    // juntos SEM perguntar. Com a opção desligada (padrão), excluir uma foto
+    // ligada a uma Câmera pergunta na hora (ver `_deletePhoto` — pedido
+    // verbatim: "deve aparecer uma janela perguntando se deseja excluir o
+    // Câmera"). ----------
+    cameraExcluirObjetoAoExcluirFotoAtivo: false,
 
     // ---------- RODADA 53 [15/09/2026 UTC], pedido verbatim (item C):
     // "deve aparecer uma opção para definir de que jeito. Por exemplo, a
@@ -2815,6 +2837,21 @@ const MapConfig = {
           </div>
         </div>
 
+        <!-- [22/09/2026] NOVA seção — pedido verbatim: "Se ainda não tem nas
+             'configurações 2D', uma seção para o objeto 'Câmera', deve
+             haver. Nela, coloque uma opção para excluir o objeto Câmera ao
+             excluir a imagem associada a Câmera." Lida/gravada via
+             cameraExcluirObjetoAoExcluirFotoAtivo (ver DEFAULTS acima) —
+             consumida por ambientephotos.js _deletePhoto. -->
+        <div class="mapconfig-section">
+          <h4>📷 Câmera</h4>
+          <span class="d" style="display:block; margin-bottom:6px">Ao excluir, em "Mapa" → "Fotos", uma foto que está associada a um objeto Câmera no mapa 2D:</span>
+          <label class="checkbox-opt" style="display:flex; align-items:flex-start; gap:8px">
+            <input type="checkbox" id="mc-camera-excluir-objeto" ${cfg.cameraExcluirObjetoAoExcluirFotoAtivo ? 'checked' : ''}>
+            <span><span class="t">Excluir também o objeto Câmera automaticamente</span><br><span class="d">Ligado: a Câmera é excluída junto com a foto, sem perguntar. Desligado (padrão): ao excluir, uma janela pergunta se você quer excluir a Câmera também — respondendo que não, só a foto some, a Câmera continua no mapa (posição, direção, altura, campo de visão e scripts preservados), sem foto nenhuma até anexar outra.</span></span>
+          </label>
+        </div>
+
         <!-- RODADA 53, pedido verbatim (item D): "Deve haver outra
              subseção para definir um nome automático para as fotos que são
              tiradas. Por padrão fica ativada. O nome deve indicar a data e
@@ -3409,6 +3446,26 @@ const MapConfig = {
             <input type="checkbox" id="mc-bussola3d" ${cfg.bussola3DAtiva !== false ? 'checked' : ''}>
             <span><span class="t">Mostrar anel de bússola (N/S/L/O)</span><br><span class="d">Anel com os pontos cardeais/colaterais no canto superior direito da tela, durante "Ver em 3D" — gira conforme a direção que a câmera olha. Clique num rótulo pra virar pra aquela direção.</span></span>
           </label>
+          <!-- [22/09/2026] NOVO — pedido verbatim: "deve ser possível
+               alterar a posição do roda dos pontos cardeais [...] na
+               tela." Reaproveita _abrirPosicionadorTela (ver comentário
+               grande dela, logo abaixo de open()) — mesmo botão/fluxo
+               usado pela caixa do relógio do mundo, na seção "🕐 Relógio do
+               mundo" abaixo. -->
+          <button type="button" class="btn secondary sm" id="mc-bussola3d-posicao" style="margin-top:6px">📍 Definir posição na tela</button>
+        </div>
+        <!-- [22/09/2026] NOVO — pedido verbatim: "a caixa do tempo que fica
+             no canto direito em cima do 'Ver em 3D' (com a mensagem 'Fora
+             de expediente')" — a caixa .relogio-mundo-hud
+             (js/relogio-mundo.js attachHUD) ainda não tinha NENHUMA seção
+             própria em "Configurações 3D" (sua config de horários/
+             velocidade vive numa chave separada, relogioMundoConfig, sem
+             UI própria ainda) — esta seção nova cobre só a posição na tela,
+             pedida agora. -->
+        <div class="mapconfig-section">
+          <h4>🕐 Relógio do mundo</h4>
+          <p style="margin:2px 0 8px; font-size:12.5px; color:var(--text-dim)">Caixinha com a hora atual e o status ("Expediente"/"Almoço"/"Fora do expediente") que aparece durante "Ver em 3D", ao lado da bússola.</p>
+          <button type="button" class="btn secondary sm" id="mc-relogiomundo-posicao">📍 Definir posição na tela</button>
         </div>
         <!-- Seção "🐞 Debug" (pedido do usuário, 25/08/2026: "deve haver uma
              seção nas 'configurações 3D' para opções de debug. O
@@ -5569,6 +5626,12 @@ const MapConfig = {
     modal.querySelector('#mc-foto-grade-evitar-colisao')?.addEventListener('change', async (e) => {
       await this.set({ fotoGradeEvitarColisao: !!e.target.checked });
     });
+    // [22/09/2026] NOVO — checkbox da seção "📷 Câmera" (ver
+    // DEFAULTS.cameraExcluirObjetoAoExcluirFotoAtivo e ambientephotos.js
+    // `_deletePhoto`).
+    modal.querySelector('#mc-camera-excluir-objeto')?.addEventListener('change', async (e) => {
+      await this.set({ cameraExcluirObjetoAoExcluirFotoAtivo: !!e.target.checked });
+    });
     // RODADA 53/54 [15/09/2026 UTC] — item C (parâmetros da grade). O
     // preview agora usa o MESMO Mapping.findGridSlot usado de verdade na
     // captura (capture.js _autoPlacePhoto), em vez de reimplementar o
@@ -5940,6 +6003,17 @@ const MapConfig = {
     // Pedido do usuário (03/09/2026) — ver DEFAULTS.bussola3DAtiva/seção "🧭
     // Bússola 3D" acima.
     modal.querySelector('#mc-bussola3d')?.addEventListener('change', async (e) => { await this.set({ bussola3DAtiva: e.target.checked }); });
+    // [22/09/2026] NOVO — botões "📍 Definir posição na tela" da bússola e
+    // do relógio do mundo (ver `_abrirPosicionadorTela`, logo abaixo de
+    // `open()`, pro fluxo completo: oculta esta folha preservando o
+    // scroll, deixa arrastar o elemento de verdade na tela, "Confirmar"
+    // salva e reabre esta folha no mesmo nível de scroll).
+    modal.querySelector('#mc-bussola3d-posicao')?.addEventListener('click', () => {
+      this._abrirPosicionadorTela(modal, { cfgKey: 'bussola3DOffset', elSelector: '.v3d-compass-ring', defaultPos: { top: 78, right: 96 } });
+    });
+    modal.querySelector('#mc-relogiomundo-posicao')?.addEventListener('click', () => {
+      this._abrirPosicionadorTela(modal, { cfgKey: 'relogioMundoOffset', elSelector: '.relogio-mundo-hud', defaultPos: { top: 78, right: 156 } });
+    });
 
     // Seção "🎬 Apresentação" (rodada 48; sub-opções do raio X por categoria
     // + "tudo no cenário" na rodada 49) — botões no topo das configurações
@@ -8043,6 +8117,102 @@ const MapConfig = {
       window.open(linkVersiculo.href, '_blank', 'noopener');
       e.preventDefault(); // evita 2 guias abertas (a nossa + a navegação padrão do <a>)
     });
+  },
+
+  /** [22/09/2026] NOVO — pedido verbatim: "deve ser possível alterar a
+   *  posição do roda dos pontos cardeais e a caixa do tempo [...] Se não
+   *  houver seção para isto ainda nas 'configurações 3D', faça uma para
+   *  cada, ao clicar em uma botão definir posição na tela, a janela das
+   *  'configurações 3D' fica ocultada (com o scroll preservado), então, é
+   *  possível clicar e arrastar a caixa de tempo (se for a opção para ela)
+   *  ou a roda dos pontos cardeais (caso for a opção para ela). Uma
+   *  informação deve ficar na tela dizendo 'Clique e arraste para
+   *  reposicionar'. Deve haver um outro botão 'Confirmar'. Ao clicar no
+   *  botão 'Confirmar', então, a posição é definida e a janela das
+   *  'configurações 3D' reaparece no mesmo nível de scroll."
+   *
+   *  Fluxo GENÉRICO (reaproveitado pelos 2 botões "📍 Definir posição na
+   *  tela", bússola e relógio do mundo — `elSelector`/`cfgKey`/
+   *  `defaultPos` são o único que muda entre os dois):
+   *   1. Esconde `modal` (`display:none`), guardando o `scrollTop` atual da
+   *      folha (`.mapconfig-sheet`) pra restaurar depois.
+   *   2. Acha o elemento de verdade na tela (`elSelector, ex.:
+   *      '.v3d-compass-ring'/'.relogio-mundo-hud'` — só existe/aparece
+   *      quando "Ver em 3D" está aberto) e liga um arraste temporário nele
+   *      (posição em px, ancorada em `top`/`right` a partir de
+   *      `.view3d-wrap`, MESMA convenção usada pra desenhar o elemento —
+   *      ver view3d.js `_applyHudPosOverride`).
+   *   3. Mostra uma legenda fixa "Clique e arraste para reposicionar" + um
+   *      botão "✅ Confirmar" flutuantes, por cima de tudo.
+   *   4. Ao confirmar: salva `{[cfgKey]: {top, right}}` (`MapConfig.set`,
+   *      que já propaga ao vivo pra `view3d.js` via `_onMapConfigChange`),
+   *      remove a legenda/o "Confirmar", desliga o arraste, e reexibe
+   *      `modal` (`display:''`) restaurando o `scrollTop` salvo no passo 1.
+   *  Se "Ver em 3D" não estiver aberto no momento (elemento não encontrado
+   *  na tela), avisa e nem chega a esconder a folha de configurações —
+   *  não há o que arrastar. */
+  _abrirPosicionadorTela(modal, { cfgKey, elSelector, defaultPos }) {
+    const el = document.querySelector(elSelector);
+    if (!el) { Utils?.toast?.('Abra o "Ver em 3D" primeiro pra poder arrastar este elemento na tela.', { type: 'warn', duration: 4500 }); return; }
+    const sheet = modal.querySelector('.mapconfig-sheet');
+    const scrollTopSalvo = sheet ? sheet.scrollTop : 0;
+    modal.style.display = 'none';
+
+    const cfgAtual = (this._cache || {})[cfgKey] || defaultPos;
+    let pos = { top: cfgAtual.top, right: cfgAtual.right };
+    const aplicarPos = () => { el.style.top = pos.top + 'px'; el.style.right = pos.right + 'px'; el.style.left = 'auto'; };
+    const posOriginal = { top: el.style.top, right: el.style.right, left: el.style.left, pointerEvents: el.style.pointerEvents };
+    // A bússola (`.v3d-compass-ring`) tem `pointer-events:none` no CSS (só
+    // os rótulos internos clicáveis reagem) — sem isso, o `pointerdown`
+    // abaixo nunca chegaria a este elemento. Forçado só durante o modo de
+    // reposicionar, restaurado em `encerrar`.
+    el.style.pointerEvents = 'auto';
+    aplicarPos();
+
+    const legenda = document.createElement('div');
+    legenda.style.cssText = 'position:fixed; left:50%; top:14px; transform:translateX(-50%); z-index:2147483600; background:rgba(16,20,28,.9); color:#e8ecf2; font:13px system-ui,sans-serif; padding:8px 14px; border-radius:10px; border:1px solid rgba(255,255,255,.25); box-shadow:0 8px 30px rgba(0,0,0,.45); display:flex; align-items:center; gap:10px; white-space:nowrap';
+    legenda.innerHTML = '<span>✋ Clique e arraste para reposicionar</span><button type="button" id="mc-posicionador-confirmar" class="btn ok sm">✅ Confirmar</button>';
+    document.body.appendChild(legenda);
+    el.style.cursor = 'grab';
+    el.classList.add('mapconfig-posicionador-alvo');
+
+    let arrastando = false, sx = 0, sy = 0, topIni = 0, rightIni = 0, moveu = false;
+    const aoMoverPointer = (e) => {
+      if (!arrastando) return;
+      const dx = e.clientX - sx, dy = e.clientY - sy;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moveu = true;
+      pos = { top: Math.max(0, topIni + dy), right: Math.max(0, rightIni - dx) };
+      aplicarPos();
+    };
+    const aoSoltarPointer = () => { arrastando = false; el.style.cursor = 'grab'; };
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      arrastando = true; moveu = false; sx = e.clientX; sy = e.clientY; topIni = pos.top; rightIni = pos.right;
+      el.style.cursor = 'grabbing';
+      el.setPointerCapture?.(e.pointerId);
+    });
+    el.addEventListener('pointermove', aoMoverPointer);
+    ['pointerup', 'pointercancel'].forEach((ev) => el.addEventListener(ev, aoSoltarPointer));
+    // Bloqueia o `click` normal do elemento (ex.: girar pra um rótulo da
+    // bússola, ciclar a velocidade do relógio do mundo) ENQUANTO o modo de
+    // reposicionar está ativo — sem isso, soltar o arraste (ou um simples
+    // toque, sem arrastar) dispararia essa ação por baixo do capô.
+    const bloquearClique = (e) => { e.stopPropagation(); e.preventDefault(); };
+    el.addEventListener('click', bloquearClique, true);
+
+    const encerrar = async (salvar) => {
+      el.removeEventListener('pointermove', aoMoverPointer);
+      el.removeEventListener('click', bloquearClique, true);
+      el.classList.remove('mapconfig-posicionador-alvo');
+      el.style.cursor = '';
+      el.style.pointerEvents = posOriginal.pointerEvents;
+      legenda.remove();
+      if (salvar) { await this.set({ [cfgKey]: pos }); }
+      else { el.style.top = posOriginal.top; el.style.right = posOriginal.right; el.style.left = posOriginal.left; }
+      modal.style.display = '';
+      if (sheet) sheet.scrollTop = scrollTopSalvo;
+    };
+    legenda.querySelector('#mc-posicionador-confirmar').onclick = () => encerrar(true);
   },
 };
 

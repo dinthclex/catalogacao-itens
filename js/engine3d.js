@@ -2575,6 +2575,32 @@ class Engine3D {
     linhasCantos.geometry.setFromPoints([origemFr, c1, origemFr, c2, origemFr, c3, origemFr, c4]);
   }
 
+  /** [22/09/2026] NOVO — pedido verbatim: "Ao mover a câmera com os
+   *  controles (botões e anéis) o aramado amarelo que representa o modelo
+   *  da Câmera e fica visível quando o Debug está ativado deve ir junto."
+   *  `updateCameraFrustumGeometry` (acima) só recalcula o TAMANHO/ângulo do
+   *  retângulo (a partir de `camProps`), reaproveitando a origem/direção
+   *  CONGELADAS em `_fotoFrustumBasisById` desde `setScene` — por isso o
+   *  aramado ficava parado no lugar de quando a cena foi montada, mesmo a
+   *  Câmera girando/subindo pelos controles (js/camcontrol3d.js). Este
+   *  método atualiza a própria BASE (origem/direção), com a MESMA fórmula
+   *  usada em `setScene` (ver bloco "fotos vinculadas ao mapa" — mantida em
+   *  sincronia de propósito: qualquer mudança numa precisa ser espelhada na
+   *  outra), e então chama `updateCameraFrustumGeometry` de novo pra
+   *  redesenhar já na posição nova — chamado por
+   *  `js/camcontrol3d.js aplicar()` a cada ajuste (arrastar anel/D-pad/
+   *  gimbal/campo numérico), sem esperar um `setScene` inteiro. */
+  updateCameraFrustumPose(fotoId, foto) {
+    const basis = this._fotoFrustumBasisById?.[fotoId];
+    if (!basis || !this.THREE || !foto) return;
+    const THREE = this.THREE;
+    const baseY = (foto.piso || 0) * (this.mapData?.alturaPiso || 2.8) + (foto.altura || 0);
+    const dir = window.Cam3DMath.objectPointerForward(foto.dirAngulo || 0, foto.rotPerp || 0);
+    basis.origem = new THREE.Vector3(foto.x, baseY, foto.y);
+    basis.dirVec = new THREE.Vector3(dir.x, dir.y, dir.z).normalize();
+    this.updateCameraFrustumGeometry(fotoId, foto.camProps);
+  }
+
   /** Só as `Engine3D.MAX_LUMINARIAS_ATIVAS` luzes de luminária mais PRÓXIMAS
    *  de `camera` ficam ACESAS (`.visible`, que o Three.js já respeita no
    *  cálculo de iluminação sem precisar remontar nenhuma malha) — pedido do
@@ -4375,7 +4401,7 @@ class Engine3D {
     if (!_escadaModificadaAgora) {
       const nomeGlb = obj.modeloGlbEstatico || OBJECT3D_PROFILES[obj.tipo]?.modeloGlbEstatico || obj.tipo;
       if (nomeGlb && window.GlbMeshSource?.hasModel?.(nomeGlb)) {
-        const y0Perfil = OBJECT3D_PROFILES[obj.tipo]?.y0 || 0;
+        const y0Perfil = obj.semY0 ? 0 : (OBJECT3D_PROFILES[obj.tipo]?.y0 || 0);
         this._buildModeloArquivoMesh(obj, baseY + y0Perfil, wireframe, colWireframe, nomeGlb, window.GlbMeshSource);
         return;
       }
@@ -4407,7 +4433,7 @@ class Engine3D {
         // tratamento). Soma o `y0` do PERFIL do tipo (mesma fonte que o ramo
         // genérico usa) no `baseY` só pra este posicionamento — não afeta
         // nenhum outro tipo/ramo, nem objetos com y0:0 (a maioria).
-        const y0Perfil = OBJECT3D_PROFILES[obj.tipo]?.y0 || 0;
+        const y0Perfil = obj.semY0 ? 0 : (OBJECT3D_PROFILES[obj.tipo]?.y0 || 0);
         this._buildModeloArquivoMesh(obj, baseY + y0Perfil, wireframe, colWireframe, nomeMalha, window.ObjMeshSource);
         return;
       }
@@ -4472,6 +4498,7 @@ class Engine3D {
       perfil = { shape: 'cylinder', r: obj.raio || 0.3, h: obj.altura || 0.5, y0: 0, color: _hexToThreeColor(obj.cor), segments: Math.max(3, Math.round(obj.lados || 24)) };
     } else {
       perfil = OBJECT3D_PROFILES[obj.tipo] || OBJECT3D_DEFAULT_PROFILE;
+      if (obj.semY0 && perfil.y0) perfil = { ...perfil, y0: 0 }; // [21/09/2026] elevação já decidida (ver Mapping.addObject)
     }
     // Modo "leve" de luminárias (ver _tintForLight/mapconfig.js) — clareia
     // a cor deste objeto se ele cair no alcance de alguma luminária. Clona
@@ -8967,11 +8994,17 @@ class Engine3D {
     this._effects.push({ kind: 'collect', t0: performance.now(), dur: 900, group, item, itemMat, box, boxMat });
   }
 
-  /** Parede/porta/janela ("itens grandes") não "cabem numa caixinha" —
-   *  tratamento diferente e propositalmente mais dramático: se despedaça em
-   *  vários cacos que voam pra fora/pra cima e caem, esmaecendo no ar, como
-   *  uma pequena demolição. `tamanho` {x,y,z} (metros) escala a dispersão
-   *  dos cacos conforme o tamanho real do elemento removido. */
+  /** [21/09/2026] AGORA usada por TODO tipo de exclusão via ferramenta 🗑️
+   *  "Apagar" (renomeada de "Remover" — pedido verbatim), não só parede/
+   *  porta/janela: "de acordo com as dimensões mais externas do objeto
+   *  (comprimento, largura, volume), deve ser vários cubos (da cor mais
+   *  característica do objeto a ser excluído) saltando como um muro que é
+   *  quebrado/despedaçado" — substituiu `spawnCollectEffect` (a "caixinha"
+   *  estilo Minecraft) pra item/objeto/tijolo também, ver view3d.js
+   *  `_confirmDeleteHit`. `tamanho` {x,y,z} (metros, dimensões externas
+   *  reais do que foi excluído) escala tanto a dispersão dos cacos quanto,
+   *  agora, a QUANTIDADE deles (objeto grande = mais cubos, pequeno = menos
+   *  — antes era sempre 9, fixo, não importava o tamanho). */
   spawnDemolishEffect(pos, tamanho, corCss) {
     if (!this._ready || !this.THREE || !this.scene) return;
     const THREE = this.THREE;
@@ -8980,7 +9013,10 @@ class Engine3D {
     this.scene.add(group);
     const sx = Math.max(0.3, tamanho?.x || 1), sy = Math.max(0.3, tamanho?.y || 1), sz = Math.max(0.3, tamanho?.z || 0.3);
     const pieces = [];
-    const n = 9;
+    // [21/09/2026] quantidade de cubos proporcional ao volume externo (antes fixo em 9) — um
+    // patrimônio pequeno (mouse, teclado) ainda quebra em poucos cacos; um rack ou uma parede
+    // grande vira "vários cubos" de verdade, como pedido.
+    const n = Math.round(Math.max(6, Math.min(40, 7 + (sx * sy * sz) * 6)));
     for (let i = 0; i < n; i++) {
       const mat = new THREE.MeshBasicMaterial({ color: corCss || '#9aa4b2', transparent: true, opacity: 1 });
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.13), mat);

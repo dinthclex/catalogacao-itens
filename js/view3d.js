@@ -1010,6 +1010,11 @@ const View3D = {
         // Configurações 3D: aplica ao vivo se o usuário mudar enquanto o 3D
         // já está aberto (ver _applyBussola3DVisibilidade).
         this._applyBussola3DVisibilidade(c.bussola3DAtiva);
+        // [22/09/2026] NOVO — posição customizável (mapconfig.js "📍 Definir
+        // posição na tela") da bússola/caixa do relógio do mundo, aplicada
+        // ao vivo se mudar enquanto o 3D já está aberto.
+        this._applyHudPosOverride('#v3d-compass-ring', c.bussola3DOffset);
+        this._applyHudPosOverride('.relogio-mundo-hud', c.relogioMundoOffset);
         // [17/09/2026 UTC] NOVO (RODADA 125) — reaplica o botão flutuante 🐞
         // ao vivo (visibilidade via 'debugBotaoTelaAtivo', estado visual via
         // 'debugModoAtivo').
@@ -1080,6 +1085,10 @@ const View3D = {
     // Estado inicial do anel de bússola (config já lida acima em cfgInicial)
     // — ver DEFAULTS.bussola3DAtiva em mapconfig.js.
     this._applyBussola3DVisibilidade(cfgInicial?.bussola3DAtiva);
+    // [22/09/2026] NOVO — posição customizável da bússola (a caixa do
+    // relógio do mundo ainda não existe neste ponto do mount — aplicada
+    // logo depois de `RelogioMundo.attachHUD`, ver mais abaixo).
+    this._applyHudPosOverride('#v3d-compass-ring', cfgInicial?.bussola3DOffset);
 
     const id = ambienteId || (await DB.getSetting('ambienteAtualId', null));
     this._map = id ? await DB.getMap(id) : null;
@@ -1305,6 +1314,10 @@ const View3D = {
     // fica no direito). Idempotente — attachHUD já não duplica se chamado
     // de novo pro mesmo container (reconstrução de cena, etc.).
     window.RelogioMundo?.attachHUD?.(container.querySelector('.view3d-wrap'));
+    // [22/09/2026] NOVO — posição customizável desta caixa (ver
+    // "⚙️ Configurações 3D" → "🕐 Relógio do mundo" → "📍 Definir posição na
+    // tela"), aplicada logo após criar o elemento acima.
+    this._applyHudPosOverride('.relogio-mundo-hud', cfgInicial?.relogioMundoOffset);
 
     // "🔧 Modelar em 3D" (mapview.js, painel do objeto — pedido do usuário,
     // 28/08/2026): se o painel 2D pediu pra abrir já editando um objeto
@@ -2080,12 +2093,16 @@ const View3D = {
     { tool: 'janela', icon: '🪟', label: 'Janela' },
     { tool: 'objeto', icon: '📦', label: 'Objeto' },
     { tool: 'item', icon: '🏷️', label: 'Item' },
-    // "Recolhedor" estilo Minecraft (pedido do usuário) — clique REMOVE o
+    // "Recolhedor" estilo Minecraft (pedido do usuário) — clique APAGA o
     // que estiver mirado (item/objeto/parede/porta/janela), com uma
-    // animação (ver _removeWithTool/Engine3D.spawnCollectEffect/
-    // spawnDemolishEffect). Sem roleta própria — não há "o que escolher",
-    // só mirar e clicar.
-    { tool: 'remover', icon: '🗑️', label: 'Remover' },
+    // animação de demolição em cubos (ver _removeWithTool/
+    // Engine3D.spawnDemolishEffect). Sem roleta própria — não há "o que
+    // escolher", só mirar e clicar. [21/09/2026] Rótulo trocado de
+    // "Remover" pra "Apagar" (pedido verbatim) — `tool: 'remover'`
+    // continua com o mesmo id interno de sempre, só o texto exibido mudou
+    // (id interno mexeria em vários outros pontos do arquivo sem ganho
+    // nenhum pro usuário, que só vê o rótulo).
+    { tool: 'remover', icon: '🗑️', label: 'Apagar' },
     // "📍 Adicionar orb" (pedido do usuário, 26/08/2026): "Assim como há nas
     // 'Fotos' o botão 'Adicionar orb'... Com ele selecionado e ao mirar um
     // objeto, abre-se a mesma janela de busca de patrimônio para poder
@@ -3031,6 +3048,25 @@ const View3D = {
   _applyBussola3DVisibilidade(ativo) {
     const el = this._container?.querySelector('#v3d-compass-ring');
     if (el) el.classList.toggle('hidden', ativo === false);
+  },
+
+  /** [22/09/2026] NOVO — pedido verbatim: "deve ser possível alterar a
+   *  posição do roda dos pontos cardeais e a caixa do tempo [...] na
+   *  tela." Aplica (ou remove, se `offset` for null/ausente — volta pra
+   *  posição padrão fixa do CSS/inline de sempre) um `{top, right}` em px
+   *  como override inline no elemento — MESMA convenção usada pelo modo de
+   *  arrastar de mapconfig.js `_abrirPosicionadorTela` (que grava esse
+   *  mesmo formato em `bussola3DOffset`/`relogioMundoOffset`). Chamado no
+   *  mount() e a cada mudança de config (`_onMapConfigChange`), pros dois
+   *  elementos (bússola e caixa do relógio do mundo). */
+  _applyHudPosOverride(elSelector, offset) {
+    const el = this._container?.querySelector(elSelector) || document.querySelector(elSelector);
+    if (!el) return;
+    if (offset && Number.isFinite(offset.top) && Number.isFinite(offset.right)) {
+      el.style.top = offset.top + 'px'; el.style.right = offset.right + 'px'; el.style.left = 'auto';
+    } else {
+      el.style.top = ''; el.style.right = ''; el.style.left = '';
+    }
   },
 
   _layerIdParaNovosItens() {
@@ -6181,9 +6217,10 @@ const View3D = {
       const textarea = wrap.querySelector('#v3d-fotocam-info-json');
       try {
         const json = textarea.value.trim() ? JSON.parse(textarea.value) : null;
-        const photoFull = await DB.getAmbientePhoto(foto.id);
-        if (!photoFull) throw new Error('Foto não encontrada.');
-        await DB.saveAmbientePhoto({ ...photoFull, mapaVanishCam: json });
+        // [22/09/2026] MUDADO — `CameraPin.save` cobre Câmera nova
+        // independente de foto e linha legada (ver js/objecttypes/camera.js).
+        const salvo = await CameraPin.save(this._map, foto.id, { mapaVanishCam: json });
+        if (!salvo) throw new Error('Foto/Câmera não encontrada.');
         foto.vanishCam = json; // atualiza a cópia local desta vista, sem esperar recarregar o mapa inteiro
         // O modo "ver através de um orb de FOTO" deriva o FOV do
         // vanishCam salvo aqui (ver _fotoCamFovFor).
@@ -6426,9 +6463,10 @@ const View3D = {
           if (this._fotoCamPropsSaveTimer) clearTimeout(this._fotoCamPropsSaveTimer);
           this._fotoCamPropsSaveTimer = setTimeout(() => {
             this._fotoCamPropsSaveTimer = null;
-            DB.getAmbientePhoto(foto.id).then((photoFull) => {
-              if (photoFull) return DB.saveAmbientePhoto({ ...photoFull, mapaCamProps: patch });
-            }).catch((err) => console.error('[view3d] falha ao salvar camProps (Propriedades da câmera):', err));
+            // [22/09/2026] MUDADO — `CameraPin.save` (cobre Câmera nova e
+            // linha legada).
+            CameraPin.save(this._map, foto.id, { mapaCamProps: patch })
+              .catch((err) => console.error('[view3d] falha ao salvar camProps (Propriedades da câmera):', err));
           }, 300);
           if (this._fotoCamMode) {
             // [11/09/2026 — CORRIGIDO] Era `_activeCamPropsVFovRad()` (passa
@@ -7052,31 +7090,12 @@ const View3D = {
    *  refeita aqui pra montar `this._map.fotos` antes de `_rebuildScene()`. */
   async _buildFotosNoMapa() {
     if (!this._map) return;
-    const fotos = await DB.getAllAmbientePhotos();
-    const posicionadas = fotos.filter((f) => typeof f.mapaX === 'number' && typeof f.mapaY === 'number');
-    const curar = [];
-    this._map.fotos = posicionadas.map((f) => {
-      const layerId = Mapping.resolveLayerId(this._map, f.mapaLayerId);
-      if (layerId && layerId !== (f.mapaLayerId || null)) curar.push({ id: f.id, layerId });
-      return {
-        id: f.id, x: f.mapaX, y: f.mapaY, piso: f.mapaPiso || 0, nome: f.nome || '', layerId,
-        dirAngulo: f.mapaDirAngulo || 0, altura: f.mapaAltura ?? 1.6, rotPerp: f.mapaRotPerp || 0,
-        thumbDataUrl: f.thumbDataUrl, dataUrl: f.dataUrl,
-        // [15/09/2026 UTC] NOVO — pedido verbatim: "Ao acrescentar uma
-        // entrada no 'Histórico deste objeto' (no 'Ver em 3D') [...] a
-        // entrada desaparece [...] não está mais ali (mesmo não tendo sido
-        // excluída)." CAUSA RAIZ: esta projeção (mesma função-espelho de
-        // `mapview.js` `_refreshFotosNoMapa`, ver comentário grande lá)
-        // nunca copiava `historico` do registro real da AmbientePhoto —
-        // toda vez que "Ver em 3D" remonta a cena (inclusive reabrindo,
-        // como na 2ª visita do próprio bug relatado), o cartão da câmera
-        // lia este objeto achatado SEM histórico nenhum, mesmo com a
-        // entrada gravada de verdade no banco por `cards/foto-pin-card.js`
-        // (`DB.saveAmbientePhoto`). Adicionado aqui.
-        historico: f.historico || [],
-      };
-    });
-    for (const c of curar) { const photo = await DB.getAmbientePhoto(c.id); if (photo) await DB.saveAmbientePhoto({ ...photo, mapaLayerId: c.layerId }); }
+    // [22/09/2026] MUDADO — mesma centralização documentada em `mapview.js
+    // _refreshFotosNoMapa` (ver comentário grande lá): a montagem agora
+    // mora só em `CameraPin.buildFotosArray` (js/camera-pin.js), que já
+    // cobre fotos legadas posicionadas E Câmeras independentes novas
+    // (`map.cameras`, sem foto nenhuma até uma ser anexada).
+    this._map.fotos = await CameraPin.buildFotosArray(this._map);
   },
 
   async _buildItensNoMapa() {
@@ -7170,19 +7189,25 @@ const View3D = {
     if (!addedIncremental) await this._rebuildScene();
   },
 
-  /** "Recolhedor" de itens no 3D, estilo Minecraft (pedido do usuário: "como
-   *  no Minecraft, deve ter algum recolhedor de itens (removê-los da cena)
-   *  no 3D... deve haver alguma animação"). Ferramenta 🗑️ Remover da hotbar
-   *  — mira em algo (mesma detecção da mira normal, `Engine3D.hoverPick`,
-   *  que já cobre item/objeto/parede/porta/janela — ver
-   *  engine3d.js) e o clique remove, sempre com uma animação (nunca
-   *  silenciosamente, ver Engine3D.spawnCollectEffect/spawnDemolishEffect).
-   *  Item/câmera/objeto ("pequenos", pedido do usuário) ganham a animação
-   *  de caixa-recolhedora — entram na caixa, ela fecha e esmaece, mesmo
-   *  estilo visual da roleta da hotbar. Parede/porta/janela ("outros itens
-   *  grandes", pedido explícito de um jeito DIFERENTE e "criativo") se
-   *  despedaçam em cacos que voam e caem, como uma pequena demolição —
-   *  "não cabem numa caixinha". */
+  /** "Recolhedor" de itens no 3D, estilo Minecraft (pedido original do
+   *  usuário: "como no Minecraft, deve ter algum recolhedor de itens
+   *  (removê-los da cena) no 3D... deve haver alguma animação"). Ferramenta
+   *  🗑️ "Apagar" da hotbar (renomeada de "Remover" — pedido verbatim,
+   *  21/09/2026) — mira em algo (mesma detecção da mira normal,
+   *  `Engine3D.hoverPick`, que já cobre item/objeto/parede/porta/janela —
+   *  ver engine3d.js) e o clique apaga, sempre com uma animação (nunca
+   *  silenciosamente).
+   *  [21/09/2026] TROCADO -- pedido verbatim: "uma animação acontece, esta
+   *  animação deve ser assim, de acordo com as dimensões mais externas do
+   *  objeto (comprimento, largura, volume), deve ser vários cubos (da cor
+   *  mais característica do objeto a ser excluído) saltando como um muro
+   *  que é quebrado/despedaçado." TODO tipo (item/objeto/tijolo/parede/
+   *  porta/janela) agora usa `Engine3D.spawnDemolishEffect` — a "caixinha"
+   *  recolhedora antiga (`spawnCollectEffect`, ainda em engine3d.js mas sem
+   *  chamador) só existia pros "pequenos" (item/câmera/objeto); ficou
+   *  substituída por completo pela demolição em cubos, com a contagem de
+   *  cacos e a dispersão escaladas pelo tamanho real do que foi excluído
+   *  (ver comentário grande em `Engine3D.spawnDemolishEffect`). */
   async _removeWithTool() {
     if (!this._map || !this._engine) return;
     const hit = this._engine.hoverPick(this._camera);
@@ -7196,7 +7221,7 @@ const View3D = {
       const ray = this._engine.centerRay?.(this._camera);
       const medidaHit = ray ? this._trena3D.pickAtRay(ray) : null;
       if (medidaHit && this._trena3D.removerMedida(medidaHit.medidaId)) return;
-      Utils.toast('Mire em algo pra remover (item, câmera, objeto, parede, porta, janela ou medida da Trena 3D).', { type: 'warn' });
+      Utils.toast('Mire em algo pra apagar (item, câmera, objeto, parede, porta, janela ou medida da Trena 3D).', { type: 'warn' });
       return;
     }
     // A partir da rodada 52 a exclusão em si (animação + Mapping.remove*/
@@ -7297,7 +7322,7 @@ const View3D = {
     // (mesma função usada pela exclusão via botão direito, ver
     // `onContextMenu` em `_bindDesktopControls`).
     if (hit.type === 'tijolo') {
-      this._engine.spawnCollectEffect(pos, '#78c8ff', Math.max(half.x, half.y, half.z) * 2);
+      this._engine.spawnDemolishEffect(pos, { x: half.x * 2, y: half.y * 2, z: half.z * 2 }, '#78c8ff');
       if (hit.id === 'tijolos-merged') {
         this._map.tijolos = (this._map.tijolos || []).filter((t) => (t.formato || 'caixa') !== 'caixa' || t.texturaUrl);
       } else {
@@ -7310,7 +7335,7 @@ const View3D = {
     }
     if (hit.type === 'object' || hit.type === 'item') {
       const cor = hit.type === 'object' ? (hit.ref?.cor || '#8a92a3') : '#4f8cff';
-      this._engine.spawnCollectEffect(pos, cor, Math.max(half.x, half.y, half.z) * 2);
+      this._engine.spawnDemolishEffect(pos, { x: half.x * 2, y: half.y * 2, z: half.z * 2 }, cor);
       if (hit.type === 'object') Mapping.removeObject(this._map, hit.ref.id);
       else if (hit.type === 'item') await DB.updateItem(hit.ref.id, { mapaX: null, mapaY: null, mapaPiso: 0 }); // solta o patrimônio do mapa, mesma ação de "Remover do mapa" — não exclui o item do catálogo
       Utils.toast('Removido 🗑️', { type: 'ok', duration: 1400 });
@@ -7818,6 +7843,45 @@ const View3D = {
     if (pertoDoFim) el.scrollTop = el.scrollHeight;
   },
 
+  /** [22/09/2026] NOVO — lógica de zoom (roda do mouse) de "Ver através desta Câmera" extraída de
+   *  dentro de `onWheel`/`_bindDesktopControls` pra um método próprio, reaproveitável por quem
+   *  mais precisar disparar esse mesmo zoom (pedido verbatim: rolar a roda em cima do miolo do
+   *  anel circular ou de um dos 3 anéis do `CamControl3D`, que são um overlay `position:fixed`
+   *  separado do `<canvas>` — o `wheel` nunca chegava até o listener abaixo nesse caso). Mesmo
+   *  comportamento de antes, byte a byte, só que sem depender de `e.currentTarget`/Pointer Lock.
+   *  Devolve `true` se aplicou o zoom (havia um `_fotoCamMode` ativo), `false` caso contrário. */
+  _zoomFotoCamWheel(e, canvasEl) {
+    const canvas = canvasEl || this._container?.querySelector('#v3d-canvas');
+    if (!this._fotoCamMode || !canvas) return false;
+    e.preventDefault?.();
+    const cfg = this._fotoCamMode;
+    // Rolar "pra frente" (deltaY<0) = zoom IN = FOV MENOR. Fator
+    // multiplicativo pra sentir consistente tanto perto de 5° (zoom
+    // in extremo) quanto perto de 140° (zoom out extremo).
+    const fator = e.deltaY < 0 ? (1 / 1.12) : 1.12;
+    cfg.zoomFov = Utils.clamp(cfg.zoomFov * fator, this._CAMVIEW_ZOOM_FOV_MIN, this._CAMVIEW_ZOOM_FOV_MAX);
+    this._engine?.setFov?.(cfg.zoomFov);
+    {
+      const frame = this._activeCamFrameRectPx();
+      const rect = canvas.getBoundingClientRect();
+      const prevOff = this._camViewPanOffset || { x: 0, y: 0 };
+      const frameCenterX = frame.left + frame.width / 2 + prevOff.x * frame.cw;
+      const frameCenterY = frame.top + frame.height / 2 + prevOff.y * frame.ch;
+      const centerPxX = rect.width / 2;
+      const centerPxY = rect.height / 2;
+      const cx = frame.width > 0.0001 ? (centerPxX - frameCenterX) / frame.width : 0;
+      const cy = frame.height > 0.0001 ? (centerPxY - frameCenterY) / frame.height : 0;
+      const off = this._camViewPanOffset || (this._camViewPanOffset = { x: 0, y: 0 });
+      const EASE = 0.15;
+      const fracToCanvasX = frame.cw > 0 ? frame.width / frame.cw : 1;
+      const fracToCanvasY = frame.ch > 0 ? frame.height / frame.ch : 1;
+      off.x += (-cx * fracToCanvasX - off.x) * EASE;
+      off.y += (-cy * fracToCanvasY - off.y) * EASE;
+    }
+    this._updateFotoCamOverlayZoomScale();
+    return true;
+  },
+
   _bindDesktopControls(canvas) {
     // Guarda defensiva (pedido do usuário, 25/08/2026: "um clique está
     // valendo por várias viradas") — se por qualquer motivo `mount()` for
@@ -8055,7 +8119,7 @@ const View3D = {
         return;
       }
       // Atalhos numéricos da hotbar (1 Mirar, 2 Parede, 3 Porta, 4 Janela, 5
-      // Objeto, 6 Item, 8 Remover) — mesmo espírito de hotbar
+      // Objeto, 6 Item, 8 Apagar) — mesmo espírito de hotbar
       // numerada de jogo. Esc
       // cancela uma parede em cadeia pendente (1º ponto já clicado, ainda
       // esperando o 2º) sem sair da ferramenta.
@@ -9078,86 +9142,10 @@ const View3D = {
       // return;` logo abaixo (guarda de TODO o resto desta função, pensada
       // pra navegação em 1ª pessoa travada) sempre barraria a roda do mouse
       // nesse modo — por isso este bloco novo fica ANTES dela, não depois.
-      if (this._fotoCamMode) {
-        e.preventDefault();
-        const cfg = this._fotoCamMode;
-        // Rolar "pra frente" (deltaY<0) = zoom IN = FOV MENOR. Fator
-        // multiplicativo pra sentir consistente tanto perto de 5° (zoom
-        // in extremo) quanto perto de 140° (zoom out extremo).
-        const fator = e.deltaY < 0 ? (1 / 1.12) : 1.12;
-        cfg.zoomFov = Utils.clamp(cfg.zoomFov * fator, this._CAMVIEW_ZOOM_FOV_MIN, this._CAMVIEW_ZOOM_FOV_MAX);
-        this._engine?.setFov?.(cfg.zoomFov);
-        // [13/09/2026 — ITEM F, REFINADO 14/09/2026] pedido verbatim (rodada
-        // 13/09): "faça o zoom ir em direção aonde o mouse está apontando".
-        // Pedido verbatim de REFINAMENTO (14/09/2026): "deve funcionar tanto
-        // ao ampliar quanto ao reduzir" (antes só tratava zoom IN) e "a
-        // 'posição relativa' deve ser calculada em relação à posição do
-        // retângulo amarelo já desenhado no canvas (não em relação ao canto
-        // do canvas inteiro nem ao centro da tela)" — antes usava
-        // `canvas.getBoundingClientRect()` puro (canto/centro do CANVAS) como
-        // referência; agora usa `_activeCamFrameRectPx()` (o "retângulo
-        // amarelo"/quadro calibrado — MESMA função usada pelo `<img>`/plano
-        // do backdrop, ver comentário grande dela). Reaproveita o MESMO
-        // deslocamento de "lente" já usado pelo pan Shift+botão-do-meio
-        // (`_camViewPanOffset`/`Engine3D.setCamPanFrac`, ver onMouseMove/
-        // _loop acima) em vez de girar `yaw`/`pitch` da câmera de verdade —
-        // evita reabrir a lógica de pose travada (`_computeFotoCamPose`, recalculada do zero todo quadro) e continua
-        // 100% compatível com a foto-guia (que já lê `_camViewPanOffset` em
-        // `_updateFotoCamOverlayZoomScale`).
-        {
-          const frame = this._activeCamFrameRectPx();
-          const rect = canvas.getBoundingClientRect();
-          const prevOff = this._camViewPanOffset || { x: 0, y: 0 };
-          // Centro ATUAL na tela do retângulo amarelo — `_activeCamFrameRectPx`
-          // sozinha sempre devolve um retângulo CENTRADO no canvas (ignora
-          // pan de propósito, ver comentário dela), mas o retângulo amarelo
-          // DE VERDADE (objeto 3D real, engine3d.js) já pode estar deslocado
-          // na tela por um pan anterior (`prevOff`, aplicado como lens-shift
-          // de verdade em `camera3` — desloca TUDO que é renderizado,
-          // inclusive o retângulo amarelo) — sem somar `prevOff` aqui, um
-          // 2º/3º passo de zoom sobre um pan já existente ia convergir pro
-          // lugar ERRADO (o centro "de fábrica", não o centro real atual).
-          const frameCenterX = frame.left + frame.width / 2 + prevOff.x * frame.cw;
-          const frameCenterY = frame.top + frame.height / 2 + prevOff.y * frame.ch;
-          // [11/09/2026] CORRIGIDO — pedido verbatim: "ao centro do canvas o
-          // zoom deve ser direcionado para ali." ANTES o ponto de
-          // convergência era a posição do CURSOR (`e.clientX/Y`, pedido
-          // explícito de uma rodada anterior) — trocado agora pelo CENTRO DO
-          // CANVAS (`rect.width/2`, `rect.height/2`), fixo, independente de
-          // onde o mouse está. Na prática, isso faz o zoom ir sempre
-          // "recentrando" o retângulo amarelo/a foto no meio do canvas
-          // conforme se aproxima/afasta — desfazendo aos poucos qualquer
-          // deslocamento feito antes pelo pan de Shift+botão-do-meio (ver
-          // `off.x/y` mais abaixo, mesma fórmula de sempre, só que agora
-          // convergindo pro centro do canvas em vez do cursor).
-          const centerPxX = rect.width / 2;
-          const centerPxY = rect.height / 2;
-          // `cx`/`cy` = posição do centro do canvas relativa ao CENTRO do
-          // retângulo amarelo (não do cursor), em fração do PRÓPRIO
-          // retângulo (-0.5..0.5 dentro dele).
-          const cx = frame.width > 0.0001 ? (centerPxX - frameCenterX) / frame.width : 0;
-          const cy = frame.height > 0.0001 ? (centerPxY - frameCenterY) / frame.height : 0;
-          // `off.x`/`off.y` (`_camViewPanOffset`) são fração do CANVAS (não
-          // do retângulo amarelo — mesma unidade que `Engine3D.setCamPanFrac`
-          // espera, ver Shift+MMB acima) — converte a fração (relativa ao
-          // retângulo amarelo) pra essa mesma unidade antes de aplicar,
-          // multiplicando pela proporção retângulo/canvas — preserva o PONTO
-          // físico de convergência (o pixel sob o cursor) trocando só a
-          // referência/escala usada pra descrevê-lo.
-          const off = this._camViewPanOffset || (this._camViewPanOffset = { x: 0, y: 0 });
-          const EASE = 0.15;
-          const fracToCanvasX = frame.cw > 0 ? frame.width / frame.cw : 1;
-          const fracToCanvasY = frame.ch > 0 ? frame.height / frame.ch : 1;
-          // [14/09/2026] Antes só rodava em `e.deltaY < 0` (zoom IN); pedido
-          // de refinamento explícito: "tanto ao ampliar quanto ao reduzir" —
-          // convergência agora roda nos 2 sentidos, sinal do `EASE` não muda
-          // (converge pro cursor tanto aproximando quanto afastando).
-          off.x += (-cx * fracToCanvasX - off.x) * EASE;
-          off.y += (-cy * fracToCanvasY - off.y) * EASE;
-        }
-        this._updateFotoCamOverlayZoomScale();
-        return;
-      }
+      // [22/09/2026] MUDADO — lógica extraída para `_zoomFotoCamWheel` (ver comentário grande
+      // dela, logo antes de `_bindDesktopControls`), pra ser reaproveitada pelo `wheel` disparado
+      // em cima dos anéis do `CamControl3D` (overlay `position:fixed` fora do `<canvas>`).
+      if (this._zoomFotoCamWheel(e, canvas)) return;
       // [10/09/2026] CORRIGIDO — bug relatado: "com a ferramenta 'Objeto'
       // ativa, rolar a roda do mouse não está mais trocando entre os
       // objetos". Antes conferia `document.pointerLockElement !== canvas`

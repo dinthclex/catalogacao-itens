@@ -49,6 +49,12 @@ window.ModalCards.register('changelog', () => `
         <div class="handle"></div>
         <h3 style="margin-top:0">🗒️ Log de alterações</h3>
         <div style="font-size:13px; color:var(--text-dim); line-height:1.6">
+          <p style="font-weight:600; color:var(--text); margin-bottom:4px">21/09/2026</p>
+          <ul style="margin:0 0 14px; padding-left:18px">
+            <li>Novo objeto Access Point Wi-Fi (Redes): 1 porta RJ-45 que recebe cabo; só emite sinal ligado e com cabo conectado.</li>
+            <li>Mapa volumétrico de sinal 3D: varredura por raios (antena semi-direcional, queda 1/d², paredes/pilares/vigas -80%, portas de madeira -30%, vidro/janela -15%), em verde/amarelo/vermelho.</li>
+            <li>Painel do AP: faixa (2,4/5/6 GHz), potência, densidade da varredura e botão 'Refazer Varredura de Sinal' com barra de progresso; roda em lotes por quadro sem travar a tela.</li>
+          </ul>
           <p style="font-weight:600; color:var(--text); margin-bottom:4px">20/09/2026</p>
           <ul style="margin:0 0 14px; padding-left:18px">
             <li>Cabos 3D mantêm formato de cilindro em curvas fechadas; sombreamento corrigido e saída do patch cord reduzida para 4 cm.</li>
@@ -114,6 +120,22 @@ window.ModalCards.register('changelog', () => `
             <li>Controle de câmera: roll do anel corrigido (sentido) e só na faixa do anel; miolo do anel controla yaw+pitch como o gimbal; só gira enquanto o botão está apertado; mão aberta/fechada como cursor; cliques nos anéis não atravessam para a cena; D-pad centralizado abaixo da caixa do Controle.</li>
             <li>Controle de câmera: botão '🎯 Fino' (×1 / ×10 / ×100 mais devagar na mesma passada); botões Controle/Anéis/Fino no canto inferior direito da área do Ver em 3D; marcadores das barras não saltam mais ao ocultar/mostrar os anéis.</li>
             <li>Controle de câmera: os 4 valores (Pitch, Yaw, Roll, Altura) agora são o botão triplo (setas, arrastar, clicar para digitar); 'Controle' e 'Anéis' trazem a janela para a frente ao serem ligados (e clicar na janela/anel também); removido o desfoque do miolo do anel.</li>
+            <li>Câmera: clicar na foto (painel do Mapa 2D e cartão do Ver em 3D) abre as opções 'Escolher um arquivo do aparelho', 'Usar uma foto já tirada (Mapa → Fotos)', 'Desvincular foto desta Câmera' e 'Cancelar'; dá para deixar a Câmera sem foto. Sem foto, continua o botão 'Anexar foto'. O antigo duplo clique da miniatura no 2D foi substituído por esse menu.</li>
+            <li>Câmera (Ver em 3D): botão 'X' no canto superior direito da janela de propriedades. Mapa 2D: o botão 'Ver em tela cheia' do painel da foto voltou a funcionar.</li>
+            <li>Mapa 2D: quando objetos se sobrepõem (ex.: monitor sobre a mesa), o objeto colocado por último recebe o clique e o arrastar. No empilhamento, o objeto pousa no que está sob o seu centro — um monitor colocado na mesa ao lado do gabinete fica rente ao tampo, e só sobe no gabinete se for colocado nele.</li>
+            <li>Propriedades do objeto (Ver em 3D): novo campo 'Posição Y (m)' para a altura; 'Andar / piso' passa a ser um deslocamento (offset).</li>
+            <li>Rack: roteamento automático dos cabos traseiros do patch panel — recuo reto de 5 cm, desvio reto até a guia vertical, curva de 90° e subida/descida em super feixe até a furação da tampa. Novo painel 'Saída de cabos' (Desligado/Topo/Base; Centro/Canto esquerdo/Canto direito/Personalizado com offset X/Z). Racks novos nascem com saída pelo Topo; racks já existentes também passam a se auto-organizar pelo Topo (escolha 'Desligado' para manter o desenho antigo). Mudou direção ou alinhamento, os cabos se refazem sozinhos.</li>
+            <li>Empilhamento: monitor, teclado e mouse postos numa mesa (mesmo ao lado de um gabinete) agora ficam rentes ao tampo. O deslocamento 'y0' do catálogo (0,75 m do monitor etc.) era somado por cima da altura da mesa e os fazia voar acima do gabinete; objetos com elevação definida (pelo apoio ou pela mira) não somam mais o 'y0'.</li>
+            <li>Propriedades do objeto (Ver em 3D): 'Y global (m)' (mundo: andar × altura do piso + Y local) e 'Y local (m)' (relativo ao andar) — editáveis, aceitam valores negativos e se atualizam juntos, inclusive ao trocar o 'Andar / piso (offset)'. Um objeto rente ao tampo de uma mesa de 0,74 m mostra Y global 0,74.</li>
+            <li>Rack: cabos traseiros agora formam feixes organizados sem se atravessar. Cada patch panel vira um sub-feixe por lado (raias de profundidade + coluna na calha vertical); esquerdo e direito se unem lado a lado na furação, e cada patch panel a mais engrossa o super feixe em mais uma coluna.</li>
+            <li>Ver em 3D: tecla E (carregar equipamento) muito mais leve com muitos cabos ligados — só os cabos do item carregado são atualizados durante o movimento e tudo é reconstruído uma vez ao soltar.</li>
+            <li>Ver em 3D: os modos E, L e M mostram uma faixa destacada no centro, logo abaixo dos botões do cabeçalho, informando o modo ativo enquanto ele durar.</li>
+            <li>Rack sobre um objeto 'Piso' (ou mesa) no mapa 2D: o rack agora nasce na altura do topo do objeto, em vez de no chão do 3D (o padrão de elevação 0 do rack impedia o empilhamento).</li>
+            <li>Mouse e Mouse ergonômico: a maior dimensão agora fica na vertical do mapa 2D (largura e profundidade trocadas).</li>
+            <li>Propriedades do objeto: grupos 'Posição' (X, Z, Y global, Y local, Andar / piso), 'Rotação' e 'Forma' destacados; 'Andar / piso' passou para logo acima da Rotação.</li>
+            <li>Rack, 'Saída de cabos': novo 'Formato do feixe' (Retangular ou Cilíndrico) e 'Espaçamento' entre cabos (Afastado, Junto/colados ou Livre, com distância em múltiplos do diâmetro do cabo).</li>
+            <li>Mapa 2D: o Rack (de piso ou de parede) também passa a ficar em cima do que já estiver na grade (Piso, mesa etc.); sem nada embaixo, fica no chão (rack de parede mantém 1,2 m). Vale também ao trocar U/profundidade do rack.</li>
+            <li>Rack, 'Saída de cabos': a distância entre cabos agora chega até colados (0,87 × diâmetro: as faces do tubo se encostam); novo 'Espaçamento vertical' (Afastado, Junto ou Livre) para a distância entre os agrupamentos que correm na horizontal, nos formatos Retangular e Cilíndrico. Cantos dos cabos agora são arcos circulares concêntricos.</li>
             <li>Removido do app o antigo objeto de câmera do mapa (câmera de vigilância / orb de câmera / modo assistindo): dados do mapa, painel 2D, cartão 3D, modelo 3D, ferramenta da hotbar 3D e script de exemplo. Resta só a Câmera (foto) de Ferramentas.</li>
             <li>Removido do app o Camera Match (perspmatch.js e perspmatch-math.js, armazenamento de sessões no db.js e o bloco comentado no index.html).</li>
             <li>'Acessar modelos': porta e janela usam exatamente a malha do 'Ver em 3D' (maçanetas reais; vidro com um só reflexo). O painel/gimbal de 'Ver através desta câmera' foi movido para a camada correta da tela.</li>

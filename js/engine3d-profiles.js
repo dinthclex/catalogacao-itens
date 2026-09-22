@@ -132,6 +132,8 @@ const OBJECT3D_PROFILES = {
   storage_12: { shape: 'box', w: 0.4826, d: 0.85, h: 0.0889, y0: 0, color: 0x2f343b },
   storage_24: { shape: 'box', w: 0.4826, d: 0.85, h: 0.0889, y0: 0, color: 0x2f343b },
   storage_60: { shape: 'box', w: 0.4826, d: 1.0, h: 0.1778, y0: 0, color: 0x2f343b },
+  // [21/09/2026 UTC] Access Point Wi-Fi: painel 20x20x4 cm, montado alto na parede (y0 = 2,2 m). Corpo real vem de RedeEquipView3D.
+  access_point: { shape: 'box', w: 0.2, d: 0.04, h: 0.2, y0: 2.2, color: 0xe9ebee },
   espelho1: { shape: 'box', w: 0.086, d: 0.03, h: 0.086, y0: 0.3, color: 0xe9ebee },
   espelho2: { shape: 'box', w: 0.086, d: 0.03, h: 0.086, y0: 0.3, color: 0xe9ebee },
   espelho4: { shape: 'box', w: 0.102, d: 0.03, h: 0.102, y0: 0.3, color: 0xe9ebee },
@@ -208,7 +210,7 @@ const OBJECT3D_PROFILES = {
   switch: { shape: 'box', w: 0.3, d: 0.15, h: 0.05, y0: 1.6, color: 0x1c1f26 },
   estabilizador: { shape: 'box', w: 0.2, d: 0.35, h: 0.15, y0: 0.05, color: 0x2c313a },
   teclado: { shape: 'box', w: 0.4, d: 0.15, h: 0.03, y0: 0.75, color: 0x2c313a },
-  mouse: { shape: 'box', w: 0.1, d: 0.06, h: 0.03, y0: 0.75, color: 0x2c313a },
+  mouse: { shape: 'box', w: 0.06, d: 0.1, h: 0.03, y0: 0.75, color: 0x2c313a },
   telefone: { shape: 'box', w: 0.18, d: 0.18, h: 0.12, y0: 0.75, color: 0x2c313a },
   grampeador: { shape: 'box', w: 0.16, d: 0.05, h: 0.05, y0: 0.75, color: 0x3a4048 },
   'caixa-som': { shape: 'box', w: 0.18, d: 0.18, h: 0.35, y0: 0, color: 0x2c313a },
@@ -387,7 +389,7 @@ const OBJECT3D_PROFILES = {
   //  - mouse2 ("Ergonômico"): variante 1 é o mouse simétrico padrão
   //    (0.1x0.06); este é maior/mais alto, formato ergonômico (corpo mais
   //    largo e mais alto pra apoiar a mão lateralmente).
-  mouse2: { shape: 'box', w: 0.12, d: 0.075, h: 0.045, y0: 0.75, color: 0x3a4048 },
+  mouse2: { shape: 'box', w: 0.075, d: 0.12, h: 0.045, y0: 0.75, color: 0x3a4048 },
   // [13/09/2026] NOVO — "robo": tipo BASE do catálogo pra infraestrutura de
   // robôs (limpeza/copa/recepcionista — backlog grande do usuário). Corpo
   // simples tipo "robô aspirador/robô de serviço": cilindro baixo e largo,

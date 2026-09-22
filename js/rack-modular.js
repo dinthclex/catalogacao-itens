@@ -84,6 +84,12 @@
     PASSA_CABOS: Object.freeze({ fracaoLargura: 0.6, fracaoProfundidade: 0.55, escovaEsp: 4, escovaCor: 0x18181a }),
     // Por onde o cabeamento estruturado deve escoar pra fora do rack (regra 4 -- validação física).
     CABLE_ENTRY_OPCOES: Object.freeze(['nenhum', 'top', 'bottom']),
+    // [21/09/2026] Alinhamento da abertura (furação) da tampa por onde o feixe de cabos sai:
+    // 'center' (centro da tampa), 'left_corner'/'right_corner' (quina TRASEIRA esquerda/direita) ou
+    // 'custom' (X/Z locais em `customExitOffset`, metros a partir do centro do rack). `MARGEM_MM` =
+    // folga mínima entre a borda da abertura e a borda da chapa.
+    CABLE_EXIT_ALINHAMENTOS: Object.freeze(['center', 'left_corner', 'right_corner', 'custom']),
+    SAIDA_CABOS: Object.freeze({ margemMm: 20 }),
     // Equipamentos 19" que encaixam nas Us (tipo -> rotulo, cor da frente).
     ACESSORIOS: Object.freeze({
       'switch':        Object.freeze({ rotulo: 'Switch',              cor: 0x3c4658 }),
@@ -143,6 +149,8 @@
      * @param {object} [p.tampaEstado]  { topo, base } -- 'fechada'|'com_abertura'|'sem_tampa'.
      * @param {'nenhum'|'top'|'bottom'} [p.cableEntry]  Por onde os cabos escoam pra fora do rack.
      * @param {boolean} [p.chicoteHabilitado]  Liga a organização em chicotes traseiros (RODADA 205).
+     * @param {'center'|'left_corner'|'right_corner'|'custom'} [p.cableExitAlignment]  Onde fica a abertura da tampa (padrão 'center').
+     * @param {{x:number,y?:number,z:number}} [p.customExitOffset]  X/Z locais (m, a partir do centro do rack) quando 'custom'.
      */
     constructor(p) {
       p = p || {};
@@ -167,6 +175,9 @@
       this.montagem.base = this.tampaEstado.base !== 'sem_tampa';
       this.cableEntry = RACK_CATALOGO.CABLE_ENTRY_OPCOES.includes(p.cableEntry) ? p.cableEntry : 'nenhum';
       this.chicoteHabilitado = !!p.chicoteHabilitado;
+      this.cableExitAlignment = RACK_CATALOGO.CABLE_EXIT_ALINHAMENTOS.includes(p.cableExitAlignment) ? p.cableExitAlignment : 'center';
+      const ceo = p.customExitOffset || {};
+      this.customExitOffset = { x: Number(ceo.x) || 0, y: Number(ceo.y) || 0, z: Number(ceo.z) || 0 };
       this.traseiraTipo = RACK_CATALOGO.TRASEIRA_TIPOS.includes(p.traseiraTipo) ? p.traseiraTipo : 'porta';
       this.dim = null;           // medidas calculadas (mm)
       this.partes = [];          // caixas/cilindros (armação, chapas, trilhos, equipamentos)
@@ -303,9 +314,9 @@
       // `RackModularView3D` decidir entre chapa sólida (`_criarMalha`, de sempre) e chapa com
       // recorte + escova (`_criarMalhaTampaComAbertura`) quando `estadoTampa==='com_abertura'`.
       if (M.topo) add('chapa_topo', 'chapa:topo', 'escala_z', { x: L, y: T, z: P },
-        { x: 0, y: yUf + d.teto - T / 2, z: 0 }, { material: 'chapa', estadoTampa: this.tampaEstado.topo });
+        { x: 0, y: yUf + d.teto - T / 2, z: 0 }, { material: 'chapa', estadoTampa: this.tampaEstado.topo, aberturaOffset: this.aberturaOffsetMm('topo') });
       if (M.base) add('chapa_base', 'chapa:base', 'escala_z', { x: L, y: T, z: P },
-        { x: 0, y: d.base - T / 2, z: 0 }, { material: 'chapa', estadoTampa: this.tampaEstado.base });
+        { x: 0, y: d.base - T / 2, z: 0 }, { material: 'chapa', estadoTampa: this.tampaEstado.base, aberturaOffset: this.aberturaOffsetMm('base') });
       if (M.traseira && this.traseiraTipo === 'chapa') add('chapa_traseira', 'chapa:traseira', 'esticavel_y',
         { x: L - 2 * T, y: d.alturaU, z: T }, { x: 0, y: yUi + d.alturaU / 2, z: -P / 2 + T / 2 }, { material: 'chapa' });
 
@@ -501,6 +512,47 @@
     // Integração com Mapa 2D e persistência (as características "ficam" no
     // objeto: 2D e 3D leem os MESMOS campos).
     // ------------------------------------------------------------------------
+    // ------------------------------------------------------------------------
+    // [21/09/2026] Saída de cabos (furação da tampa) -- ver js/rack-cable-routing.js.
+    // Coordenadas LOCAIS do rack (mm): x = direita (+) / esquerda (-), y = a partir do piso da base
+    // do rack, z = frente (+) / traseira (-) -- a MESMA convenção de `partes[].pos`.
+    // ------------------------------------------------------------------------
+    /** Deslocamento máximo (mm) do centro da abertura em X/Z sem sair da chapa (tampa topo/base). */
+    _saidaLimitesMm() {
+      const C = RACK_CATALOGO, d = this.dim, PC = C.PASSA_CABOS, m = C.SAIDA_CABOS.margemMm;
+      const hw = d.largura * PC.fracaoLargura / 2, hd = d.profundidade * PC.fracaoProfundidade / 2;
+      return { x: Math.max(0, d.largura / 2 - hw - m), z: Math.max(0, d.profundidade / 2 - hd - m) };
+    }
+    /** Centro (mm, X/Z locais) da abertura da tampa conforme `cableExitAlignment`:
+     *  'center' -> (0,0); 'left_corner'/'right_corner' -> quina TRASEIRA esquerda/direita (o mais
+     *  perto possível do canto, mantendo a abertura inteira dentro da chapa); 'custom' -> `customExitOffset`
+     *  (m) limitado à chapa. */
+    posicaoSaidaXZMm() {
+      const lim = this._saidaLimitesMm(), a = this.cableExitAlignment;
+      if (a === 'left_corner') return { x: -lim.x, z: -lim.z };
+      if (a === 'right_corner') return { x: lim.x, z: -lim.z };
+      if (a === 'custom') {
+        const cl = (v, m) => Math.max(-m, Math.min(m, v));
+        return { x: cl(this.customExitOffset.x * 1000, lim.x), z: cl(this.customExitOffset.z * 1000, lim.z) };
+      }
+      return { x: 0, z: 0 };
+    }
+    /** Deslocamento da abertura DESTA tampa ('topo'|'base'): só a tampa por onde os cabos saem
+     *  (`cableEntry`) acompanha o alinhamento; a outra continua com a abertura central. */
+    aberturaOffsetMm(lado) {
+      const usa = (lado === 'topo' && this.cableEntry === 'top') || (lado === 'base' && this.cableEntry === 'bottom');
+      return usa ? this.posicaoSaidaXZMm() : { x: 0, z: 0 };
+    }
+    /** Nó de saída (mm, coordenadas locais do rack) no MEIO da chapa da tampa: `{ x, y, z, lado, dirY }` ou
+     *  `null` com `cableEntry === 'nenhum'`. `y` = altura do meio da chapa (topo: yFimUteis + teto - chapa/2;
+     *  base: base - chapa/2), `dirY` = +1 (sai para cima) / -1 (sai para baixo). */
+    posicaoSaidaLocalMm() {
+      if (this.cableEntry !== 'top' && this.cableEntry !== 'bottom') return null;
+      const C = RACK_CATALOGO, d = this.dim, T = C.CHAPA_ESP_MM, xz = this.posicaoSaidaXZMm();
+      const topo = this.cableEntry === 'top';
+      return { x: xz.x, y: topo ? d.yFimUteis + d.teto - T / 2 : d.base - T / 2, z: xz.z, lado: topo ? 'topo' : 'base', dirY: topo ? 1 : -1 };
+    }
+
     /** Retângulo ocupado no Mapa 2D (mm) — largura x profundidade. */
     footprint2D() {
       return { largura: this.dim.largura, profundidade: this.dim.profundidade,
@@ -509,12 +561,14 @@
     toJSON() {
       return { kind: 'rackModular19', v: 3, us: this.us, profundidade: this.profundidade, tipo: this._tipoManual,
                montagem: Object.assign({}, this.montagem), traseiraTipo: this.traseiraTipo, acessorios: this.acessorios(),
-               tampaEstado: Object.assign({}, this.tampaEstado), cableEntry: this.cableEntry, chicoteHabilitado: this.chicoteHabilitado };
+               tampaEstado: Object.assign({}, this.tampaEstado), cableEntry: this.cableEntry, chicoteHabilitado: this.chicoteHabilitado,
+               cableExitAlignment: this.cableExitAlignment, customExitOffset: Object.assign({}, this.customExitOffset) };
     }
     static fromJSON(j) {
       return new RackModular({ us: j.us, profundidade: j.profundidade, tipo: j.tipo, montagem: j.montagem,
                                traseiraTipo: j.traseiraTipo, acessorios: j.acessorios,
-                               tampaEstado: j.tampaEstado, cableEntry: j.cableEntry, chicoteHabilitado: j.chicoteHabilitado });
+                               tampaEstado: j.tampaEstado, cableEntry: j.cableEntry, chicoteHabilitado: j.chicoteHabilitado,
+                               cableExitAlignment: j.cableExitAlignment, customExitOffset: j.customExitOffset });
     }
 
     // ------------------------------------------------------------------------
@@ -532,7 +586,8 @@
       return new RackModular({ us, profundidade: prof, montagem: obj && obj.rackMontagem,
                                traseiraTipo: obj && obj.rackTraseiraTipo, acessorios: obj && obj.rackAcessorios,
                                tampaEstado: obj && obj.rackTampaEstado, cableEntry: obj && obj.rackCableEntry,
-                               chicoteHabilitado: obj && obj.rackChicoteHabilitado });
+                               chicoteHabilitado: obj && obj.rackChicoteHabilitado,
+                               cableExitAlignment: obj && obj.rackCableExitAlignment, customExitOffset: obj && obj.rackCustomExitOffset });
     }
     /** Patch (para Mapping.updateObject) que aplica novos Us/profundidade ao
      *  objeto: parâmetros + forma 2D + altura total + elevação (parede/piso). */
@@ -556,7 +611,22 @@
     static patchMontagem(obj, mudancas) {
       const atual = Object.assign({}, MONTAGEM_COMPLETA, (obj && obj.rackMontagem) || {});
       RACK_CATALOGO.PECAS.forEach((p) => { if (mudancas && p.chave in mudancas) atual[p.chave] = !!mudancas[p.chave]; });
-      return { rackMontagem: atual };
+      const patch = { rackMontagem: atual };
+      // [21/09/2026] CORRIGIDO -- pedido verbatim: "as opções 'Tampa de baixo' e 'Tampa de cima'
+      // acabam não aplicando o efeito imediatamente." Desde a RODADA 205 quem manda de verdade em
+      // topo/base é `rackTampaEstado` (não mais `rackMontagem.topo/base`, que virou só espelho
+      // legado) -- `fromObjeto`/o construtor SEMPRE re-derivam `this.montagem.topo/base` a partir
+      // de `rackTampaEstado`, então marcar/desmarcar aqui sem também mexer em `rackTampaEstado`
+      // era sobrescrito na hora seguinte e nunca aparecia no 3D. Sincroniza os dois: desmarcado
+      // -> 'sem_tampa' (tampa removida); marcado -> 'fechada' (chapa sólida), A MENOS que já
+      // estivesse 'com_abertura' (preserva o furo -- só "reinstala" a chapa, não fecha sozinho).
+      ['topo', 'base'].forEach((chave) => {
+        if (!mudancas || !(chave in mudancas)) return;
+        const atualTE = Object.assign({ topo: 'fechada', base: 'fechada' }, obj && obj.rackTampaEstado, patch.rackTampaEstado);
+        const novoEstado = mudancas[chave] ? (atualTE[chave] === 'sem_tampa' ? 'fechada' : atualTE[chave]) : 'sem_tampa';
+        if (novoEstado !== atualTE[chave]) { atualTE[chave] = novoEstado; patch.rackTampaEstado = atualTE; }
+      });
+      return patch;
     }
     static patchDesmontarTudo(obj) {
       const m = {}; RACK_CATALOGO.PECAS.forEach((p) => { m[p.chave] = false; });
@@ -585,6 +655,27 @@
     static patchCableEntry(obj, entrada) {
       return { rackCableEntry: RACK_CATALOGO.CABLE_ENTRY_OPCOES.includes(entrada) ? entrada : 'nenhum' };
     }
+    /** [21/09/2026] Direção da saída dos cabos: 'top' | 'bottom' | 'nenhum' (roteamento automático desligado). */
+    static patchCableExitDirection(obj, direcao) { return RackModular.patchCableEntry(obj, direcao); }
+    /** [21/09/2026] Alinhamento da abertura da tampa: 'center' | 'left_corner' | 'right_corner' | 'custom'. */
+    static patchCableExitAlignment(obj, alinhamento) {
+      return { rackCableExitAlignment: RACK_CATALOGO.CABLE_EXIT_ALINHAMENTOS.includes(alinhamento) ? alinhamento : 'center' };
+    }
+    /** [21/09/2026] X/Z (m, a partir do centro do rack) da abertura quando o alinhamento é 'custom'. */
+    static patchCustomExitOffset(obj, x, z) {
+      const atual = (obj && obj.rackCustomExitOffset) || {};
+      return { rackCustomExitOffset: { x: Number.isFinite(x) ? x : (Number(atual.x) || 0), y: 0, z: Number.isFinite(z) ? z : (Number(atual.z) || 0) } };
+    }
+    /** [21/09/2026] Organização do feixe de cabos: formato 'retangular' | 'cilindrico'. */
+    static patchCabosFormato(obj, formato) { return { rackCabosFormato: formato === 'cilindrico' ? 'cilindrico' : 'retangular' }; }
+    /** [21/09/2026] Espaçamento entre cabos: 'junto' (colados, padrão) | 'afastado' | 'livre' (usa `rackCabosFator`). */
+    static patchCabosEspacamento(obj, esp) { return { rackCabosEspacamento: esp === 'afastado' || esp === 'livre' ? esp : 'junto' }; }
+    /** [21/09/2026] Distância centro a centro entre cabos, em múltiplos do diâmetro (0,87 = colados a 3,00; só vale em 'livre'). */
+    static patchCabosFator(obj, fator) { const f = Number(fator); return { rackCabosFator: Number.isFinite(f) ? Math.min(3, Math.max(0.87, f)) : 1.06 }; }
+    /** [21/09/2026] Distância VERTICAL entre os agrupamentos (feixes na horizontal): 'junto' (padrão) | 'afastado' | 'livre' (usa `rackCabosFatorV`). */
+    static patchCabosEspacamentoV(obj, esp) { return { rackCabosEspacamentoV: esp === 'afastado' || esp === 'livre' ? esp : 'junto' }; }
+    /** [21/09/2026] Distância vertical entre agrupamentos em múltiplos do diâmetro (0,87 = colados a 6,00). */
+    static patchCabosFatorV(obj, fator) { const f = Number(fator); return { rackCabosFatorV: Number.isFinite(f) ? Math.min(6, Math.max(0.87, f)) : 2 }; }
     /** Liga/desliga a organização em chicotes traseiros (opcional -- requisito 4 do pedido). */
     static patchChicoteHabilitado(obj, habilitado) {
       return { rackChicoteHabilitado: !!habilitado };
@@ -772,21 +863,23 @@
       const T = this.THREE, k = this.k, PC = RACK_CATALOGO.PASSA_CABOS;
       const w = p.tam.x * k, prof = p.tam.z * k, esp = p.tam.y * k;
       const hw = (w * PC.fracaoLargura) / 2, hd = (prof * PC.fracaoProfundidade) / 2;
+      // [21/09/2026] centro da abertura deslocado (alinhamento da saída de cabos) -- a chapa em si continua centrada.
+      const ao = p.aberturaOffset || { x: 0, z: 0 }, ox = ao.x * k, oz = ao.z * k;
       const sh = new T.Shape();
       sh.moveTo(-w / 2, -prof / 2); sh.lineTo(w / 2, -prof / 2); sh.lineTo(w / 2, prof / 2); sh.lineTo(-w / 2, prof / 2); sh.closePath();
       const furo = new T.Path();
-      furo.moveTo(-hw, -hd); furo.lineTo(hw, -hd); furo.lineTo(hw, hd); furo.lineTo(-hw, hd); furo.closePath();
+      furo.moveTo(ox - hw, oz - hd); furo.lineTo(ox + hw, oz - hd); furo.lineTo(ox + hw, oz + hd); furo.lineTo(ox - hw, oz + hd); furo.closePath();
       sh.holes.push(furo);
       const geo = new T.ExtrudeGeometry(sh, { depth: esp, bevelEnabled: false, curveSegments: 4 });
       geo.rotateX(Math.PI / 2);   // Shape em (x,z) + extrusão em Z-local -> vira Y depois de rodar
       geo.translate(0, esp / 2, 0); // recentraliza a espessura em torno de y=0 (mesma convenção da caixa)
-      return { geo, hw, hd, esp };
+      return { geo, hw, hd, esp, ox, oz };
     }
 
     /** 4 barras finas de borracha/escova em volta do recorte (só decorativo -- sem física real).
      *  Devolve `{ mesh, offsetLocal }[]` -- `offsetLocal` é a posição RELATIVA ao centro da chapa
      *  (`p.pos`), pra `_sync` conseguir reposicionar depois sem recriar as barras a cada quadro. */
-    _criarEscovaFrame(hw, hd, esp) {
+    _criarEscovaFrame(hw, hd, esp, ox = 0, oz = 0) {
       const T = this.THREE, PC = RACK_CATALOGO.PASSA_CABOS, matEscova = this._matEscova || (this._matEscova =
         new T.MeshStandardMaterial({ color: PC.escovaCor, roughness: 0.95, metalness: 0 }));
       const espEscova = PC.escovaEsp * this.k, out = [];
@@ -795,10 +888,10 @@
         out.push({ mesh, offsetLocal: { x: cx, y: 0, z: cz } });
       };
       // 2 barras ao longo de X (bordas -z/+z do recorte) + 2 ao longo de Z (bordas -x/+x).
-      bar(hw * 2 + espEscova * 2, espEscova, 0, -hd - espEscova / 2);
-      bar(hw * 2 + espEscova * 2, espEscova, 0, hd + espEscova / 2);
-      bar(espEscova, hd * 2, -hw - espEscova / 2, 0);
-      bar(espEscova, hd * 2, hw + espEscova / 2, 0);
+      bar(hw * 2 + espEscova * 2, espEscova, ox, oz - hd - espEscova / 2);
+      bar(hw * 2 + espEscova * 2, espEscova, ox, oz + hd + espEscova / 2);
+      bar(espEscova, hd * 2, ox - hw - espEscova / 2, oz);
+      bar(espEscova, hd * 2, ox + hw + espEscova / 2, oz);
       return out;
     }
 
@@ -807,12 +900,13 @@
      *  limpar/detectar mudança de estado e reposicionar depois). */
     _criarMalhaTampaComAbertura(p) {
       const T = this.THREE, k = this.k;
-      const { geo, hw, hd, esp } = this._geometriaTampaComAbertura(p);
+      const { geo, hw, hd, esp, ox, oz } = this._geometriaTampaComAbertura(p);
       const m = new T.Mesh(geo, this._materialDe(p));
       m.name = p.id; m.castShadow = m.receiveShadow = true;
       m.userData.rackParte = p.grupo; m.userData.estadoTampa = 'com_abertura';
+      m.userData.aberturaKey = ((p.aberturaOffset && p.aberturaOffset.x) || 0) + '|' + ((p.aberturaOffset && p.aberturaOffset.z) || 0);
       this.grupo.add(m); this.malhas.set(p.id, m);
-      this._criarEscovaFrame(hw, hd, esp).forEach(({ mesh, offsetLocal }, i) => {
+      this._criarEscovaFrame(hw, hd, esp, ox, oz).forEach(({ mesh, offsetLocal }, i) => {
         mesh.name = p.id + '_escova' + i; mesh.userData.rackParte = p.grupo;
         mesh.userData._offsetLocal = offsetLocal;
         mesh.position.set(p.pos.x * k + offsetLocal.x, p.pos.y * k + offsetLocal.y, p.pos.z * k + offsetLocal.z);
@@ -833,7 +927,9 @@
         const tinhaAbertura = !!(m && m.userData.estadoTampa === 'com_abertura');
         // Estado da tampa mudou ('fechada'<->'com_abertura') -- a geometria não é reescalável
         // como as caixas normais, precisa ser recriada do zero (inclui as barras de escova).
-        if (m && querAbertura !== tinhaAbertura) {
+        const chaveAb = querAbertura ? (((p.aberturaOffset && p.aberturaOffset.x) || 0) + '|' + ((p.aberturaOffset && p.aberturaOffset.z) || 0)) : '';
+        const abMudou = !!(m && querAbertura && tinhaAbertura && m.userData.aberturaKey !== chaveAb);   // [21/09/2026] alinhamento da saída mudou -> recria o recorte
+        if (m && (querAbertura !== tinhaAbertura || abMudou)) {
           this.grupo.remove(m); m.geometry.dispose(); this.malhas.delete(p.id);
           ['_escova0', '_escova1', '_escova2', '_escova3'].forEach((suf) => {
             const esc = this.malhas.get(p.id + suf);

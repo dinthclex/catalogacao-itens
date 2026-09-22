@@ -501,6 +501,8 @@
 <script src="assets/modelos/js/_novos-objetos.js"></script>
 <!-- [18/09/2026 UTC] NOVO -- "Rack" modular de 19" (objeto parametrico do catalogo): logica pura (RackModular) + montagem Three.js (RackModularView3D). Usado por Mapping.addObject/ensureNewFields, Engine3D._buildRackMesh e o painel de propriedades (js/cards/object-panel-card.js). Nao depende de engine3d.js; so precisa estar carregado antes do uso em tempo de execucao. -->
 <script src="js/rack-modular.js"></script>
+<script src="js/rack-cable-routing.js"></script>
+<script src="js/wifi-signal.js"></script>
 <script src="js/rede-passiva.js"></script>
 <script src="js/rede-equip.js"></script>
 <!-- [19/09/2026 UTC] NOVO (RODADA 171) -- classes de lógica (sem Three.js) pros novos objetos No-break/UPS, Storage (NAS/SAN/Disk Shelf) e Unidades de Disco (HD/SSD): StorageDevice.insertDrive/removeDrive, UPSDevice.calculateLoad. Ver comentário completo no topo de js/rede-storage-energia.js. -->
@@ -535,6 +537,14 @@
      Carregado ANTES de engine3d.js (que já consulta o registro no
      dispatcher de malha 3D) e de qualquer js/objecttypes/<tipo>.js. -->
 <script src="js/objecttypes/object-type-registry.js"></script>
+<!-- [22/09/2026] NOVO — js/objecttypes/camera.js (CameraPin): objeto
+     "Câmera" independente de foto, autocontido/autoregistrado no mesmo
+     padrão dos demais tipos de objeto (ver comentário grande no topo do
+     arquivo). Carregado logo depois do registro (usa `ObjectTypes.
+     register`) e ANTES de js/mapview.js/js/view3d.js, que o consomem em
+     runtime (`CameraPin.buildFotosArray`/`create`/`get`/`save`/
+     `attachPhoto`/`detachPhoto`/`delete`). -->
+<script src="js/objecttypes/camera.js"></script>
 <script src="js/engine3d.js"></script>
 <!-- [20/09/2026 UTC] js/engine3d-rede-mesh.js -- extraído de engine3d.js
      (pedido verbatim: "deixe apenas o core do projeto quanto ao motor 3D").
@@ -728,19 +738,6 @@
 <script src="js/capture.js"></script>
 <script src="js/mapconfig.js"></script>
 <script src="js/mapselection.js"></script>
-<!-- [10/09/2026] "📐 Camera Match" DESATIVADA por pedido verbatim do
-     usuário: "Remova o 'camera match' do projeto por enquanto." Os 2
-     scripts abaixo (window.PerspMatchMath/window.PerspMatch) foram
-     REMOVIDOS daqui pra a ferramenta não carregar/rodar mais — os arquivos
-     js/perspmatch.js e js/perspmatch-math.js continuam intactos em disco
-     (não apagados), assim como a store perspMatchSessions em js/db.js e o
-     comentário/botão correspondente em js/view3d.js (também removido de
-     lá, ver lá). Reversível: basta re-adicionar as 2 linhas abaixo (nesta
-     mesma posição, entre js/mapselection.js e js/mapview.js) e o botão em
-     js/view3d.js para reativar.
-     <script src="js/perspmatch-math.js"></script>
-     <script src="js/perspmatch.js"></script>
--->
 <!-- [11/09/2026] CodeMirror 5 (vendorizado, ver <link> no <head>) — core
      antes do modo, ambos antes de js/mapview.js (que instancia
      `CodeMirror.fromTextArea` na folha de código dos Scripts). -->

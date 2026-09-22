@@ -21,8 +21,10 @@
 window.CardSystem.register('foto-pin', {
   build(foto, ctx) {
     const html = `
-      <div style="text-align:center; font-weight:700; margin-bottom:8px">📷 Câmera</div>
-      <div class="map-fotopin-thumb-wrap" id="v3d-foto-thumb-wrap" title="Toque para trocar a foto">
+      <div style="position:sticky; top:-14px; z-index:3; margin:-14px -14px 8px; padding:10px 40px 6px; background:rgba(23,27,33,.98); border-radius:var(--radius-lg) var(--radius-lg) 0 0; text-align:center; font-weight:700">📷 Câmera
+        <button type="button" id="v3d-fc-x" class="icon-btn sm" title="Fechar" style="position:absolute; top:6px; right:8px">✕</button>
+      </div>
+      <div class="map-fotopin-thumb-wrap" id="v3d-foto-thumb-wrap" title="Clique na foto para trocá-la ou desvinculá-la">
         <img id="v3d-foto-thumb" class="map-fotopin-thumb hidden" alt="">
         <button type="button" class="btn secondary sm hidden" id="v3d-foto-anexar" title="Escolher uma imagem para esta câmera">📎 Anexar foto</button>
         <input type="file" id="v3d-foto-anexar-file" accept="image/*" style="display:none">
@@ -43,6 +45,7 @@ window.CardSystem.register('foto-pin', {
       const AmbientePhotos = window.AmbientePhotos;
 
       el.querySelector('#v3d-fc-close').onclick = () => el.remove();
+      el.querySelector('#v3d-fc-x').onclick = () => el.remove();
       {
         const toggle = el.querySelector('#v3d-foto-hist-toggle');
         const host = el.querySelector('#v3d-foto-hist');
@@ -51,8 +54,10 @@ window.CardSystem.register('foto-pin', {
             if (host.classList.contains('hidden') && !host.dataset.built) {
               host.innerHTML = window.ObjectStandard.historicoHtml(foto, 'v3d-foto-hist');
               window.ObjectStandard.wireHistoricoUi(host, foto, 'v3d-foto-hist', async () => {
-                const photoFull = await DB.getAmbientePhoto(foto.id);
-                if (photoFull) await DB.saveAmbientePhoto({ ...photoFull, historico: foto.historico });
+                // [22/09/2026] MUDADO — `CameraPin.save` cobre Câmera nova
+                // independente de foto e linha legada (ver
+                // js/objecttypes/camera.js).
+                await window.CameraPin.save(view3d._map, foto.id, { historico: foto.historico });
               });
               host.dataset.built = '1';
             }
@@ -73,6 +78,7 @@ window.CardSystem.register('foto-pin', {
         const temFoto = !!(photo && photo.dataUrl);
         if (img) { img.classList.toggle('hidden', !temFoto); if (temFoto) img.src = photo.thumbDataUrl || photo.dataUrl || ''; }
         if (btn) btn.classList.toggle('hidden', temFoto);
+        try { foto.dataUrl = temFoto ? photo.dataUrl : null; foto.thumbDataUrl = temFoto ? (photo.thumbDataUrl || photo.dataUrl) : null; } catch (e) { /* ignora */ }   // mantém o registro em memória em sincronia (sobreposição da câmera)
         // "Ao carregar uma foto, a câmera deve assumir a resolução da
         // foto" — `v3dPropsApi` só existe depois que o fieldset de
         // propriedades é montado (1ª vez que "⚙️ Propriedades da câmera" é
@@ -87,19 +93,43 @@ window.CardSystem.register('foto-pin', {
         }
       };
       let v3dPropsApi = null;
-      DB.getAmbientePhoto(foto.id).then((photo) => v3dAtualizarThumb(photo));
+      // [22/09/2026] MUDADO — `CameraPin.get` acha a foto acessória certa
+      // mesmo quando `foto.id` é uma Câmera nova independente (id real da
+      // foto é outro, via `fotoId` — ver js/objecttypes/camera.js).
+      window.CameraPin.get(view3d._map, foto.id).then((photo) => v3dAtualizarThumb(photo));
       // [20/09/2026] Anexar/trocar foto: arquivo do aparelho OU foto já tirada em Mapa → Fotos (com botão de retorno).
       const escolherOrigemFoto = async () => {
+        const imgAtual = el.querySelector('#v3d-foto-thumb');
+        const temFotoAgora = !!(imgAtual && !imgAtual.classList.contains('hidden'));
         const origem = await Utils.showChoiceModal({
-          title: 'Anexar foto à câmera', message: 'De onde vem a foto?',
+          title: temFotoAgora ? 'Foto da câmera' : 'Anexar foto à câmera', message: temFotoAgora ? 'O que fazer com a foto desta câmera?' : 'De onde vem a foto?',
           choices: [
             { value: 'arquivo', label: '📁 Escolher um arquivo do aparelho' },
             { value: 'fotos', label: '📷 Usar uma foto já tirada (Mapa → Fotos)' },
+            ...(temFotoAgora ? [{ value: 'desvincular', label: '🔗 Desvincular foto desta Câmera' }] : []),
             { value: 'cancelar', label: 'Cancelar', secondary: true },
           ],
         });
         if (!origem || origem === 'cancelar') return;
         if (origem === 'arquivo') { el.querySelector('#v3d-foto-anexar-file').click(); return; }
+        if (origem === 'desvincular') {
+          const ok = await Utils.showChoiceModal({
+            title: 'Desvincular foto', message: 'A Câmera continua no mapa (posição, direção, altura, campo de visão e scripts), mas fica sem nenhuma foto. Se a imagem só existir nesta Câmera, ela será perdida.',
+            choices: [{ value: 'sim', label: 'Desvincular' }, { value: 'nao', label: 'Cancelar', secondary: true }],
+          });
+          if (ok !== 'sim') return;
+          try {
+            // [22/09/2026] MUDADO — `CameraPin.detachPhoto` cobre os dois
+            // casos: Câmera nova (some só o "acessório" foto) e foto legada
+            // (zera dataUrl na própria linha, como sempre).
+            const novo = await window.CameraPin.detachPhoto(view3d._map, foto.id);
+            if (!novo) return;
+            v3dAtualizarThumb(novo);
+            if (el.isConnected) { await view3d._buildFotosNoMapa(); await view3d._afterMapMutated(); }
+            Utils.toast('Foto desvinculada da câmera ✓', { type: 'ok' });
+          } catch (err) { console.error('Falha ao desvincular a foto da câmera:', err); Utils.toast('Não foi possível desvincular a foto: ' + (err?.message || err), { type: 'danger', duration: 5000 }); }
+          return;
+        }
         const displayAntes = el.style.display;
         el.style.display = 'none';
         const volta = () => { if (el.isConnected) { el.style.display = displayAntes || ''; try { window.WindowManager?.focus(el); } catch (e) { /* ignora */ } } };
@@ -109,11 +139,22 @@ window.CardSystem.register('foto-pin', {
             volta();
             try {
               const escolhida = await DB.getAmbientePhoto(idEscolhido);
-              const atual = await DB.getAmbientePhoto(foto.id);
-              if (!escolhida || !atual) return;
-              const novo = { ...atual, dataUrl: escolhida.dataUrl, thumbDataUrl: escolhida.thumbDataUrl || escolhida.dataUrl };
-              await DB.saveAmbientePhoto(novo);
+              if (!escolhida) return;
+              // [22/09/2026] MUDADO — `CameraPin.attachPhoto` decide sozinho
+              // se cria a linha de foto agora (Câmera nova, SEM foto até
+              // este momento) ou só troca o dataUrl (foto legada).
+              const novo = await window.CameraPin.attachPhoto(view3d._map, foto.id, { dataUrl: escolhida.dataUrl, thumbDataUrl: escolhida.thumbDataUrl || escolhida.dataUrl });
+              if (!novo) return;
               v3dAtualizarThumb(novo);
+              // [22/09/2026] Bug relatado: "a foto selecionada não está sendo
+              // anexada à câmera". Causa raiz: o retângulo 3D texturizado da
+              // câmera é construído só uma vez, a partir de `this._map.fotos`
+              // (achatado por `_buildFotosNoMapa`, ver comentário grande lá) —
+              // salvar no banco não bastava, a cena 3D continuava mostrando a
+              // textura antiga (ou nenhuma) até um rebuild manual qualquer.
+              // Mesmo padrão já usado em `tool === 'orbfoto-novo'` acima na
+              // classe: resincroniza `this._map.fotos` e reconstrói a cena.
+              if (el.isConnected) { await view3d._buildFotosNoMapa(); await view3d._afterMapMutated(); }
               Utils.toast('Foto anexada ✓', { type: 'ok' });
             } catch (err) { console.error('Falha ao anexar foto de Mapa → Fotos:', err); Utils.toast('Não foi possível anexar esta foto: ' + (err?.message || err), { type: 'danger', duration: 5000 }); }
           },
@@ -132,10 +173,11 @@ window.CardSystem.register('foto-pin', {
         try {
           const dataUrl = await Utils.resizeImage(file, 2400, 0.85);
           const thumbDataUrl = await Utils.resizeImage(file, 220, 0.75);
-          const photo = await DB.getAmbientePhoto(foto.id);
+          // [22/09/2026] MUDADO — `CameraPin.attachPhoto` (ver acima).
+          const photo = await window.CameraPin.attachPhoto(view3d._map, foto.id, { dataUrl, thumbDataUrl });
           if (!photo) return;
-          await DB.saveAmbientePhoto({ ...photo, dataUrl, thumbDataUrl });
-          v3dAtualizarThumb({ ...photo, dataUrl, thumbDataUrl });
+          v3dAtualizarThumb(photo);
+          if (el.isConnected) { await view3d._buildFotosNoMapa(); await view3d._afterMapMutated(); }
           Utils.toast('Foto trocada ✓', { type: 'ok' });
         } catch (err) {
           console.error('Falha ao trocar a foto desta câmera:', err);
@@ -170,16 +212,17 @@ window.CardSystem.register('foto-pin', {
             if (view3d._v3dFotoPropsSaveTimer) clearTimeout(view3d._v3dFotoPropsSaveTimer);
             view3d._v3dFotoPropsSaveTimer = setTimeout(() => {
               view3d._v3dFotoPropsSaveTimer = null;
-              DB.getAmbientePhoto(foto.id).then((photoFull) => {
-                if (photoFull) return DB.saveAmbientePhoto({ ...photoFull, mapaCamProps: props });
-              }).catch((err) => console.error('[view3d] falha ao salvar camProps (cartão Câmera):', err));
+              // [22/09/2026] MUDADO — `CameraPin.save` (cobre Câmera nova e
+              // linha legada; FIELD_MAP interno já traduz `mapaCamProps`).
+              window.CameraPin.save(view3d._map, foto.id, { mapaCamProps: props })
+                .catch((err) => console.error('[view3d] falha ao salvar camProps (cartão Câmera):', err));
             }, 300);
           });
           // Se a foto já estava carregada ANTES de abrir as propriedades
           // pela 1ª vez, adota a resolução dela agora que o widget passou a
           // existir. Busca `dataUrl` de resolução PLENA de novo (não
           // `thumbDataUrl`, já reduzido a 220px pela miniatura).
-          DB.getAmbientePhoto(foto.id).then((photoFull) => {
+          window.CameraPin.get(view3d._map, foto.id).then((photoFull) => {
             if (!photoFull?.dataUrl || !el.isConnected) return;
             const im2 = new Image();
             im2.onload = () => { if (el.isConnected) v3dPropsApi?.setResolutionFromPhoto(im2.naturalWidth, im2.naturalHeight); };
@@ -195,7 +238,17 @@ window.CardSystem.register('foto-pin', {
         view3d._enterFotoCameraView(foto.id);
       };
       el.querySelector('#v3d-foto-abrir').onclick = async () => {
-        const photo = await DB.getAmbientePhoto(foto.id);
+        // [22/09/2026] MUDADO — pra uma Câmera nova independente, o id real
+        // da foto (linha `DB.mapPhotos`, pra abrir em "Mapa"->"Fotos") é
+        // `cam.fotoId`, diferente de `foto.id` (id da Câmera) — busca o
+        // objeto Câmera cru quando for o caso; linha legada continua igual.
+        let realPhotoId = foto.id;
+        if (window.CameraPin.isCameraId(view3d._map, foto.id)) {
+          const cam = view3d._map.cameras.find((c) => c.id === foto.id);
+          realPhotoId = cam?.fotoId || null;
+        }
+        if (!realPhotoId) { Utils.toast('Esta Câmera ainda não tem foto anexada.', { type: 'warn' }); return; }
+        const photo = await DB.getAmbientePhoto(realPhotoId);
         if (!photo) { Utils.toast('Esta foto não foi encontrada (pode ter sido excluída).', { type: 'warn' }); return; }
         const owningMap = photo.ambienteId === view3d._map.id ? view3d._map : (await DB.getMap(photo.ambienteId)) || view3d._map;
         el.remove();

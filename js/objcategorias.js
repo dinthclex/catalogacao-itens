@@ -24,7 +24,7 @@
 
   const MAPA = {
     escritorio: 'gabinete monitor teclado mouse gabinete2 monitor2 teclado2 mouse2 notebook impressora estabilizador telefone grampeador calculadora arquivo quadro',
-    redes: 'rack switch24 switch48 patchpanel24 patchpanel48 dio12 dio24 dio48 guia_h1 guia_h2 guia_v bandeja_fixa bandeja_basc pdu8 nobreak_torre nobreak_1u nobreak_2u nobreak_corporativo storage_12 storage_24 storage_60 frente_falsa kit_vent espelho1 espelho2 espelho4 caixa_piso2 caixa_piso4 abracadeira_velcro abracadeira_nylon eletrocalha leito canaleta eletroduto',
+    redes: 'rack switch24 switch48 patchpanel24 patchpanel48 dio12 dio24 dio48 guia_h1 guia_h2 guia_v bandeja_fixa bandeja_basc pdu8 nobreak_torre nobreak_1u nobreak_2u nobreak_corporativo storage_12 storage_24 storage_60 frente_falsa kit_vent access_point espelho1 espelho2 espelho4 caixa_piso2 caixa_piso4 abracadeira_velcro abracadeira_nylon eletrocalha leito canaleta eletroduto',
     eletrica: 'interruptor interruptor-remoto disjuntor luminaria ventilador ar-condicionado',
     estrutura: 'pilar viga teto-modular teto-gesso elevador-cabine elevador-botao-chamada piso parede porta janela',
     mobiliario: 'mesa cadeira poltrona armario estante planta quadro-parede quadro-mesa relogio caixa-som lixeira extintor escada caixa-generica',

@@ -74,6 +74,10 @@
       espelho4:     Object.freeze({ familia: 'tomada',     rotulo: 'Espelho de parede 4 módulos', rj45: 4, sfp: 0, alturaU: 0, largura: 102, altura: 102, profundidade: 30, rackavel: false, modulos: 4, modelo: 'EP-4' }),
       caixa_piso2:  Object.freeze({ familia: 'tomada',     rotulo: 'Caixa de piso 2 módulos',  rj45: 2, sfp: 0, alturaU: 0, largura: 110, altura: 60, profundidade: 110, rackavel: false, modulos: 2, piso: true, modelo: 'CP-2' }),
       caixa_piso4:  Object.freeze({ familia: 'tomada',     rotulo: 'Caixa de piso 4 módulos',  rj45: 4, sfp: 0, alturaU: 0, largura: 130, altura: 60, profundidade: 130, rackavel: false, modulos: 4, piso: true, modelo: 'CP-4' }),
+      // [21/09/2026 UTC] NOVO -- Access Point Wi-Fi (semi-direcional, painel de parede/teto). Frente (+Z local) = lobo
+      // principal de sinal; 1 porta RJ-45 (keystone) na face frontal-inferior, que recebe cabo estruturado/patch cord.
+      // O motor de mapeamento de sinal fica em js/wifi-signal.js (`WifiSignal`).
+      access_point: Object.freeze({ familia: 'ap', rotulo: 'Access Point Wi-Fi (AP)', rj45: 1, sfp: 0, alturaU: 0, largura: 200, altura: 200, profundidade: 40, rackavel: false, watts: 12, modelo: 'AP-WF6' }),
       abracadeira_velcro: Object.freeze({ familia: 'abracadeira', rotulo: 'Abraçadeira de velcro', rj45: 0, sfp: 0, alturaU: 0, largura: 30, altura: 30, profundidade: 14, rackavel: false, material: 'velcro', modelo: 'AB-V' }),
       abracadeira_nylon:  Object.freeze({ familia: 'abracadeira', rotulo: 'Abraçadeira de nylon',  rj45: 0, sfp: 0, alturaU: 0, largura: 30, altura: 30, profundidade: 14, rackavel: false, material: 'nylon', modelo: 'AB-N' }),
       // [19/09/2026 UTC] NOVO (RODADA 171) -- pedido verbatim do usuário (resumo): "novos objetos de
@@ -93,17 +97,22 @@
     }),
     // Tipos de cabo (cor padrao de mercado por categoria/uso).
     // Chaves = catalogo de js/rede-passiva.js (`RedePassiva.CABOS`) + 'fibra' (legado = OM3) + 'console'.
+    // [21/09/2026] pedido verbatim: "o 'azul' não deve estar presente neste texto, pois é possível
+    // mudar a cor do cabo logo abaixo (acaba ficando incoerente)." `cor` aqui é só a cor PADRÃO de
+    // fábrica de cada tipo (usada quando o cabo ainda não tem `cabo.cor` próprio -- ver o color
+    // picker "Cor do cabo" em view3d-rede.js) -- o nome da cor foi removido de todos os `rotulo`
+    // (não só o Cat6 citado), já que qualquer um deles pode ter a cor trocada pelo usuário.
     CABOS: Object.freeze({
-      cat5e:     Object.freeze({ rotulo: 'Cat5e (U/UTP)',          cor: '#9aa3ad' }),
-      cat6:      Object.freeze({ rotulo: 'Cat6 (U/UTP, azul)',     cor: '#2f6fdb' }),
-      cat6a:     Object.freeze({ rotulo: 'Cat6A (F/UTP, vermelho)', cor: '#d8362f' }),
-      cat7:      Object.freeze({ rotulo: 'Cat7 (S/FTP, preto)',    cor: '#22262b' }),
-      fibra_smf: Object.freeze({ rotulo: 'Fibra SMF (amarelo)',    cor: '#f0c419' }),
-      fibra_om3: Object.freeze({ rotulo: 'Fibra OM3 (aqua)',       cor: '#22d3ee' }),
-      fibra_om4: Object.freeze({ rotulo: 'Fibra OM4 (violeta)',    cor: '#a855f7' }),
-      fibra:     Object.freeze({ rotulo: 'Fibra (legado = OM3)',   cor: '#22d3ee' }),
-      console:   Object.freeze({ rotulo: 'Console (azul-claro)',   cor: '#38bdf8' }),
-      energia:   Object.freeze({ rotulo: 'Cabo de energia (preto)', cor: '#111318' }),   // [19/09/2026 UTC] NOVO (RODADA 171) -- PDU/nobreak <-> equipamento
+      cat5e:     Object.freeze({ rotulo: 'Cat5e (U/UTP)',        cor: '#9aa3ad' }),
+      cat6:      Object.freeze({ rotulo: 'Cat6 (U/UTP)',         cor: '#2f6fdb' }),
+      cat6a:     Object.freeze({ rotulo: 'Cat6A (F/UTP)',        cor: '#d8362f' }),
+      cat7:      Object.freeze({ rotulo: 'Cat7 (S/FTP)',         cor: '#22262b' }),
+      fibra_smf: Object.freeze({ rotulo: 'Fibra SMF',            cor: '#f0c419' }),
+      fibra_om3: Object.freeze({ rotulo: 'Fibra OM3',            cor: '#22d3ee' }),
+      fibra_om4: Object.freeze({ rotulo: 'Fibra OM4',            cor: '#a855f7' }),
+      fibra:     Object.freeze({ rotulo: 'Fibra (legado = OM3)', cor: '#22d3ee' }),
+      console:   Object.freeze({ rotulo: 'Console',              cor: '#38bdf8' }),
+      energia:   Object.freeze({ rotulo: 'Cabo de energia',      cor: '#111318' }),   // [19/09/2026 UTC] NOVO (RODADA 171) -- PDU/nobreak <-> equipamento
     }),
     STATUS: Object.freeze(['auto', 'active', 'idle', 'off']),
   });
@@ -206,6 +215,10 @@
     pos.forEach((q, i) => portas.push({ n: i + 1, tipo: 'keystone', x: q[0], y: H / 2 + q[1], w: jw, h: jh, linha: 'sup', grupo: 1 }));
     return { portas, layout: { modulos: k }, extras: {} };
   }
+  /** Access Point: 1 porta RJ-45 (keystone) na parte inferior da face frontal. */
+  function _especAP(T) {
+    return { portas: [{ n: 1, tipo: 'keystone', x: 0, y: 34, w: 14.6, h: 16.5, linha: 'sup', grupo: 1 }], layout: { modulos: 1 }, extras: { ap: true } };
+  }
   function _especSimples() { return { portas: [], layout: {}, extras: {} }; }
   /** No-break/UPS: as "portas" são as TOMADAS de saída (tipo 'tomada_energia'), em 1 ou 2 fileiras
    *  na frente, espelhando o layout já usado pelo PDU (`x0=-170, passo=340/(n-1)`) — nada de novo
@@ -238,7 +251,7 @@
     const T = REDE_CATALOGO.TIPOS[tipo];
     if (!T) return null;
     const base = T.familia === 'switch' ? _especSwitch(tipo, T) : T.familia === 'patchpanel' ? _especPatch(tipo, T)
-      : T.familia === 'dio' ? _especDio(T) : T.familia === 'guia' ? _especGuia(T) : T.familia === 'tomada' ? _especTomada(T)
+      : T.familia === 'dio' ? _especDio(T) : T.familia === 'guia' ? _especGuia(T) : T.familia === 'tomada' ? _especTomada(T) : T.familia === 'ap' ? _especAP(T)
       : T.familia === 'nobreak' ? _especNobreak(T) : T.familia === 'storage' ? _especStorage(T) : _especSimples();
     const rackavel = T.rackavel !== false;
     const spec = Object.assign({
@@ -366,6 +379,7 @@
   function ehRackavel(tipo) { const t = REDE_CATALOGO.TIPOS[tipo]; return !!t && t.rackavel !== false; }
   function ehSwitch(tipo) { return !!(REDE_CATALOGO.TIPOS[tipo] && REDE_CATALOGO.TIPOS[tipo].familia === 'switch'); }
   // [19/09/2026 UTC] NOVO (RODADA 171).
+  function ehAP(tipo) { return !!(REDE_CATALOGO.TIPOS[tipo] && REDE_CATALOGO.TIPOS[tipo].familia === 'ap'); }
   function ehNobreak(tipo) { return !!(REDE_CATALOGO.TIPOS[tipo] && REDE_CATALOGO.TIPOS[tipo].familia === 'nobreak'); }
   function ehStorage(tipo) { return !!(REDE_CATALOGO.TIPOS[tipo] && REDE_CATALOGO.TIPOS[tipo].familia === 'storage'); }
 
@@ -373,11 +387,11 @@
   function garantirRede(obj) {
     if (!obj) return null;
     if (!obj.rede || typeof obj.rede !== 'object') obj.rede = {};
-    if (obj.rede.ligado === undefined) obj.rede.ligado = ehSwitch(obj.tipo);
+    if (obj.rede.ligado === undefined) obj.rede.ligado = ehSwitch(obj.tipo) || ehAP(obj.tipo);
     if (typeof obj.rede.hostname !== 'string') obj.rede.hostname = '';
     if (!obj.rede.portas || typeof obj.rede.portas !== 'object') obj.rede.portas = {};
     const fam = REDE_CATALOGO.TIPOS[obj.tipo] && REDE_CATALOGO.TIPOS[obj.tipo].familia;
-    if (fam === 'patchpanel' || fam === 'tomada') { if (!obj.rede.categoria) obj.rede.categoria = 'cat6'; if (!obj.rede.blindagem) obj.rede.blindagem = 'U/UTP'; }
+    if (fam === 'patchpanel' || fam === 'tomada' || fam === 'ap') { if (!obj.rede.categoria) obj.rede.categoria = 'cat6'; if (!obj.rede.blindagem) obj.rede.blindagem = 'U/UTP'; }
     if (fam === 'dio') { if (!obj.rede.conector) obj.rede.conector = 'LC'; if (!obj.rede.fibra) obj.rede.fibra = 'SMF'; }
     // [19/09/2026 UTC] NOVO (RODADA 174) -- `obj.rede.baias` = { [slotIndex]: {tecnologia,
     // capacidadeTB, status} } -- estado SERIALIZÁVEL (plain object, salvo no mapa) que espelha o
@@ -1142,7 +1156,8 @@
     _construirPassivo() {
       const T = this.THREE, s = this.spec, W = s.largura, H = s.alturaMm, F = s.profundidade / 2, E = s.placaEsp, fam = s.familia;
       const zPlacaTras = F - E;
-      const matPlaca = this._mat(fam === 'tomada' ? 0xe9ebee : 0x2f343b, fam === 'tomada' ? 0.05 : 0.5, fam === 'tomada' ? 0.6 : 0.5);
+      const claro = fam === 'tomada' || fam === 'ap';
+      const matPlaca = this._mat(claro ? 0xe9ebee : 0x2f343b, claro ? 0.05 : 0.5, claro ? 0.6 : 0.5);
       const matCorpo = this._mat(0x23272c, 0.5, 0.6);
       const matEscuro = this._reg(new T.MeshStandardMaterial({ color: 0x06080a, metalness: 0.1, roughness: 0.9 }));
       const matMetal = this._mat(0x9aa2aa, 0.8, 0.4);
@@ -1179,7 +1194,7 @@
           cavidades.push({ x: p.x - 2.6, y: p.y, z: F + 2.65, w: 3.4, h: 3.4, d: 0.3 }, { x: p.x + 2.6, y: p.y, z: F + 2.65, w: 3.4, h: 3.4, d: 0.3 });
         });
         this._caixas(ad, this._mat(corAd, 0.1, 0.5), false);
-      } else if (fam === 'tomada') {
+      } else if (fam === 'tomada' || fam === 'ap') {
         const rj = REDE_CATALOGO.RJ45, jk = [];
         s.portas.forEach((p) => {
           furoRect(p.x, p.y, p.w, p.h);
@@ -1188,7 +1203,7 @@
           contatos.push({ x: p.x, y: p.y - rj.janelaH / 2 + 0.9, z: F + 0.85, w: rj.janelaW - 2.4, h: 0.9, d: 0.1 });
         });
         this._caixas(jk, this._mat(0xf4f5f7, 0.05, 0.5), false);
-        furoCirc(0, H - 6, 2); furoCirc(0, 6, 2);                                     // furos de parafuso
+        if (fam === 'tomada') { furoCirc(0, H - 6, 2); furoCirc(0, 6, 2); }           // furos de parafuso
       } else if (fam === 'pdu') {
         const n = s.tomadas, x0 = -170, passo = 340 / (n - 1), pinos = [];
         for (let i = 0; i < n; i++) {
@@ -1257,6 +1272,14 @@
       else if (fam === 'pdu') this._box(s.larguraCorpo, H - 4, profCorpo, matCorpo, 0, H / 2, zPlacaTras - profCorpo / 2);
       else if (fam === 'ventilacao') this._box(s.larguraCorpo, H - 4, profCorpo, matCorpo, 0, H / 2, zPlacaTras - profCorpo / 2);
       else if (fam === 'tomada') this._box(W - 8, H - 8, profCorpo, matCorpo, 0, H / 2, zPlacaTras - profCorpo / 2);
+      else if (fam === 'ap') {
+        // Corpo do AP + 'lente' de antena (painel escuro em relevo) + LED de status (cor conforme ligado/ativo).
+        this._box(W - 8, H - 8, profCorpo, matCorpo, 0, H / 2, zPlacaTras - profCorpo / 2);
+        this._box(W - 60, H - 90, 2, this._mat(0xcfd4da, 0.05, 0.7), 0, H / 2 + 24, F + 1);
+        const ligado = this.opt && this.opt.apAtivo;
+        this._box(8, 4, 1.2, this._mat(ligado ? 0x3ecb6e : 0x545a63, 0.1, 0.4), 0, 14, F + 0.6);
+        [-1, 1].forEach((sx) => this._box(4, H - 100, 6, this._mat(0xb9bec6, 0.2, 0.6), sx * (W / 2 - 22), H / 2 + 24, F + 3));   // aletas de antena
+      }
       else if (fam === 'frente') this._box(s.larguraCorpo, H - 4, profCorpo, matCorpo, 0, H / 2, zPlacaTras - profCorpo / 2);
       else if (fam === 'nobreak' || fam === 'storage') this._box(s.rackavel ? s.larguraCorpo : W - 10, H - (s.rackavel ? 4 : 10), profCorpo, matCorpo, 0, H / 2, zPlacaTras - profCorpo / 2);
       else if (fam === 'guia') {
@@ -1363,7 +1386,7 @@
   const API = {
     REDE_CATALOGO, LED_ESTILOS, REDE_LED_CSS, especificar, portaLocal,
     EquipamentoRede, Switch24, Switch48, PatchPanel24, PatchPanel48, criar,
-    ehEquipRede, ehSwitch, ehRackavel, ehNobreak, ehStorage, garantirRede, patchParaObjeto, descritorPorta, diametroCabo,
+    ehEquipRede, ehSwitch, ehAP, ehRackavel, ehNobreak, ehStorage, garantirRede, patchParaObjeto, descritorPorta, diametroCabo,
     pinosRJ45, pinoLocalRJ45, classificarLigacao,   // [19/09/2026 UTC] NOVO (RODADA 200)
     diametroFeixe, generateRearChicote, generateSuperFeixeVertical,   // [19/09/2026 UTC] NOVO (RODADA 205)
     baiaInserir, baiaRemover, storageResumo, upsCarga,   // [19/09/2026 UTC] NOVO (RODADA 174)

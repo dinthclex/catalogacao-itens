@@ -201,6 +201,13 @@ window.ObjectPanelCard = {
         : '';
       // [18/09/2026 UTC] RODADA 164 -- Montagem (pecas desmontaveis) e Equipamentos.
       const mont = Object.assign({ frente: true, traseira: true, lateralEsq: true, lateralDir: true, topo: true, base: true }, obj.rackMontagem || {});
+      // [21/09/2026] topo/base refletem `rackTampaEstado` (fonte real desde a RODADA 205 -- ver
+      // `RackModular.patchMontagem`), não o espelho legado `rackMontagem`: em racks salvos antes
+      // da correção acima, os dois podiam estar dessincronizados (checkbox marcado sem efeito
+      // nenhum no 3D) -- isto faz o checkbox mostrar o que REALMENTE está montado.
+      const teAtual = obj.rackTampaEstado || {};
+      if (teAtual.topo) mont.topo = teAtual.topo !== 'sem_tampa';
+      if (teAtual.base) mont.base = teAtual.base !== 'sem_tampa';
       const tt = obj.rackTraseiraTipo === 'chapa' ? 'chapa' : 'porta';
       const checks = RC.PECAS.map((p) => {
         const rot = p.chave === 'traseira' ? (tt === 'chapa' ? 'Chapa de tr\u00e1s' : 'Porta de tr\u00e1s') : p.rotulo;
@@ -221,6 +228,18 @@ window.ObjectPanelCard = {
       <fieldset class="map-panel-field" style="border:1px solid var(--border,#3a4250);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px">
         <legend style="font-size:12.5px;padding:0 4px">Montagem (pe\u00e7as)</legend>
         ${checks}
+        <div style="border-top:1px solid var(--border,#3a4250);padding-top:6px;display:flex;flex-direction:column;gap:6px" title="Roteamento autom\u00e1tico dos cabos traseiros do patch panel: barra de apoio (5 cm) \u2192 guia vertical \u2192 furo da tampa.">
+          <div style="font-size:12.5px">\ud83d\udd0c Sa\u00edda de cabos</div>
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px"><span>Dire\u00e7\u00e3o:</span><select id="obj-rack-saida-dir"><option value="nenhum" ${obj.rackCableEntry !== 'top' && obj.rackCableEntry !== 'bottom' ? 'selected' : ''}>Desligado</option><option value="top" ${obj.rackCableEntry === 'top' ? 'selected' : ''}>Topo</option><option value="bottom" ${obj.rackCableEntry === 'bottom' ? 'selected' : ''}>Base</option></select></label>
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px" title="Abre as duas tampas ao mesmo tempo (independente da Dire\u00e7\u00e3o escolhida acima) -- \u00fatil quando parte dos cabos sai por cima e parte por baixo."><input type="checkbox" id="obj-rack-saida-ambas" ${(() => { const te = obj.rackTampaEstado || {}; return te.topo === 'com_abertura' && te.base === 'com_abertura' ? 'checked' : ''; })()}> Abrir as duas tampas ao mesmo tempo</label>
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px"><span>Alinhamento:</span><select id="obj-rack-saida-alin">${['center:Centro', 'left_corner:Canto esquerdo', 'right_corner:Canto direito', 'custom:Personalizado'].map((x) => { const [v, r] = x.split(':'); return `<option value="${v}" ${(obj.rackCableExitAlignment || 'center') === v ? 'selected' : ''}>${r}</option>`; }).join('')}</select></label>
+          <div id="obj-rack-saida-custom" style="display:${obj.rackCableExitAlignment === 'custom' ? 'flex' : 'none'};gap:8px;align-items:center;font-size:13px"><span>Offset X/Z (m):</span><input type="number" step="0.01" id="obj-rack-saida-x" value="${(obj.rackCustomExitOffset && obj.rackCustomExitOffset.x) || 0}" style="width:70px"><input type="number" step="0.01" id="obj-rack-saida-z" value="${(obj.rackCustomExitOffset && obj.rackCustomExitOffset.z) || 0}" style="width:70px"></div>
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px" title="Retangular: cada patch panel forma uma grade (colunas x raias), vista de corte retangular. Cil\u00edndrico: grade quase quadrada, feixe mais redondo (usa mais altura livre acima do patch panel)."><span>Formato do feixe:</span><select id="obj-rack-cabos-fmt"><option value="retangular" ${obj.rackCabosFormato !== 'cilindrico' ? 'selected' : ''}>Retangular</option><option value="cilindrico" ${obj.rackCabosFormato === 'cilindrico' ? 'selected' : ''}>Cil\u00edndrico</option></select></label>
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px" title="Dist\u00e2ncia entre os cabos do feixe. Junto = colados (0,87 \u00d7 di\u00e2metro: as faces do cabo se tocam, padr\u00e3o); Afastado = 1,06 \u00d7 di\u00e2metro; Livre = voc\u00ea define (0,87 a 3,00)."><span>Espa\u00e7amento:</span><select id="obj-rack-cabos-esp"><option value="afastado" ${obj.rackCabosEspacamento === 'afastado' ? 'selected' : ''}>Afastado</option><option value="junto" ${(obj.rackCabosEspacamento || 'junto') === 'junto' ? 'selected' : ''}>Junto (colados)</option><option value="livre" ${obj.rackCabosEspacamento === 'livre' ? 'selected' : ''}>Livre</option></select></label>
+          <label id="obj-rack-cabos-fator-wrap" style="display:${obj.rackCabosEspacamento === 'livre' ? 'flex' : 'none'};gap:8px;align-items:center;font-size:13px" title="Dist\u00e2ncia centro a centro entre cabos, em m\u00faltiplos do di\u00e2metro. 0,87 = colados (as faces se tocam)."><span>Dist\u00e2ncia (\u00d7 di\u00e2metro):</span><input type="number" step="0.01" min="0.87" max="3" id="obj-rack-cabos-fator" value="${(Number.isFinite(Number(obj.rackCabosFator)) ? Number(obj.rackCabosFator) : 1.5).toFixed(2)}" style="width:70px"></label>
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px" title="Dist\u00e2ncia VERTICAL entre os agrupamentos (feixes correndo na horizontal, junto \u00e0 tampa). Junto = colados (padr\u00e3o); Afastado; Livre = voc\u00ea define."><span>Espa\u00e7amento vertical:</span><select id="obj-rack-cabos-espv"><option value="afastado" ${obj.rackCabosEspacamentoV === 'afastado' ? 'selected' : ''}>Afastado</option><option value="junto" ${(obj.rackCabosEspacamentoV || 'junto') === 'junto' ? 'selected' : ''}>Junto (colados)</option><option value="livre" ${obj.rackCabosEspacamentoV === 'livre' ? 'selected' : ''}>Livre</option></select></label>
+          <label id="obj-rack-cabos-fatorv-wrap" style="display:${obj.rackCabosEspacamentoV === 'livre' ? 'flex' : 'none'};gap:8px;align-items:center;font-size:13px" title="Dist\u00e2ncia vertical entre agrupamentos, em m\u00faltiplos do di\u00e2metro do cabo. 0,87 = colados (as faces se tocam)."><span>Dist\u00e2ncia vert. (\u00d7 di\u00e2metro):</span><input type="number" step="0.01" min="0.87" max="6" id="obj-rack-cabos-fatorv" value="${(Number.isFinite(Number(obj.rackCabosFatorV)) ? Number(obj.rackCabosFatorV) : 2).toFixed(2)}" style="width:70px"></label>
+        </div>
         <label style="display:flex;gap:8px;align-items:center;font-size:13px" title="O que fecha a traseira do rack: uma porta articulada (com grelha) ou uma chapa met\u00e1lica fixa."><span>Traseira:</span><select id="obj-rack-traseira"><option value="porta" ${tt === 'porta' ? 'selected' : ''}>Porta</option><option value="chapa" ${tt === 'chapa' ? 'selected' : ''}>Chapa met\u00e1lica</option></select></label>
         <div style="display:flex;gap:6px"><button type="button" class="btn btn-sm" id="obj-rack-desmontar">Desmontar tudo (s\u00f3 a arma\u00e7\u00e3o)</button><button type="button" class="btn btn-sm" id="obj-rack-montar">Montar tudo</button></div>
         <div style="font-size:11.5px;color:var(--text-dim)">No Ver em 3D: dois cliques na porta abrem/fecham (Modo Navega\u00e7\u00e3o); clique esquerdo no Modo Edi\u00e7\u00e3o abre o menu (remover a pe\u00e7a mirada, recolocar, equipamentos).</div>
@@ -273,6 +292,11 @@ window.ObjectPanelCard = {
         ${sp.familia === 'dio' ? `<label style="display:flex;gap:8px;align-items:center;font-size:13px"><span>Conector</span><select data-rede-cfg="conector">${['LC', 'SC', 'ST'].map((k) => `<option value="${k}" ${(r.conector || 'LC') === k ? 'selected' : ''}>${k}</option>`).join('')}</select><span>Fibra</span><select data-rede-cfg="fibra">${['SMF', 'OM3', 'OM4'].map((k) => `<option value="${k}" ${(r.fibra || 'SMF') === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>` : ''}
         ${(sp.familia === 'patchpanel' || sp.familia === 'tomada') ? `<label style="display:flex;gap:8px;align-items:center;font-size:13px"><span>Keystone</span><select data-rede-cfg="categoria">${['cat5e', 'cat6', 'cat6a', 'cat7'].map((k) => `<option value="${k}" ${(r.categoria || 'cat6') === k ? 'selected' : ''}>${({ cat5e: 'Cat5e', cat6: 'Cat6', cat6a: 'Cat6A', cat7: 'Cat7' })[k]}</option>`).join('')}</select><span>Blindagem</span><select data-rede-cfg="blindagem">${['U/UTP', 'F/UTP', 'S/FTP'].map((k) => `<option value="${k}" ${(r.blindagem || 'U/UTP') === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>` : ''}
       </fieldset>
+      ${(RE.ehAP(obj.tipo) && !modoVer3D && window.View3D) ? `<fieldset class="map-panel-field" style="border:1px solid var(--border,#3a4250);border-radius:8px;padding:8px">
+        <legend style="font-size:12.5px;padding:0 4px">📡 Wi-Fi</legend>
+        <button type="button" class="btn secondary sm" id="obj-rede-ap-config" style="width:100%">⚙️ Configurações de Rede / Wi-Fi</button>
+        <div style="font-size:11.5px;color:var(--text-dim);margin-top:4px">Faixa, potência, densidade da varredura, "mostrar mapa" e o método de projeção no mapa 2D (fatiamento/textura) — a mesma janela do "Ver em 3D".</div>
+      </fieldset>` : ''}
       ${ehSw ? `<fieldset class="map-panel-field" style="border:1px solid var(--border,#3a4250);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px"><legend style="font-size:12.5px;padding:0 4px">Energia</legend>
         <label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="obj-rede-ligado" ${r.ligado ? 'checked' : ''}> Ligado (LEDs acendem conforme os cabos)</label>
         <label style="display:flex;gap:8px;align-items:center;font-size:13px"><span>Hostname</span><input type="text" id="obj-rede-host" value="${esc(r.hostname)}" style="flex:1"></label>
@@ -303,6 +327,16 @@ window.ObjectPanelCard = {
     ` : isImagem ? `
       <label class="map-panel-field" title="Distância vertical entre o chão daquele andar/piso e a base da imagem — 0 = deitada no chão (comportamento de sempre). Só tem efeito no 3D (o 2D é vista de cima, sem eixo vertical) — mesmo campo obj.elevacao já usado por outros objetos (ex.: luminária de teto), ver engine3d.js/mapping.js objectTopHeight."><span>Altura em relação ao chão (m)</span><input type="number" step="0.05" min="0" id="obj-elevacao" value="${(obj.elevacao || 0).toFixed(2)}"></label>
     ` : '';
+    // [21/09/2026] "Ver em 3D": campo Posição Y (altura) junto de X/Z — pedido verbatim: "deve aparecer o campo Y (para definir a
+    // altura). Atualmente, só aparece os campos Z e X. O andar fica como offset." Y = obj.elevacao (metros acima do chão do
+    // andar); a altura no mundo é (andar × altura do piso) + Y. Imagem e rack de parede já trazem o próprio campo de elevação.
+    const temElevacaoPropria = isImagem || /id="obj-rack-elev"/.test(formaFields || '');
+    const _aPiso = (ctx._map && ctx._map.alturaPiso) || 2.8, _y0e = window.Mapping ? window.Mapping.y0Efetivo(obj) : 0;
+    const _yLocal = (obj.elevacao || 0) + _y0e, _yGlobal = (obj.piso || 0) * _aPiso + _yLocal;
+    const campoYHtml = (modoVer3D && !temElevacaoPropria)
+      ? `<label class="map-panel-field" title="Altura da base do objeto no MUNDO (referência 0 = chão do andar 0). Ex.: um objeto sobre uma mesa de 0,74 m tem Y global = 0,74. Aceita valores negativos."><span>Y global (m) <span class="map-panel-axis-arrow">↑</span> <small style="opacity:.7">(mundo)</small></span><input type="number" step="0.05" id="obj-pos-y" value="${_yGlobal.toFixed(2)}"></label>
+         <label class="map-panel-field" title="Altura da base do objeto RELATIVA ao chão do andar dele (Y global − andar × altura do piso). Aceita valores negativos."><span>Y local (m) <span class="map-panel-axis-arrow">↑</span> <small style="opacity:.7">(no andar)</small></span><input type="number" step="0.05" id="obj-pos-yl" value="${_yLocal.toFixed(2)}"></label>`
+      : '';
     // NOVO (05/09/2026), pedido verbatim: "no cabeçalho de propriedades da
     // ferramenta, deve ter mais um controle. O método atual de desenho da
     // grade interna ('na origem do retículo') e outro que deve ser orientado
@@ -385,10 +419,14 @@ window.ObjectPanelCard = {
            arquivo (js/cards/object-panel-card.js) numa refatoração anterior -- não fazia parte daquela
            varredura. Mesmo padrão visual/rótulo ("→" pro X, "↓" pro Z, mesmo quando o campo/propriedade se
            chama "y" internamente, igual porta-y/janela-y/cam-y/txt-y) das outras janelas.-->
+      <div class="map-panel-group-title" style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--accent,#4f8cff);border-bottom:1px solid var(--border,#3a4250);padding:6px 0 2px;margin-top:4px">Posição</div>
       <label class="map-panel-field"><span>Posição X (m) <span class="map-panel-axis-arrow" title="Sentido em que o eixo X aumenta seus valores">→</span></span><input type="number" step="0.1" id="obj-x" value="${obj.x.toFixed(2)}"></label>
       <label class="map-panel-field"><span>Posição Z (m) <span class="map-panel-axis-arrow" title="Sentido em que este eixo aumenta seus valores (para baixo no mapa 2D)">↓</span></span><input type="number" step="0.1" id="obj-y" value="${obj.y.toFixed(2)}"></label>
+      ${campoYHtml}
+      <label class="map-panel-field"><span title="Deslocamento (offset) vertical: cada andar soma a altura do piso ao Y LOCAL do objeto (Y global = andar × altura do piso + Y local).">Andar / piso (offset)</span><input type="number" step="1" id="obj-piso" value="${obj.piso || 0}"></label>
+      <div class="map-panel-group-title" style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--accent,#4f8cff);border-bottom:1px solid var(--border,#3a4250);padding:6px 0 2px;margin-top:4px">Rotação</div>
       <label class="map-panel-field"><span>Rotação (°)</span><input type="number" step="1" id="obj-angulo" value="${grausAngulo}"></label>
-      <label class="map-panel-field"><span>Andar / piso</span><input type="number" step="1" id="obj-piso" value="${obj.piso || 0}"></label>
+      ${/id="obj-(largura|altura|profundidade|raio)"/.test(formaFields || '') ? `<div class="map-panel-group-title" style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--accent,#4f8cff);border-bottom:1px solid var(--border,#3a4250);padding:6px 0 2px;margin-top:4px">Forma</div>` : ''}
       ${formaFields}
       <div class="map-panel-field">
         <span style="display:flex; align-items:center; justify-content:space-between; gap:8px">
@@ -785,8 +823,19 @@ window.ObjectPanelCard = {
       if (d?.reticuloMetrico) patch.reticuloOrigemY = (d.reticuloOrigemY ?? d.y) + (novoY - d.y);
       salvarCampo(patch);
     };
+    // Y global (mundo) e Y local (no andar) — o outro campo acompanha; grava `elevacao` = Y local − y0 efetivo (negativo permitido).
+    {
+      const yG = panel.querySelector('#obj-pos-y'), yL = panel.querySelector('#obj-pos-yl'), aP = () => (ctx._map && ctx._map.alturaPiso) || 2.8;
+      const gravar = (local) => { const o = objAtual(); salvarCampo({ elevacao: local - window.Mapping.y0Efetivo(o) }); };
+      if (yG) yG.addEventListener('input', (e) => { const v = parseFloat(e.target.value); if (!Number.isFinite(v)) return; const o = objAtual(), local = v - (o.piso || 0) * aP(); if (yL) yL.value = local.toFixed(2); gravar(local); });
+      if (yL) yL.addEventListener('input', (e) => { const v = parseFloat(e.target.value); if (!Number.isFinite(v)) return; const o = objAtual(); if (yG) yG.value = (v + (o.piso || 0) * aP()).toFixed(2); gravar(v); });
+    }
     panel.querySelector('#obj-angulo').oninput = (e) => salvarCampo({ angulo: (parseFloat(e.target.value) || 0) * Math.PI / 180 });
-    panel.querySelector('#obj-piso').oninput = (e) => salvarCampo({ piso: parseInt(e.target.value, 10) || 0 });
+    panel.querySelector('#obj-piso').oninput = (e) => {
+      salvarCampo({ piso: parseInt(e.target.value, 10) || 0 });
+      const yG = panel.querySelector('#obj-pos-y'), yL = panel.querySelector('#obj-pos-yl'); // Y global acompanha o andar (o local não muda)
+      if (yG && yL) yG.value = (parseFloat(yL.value) + (parseInt(e.target.value, 10) || 0) * ((ctx._map && ctx._map.alturaPiso) || 2.8)).toFixed(2);
+    };
     // [13/09/2026] NOVO — "Acabamento" do Piso ('liso'/'lajota', ver
     // `acabamentoField` acima e engine3d.js `_getProceduralFloorTexture`).
     panel.querySelector('#obj-acabamento')?.addEventListener('change', (e) => salvarCampo({ acabamento: e.target.value }));
@@ -844,6 +893,11 @@ window.ObjectPanelCard = {
       const q = (s2) => panel.querySelector(s2);
       if (q('#obj-rede-ligado')) q('#obj-rede-ligado').onchange = (e) => { r().ligado = e.target.checked; ctx._saveMap(); };
       if (q('#obj-rede-label')) q('#obj-rede-label').oninput = (e) => { r().labelID = e.target.value; ctx._saveMap(); };
+      // [21/09/2026 UTC] NOVO -- pedido verbatim: "No mapa 2D, nas propriedades do Access Point, deve ter
+      // um botão que faz aparecer a mesma janela que aparece no 'Ver em 3D' [...] quando aponta-se para um
+      // AP e clica nele." Reaproveita `View3D.abrirPainelEquipamento` (view3d-rede.js) -- a MESMA janela,
+      // sem duplicar os campos de faixa/potência/varredura/mapa 2D aqui.
+      if (q('#obj-rede-ap-config')) q('#obj-rede-ap-config').onclick = () => { window.View3D.abrirPainelEquipamento(objAtual(), document.body, ctx._map); };
       panel.querySelectorAll('[data-rede-cfg]').forEach((sel) => { sel.onchange = (e) => { r()[sel.getAttribute('data-rede-cfg')] = e.target.value; persistir(objAtual()); }; });
       if (q('#obj-rede-host')) q('#obj-rede-host').oninput = (e) => { r().hostname = e.target.value; ctx._saveMap(); };
       if (q('#obj-rede-instalar')) q('#obj-rede-instalar').onclick = () => {
@@ -880,7 +934,22 @@ window.ObjectPanelCard = {
       // refletir tipo (parede/piso), medidas e o campo de altura da base.
       const reabrir = () => ctx._openObjectPanel?.((ctx._map.objects || []).find((o) => o.id === obj.id) || obj, modoVer3D ? { modoVer3D: true } : undefined);
       const aplicarRack = (us, prof) => {
-        salvarCampo(window.RackModular.patchParaObjeto(objAtual(), us, prof));
+        const patch = window.RackModular.patchParaObjeto(objAtual(), us, prof), o = objAtual();
+        // trocou o tipo (parede/piso): quem está embaixo (Piso, mesa...) manda na elevação; sem nada embaixo vale a do tipo.
+        if (patch.elevacao != null && window.Mapping) {
+          const base = window.Mapping._findTopObjectAt(ctx._map, o.x, o.y, o.id, Object.assign({}, o, patch));
+          if (base) {
+            // [21/09/2026] pedido verbatim: "se é um rack de parede, ao ficar em cima de outra
+            // coisa ou objeto Piso, deve também ter a altura padrão em relação a este outro
+            // objeto ou objeto Piso que tem (quando está referenciado ao chão)." Antes, em cima de
+            // outro objeto o rack de parede ficava ENCOSTADO nele (sem o 1,2 m padrão), diferente
+            // de quando está direto no chão -- agora soma a mesma altura padrão sobre o apoio.
+            const ehParede = window.RackModular.fromObjeto(Object.assign({}, o, patch)).tipo === 'parede';
+            const RC = window.RACK_CATALOGO;
+            patch.elevacao = window.Mapping.objectTopHeight(base) + (ehParede && RC ? RC.ELEVACAO_PAREDE_M : 0);
+          }
+        }
+        salvarCampo(patch);
         reabrir();
       };
       panel.querySelector('#obj-rack-us').onchange = (e) => aplicarRack(parseInt(e.target.value, 10), objAtual().rackProfundidade || 600);
@@ -892,6 +961,48 @@ window.ObjectPanelCard = {
       panel.querySelectorAll('[data-rack-peca]').forEach((cb) => {
         cb.onchange = () => { salvarCampo(RM.patchMontagem(objAtual(), { [cb.getAttribute('data-rack-peca')]: cb.checked })); reabrir(); };
       });
+      // [21/09/2026] CORRIGIDO -- pedido verbatim: "Na 'Direção' Ao trocar de Topo para Base,
+      // acabam ficando abertas as duas tampas. Deveria ser apenas a tampa selecionada. Faça
+      // outra opção para que as duas tampas fiquem abertas ao mesmo tempo." Unifica a lógica
+      // de abrir/fechar tampa num só lugar (chamada pela Direção E pelo novo checkbox
+      // "Abrir as duas tampas"): sem o checkbox marcado, só o lado escolhido abre -- o OUTRO
+      // lado fecha se estava aberto por uma escolha anterior (essa era a causa do bug: nada
+      // fechava o lado antigo ao trocar de Topo pra Base ou vice-versa). Nunca mexe em quem
+      // está 'sem_tampa' (removida por completo -- escolha independente da saída de cabos).
+      const aplicarSaidaCabos = () => {
+        const dir = panel.querySelector('#obj-rack-saida-dir').value;
+        const ambas = panel.querySelector('#obj-rack-saida-ambas').checked;
+        const patch = RM.patchCableExitDirection(objAtual(), dir);
+        const lado = dir === 'top' ? 'topo' : dir === 'bottom' ? 'base' : null;
+        const atual = Object.assign({ topo: 'fechada', base: 'fechada' }, objAtual().rackTampaEstado);
+        const novo = { topo: atual.topo, base: atual.base };
+        const abrir = (k) => { if (novo[k] !== 'sem_tampa') novo[k] = 'com_abertura'; };
+        const fechar = (k) => { if (novo[k] === 'com_abertura') novo[k] = 'fechada'; };
+        if (ambas) { abrir('topo'); abrir('base'); }
+        else if (lado) { abrir(lado); fechar(lado === 'topo' ? 'base' : 'topo'); }
+        else { fechar('topo'); fechar('base'); }
+        if (novo.topo !== atual.topo || novo.base !== atual.base) patch.rackTampaEstado = novo;
+        salvarCampo(patch); reabrir();
+      };
+      panel.querySelector('#obj-rack-saida-dir').onchange = aplicarSaidaCabos;
+      panel.querySelector('#obj-rack-saida-ambas').onchange = aplicarSaidaCabos;
+      panel.querySelector('#obj-rack-saida-alin').onchange = (e) => { salvarCampo(RM.patchCableExitAlignment(objAtual(), e.target.value)); reabrir(); };
+      const salvarOffsetSaida = () => salvarCampo(RM.patchCustomExitOffset(objAtual(), parseFloat(panel.querySelector('#obj-rack-saida-x').value), parseFloat(panel.querySelector('#obj-rack-saida-z').value)));
+      panel.querySelector('#obj-rack-saida-x').oninput = salvarOffsetSaida;
+      panel.querySelector('#obj-rack-saida-z').oninput = salvarOffsetSaida;
+      panel.querySelector('#obj-rack-cabos-fmt').onchange = (e) => { salvarCampo(RM.patchCabosFormato(objAtual(), e.target.value)); reabrir(); };
+      panel.querySelector('#obj-rack-cabos-esp').onchange = (e) => {
+        const patch = RM.patchCabosEspacamento(objAtual(), e.target.value);
+        if (e.target.value === 'livre' && objAtual().rackCabosFator == null) Object.assign(patch, RM.patchCabosFator(objAtual(), 1.5));
+        salvarCampo(patch); reabrir();
+      };
+      panel.querySelector('#obj-rack-cabos-espv').onchange = (e) => {
+        const patch = RM.patchCabosEspacamentoV(objAtual(), e.target.value);
+        if (e.target.value === 'livre' && objAtual().rackCabosFatorV == null) Object.assign(patch, RM.patchCabosFatorV(objAtual(), 2));
+        salvarCampo(patch); reabrir();
+      };
+      panel.querySelector('#obj-rack-cabos-fatorv').onchange = (e) => { salvarCampo(RM.patchCabosFatorV(objAtual(), parseFloat(e.target.value))); reabrir(); };
+      panel.querySelector('#obj-rack-cabos-fator').onchange = (e) => { salvarCampo(RM.patchCabosFator(objAtual(), parseFloat(e.target.value))); reabrir(); };
       panel.querySelector('#obj-rack-traseira').onchange = (e) => { salvarCampo(RM.patchTraseiraTipo(objAtual(), e.target.value)); reabrir(); };
       panel.querySelector('#obj-rack-desmontar').onclick = () => { salvarCampo(RM.patchDesmontarTudo(objAtual())); reabrir(); };
       panel.querySelector('#obj-rack-montar').onclick = () => { salvarCampo(RM.patchMontarTudo(objAtual())); reabrir(); };

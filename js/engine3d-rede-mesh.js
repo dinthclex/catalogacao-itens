@@ -187,7 +187,7 @@ class Engine3DRedeMeshMixin {
     // escolhida no painel de propriedades) passada pro `opt` da view -- usada por `_serigrafia()` pra
     // trocar o rótulo "Cat6" gravado na chapa do patch panel pelo valor REAL escolhido pelo usuário (ver
     // comentário lá; antes disso, esse rótulo ficava sempre travado no valor fixo do catálogo).
-    const view = new RE.RedeEquipView3D(THREE, spec, { ligado: obj.rede.ligado !== false, parafusos: !!obj.rackId, fibra: obj.rede.fibra || 'SMF', baias: obj.rede.baias || null, categoria: obj.rede.categoria });   // [19/09/2026 UTC] NOVO (RODADA 174) -- `baias` p/ colorir as gavetas do Storage
+    const view = new RE.RedeEquipView3D(THREE, spec, { ligado: obj.rede.ligado !== false, parafusos: !!obj.rackId, fibra: obj.rede.fibra || 'SMF', baias: obj.rede.baias || null, categoria: obj.rede.categoria, apAtivo: RE.ehAP(obj.tipo) && obj.rede.ligado !== false && !!(this.mapData && RE.cabosDoObjeto(this.mapData, obj.id).length) });   // [19/09/2026 UTC] NOVO (RODADA 174) -- `baias` p/ colorir as gavetas do Storage
     const zOff = this._redeZOffMm(obj, spec);
     const rotY = objAnguloToRotY(obj.angulo);
     const root = new THREE.Group();
@@ -271,7 +271,8 @@ class Engine3DRedeMeshMixin {
   /** ZONAS DE PASSAGEM que alteram a spline do cabo (RODADA 167): (1) guia horizontal 1U/2U do MESMO rack mais
    *  proxima (em U) de `obj` — o cabo e obrigado a passar pelo vao entre dedos mais proximo da porta; (2) guia
    *  vertical (`guia_v`) a ate 0,6 m do ponto medio da corda A-B, no vao mais proximo dessa altura. */
-  _redeZonasGuia(A, pa, B, pb, a, b, ladoA, ladoB) {
+  _redeZonasGuia(A, pa, B, pb, a, b, ladoA, ladoB, pular) {
+    pular = pular || {}; // { A:bool, B:bool } -- ponta ja roteada por RackCableRouting (sem barra/guia_h automaticas)
     const RE = window.RedeEquip, zonas = [], objs = this.mapData?.objects || [];
     const escolher = (guia, ponto) => {
       const sp = RE.especificar(guia.tipo), zs = sp && sp.extras && sp.extras.zonas; if (!zs || !zs.length) return null;
@@ -300,8 +301,8 @@ class Engine3DRedeMeshMixin {
     // TRASEIRA da porta (`lado === 'tras'`, ver `RedeEquip.conectar`) -- um patch cord na FRENTE do
     // painel (uso comum) não tem por que rotear por trás dele; só o cabo horizontal (que já entra por
     // trás, no "ponto de ruptura" de `_redePortaMundoLado`) faz sentido passar pela barra de apoio.
-    [[A, pa, a, ladoA], [B, pb, b, ladoB]].forEach(([o, p, ext, lado]) => {
-      if (!o.rackId || !ext || lado !== 'tras') return;
+    [[A, pa, a, ladoA, pular.A], [B, pb, b, ladoB, pular.B]].forEach(([o, p, ext, lado, pl]) => {
+      if (pl || !o.rackId || !ext || lado !== 'tras') return;
       const sp0 = RE.especificar(o.tipo);
       if (sp0 && sp0.familia === 'patchpanel' && sp0.barra) {
         const distM = (sp0.profundidade + sp0.corpo / 2) * 0.001; // ver `_redeRenderRearCrimping` (FUNDO_MM) -- mesma aproximacao de profundidade ate a barra
@@ -309,8 +310,8 @@ class Engine3DRedeMeshMixin {
         zonas.push({ x: p.x - nx * distM, y: p.y, z: p.z - nz * distM, reto: true });
       }
     });
-    [[A, pa], [B, pb]].forEach(([o, p]) => {
-      if (!o.rackId) return;
+    [[A, pa, pular.A], [B, pb, pular.B]].forEach(([o, p, pl]) => {
+      if (pl || !o.rackId) return;
       let g = null, dmin = 1e9;
       objs.forEach((q) => { if (q.rackId === o.rackId && q.id !== o.id && /^guia_h/.test(q.tipo)) { const d = Math.abs((q.rackU || 0) - (o.rackU || 0)); if (d < dmin && d <= 4) { dmin = d; g = q; } } });
       if (g) { const w = escolher(g, p); if (w && !zonas.some((z) => Math.hypot(z.x - w.x, z.y - w.y, z.z - w.z) < 0.01)) zonas.push(w); }
@@ -324,6 +325,29 @@ class Engine3DRedeMeshMixin {
     });
     return zonas;
   }
+
+  /** [20/09/2026 UTC] NOVO -- rota de UMA ponta (traseira de patch panel em rack com saida Topo/Base) ate a
+   *  furacao da tampa, via `RackCableRouting.calculateCablePath`. `null` se nao se aplica. */
+  _rackRotaExtremidade(c, ext, eq) {
+    const RCR = window.RackCableRouting;
+    if (!RCR || !ext || ext.lado !== 'tras' || !eq || !eq.rackId) return null;
+    const rack = (this.mapData?.objects || []).find((o) => o.id === eq.rackId);
+    if (!rack || !RCR.ativo(rack)) return null;
+    const r = RCR.calculateCablePath(rack, c, eq, {
+      mapData: this.mapData, THREE: this.THREE,
+      portaTras: (pp, n) => this._redePortaMundoLado(pp, n, 'tras'),
+    });
+    return r && r.pontos && r.pontos.length > 1 ? r : null;
+  }
+
+  /** [20/09/2026 UTC] API reativa do roteamento por rack: posicao GLOBAL (THREE.Vector3) da furacao da tampa. */
+  rackGetExitNodePosition(rackObj) {
+    return window.RackCableRouting ? window.RackCableRouting.getExitNodePosition(rackObj, this.mapData, this.THREE) : null;
+  }
+  /** Direcao/alinhamento da saida mudou -> recalcula a geometria de TODOS os cabos ligados ao rack (e a tampa). */
+  rackAtualizarRoteamento(rackObj) { if (typeof rackObj === 'string') rackObj = (this.mapData?.objects || []).find((o) => o.id === rackObj); if (rackObj) this.rebuildObjectIncremental(rackObj); }
+  /** `cable.updateGeometry()`: recalcula o tubo de UM cabo (rota + malha) sem reconstruir os demais. */
+  caboUpdateGeometry(caboId) { return this.caboAtualizarTuboVivo(caboId); }
 
   /** [19/09/2026 UTC] NOVO (RODADA 189) — extraído do corpo de `rebuildCabos` (era código inline dentro do
    *  `forEach`) pra ser reaproveitado também pela atualização "ao vivo" de UM cabo só durante o arraste
@@ -360,8 +384,23 @@ class Engine3DRedeMeshMixin {
       // a posição geométrica), só caindo na projeção normal quando pelo menos um dos dois é uma zona-guia
       // automática (essas continuam só por geometria, não têm "ordem de criação" nenhuma pra preservar).
       const extras = (Array.isArray(c.pontosExtras) ? c.pontosExtras : []).map((p, i) => ({ x: p.x, y: p.y, z: p.z, reto: !!p.reto, _ordemManual: i }));
+      // [20/09/2026 UTC] NOVO -- roteamento ortogonal por rack (RackCableRouting): a ponta traseira de um patch
+      // panel num rack com saida Topo/Base segue barra de apoio -> guia vertical -> furacao da tampa; o resto
+      // do cabo (ate a outra ponta / outro rack) continua sendo roteado por `RedePassiva.rotaCabo`.
+      const ra = this._rackRotaExtremidade(c, c.de, A), rb = this._rackRotaExtremidade(c, c.para, B);
+      if (ra || rb) {
+        const de = ra ? ra.saida : pa, para = rb ? rb.saida : pb;
+        const nDe = ra ? { x: 0, y: ra.saida.ny, z: 0 } : { x: a.nx, y: 0, z: a.nz };
+        const nPara = rb ? { x: 0, y: rb.saida.ny, z: 0 } : { x: b.nx, y: 0, z: b.nz };
+        const zn = this._redeZonasGuia(A, de, B, para, a, b, c.de.lado, c.para.lado, { A: !!ra, B: !!rb }).concat(extras);
+        let mid = RP.rotaCabo({ x: de.x, y: de.y, z: de.z }, nDe, { x: para.x, y: para.y, z: para.z }, nPara, { zonas: zn });
+        if (ra) mid = mid.slice(1);
+        if (rb) mid = mid.slice(0, -1);
+        ctrl = (ra ? ra.pontos : []).concat(mid, rb ? window.RackCableRouting.inverter(rb.pontos) : []);
+      } else {
       const zonas = this._redeZonasGuia(A, pa, B, pb, a, b, c.de.lado, c.para.lado).concat(extras);
       ctrl = RP.rotaCabo(pa, { x: a.nx, y: 0, z: a.nz }, pb, { x: b.nx, y: 0, z: b.nz }, { zonas });
+      }
     } else {
       ctrl = [pa, pb];
     }
@@ -740,6 +779,7 @@ class Engine3DRedeMeshMixin {
       this._cabosGroup = null;
     }
     this._cabosInfo = new Map();
+    if (window.RackCableRouting) window.RackCableRouting.limparCache();
     const cabos = this.mapData?.cabos;
     this._feixes = [];
     if (!Array.isArray(cabos) || !cabos.length) return;
@@ -903,6 +943,7 @@ class Engine3DRedeMeshMixin {
     if (!RE || !RM || !RE.generateRearChicote || !RE.generateSuperFeixeVertical) return;
     objs.forEach((rackObj) => {
       if (rackObj.tipo !== 'rack' || !rackObj.rackChicoteHabilitado) return;
+      if (window.RackCableRouting && window.RackCableRouting.ativo(rackObj)) return; // roteamento por rack ja desenha o super feixe
       try { this._redeRenderChicotesDoRack(g, rackObj, objs); } catch (e) { console.error('chicote do rack ' + rackObj.id + ' -- ignorado.', e); }
     });
   }
@@ -1045,13 +1086,14 @@ class Engine3DRedeMeshMixin {
       rt.custom.updateMatrixWorld(true);
     }
     this._redeCarga = { id: obj.id, zOffMm: null };
+    this._redeCargaOcultos = null; this._redeCargaCaboT = 0;
     rt.carregando = true;
     return true;
   }
 
   /** Termina o modo carregar (o chamador faz `rebuildObjectIncremental` para recolocar as malhas nos raios). */
   redeCarregarFim(obj) {
-    this._redeCarga = null;
+    this._redeCarga = null; this._redeCargaOcultos = null;
     const rt = this._redeRuntime?.get(obj?.id); if (rt) rt.carregando = false;
   }
 
@@ -1138,11 +1180,25 @@ class Engine3DRedeMeshMixin {
     rt.root.updateMatrixWorld(true);
     const tinta = est.modo === 'rack' ? 0x0b3a7a : est.modo === 'rack-cheio' ? 0x7a1010 : (est.modo === 'mao' ? null : 0x0f5a1f);
     if (rt._tinta !== tinta) { rt._tinta = tinta; this._redeTingir(rt, tinta); }
-    // cabos acompanham (reconstrucao limitada a ~12 Hz)
+    // cabos acompanham. [21/09/2026] OTIMIZADO: antes cada ~80 ms reconstruía TODOS os cabos do mapa (tubos, plugues,
+    // 8 fios de cada ponta traseira, chicotes...) -> FPS despencava com um patch panel de 24 cabos. Agora só o TUBO dos
+    // cabos LIGADOS a este item é refeito (a cada ~33 ms); plugues e fios ficam ocultos enquanto carrega e o
+    // `rebuildObjectIncremental` de quando solta (view3d-rede.js) reconstrói tudo uma única vez.
     const agora = performance.now();
-    if (!this._redeCargaCaboT || agora - this._redeCargaCaboT > 80) {
-      if (RE.cabosDoObjeto(this.mapData, obj.id).length) this.rebuildCabos();
+    if (!this._redeCargaCaboT || agora - this._redeCargaCaboT > 33) {
       this._redeCargaCaboT = agora;
+      const meus = RE.cabosDoObjeto(this.mapData, obj.id);
+      if (meus.length) {
+        if (!this._cabosGroup) this.rebuildCabos();
+        else {
+          if (this._redeCargaOcultos !== obj.id) {
+            this._redeCargaOcultos = obj.id;
+            const ids = new Set(meus.map((c) => c.id));
+            this._cabosGroup.traverse((n) => { if (n.isMesh && ids.has(n.userData.caboId) && n.geometry?.type !== 'TubeGeometry' && n.userData.pontoExtraIndex == null) n.visible = false; });
+          }
+          meus.forEach((c) => this.caboAtualizarTuboVivo(c.id));
+        }
+      }
     }
   }
 

@@ -261,7 +261,24 @@ const StorageStatus = {
       <button type="button" class="ssw-diagram" id="ssw-diagram" title="Como as informações deste app são guardadas — toque para ver detalhes"></button>
       <div class="ssw-channels" id="ssw-channels"></div>
     `;
-    bar.insertBefore(wrap, btnVerLista);
+    // [22/09/2026] CORRIGIDO — bug relatado pelo usuário (achado no console
+    // após um travamento): "NotFoundError: Failed to execute 'insertBefore'
+    // on 'Node': The node before which the new node is to be inserted is
+    // not a child of this node." CAUSA RAIZ: `btnVerLista` (#btn-verlista-top)
+    // não é filho DIRETO de `bar` (#topbar-default) — ele vive dentro de
+    // `.topbar-default-row`, um nível a mais (ver index.html) — e
+    // `Node.insertBefore` exige que o nó de referência seja filho direto do
+    // nó em que é chamado, senão lança exatamente esse erro. Usar
+    // `bar.insertBefore` funcionava só enquanto, por acidente de estrutura,
+    // ninguém tivesse envolvido o botão numa div extra; qualquer mudança de
+    // layout do topbar (ou um layout de topbar alternativo/responsivo que
+    // aninhe esse botão) reproduz o erro. CORRIGIDO: usa o PRÓPRIO pai real
+    // do botão (`btnVerLista.parentNode`), que é sempre o nó correto de
+    // onde `btnVerLista` de fato é filho direto, em vez de assumir que esse
+    // pai é `bar`.
+    const paiReal = btnVerLista.parentNode;
+    if (!paiReal) return;
+    paiReal.insertBefore(wrap, btnVerLista);
     wrap.querySelector('#ssw-diagram').onclick = () => this._openIndexedDbWindow();
   },
 

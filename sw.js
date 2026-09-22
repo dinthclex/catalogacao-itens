@@ -29,6 +29,8 @@ const APP_SHELL = [
   './js/barcode.js',
   './js/libloader.js',
   './js/mapping.js',
+  './js/objecttypes/object-type-registry.js',
+  './js/objecttypes/camera.js',
   './js/organizeview.js',
   './js/ambientephotos.js',
   './js/model3dloader.js',
@@ -41,6 +43,8 @@ const APP_SHELL = [
   './js/novosobjetos.js',
   './assets/modelos/js/_novos-objetos.js',
   './js/rack-modular.js',
+  './js/rack-cable-routing.js',
+  './js/wifi-signal.js',
   './js/rede-passiva.js',
   './js/rede-docs.js',
   './js/rede-equip.js',
@@ -125,4 +129,4 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
-const CACHE_VERSION = 'catalogo-v662';
+const CACHE_VERSION = 'catalogo-v676';

@@ -132,6 +132,10 @@
       pode: ['Ocupa 4U ao ser encaixado; mesmas regras de inserção/remoção de disco das demais storages.'], teclas: T_RACK },
 
     // ---- tomadas ----
+    { tipo: 'access_point', grupo: 'tomadas', nome: 'Access Point Wi-Fi (AP)',
+      resumo: 'Ponto de acesso sem fio semi-direcional: 1 porta RJ-45 (PoE) na frente; o sinal sai pelo lado da frente (+Z) e enfraquece nas laterais e atrás.',
+      faz: ['Gera um mapa volumétrico 3D de cobertura Wi-Fi (verde = excelente, amarelo = médio, vermelho = fraco), considerando paredes, portas, janelas, pilares e vigas.'],
+      pode: ['Ligar/desligar; escolher faixa (2,4/5/6 GHz) e potência; receber 1 cabo de rede (sem cabo, não emite sinal); refazer a varredura com densidade ajustável.'], teclas: T_PASSO },
     { tipo: 'espelho1', grupo: 'tomadas', nome: 'Espelho de parede 1 módulo',
       resumo: 'Placa 4x4" com 1 módulo (keystone RJ-45).', faz: ['Ponto de rede na parede, onde o usuário liga o notebook/telefone.'],
       pode: ['Ser posicionado na parede (mapa 2D ou pegando com E no 3D); receber 1 cabo.'], teclas: T_PASSO },

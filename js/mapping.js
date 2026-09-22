@@ -172,7 +172,13 @@ const Mapping = {
     if (map.apelido && map.apelido.trim()) map.nome = map.apelido.trim();
     delete map.apelido;
     if (!map.nome || !map.nome.trim()) map.nome = Mapping.defaultAmbienteName(map.id);
-    delete map.cameras;
+    // [22/09/2026] MUDADO — `map.cameras` guardava um campo de uma tentativa
+    // abandonada antiga (por isso era sempre apagado aqui). Reaproveitado
+    // agora, com um formato novo, pra guardar objetos "Câmera" independentes
+    // de foto (ver js/objecttypes/camera.js `CameraPin`, pedido verbatim: "o objeto
+    // Câmera é um objeto independente de foto"). `delete` trocado por
+    // inicialização, mesmo padrão de `map.objects`/`map.textos` logo abaixo.
+    if (!map.cameras) map.cameras = [];
     if (!map.objects) map.objects = [];
     if (!map.textos) map.textos = [];
     if (!map.portas) map.portas = []; // ferramenta "Porta" (ver mapview.js) — mapas de antes desta rodada
@@ -202,6 +208,13 @@ const Mapping = {
     // ex.: criados por script/importacao -- ganham o padrao 12U x 600mm.
     (map.objects || []).forEach((o) => {
       if (o.tipo === 'rack' && o.rackUs == null && window.RackModular) Object.assign(o, window.RackModular.patchParaObjeto(o, 12, 600));
+      // [20/09/2026] Racks existentes (sem escolha de saida de cabos) passam a se auto-organizar: saida pelo Topo,
+      // centralizada, tampa com abertura. Quem escolheu 'Desligado' ('nenhum') continua desligado.
+      if (o.tipo === 'rack' && o.rackCableEntry == null) {
+        o.rackCableEntry = 'top'; o.rackCableExitAlignment = o.rackCableExitAlignment || 'center';
+        const te = o.rackTampaEstado || {};
+        o.rackTampaEstado = Object.assign({ base: 'fechada' }, te, { topo: !te.topo || te.topo === 'fechada' ? 'com_abertura' : te.topo });
+      }
       // [18/09/2026 UTC] RODADA 164 -- Rack sem componentes (criado antes desta
       // rodada) ganha o Script de fabrica + gatilho "Ao Clicar Duas Vezes"
       // (abrir/fechar a porta). Nunca pisa em componentes ja existentes.
@@ -1296,7 +1309,17 @@ const Mapping = {
     // parametros -- mesma fonte pro 2D, colisao, empilhamento e 3D. Sem
     // elevacao explicita, o tipo "parede" nasce a 1,2m do chao (piso = 0).
     if (tipo === 'rack' && window.RackModular) {
+      const _elevPediu = typeof obj.elevacao === 'number';
+      var _rackElevPadrao = null;
       Object.assign(obj, window.RackModular.patchParaObjeto(obj, obj.rackUs || 12, obj.rackProfundidade || 600));
+      // [21/09/2026] o patch do rack força elevacao 0 (piso) — sem elevação pedida, deixa o empilhamento decidir (rack sobre 'piso'/mesa).
+      // (Rack de parede também: se há objeto embaixo, fica em cima dele; sem objeto, mantém a elevação do tipo — parede 1,2 m / piso 0.)
+      if (!_elevPediu) { _rackElevPadrao = obj.elevacao; delete obj.elevacao; }
+      // [20/09/2026] Racks NOVOS: saida de cabos pelo Topo, centralizada, tampa com abertura (racks antigos ficam desligados).
+      if (obj.rackCableEntry == null) {
+        obj.rackCableEntry = 'top'; obj.rackCableExitAlignment = 'center';
+        obj.rackTampaEstado = Object.assign({ topo: 'com_abertura', base: 'fechada' }, obj.rackTampaEstado || {});
+      }
       // [18/09/2026 UTC] RODADA 164 -- Script de fabrica do Rack (adaptado do da
       // Porta, sem macaneta): duplo clique na PORTA abre/fecha. So entra se o
       // molde configuravel do tipo ('rack') nao trouxe componentes.
@@ -1331,6 +1354,11 @@ const Mapping = {
     // "colocar uma planta em cima de uma mesa") empilha na elevação certa
     // em vez de ficar na MESMA altura (0) do que já está ali, que ia
     // aparecer como dois objetos atravessando um ao outro no 3D.
+    // [21/09/2026] Elevação decidida por quem coloca (3D: mira) ou pelo apoio achado abaixo => o objeto NÃO soma mais o `y0` do
+    // catálogo (`semY0`): o `y0` (monitor 0,75 / gabinete 0,3 ...) era somado POR CIMA da elevação do apoio e fazia
+    // monitor/teclado/mouse "voarem" acima do gabinete quando postos numa mesa (0,74 + 0,75).
+    const elevExplicita = typeof obj.elevacao === 'number';
+    if (elevExplicita && obj.semY0 == null) obj.semY0 = true;
     if (typeof obj.elevacao !== 'number') {
       // 25/08/2026 — BUG corrigido (pedido do usuário: "tendo qualquer área
       // da forma do objeto coincidente com a outra, então, haverá o
@@ -1347,7 +1375,20 @@ const Mapping = {
       // a ÁREA do novo objeto contra a área de cada objeto já no mapa (ver
       // _boxesOverlap), não só o ponto central.
       const base = this._findTopObjectAt(map, x, y, obj.id, obj);
-      if (base) obj.elevacao = this.objectTopHeight(base);
+      if (base) {
+        // [21/09/2026] pedido verbatim: "se é um rack de parede, ao ficar em cima de outra coisa
+        // ou objeto Piso, deve também ter a altura padrão em relação a este outro objeto ou
+        // objeto Piso que tem (quando está referenciado ao chão)." Sem isso, um rack de parede
+        // solto sobre outro objeto ficava ENCOSTADO nele, perdendo o 1,2 m padrão que tem quando
+        // vai direto pro chão -- soma a mesma altura padrão por cima do apoio encontrado.
+        let extra = 0;
+        if (tipo === 'rack' && window.RackModular) {
+          try { if (window.RackModular.fromObjeto(obj).tipo === 'parede' && window.RACK_CATALOGO) extra = window.RACK_CATALOGO.ELEVACAO_PAREDE_M; } catch (e) { /* obj ainda sem dados completos de rack -- sem extra */ }
+        }
+        obj.elevacao = this.objectTopHeight(base) + extra;
+        obj.semY0 = true;
+      }
+      else if (tipo === 'rack' && typeof _rackElevPadrao === 'number') obj.elevacao = _rackElevPadrao;
     }
     map.objects.push(obj);
     this.recalcBounds(map);
@@ -1397,8 +1438,24 @@ const Mapping = {
   objectTopHeight(o) {
     const elevacao = o.elevacao || 0;
     if (o.forma === 'imagem') return elevacao;
-    return elevacao + (o.altura || 0.5);
+    return elevacao + this.y0Efetivo(o) + (o.altura || 0.5);
   },
+
+  /** [21/09/2026] Deslocamento vertical extra (`y0` do catálogo) que o 3D REALMENTE aplica a `o`: 0 se o objeto tem
+   *  `semY0` (elevação já decidida) ou se cai no ramo genérico de retângulo/polígono (y0 = 0); senão o `y0` do perfil
+   *  (malhas .glb/.obj estáticas de monitor, gabinete, switch...). Espelha `Engine3D._buildOneObjectMesh`. */
+  y0Efetivo(o) {
+    if (!o || o.semY0) return 0;
+    const p = window.OBJECT3D_PROFILES && window.OBJECT3D_PROFILES[o.tipo];
+    if (!p || !p.y0) return 0;
+    if ((o.modeloArquivo || p.modeloArquivo) && window.Model3DLoader?.hasModel?.(o.modeloArquivo || p.modeloArquivo)) return 0;
+    const glb = o.modeloGlbEstatico || p.modeloGlbEstatico || o.tipo, malha = o.modeloMalhaEstatica || p.modeloMalhaEstatica || o.tipo;
+    if (window.GlbMeshSource?.hasModel?.(glb) || window.ObjMeshSource?.hasModel?.(malha)) return p.y0;
+    return (o.forma === 'retangulo' || o.forma === 'poligono') ? 0 : p.y0;
+  },
+
+  /** Altura GLOBAL (mundo) da base do objeto: andar × altura do piso + elevação + y0 efetivo. */
+  yGlobalObjeto(map, o) { return (o.piso || 0) * ((map && map.alturaPiso) || 2.8) + (o.elevacao || 0) + this.y0Efetivo(o); },
 
   /** NOVO (01/09/2026), pedido verbatim: "Sobre o objeto escada, no 3D,
    *  deve dar para subir pela escada." `objectTopHeight` (acima) devolve
@@ -1534,6 +1591,18 @@ const Mapping = {
    *  criado. */
   _findTopObjectAt(map, x, y, excludeId, newObj) {
     let best = null, bestTop = -Infinity;
+    // [21/09/2026] O ponto de colocação (centro do novo objeto) manda: se ele cai DENTRO da área de algum objeto, o novo
+    // pousa no topo do mais alto entre esses (ex.: monitor posto na tampa da mesa, ao lado de um gabinete, fica rente à
+    // tampa — não "voa" só porque a caixa dele encosta na do gabinete; posto SOBRE o gabinete, sobe nele). Só quando o
+    // ponto não cai em nenhum objeto vale o teste antigo de área-contra-área (ver abaixo).
+    (map.objects || []).forEach((o) => {
+      if (o.id === excludeId) return;
+      if (!this.pointInObjectFootprint(o, x, y)) return;
+      this.applyDefaultShapeToObject(o);
+      const top = this.objectTopHeight(o);
+      if (top > bestTop) { bestTop = top; best = o; }
+    });
+    if (best) return best;
     const box = newObj ? this._footprintBox({ ...newObj, x, y }) : null;
     (map.objects || []).forEach((o) => {
       if (o.id === excludeId) return;
