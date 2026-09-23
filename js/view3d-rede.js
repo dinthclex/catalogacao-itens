@@ -33,8 +33,475 @@
   const esc = (t) => (raiz.Utils && raiz.Utils.escapeHtml) ? raiz.Utils.escapeHtml(String(t == null ? '' : t)) : String(t == null ? '' : t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const toast = (msg, opt) => { try { raiz.Utils.toast(msg, opt || { duration: 2200 }); } catch (e) { /* sem toast */ } };
   const ehCampoTexto = (e) => { const t = e && e.target; return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); };
+  // [22/09/2026] NOVO -- opções de densidade dos raios do motor avançado ("mostrar raios" -- ver
+  // `avancadoDensidadeRaios` em wifi-signal.js). Fração dos raios primários que ganham linha desenhada;
+  // sempre inclui o valor atual (mesmo que não bata com nenhuma opção padrão) pra nunca "sumir" a seleção.
+  // [28/09/2026] NOVO -- pedido verbatim: "Faça uma separação visual do que é da 'Varredura normal', do que
+  // é da 'Varredura avançada' e do que é sobre o 2D." Rótulo de seção reaproveitado nos 2 painéis (principal
+  // + janelinha) — maiúsculas pequenas + traço acima, mesmo padrão visual dos outros divisores já existentes.
+  // [29/09/2026] MUDADO -- pedido verbatim: "Visualmente, '📶 Varredura normal', '🛰️ Varredura avançada' e
+  // '🗺️ Mapa 2D' devem ficar separados com algum destaque entre eles os separando." A linha fina de cima
+  // (1px, mesma cor da borda do painel) passava despercebida -- agora é uma faixa com fundo tintado +
+  // borda de cor de destaque (azul, mesma do resto da UI), bem mais visível como divisor de seção.
+  const SEC_HDR = (emoji, texto) => '<div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.9;color:#9db8e8;margin-top:14px;padding:6px 8px;border-top:2px solid #4f8cff;border-radius:0 0 4px 4px;background:rgba(79,140,255,.10)">' + emoji + ' ' + texto + '</div>';
+  const DENSIDADES_RAIOS = [1, 0.5, 0.25, 0.1, 0.05, 0.02, 0.01];
+  const DENSIDADES_RAIOS_OPTS = (atual) => {
+    const vals = DENSIDADES_RAIOS.slice();
+    if (atual > 0 && !vals.some((v) => Math.abs(v - atual) < 1e-6)) vals.push(atual);
+    vals.sort((a, b) => b - a);
+    return vals.map((v) => '<option value="' + v + '"' + (Math.abs(v - atual) < 1e-6 ? ' selected' : '') + '>' + Math.round(v * 100) + '%</option>').join('');
+  };
 
   const M = {
+
+    // ======================================================================
+    // 0) RAYCASTER DO AP -- pontos/raios por nível de sinal (reaproveitado pelo
+    //    painel principal do AP e pela "janelinha" compacta -- ver `_wfMiniHtml`/`_wfMiniWire`)
+    // ======================================================================
+    /** [28/09/2026] NOVO -- pedido verbatim: "Os botões que indicam a intensidade (fraco/baixo/médio/bom/
+     *  excelente) devem ter um novo formato. Em vez de ser um checkbox com um label do lado, deve ser um
+     *  botão ativa/desativa. Dentro do botão, deve ter a bolinha com a cor e o texto do label. Coloque os 5
+     *  botões colados um do lado do outro." 1 `<button>` por nível (em vez de `<label><input type=checkbox>`),
+     *  bordas coladas (só o 1º/último arredondados, `margin-left:-1px` nos do meio pra fundir a borda com o
+     *  vizinho). Estado "ativo" muda cor de fundo/texto/bolinha via `data-ativo`.
+     *  [29/09/2026] MUDADO -- pedido verbatim: "As sequências de botões 'fraco', 'baixo', 'médio', 'bom' e
+     *  'excelente' devem ter só o tamanho necessário para a bolinha com a cor e o texto parecerem com um
+     *  pouco de padding lateral. Não devem obrigatoriamente ocupar a linha toda." Trocado `flex:1` (esticava
+     *  cada botão pra dividir a linha toda em partes iguais) por `flex:0 0 auto` (tamanho pelo conteúdo) +
+     *  padding lateral maior (2px -> 10px); a fileira (`_wfFileiraNiveisHtml`) ganhou `flex-wrap:wrap` pra
+     *  não estourar a largura do painel quando os 5 juntos não cabem numa linha só. */
+    _wfBotaoNivelHtml(niv, k, n, attr, ativo) {
+      const r = Math.round(niv.cor[0] * 255), g = Math.round(niv.cor[1] * 255), b = Math.round(niv.cor[2] * 255);
+      const raio = k === 0 ? '6px 0 0 6px' : (k === n - 1 ? '0 6px 6px 0' : '0');
+      return '<button type="button" data-' + attr + '="' + k + '" data-ativo="' + (ativo ? '1' : '0') + '" data-rgb="' + r + ',' + g + ',' + b + '" title="' + esc(niv.nome) + '" style="flex:0 0 auto;' + (k > 0 ? 'margin-left:-1px;' : '') + 'display:flex;align-items:center;justify-content:center;gap:4px;padding:4px 10px;font:inherit;font-size:10px;line-height:1;border:1px solid #3a4250;border-radius:' + raio + ';background:' + (ativo ? 'rgba(' + r + ',' + g + ',' + b + ',.22)' : 'transparent') + ';color:' + (ativo ? '#e8ecf2' : '#7a8391') + ';cursor:pointer;white-space:nowrap">'
+        + '<span style="flex:0 0 auto;display:inline-block;width:8px;height:8px;border-radius:50%;background:rgb(' + r + ',' + g + ',' + b + ')' + (ativo ? '' : ';opacity:.4') + '"></span>'
+        + '<span>' + esc(niv.nome) + '</span></button>';
+    },
+    /** 1 fileira de 5 `_wfBotaoNivelHtml`, todos colados (sem gap — as bordas negativas fazem a colagem).
+     *  `flex-wrap:wrap` [29/09/2026 NOVO] -- os botões não são mais `flex:1` (ver `_wfBotaoNivelHtml`), então
+     *  os 5 juntos podem não caber numa linha só num painel estreito; quebram em vez de estourar a largura. */
+    _wfFileiraNiveisHtml(arr, attr) {
+      const WS = raiz.WifiSignal, n = WS.NIVEIS.length;
+      return '<div style="display:flex;flex-wrap:wrap">' + WS.NIVEIS.map((niv, k) => this._wfBotaoNivelHtml(niv, k, n, attr, !!arr[k])).join('') + '</div>';
+    },
+    /** Liga os botões de `_wfFileiraNiveisHtml` a `toggleFn(k, novoValor)`, alternando o próprio estado a
+     *  cada clique (lê o estado atual do `data-ativo` do botão -- não depende de reconstruir o HTML) e
+     *  repinta na hora (cor de fundo/texto/bolinha), sem `render()` nenhum. */
+    _wfFileiraNiveisWire(root, attr, toggleFn) {
+      root.querySelectorAll('[data-' + attr + ']').forEach((btn) => {
+        btn.onclick = () => {
+          const k = Number(btn.getAttribute('data-' + attr));
+          const ativo = btn.getAttribute('data-ativo') !== '1';
+          btn.setAttribute('data-ativo', ativo ? '1' : '0');
+          const dot = btn.querySelector('span');
+          const rgb = btn.getAttribute('data-rgb') || '255,255,255';
+          btn.style.background = ativo ? 'rgba(' + rgb + ',.22)' : 'transparent';
+          btn.style.color = ativo ? '#e8ecf2' : '#7a8391';
+          dot.style.opacity = ativo ? '1' : '.4';
+          toggleFn(k, ativo);
+        };
+      });
+    },
+    /** [25/09/2026] NOVO -- pedido verbatim: "Faça os 'raios do raycaster' ir trocando a cor conforme os
+     *  níveis da malha de cor dos 5 níveis que tem [...] deve ser possível escolher quais partes do raio
+     *  ficam aparecendo [...] Cada parte do raio pode ser ativada individualmente." 2 fileiras de 5 botões
+     *  (pontos/raios, ver `_wfFileiraNiveisHtml`), 1 por nível de `WS.NIVEIS` (0=fraco/vermelho ..
+     *  4=excelente/verde), cada bolinha colorida na cor real daquele nível -- mesma paleta da malha de calor. */
+    _wfNiveisHtml(ap) {
+      const pontos = ap.mostrarPontosNiveis, raios = ap.mostrarRaiosNiveis, modoColisao = ap.pontosRaycasterModo === 'colisao';
+      // [22/09/2026] NOVO -- pedido verbatim: "deve haver dois modos para os pontos do raycaster (por
+      // nível). O jeito atual (até o limite de atenuação para aquele nível) e o outro jeito (apenas onde,
+      // dentro daquele nível, houve batida em alguma superfície com raycaster) [...] os raios [...] devem
+      // seguir estes pontos." `<select>` compartilhado pelos dois (pontos E raios, já que os raios sempre
+      // seguem os pontos -- ver wifi-signal.js).
+      return '<div style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="font-size:11px;opacity:.7">Modo dos pontos/raios</span><select data-wf-pontos-modo="1" style="' + INP + '" title="Alcance: ponto na borda de alcance do nível, exista ou não parede ali (comportamento de sempre). Colisão real: ponto só onde o raycaster realmente bateu numa superfície dentro da faixa daquele nível.">'
+        + '<option value="alcance"' + (modoColisao ? '' : ' selected') + '>Alcance (borda do nível)</option>'
+        + '<option value="colisao"' + (modoColisao ? ' selected' : '') + '>Colisão real (só onde bateu)</option>'
+        + '</select></div>'
+        + '<div style="font-size:11px;opacity:.7;margin-top:4px" title="Mostra/esconde os pontos 3D onde os raios da varredura normal bateram, separados por nível de sinal.">pontos do raycaster (por nível)</div>' + this._wfFileiraNiveisHtml(pontos, 'wf-nivpt')
+        + '<div style="font-size:11px;opacity:.7;margin-top:3px" title="Mostra/esconde as linhas 3D dos raios da varredura normal, separadas por nível de sinal.">raios do raycaster (por nível)</div>' + this._wfFileiraNiveisHtml(raios, 'wf-nivray');
+    },
+    /** Liga os botões de `_wfNiveisHtml` a `ap.setMostrarPontosNivel`/`setMostrarRaiosNivel` + o `<select>` de
+     *  modo a `ap.pontosRaycasterModo`. `render`/`renderAgora` (mesmo parâmetro de `_wfCorteWire`) refaz o
+     *  HTML pra os botões/pontos refletirem o novo modo imediatamente após a troca. */
+    _wfNiveisWire(root, ap, render) {
+      this._wfFileiraNiveisWire(root, 'wf-nivpt', (k, v) => ap.setMostrarPontosNivel(k, v));
+      this._wfFileiraNiveisWire(root, 'wf-nivray', (k, v) => ap.setMostrarRaiosNivel(k, v));
+      const modo = root.querySelector('[data-wf-pontos-modo]');
+      if (modo) modo.onchange = (e) => { ap.pontosRaycasterModo = e.target.value; if (typeof render === 'function') render(); };
+    },
+    /** [22/09/2026] NOVO -- pedido verbatim: "coloque os botões de níveis para os pontos e para os raios,
+     *  assim como na varredura normal. Retire os checkbox 'mostrar pontos' e 'mostrar raios', pois os botões
+     *  de níveis já vão executar esta função." Mesmíssimo padrão visual/técnico de `_wfNiveisHtml`/
+     *  `_wfNiveisWire` acima, só que ligado aos toggles POR NÍVEL do motor avançado
+     *  (`avancadoMostrarPontosNiveis`/`avancadoMostrarRaiosNiveis`, ver wifi-signal.js) -- substitui os antigos
+     *  checkboxes únicos `avancadoMostrarPontos`/`avancadoMostrarRaios` (e a "grade quadriculada", removida
+     *  inteira, código incluso). */
+    _wfNiveisAvancadaHtml(ap) {
+      const pontos = ap.avancadoMostrarPontosNiveis, raios = ap.avancadoMostrarRaiosNiveis;
+      return '<div style="font-size:11px;opacity:.7;margin-top:4px" title="Mostra/esconde os pontos 3D onde os raios do motor avançado bateram, separados por nível de sinal.">pontos do motor avançado (por nível)</div>' + this._wfFileiraNiveisHtml(pontos, 'wfa-nivpt')
+        + '<div style="font-size:11px;opacity:.7;margin-top:3px" title="Mostra/esconde as linhas 3D dos raios do motor avançado, separadas por nível de sinal.">raios do motor avançado (por nível)</div>' + this._wfFileiraNiveisHtml(raios, 'wfa-nivray');
+    },
+    _wfNiveisAvancadaWire(root, ap) {
+      this._wfFileiraNiveisWire(root, 'wfa-nivpt', (k, v) => ap.setAvancadoMostrarPontosNivel(k, v));
+      this._wfFileiraNiveisWire(root, 'wfa-nivray', (k, v) => ap.setAvancadoMostrarRaiosNivel(k, v));
+    },
+    /** [26/09/2026] NOVO -- pedido verbatim: "Deve ser possível habilitar as formas 3D produzidas
+     *  independentemente também [...] mostrá-las individualmente. E também só habilitar a superfície mais
+     *  externa [...] Deve ser possível selecionar se vai ser sólido ou wireframe." Mesmo padrão visual de
+     *  `_wfNiveisHtml` (1 fileira de 5 botões, ver `_wfFileiraNiveisHtml`) + 1 checkbox extra "wireframe". */
+    _wfMalhaNiveisHtml(ap) {
+      const niveis = ap.mostrarMalhaNiveis;
+      return '<div style="font-size:11px;opacity:.7;margin-top:4px" title="Ativa/desativa a superfície 3D de cada nível de sinal individualmente (nível 0/\'fraco\' = casca mais externa, os demais ficam por dentro dela).">superfície da malha (por nível — nível 0/"fraco" = superfície mais externa)</div>' + this._wfFileiraNiveisHtml(niveis, 'wf-nivmalha')
+        + '<label style="font-size:11px;display:block;margin-top:3px" title="Desenha as superfícies acima em linhas (wireframe) em vez de preenchidas (sólido)."><input type="checkbox" data-wf-malha-wireframe="1"' + (ap.malhaWireframe ? ' checked' : '') + '> wireframe (em vez de sólido)</label>';
+    },
+    /** Liga os controles de `_wfMalhaNiveisHtml`, mesmo padrão de `_wfNiveisWire`. */
+    _wfMalhaNiveisWire(root, ap) {
+      this._wfFileiraNiveisWire(root, 'wf-nivmalha', (k, v) => ap.setMostrarMalhaNivel(k, v));
+      const wf = root.querySelector('[data-wf-malha-wireframe]'); if (wf) wf.onchange = (e) => { ap.malhaWireframe = e.target.checked; };
+    },
+    /** [29/09/2026] NOVO -- pedido verbatim: "Na varredura avançada, deve ser possível ver a forma 3D gerada
+     *  com o mapa de calor do sinal (superfície mais externa (como na varredura normal) e forma. Ambas por
+     *  nível, os 5 níveis)." Mesmíssimo padrão visual/técnico de `_wfMalhaNiveisHtml` (fileira de 5 botões +
+     *  checkbox de wireframe), só que ligado aos toggles PRÓPRIOS do motor avançado
+     *  (`avancadoMostrarMalhaNiveis`/`avancadoMalhaWireframe`, ver wifi-signal.js) -- a malha do motor
+     *  avançado é um `THREE.Mesh` À PARTE (`ap.malhaAvancada`), convive com a nuvem de pontos/grade dele. */
+    _wfMalhaNiveisAvancadaHtml(ap) {
+      const niveis = ap.avancadoMostrarMalhaNiveis;
+      return '<div style="font-size:12px;opacity:.7;margin-top:6px" title="Forma 3D (casca) do motor avançado, por nível -- mesma técnica da varredura normal (nível 0/\'fraco\' = superfície mais externa), calculada sem reflexão/refração.">superfície 3D do motor avançado (por nível)</div>' + this._wfFileiraNiveisHtml(niveis, 'wfa-nivmalha')
+        + '<label style="font-size:12px;display:block;margin-top:3px" title="Desenha a superfície acima em linhas (wireframe) em vez de preenchida (sólido)."><input type="checkbox" data-wfa-malha-wireframe="1"' + (ap.avancadoMalhaWireframe ? ' checked' : '') + '> wireframe (em vez de sólido)</label>';
+    },
+    _wfMalhaNiveisAvancadaWire(root, ap) {
+      this._wfFileiraNiveisWire(root, 'wfa-nivmalha', (k, v) => ap.setAvancadoMostrarMalhaNivel(k, v));
+      const wf = root.querySelector('[data-wfa-malha-wireframe]'); if (wf) wf.onchange = (e) => { ap.avancadoMalhaWireframe = e.target.checked; };
+    },
+    /** [29/09/2026] NOVO -- pedido verbatim: "Faça a opção de 'Vista em Corte' para a varredura normal [...]
+     *  uma superfície paralela ao chão que se pode controlar a altura Y [...] controlar a opacidade [...]
+     *  Uma barra de 0 a 100% [...] Um campo de entrada numérico [...] alterando um, altera o outro [...] até
+     *  totalmente aparente." Checkbox liga/desliga (`ap.corteAtivo`) + `<input type=range>` E `<input
+     *  type=number>` SINCRONIZADOS (mesmo valor, `ap.corteAltura01`, 0..100%) + slider de opacidade do
+     *  plano visual (`ap.corteOpacidade`) -- ver `atualizarCorte`/wifi-signal.js pra física do recorte. */
+    // [22/09/2026] MUDADO -- pedido verbatim: "deve ter um outro modo o corte de giro [...] Deve ser possível
+    // definir um ângulo fixo (que será o 0) e usar o outro ângulo para variar de 0 até 100% do cardioide
+    // visível [...] Por padrão, fica o modo de corte de superfície de cima para baixo (deve ser possível mover
+    // este eixo de deslocamento por meio de dois eixos de giro, assim, poder-se-à mover a superfície em um
+    // eixo inclinado a 30°, por exemplo)." Acrescenta um `<select>` de modo ('superficie'/'giro') + 2 campos
+    // de inclinação (graus, -89..89) no modo 'superficie' + ângulo fixo/percentual no modo 'giro' -- só o
+    // bloco do modo ATIVO fica visível (os dois ficam sempre no HTML, alternando com `display:none`, pra não
+    // perder o wiring ao trocar de modo). Opacidade continua compartilhada pelos dois (vale pro plano visual
+    // OU pras "mãos de relógio", conforme o modo).
+    _wfCorteHtml(ap) {
+      const pct = Math.round(ap.corteAltura01 * 100), opPct = Math.round(ap.corteOpacidade * 100);
+      const giroPct = Math.round(ap.corteGiroPercentual01 * 100), giroFixo = Math.round(ap.corteGiroAnguloFixo);
+      const modoGiro = ap.corteModo === 'giro';
+      return SEC_HDR('✂️', 'Vista em corte')
+        + '<label style="font-size:12px" title="Recorta as formas 3D da varredura normal, no modo escolhido abaixo."><input type="checkbox" data-wf-corte-ativo="1"' + (ap.corteAtivo ? ' checked' : '') + '> ativar vista em corte</label>'
+        + '<div style="display:flex;align-items:center;gap:6px;margin-top:4px' + (ap.corteAtivo ? '' : ';opacity:.45;pointer-events:none') + '" data-wf-corte-campos="1">'
+        + '<span style="font-size:12px">Modo</span><select data-wf-corte-modo="1" style="' + INP + '" title="Superfície: plano horizontal (ou inclinado) de cima para baixo. Giro: recorte circular em torno do AP, como ponteiros de relógio se afastando.">'
+        + '<option value="superficie"' + (modoGiro ? '' : ' selected') + '>Superfície (cima↓baixo)</option>'
+        + '<option value="giro"' + (modoGiro ? ' selected' : '') + '>Giro (circular, eixo Y)</option>'
+        + '</select></div>'
+        + '<div style="display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;align-items:center;margin-top:4px' + (ap.corteAtivo && !modoGiro ? '' : ';opacity:.45;pointer-events:none') + (modoGiro ? ';display:none' : '') + '" data-wf-corte-campos-superficie="1">'
+        + '<span>Altura do corte</span><input data-wf-corte-altura="1" type="range" min="0" max="100" step="1" value="' + pct + '" style="width:100%" title="Posição do plano de corte: 0% = base das formas (tudo oculto), 100% = topo (tudo aparente).">'
+        + '<input data-wf-corte-altura-num="1" type="number" min="0" max="100" step="1" value="' + pct + '" style="' + INP + ';width:56px" title="Mesmo valor da barra ao lado, em número (0-100%).">'
+        + '<span>Eixo externo</span><input data-wf-corte-eixoext="1" type="range" min="0" max="359" step="1" value="' + Math.round(ap.corteEixoExterno) + '" style="width:100%" title="Gira em torno do eixo Y do mundo, posicionando pra qual lado o eixo interno vai inclinar o plano (graus, 0-359).">'
+        + '<input data-wf-corte-eixoext-num="1" type="number" min="0" max="359" step="1" value="' + Math.round(ap.corteEixoExterno) + '" style="' + INP + ';width:56px" title="Mesmo valor da barra ao lado, em graus (0-359).">'
+        + '<span>Eixo interno</span><input data-wf-corte-eixoint="1" type="range" min="-89" max="89" step="1" value="' + Math.round(ap.corteEixoInterno) + '" style="width:100%" title="Inclina o plano em torno do eixo já posicionado pelo \'Eixo externo\' acima (graus). 0° = plano perfeitamente horizontal.">'
+        + '<input data-wf-corte-eixoint-num="1" type="number" min="-89" max="89" step="1" value="' + Math.round(ap.corteEixoInterno) + '" style="' + INP + ';width:56px" title="Mesmo valor da barra ao lado, em graus (-89 a 89).">'
+        + '</div>'
+        + '<div style="display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;align-items:center;margin-top:4px' + (ap.corteAtivo && modoGiro ? '' : ';opacity:.45;pointer-events:none') + (modoGiro ? '' : ';display:none') + '" data-wf-corte-campos-giro="1">'
+        + '<span>Ângulo fixo (0%)</span><input data-wf-corte-giro-fixo="1" type="range" min="0" max="359" step="1" value="' + giroFixo + '" style="width:100%" title="Ângulo (visto de cima) da \'mão\' fixa de referência -- é o 0% do giro.">'
+        + '<input data-wf-corte-giro-fixo-num="1" type="number" min="0" max="359" step="1" value="' + giroFixo + '" style="' + INP + ';width:56px" title="Mesmo valor da barra ao lado, em graus (0-359).">'
+        + '<span>Giro visível</span><input data-wf-corte-giro-pct="1" type="range" min="0" max="100" step="1" value="' + giroPct + '" style="width:100%" title="0% = as duas \'mãos\' coincidem (nada visível). 100% = volta completa (tudo visível). A \'mão\' móvel gira sempre no sentido crescente a partir do ângulo fixo.">'
+        + '<input data-wf-corte-giro-pct-num="1" type="number" min="0" max="100" step="1" value="' + giroPct + '" style="' + INP + ';width:56px" title="Mesmo valor da barra ao lado, em número (0-100%).">'
+        + '</div>'
+        + '<div style="display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;align-items:center;margin-top:4px' + (ap.corteAtivo ? '' : ';opacity:.45;pointer-events:none') + '" data-wf-corte-campos-opacidade="1">'
+        + '<span>Opacidade visual</span><input data-wf-corte-opacidade="1" type="range" min="0" max="100" step="1" value="' + opPct + '" style="width:100%" title="Opacidade da referência visual do corte (o plano ou as \'mãos\' -- não afeta as formas recortadas em si).">'
+        + '<input data-wf-corte-opacidade-num="1" type="number" min="0" max="100" step="1" value="' + opPct + '" style="' + INP + ';width:56px" title="Mesmo valor da barra ao lado, em número (0-100%).">'
+        + '</div>'
+        + '<div style="font-size:11px;opacity:.6;margin-top:3px">' + (modoGiro
+          ? 'Giro de 0% (mãos coincidentes, nada visível) a 100% (volta completa, tudo visível) -- só afeta a varredura normal (malha de calor), não a nuvem de pontos do motor avançado.'
+          : 'Desliza de 0% (formas totalmente ocultas) a 100% (formas totalmente aparentes) -- só afeta a varredura normal (malha de calor), não a nuvem de pontos do motor avançado.') + '</div>';
+    },
+    _wfCorteWire(root, ap, render) {
+      const campos = root.querySelector('[data-wf-corte-campos]');
+      const camposSup = root.querySelector('[data-wf-corte-campos-superficie]');
+      const camposGiro = root.querySelector('[data-wf-corte-campos-giro]');
+      const camposOp = root.querySelector('[data-wf-corte-campos-opacidade]');
+      const aplicarAtivo = () => {
+        [camposSup, camposGiro, camposOp].forEach((el) => { if (el) { el.style.opacity = ap.corteAtivo ? '' : '.45'; el.style.pointerEvents = ap.corteAtivo ? '' : 'none'; } });
+        if (campos) { campos.style.opacity = ap.corteAtivo ? '' : '.45'; campos.style.pointerEvents = ap.corteAtivo ? '' : 'none'; }
+      };
+      const ativo = root.querySelector('[data-wf-corte-ativo]');
+      if (ativo) ativo.onchange = (e) => { ap.corteAtivo = e.target.checked; aplicarAtivo(); };
+      const modo = root.querySelector('[data-wf-corte-modo]');
+      // [22/09/2026] NOVO -- troca de modo refaz o HTML inteiro (`render()`, já disponível nos dois
+      // chamadores -- painel principal e janelinha) pra alternar qual bloco de campos (superfície/giro) fica
+      // visível -- mais simples/confiável que alternar `display` manualmente aqui igual `aplicarAtivo` faz
+      // pro `corteAtivo` (que não muda QUAL bloco existe, só se está habilitado).
+      if (modo) modo.onchange = (e) => { ap.corteModo = e.target.value; render(); };
+      const alt = root.querySelector('[data-wf-corte-altura]'), altNum = root.querySelector('[data-wf-corte-altura-num]');
+      if (alt) alt.oninput = (e) => { const v = Number(e.target.value); ap.corteAltura01 = v / 100; if (altNum) altNum.value = v; };
+      if (altNum) altNum.oninput = (e) => { let v = Number(e.target.value); if (!Number.isFinite(v)) return; v = Math.max(0, Math.min(100, v)); ap.corteAltura01 = v / 100; if (alt) alt.value = v; };
+      const eixoExt = root.querySelector('[data-wf-corte-eixoext]'), eixoExtNum = root.querySelector('[data-wf-corte-eixoext-num]');
+      if (eixoExt) eixoExt.oninput = (e) => { const v = Number(e.target.value); ap.corteEixoExterno = v; if (eixoExtNum) eixoExtNum.value = v; };
+      if (eixoExtNum) eixoExtNum.oninput = (e) => { let v = Number(e.target.value); if (!Number.isFinite(v)) return; v = Math.max(0, Math.min(359, v)); ap.corteEixoExterno = v; if (eixoExt) eixoExt.value = v; };
+      const eixoInt = root.querySelector('[data-wf-corte-eixoint]'), eixoIntNum = root.querySelector('[data-wf-corte-eixoint-num]');
+      if (eixoInt) eixoInt.oninput = (e) => { const v = Number(e.target.value); ap.corteEixoInterno = v; if (eixoIntNum) eixoIntNum.value = v; };
+      if (eixoIntNum) eixoIntNum.oninput = (e) => { let v = Number(e.target.value); if (!Number.isFinite(v)) return; v = Math.max(-89, Math.min(89, v)); ap.corteEixoInterno = v; if (eixoInt) eixoInt.value = v; };
+      const giroFixo = root.querySelector('[data-wf-corte-giro-fixo]'), giroFixoNum = root.querySelector('[data-wf-corte-giro-fixo-num]');
+      if (giroFixo) giroFixo.oninput = (e) => { const v = Number(e.target.value); ap.corteGiroAnguloFixo = v; if (giroFixoNum) giroFixoNum.value = v; };
+      if (giroFixoNum) giroFixoNum.oninput = (e) => { let v = Number(e.target.value); if (!Number.isFinite(v)) return; v = Math.max(0, Math.min(359, v)); ap.corteGiroAnguloFixo = v; if (giroFixo) giroFixo.value = v; };
+      const giroPct = root.querySelector('[data-wf-corte-giro-pct]'), giroPctNum = root.querySelector('[data-wf-corte-giro-pct-num]');
+      if (giroPct) giroPct.oninput = (e) => { const v = Number(e.target.value); ap.corteGiroPercentual01 = v / 100; if (giroPctNum) giroPctNum.value = v; };
+      if (giroPctNum) giroPctNum.oninput = (e) => { let v = Number(e.target.value); if (!Number.isFinite(v)) return; v = Math.max(0, Math.min(100, v)); ap.corteGiroPercentual01 = v / 100; if (giroPct) giroPct.value = v; };
+      const op = root.querySelector('[data-wf-corte-opacidade]'), opNum = root.querySelector('[data-wf-corte-opacidade-num]');
+      if (op) op.oninput = (e) => { const v = Number(e.target.value); ap.corteOpacidade = v / 100; if (opNum) opNum.value = v; };
+      if (opNum) opNum.oninput = (e) => { let v = Number(e.target.value); if (!Number.isFinite(v)) return; v = Math.max(0, Math.min(100, v)); ap.corteOpacidade = v / 100; if (op) op.value = v; };
+    },
+
+    // ======================================================================
+    // 0b) "JANELINHA" SIMPLISTA DO AP -- pedido verbatim: "deve ter uma opção para habilitar uma
+    //     janelinha simplista do AP (mesmo fechando a janela do AP, a janelinha deve ficar ativa [...]
+    //     Nesta janelinha, deve ser possível trocar a fixa, A potência, a Densidade de varredura, o Modo
+    //     de malha. Deve ter o botão 'Refazer Varredura de Sinal' e todos os checkbox [...] Deve ter os
+    //     botões e opções da varredura avançada também. Deve ter só os botões, checkbox e pouco texto,
+    //     uma janela compacta e prática para configurar o AP." -- flutua fixa no canto da tela (não é um
+    //     painel 3D), sobrevive ao fechar o menu principal do AP (`_openRedeMenu`), controlada só por
+    //     `ap.miniJanela` (persistido, ver wifi-signal.js). Reaproveita `_wfNiveisHtml`/`_wfNiveisWire`.
+    // ======================================================================
+    /** Container fixo (cobre a viewport 3D inteira, mas não intercepta cliques -- `pointer-events:none`,
+     *  só as janelinhas em si têm `pointer-events:auto`) onde as janelinhas de todos os APs com
+     *  `miniJanela === true` ficam. Cada janelinha tem posição PRÓPRIA (`position:absolute;left/top`, ver
+     *  `_wfMiniCriar`/`_wfMiniHabilitarArrastar`) -- pedido verbatim: "Deve ser possível mover a janelinha
+     *  simplista do AP." Criado sob demanda, 1 só pra toda a sessão de `Ver em 3D`. */
+    _wfMiniContainer() {
+      if (this._wfMiniEls && this._wfMiniEls._box && this._wfMiniEls._box.isConnected) return this._wfMiniEls._box;
+      const box = document.createElement('div');
+      // [22/09/2026] MUDADO -- pedido verbatim: "deve ser possível movê-la por toda a tela do app [...] para
+      // além da tela do 'Ver em 3D'." Antes o container era filho de `this._container` (só a área do canvas
+      // 3D, `position:absolute`), limitando o arrasto (e o clamp em `_wfMiniHabilitarArrastar`, que usa o
+      // retângulo deste box) a essa região. Agora é `position:fixed;inset:0` direto em `document.body` --
+      // cobre a JANELA inteira do app, e sobrevive normalmente à troca de tela (recriado sob demanda).
+      box.style.cssText = 'position:fixed;inset:0;z-index:9999;pointer-events:none;overflow:visible';
+      document.body.appendChild(box);
+      if (!this._wfMiniEls) this._wfMiniEls = {};
+      this._wfMiniEls._box = box;
+      return box;
+    },
+    /** HTML compacto da janelinha de 1 AP -- só botões/checkbox/selects e pouco texto (pedido verbatim).
+     *  [26/09/2026] MUDADO -- pedido verbatim: "Os botões dela devem ser espelho dos botões da janela do
+     *  AP [...] Os textos dos nomes dos checkbox devem ser exatamente os mesmos [...] Na varredura
+     *  avançada, a quantidade de refração e reflexão devem aparecer também." Textos/rótulos abaixo copiados
+     *  literalmente do painel principal (ver bloco `if (ehAp)` em `_openRedeMenu`/`render` mais abaixo). */
+    _wfMiniHtml(obj, ap) {
+      const WS = raiz.WifiSignal, emite = ap.emiteSinal;
+      const opts = (mapa, atual) => Object.keys(mapa).map((k) => '<option value="' + k + '"' + (atual === k ? ' selected' : '') + '>' + esc(mapa[k].rotulo) + '</option>').join('');
+      const nome = esc(obj.nome || (WS.ehAP(obj) ? 'Access Point' : obj.nome));
+      // Cabeçalho: área de arrastar (ver `_wfMiniHabilitarArrastar` -- tudo aqui exceto o botão ✕ arrasta a janela).
+      let h = '<div data-wfm-cabecalho="1" style="display:flex;align-items:center;gap:6px;margin-bottom:5px;cursor:move"><b style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none">📡 ' + nome + '</b><button type="button" data-wfm="fechar" style="background:transparent;border:none;color:#9aa3ad;cursor:pointer;font-size:14px;line-height:1;padding:0 2px">✕</button></div>';
+      h += SEC_HDR('📶', 'Varredura normal')
+        + '<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 6px;align-items:center">'
+        + '<span>Faixa</span><select data-wfm="frequencia" style="' + INP + '" title="Faixa de frequência do rádio — muda o alcance físico e a potência padrão.">' + opts(WS.FAIXAS, ap.signalFrequency) + '</select>'
+        + '<span>Potência (W)</span><input data-wfm="potencia" type="number" min="0.01" max="2" step="0.001" value="' + ap.powerWatts + '" style="' + INP + '" title="Potência de transmissão, em watts.">'
+        + '<span>Densidade da varredura</span><select data-wfm="densidade" style="' + INP + '" title="Quantos raios são lançados pra medir o sinal. Mais denso = mais fiel, porém mais lento.">' + opts(WS.DENSIDADES, ap.densidade) + '</select>'
+        + '<span>Modo de malha</span><select data-wfm="meshMode" style="' + INP + '" title="Malha real: 1 vértice por raio. Malha simplificada: funde regiões planas — recomendado.">' + opts(WS.MODOS_MALHA, ap.meshMode) + '</select>'
+        + '</div>'
+        + '<div style="display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap"><button type="button" data-wfm="scan" style="' + BTN + (emite ? '' : ';opacity:.5') + '"' + (ap.scanning ? ' disabled' : '') + '>🔄 Refazer Varredura de Sinal</button>'
+        + (ap.scanning ? '<button type="button" data-wfm="cancel" style="' + BTN + '">Cancelar</button>' : '') + '</div>'
+        + '<div class="wf-bar' + (ap.scanning ? '' : ' wf-fim') + '" data-wfm-bar="1"><div class="wf-fill" style="width:' + ap.scanProgress + '%"></div></div>'
+        // [22/09/2026] REMOVIDO -- pedido verbatim: "Retire o botão 'mostrar mapa' da varredura normal."
+        // `ap.mostrar`/`mostrar2D` continuam existindo (ainda usados internamente -- ver `_v3dSairDesligarMapasAP`/
+        // "Vista em Corte" a 0%/"Desligar o mapa de calor ao sair do Ver em 3D" em Configurações 3D), só o
+        // controle manual (checkbox) na janela do AP foi removido.
+        + this._wfMalhaNiveisHtml(ap)
+        + this._wfNiveisHtml(ap)
+        // [29/09/2026] NOVO -- espelha a "Vista em Corte" da janela principal (ver `_wfCorteHtml`).
+        + this._wfCorteHtml(ap)
+        + SEC_HDR('🛰️', 'Varredura avançada')
+        // [29/09/2026] MUDADO -- espelha a mesma mudança da janela principal do AP (checkbox antes do texto,
+        // sem "habilitada", número colado à direita -- ver comentário grande em `render()`/`_openRedeMenu`).
+        + '<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 6px;align-items:center">'
+        + '<label style="font-size:11px;display:flex;align-items:center;gap:5px"><input type="checkbox" data-wfm="enableReflection"' + (ap.enableReflection ? ' checked' : '') + '> 🛰️ Reflexão</label><input data-wfm="maxReflections" type="number" min="0" max="5" step="1" value="' + ap.maxReflections + '" style="' + INP + '"' + (ap.enableReflection ? '' : ' disabled') + '>'
+        + '<label style="font-size:11px;display:flex;align-items:center;gap:5px"><input type="checkbox" data-wfm="enableRefraction"' + (ap.enableRefraction ? ' checked' : '') + '> 🛰️ Refração</label><input data-wfm="maxRefractions" type="number" min="0" max="3" step="1" value="' + ap.maxRefractions + '" style="' + INP + '"' + (ap.enableRefraction ? '' : ' disabled') + '>'
+        + '</div>'
+        // [29/09/2026] NOVO -- espelha a superfície 3D por nível do motor avançado (ver `_wfMalhaNiveisAvancadaHtml`).
+        + this._wfMalhaNiveisAvancadaHtml(ap)
+        // [22/09/2026] MUDADO -- pedido verbatim: "coloque os botões de níveis para os pontos e para os
+        // raios, assim como na varredura normal. Retire os checkbox 'mostrar pontos' e 'mostrar raios'."
+        // Antigos checkboxes únicos ("mostrar pontos"/"grade quadriculada"/"mostrar raios") substituídos
+        // pelos botões de nível de `_wfNiveisAvancadaHtml` (mesmo padrão da varredura normal).
+        + this._wfNiveisAvancadaHtml(ap)
+        + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px"><span style="font-size:11px;opacity:.7">Densidade dos raios</span><select data-wfm="avancadoDensidadeRaios" style="' + INP + '">' + DENSIDADES_RAIOS_OPTS(ap.avancadoDensidadeRaios) + '</select></div>'
+        + '<div style="display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap"><button type="button" data-wfm="scanav" style="' + BTN + (emite ? '' : ';opacity:.5') + '"' + (ap.motorAvancado.scanning ? ' disabled' : '') + '>🛰️ Varredura avançada (reflexão/refração)</button>'
+        + (ap.motorAvancado.scanning ? '<button type="button" data-wfm="cancelav" style="' + BTN + '">Cancelar</button>' : '') + '</div>'
+        + '<div class="wf-bar' + (ap.motorAvancado.scanning ? '' : ' wf-fim') + '" data-wfm-barav="1"><div class="wf-fill" style="width:' + (ap.motorAvancado.progress || 0) + '%"></div></div>';
+      return h;
+    },
+    /** Liga todos os controles da janelinha (`el` = elemento raiz dessa 1 janela). `renderAgora` refaz o
+     *  HTML inteiro dessa janela (usado após scan/cancel, pra atualizar barra/estado dos botões -- SÓ
+     *  chamado em transições de estado agora, ver `_wfMiniAtualizarTodas`, nunca mais a cada quadro). */
+    _wfMiniWireEl(el, obj, ap, renderAgora) {
+      const q = (sel) => el.querySelector(sel);
+      if (q('[data-wfm="fechar"]')) q('[data-wfm="fechar"]').onclick = () => { ap.miniJanela = false; try { raiz.App && raiz.App.salvarMapaAtual && raiz.App.salvarMapaAtual(); } catch (e) { /* noop */ } this._wfMiniAtualizarTodas(); };
+      el.querySelectorAll('[data-wfm]').forEach((c) => {
+        const k = c.getAttribute('data-wfm');
+        if (['fechar', 'scan', 'cancel', 'scanav', 'cancelav'].includes(k)) return;
+        const ev = (c.tagName === 'SELECT' || c.type === 'checkbox') ? 'onchange' : 'oninput';
+        c[ev] = (e) => {
+          const v = c.type === 'checkbox' ? e.target.checked : e.target.value;
+          if (k === 'frequencia') ap.signalFrequency = v;
+          else if (k === 'potencia') ap.powerWatts = v;
+          else if (k === 'densidade') ap.densidade = v;
+          else if (k === 'meshMode') ap.meshMode = v;
+          else if (k === 'enableReflection') { ap.enableReflection = v; renderAgora(); return; }
+          else if (k === 'enableRefraction') { ap.enableRefraction = v; renderAgora(); return; }
+          else if (k === 'maxReflections') ap.maxReflections = v;
+          else if (k === 'maxRefractions') ap.maxRefractions = v;
+          else if (k === 'avancadoDensidadeRaios') ap.avancadoDensidadeRaios = v;
+        };
+      });
+      this._wfNiveisWire(el, ap, renderAgora);
+      this._wfMalhaNiveisWire(el, ap);
+      // [29/09/2026] NOVO -- superfície 3D por nível do motor avançado + "Vista em Corte" (espelham a janela
+      // principal, ver `_wfMalhaNiveisAvancadaWire`/`_wfCorteWire` acima).
+      this._wfMalhaNiveisAvancadaWire(el, ap);
+      // [22/09/2026] NOVO -- botões de nível dos pontos/raios do motor avançado (ver `_wfNiveisAvancadaHtml`).
+      this._wfNiveisAvancadaWire(el, ap);
+      this._wfCorteWire(el, ap, renderAgora);
+      // [26/09/2026] CORRIGIDO -- pedido verbatim: "iniciei uma varredura e [...] cliquei no botão
+      // 'cancelar', porém não funcionava [...] na janela do AP, ao clicar em cancelar [...] cancela
+      // imediatamente" -- o motivo real não era o `onclick` em si (idêntico ao do painel principal), e sim
+      // a janelinha inteira sendo refeita a CADA QUADRO enquanto `ap.scanning` (ver bug corrigido em
+      // `_wfMiniAtualizarTodas`), que destruía o botão antes do clique terminar de disparar.
+      if (q('[data-wfm="scan"]')) q('[data-wfm="scan"]').onclick = () => { ap.startScan({ densidade: ap.densidade, meshMode: ap.meshMode }); renderAgora(); };
+      if (q('[data-wfm="cancel"]')) q('[data-wfm="cancel"]').onclick = () => { ap.cancelScan(); renderAgora(); };
+      if (q('[data-wfm="scanav"]')) q('[data-wfm="scanav"]').onclick = () => { ap.startScanAvancado(); renderAgora(); };
+      if (q('[data-wfm="cancelav"]')) q('[data-wfm="cancelav"]').onclick = () => { ap.cancelScanAvancado(); renderAgora(); };
+    },
+    /** Atualização LEVE (sem refazer HTML) das 2 barras de progresso -- chamada todo quadro enquanto uma
+     *  varredura está em andamento (ver `_wfMiniAtualizarTodas`), pra "a barrinha enchendo aparecer na
+     *  janelinha também" (pedido verbatim) sem o custo/bug de recriar o DOM inteiro a cada quadro. */
+    _wfMiniAtualizarBarra(el, ap) {
+      const barra = el.querySelector('[data-wfm-bar]');
+      if (barra) { barra.classList.toggle('wf-fim', !ap.scanning); const f = barra.querySelector('.wf-fill'); if (f) f.style.width = ap.scanProgress + '%'; }
+      const barraAv = el.querySelector('[data-wfm-barav]');
+      if (barraAv) { barraAv.classList.toggle('wf-fim', !ap.motorAvancado.scanning); const f = barraAv.querySelector('.wf-fill'); if (f) f.style.width = (ap.motorAvancado.progress || 0) + '%'; }
+    },
+    /** Pedido verbatim: "Deve ser possível mover a janelinha simplista do AP." Arrasta pela área marcada
+     *  `[data-wfm-cabecalho]` (tudo do cabeçalho, exceto o botão ✕) -- delegado em `el` (nunca é substituído,
+     *  só seu `innerHTML`, ver `renderAgora`), então funciona mesmo depois de um refazer de HTML. */
+    _wfMiniHabilitarArrastar(el) {
+      let arrastando = false, dx = 0, dy = 0;
+      const onDown = (e) => {
+        const cab = e.target.closest && e.target.closest('[data-wfm-cabecalho]'); if (!cab) return;
+        if (e.target.closest('button')) return;   // botão ✕ continua clicável, não inicia arrasto
+        const box = el.parentElement; if (!box) return;
+        const r = el.getBoundingClientRect(), rb = box.getBoundingClientRect();
+        dx = e.clientX - r.left; dy = e.clientY - r.top; arrastando = true;
+        e.preventDefault();
+      };
+      const onMove = (e) => {
+        if (!arrastando) return;
+        const box = el.parentElement; if (!box) return;
+        const rb = box.getBoundingClientRect();
+        let left = e.clientX - rb.left - dx, top = e.clientY - rb.top - dy;
+        // [28/09/2026] MUDADO -- pedido verbatim: "Deve ser possível mover a parte de baixo da janelinha do
+        // AP para fora da área visível da tela do navegador." Antes `top` tinha teto em
+        // `rb.height - el.offsetHeight` (a janela inteira ficava sempre 100% visível verticalmente) -- como
+        // a janelinha pode crescer bastante (várias seções, ver `max-height`/scroll interno em
+        // `_wfMiniCriar`), isso podia até travar o arrasto vertical perto do fim da tela. Agora só o
+        // CABEÇALHO (o que dá pra arrastar) precisa ficar alcançável -- `top` não tem mais teto, só piso
+        // (0), deixando a parte de baixo sair da tela livremente. Horizontal continua 100% dentro (nenhum
+        // pedido pra mudar isso, e evita perder a janela de vista pros lados).
+        left = Math.max(0, Math.min(Math.max(0, rb.width - el.offsetWidth), left));
+        top = Math.max(0, top);
+        el.style.left = left + 'px'; el.style.top = top + 'px';
+      };
+      const onUp = () => { arrastando = false; };
+      el.addEventListener('mousedown', onDown);
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      el._wfMiniDragCleanup = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    },
+    /** Cria a janelinha (DOM + wiring) de 1 AP e devolve `{el, renderAgora}`. Posição inicial em cascata
+     *  (cada nova janelinha some um pouco mais pro canto), depois disso só muda arrastando (posição fica em
+     *  `el.style.left/top`, que sobrevive a `renderAgora` -- só o `innerHTML` de dentro é trocado). */
+    _wfMiniCriar(obj, ap) {
+      const box = this._wfMiniContainer();
+      const el = document.createElement('div');
+      const n = box.children.length, desloc = 16 * n;
+      // [27/09/2026] MUDADO -- pedido verbatim: "Dê um jeito de tudo caber na tela na janelinha do AP."
+      // Com as seções todas (malha por nível, pontos/raios por nível, avançado...) a janelinha ficava mais
+      // alta que a tela em telas menores/zoom maior, sem nenhuma forma de rolar até o fim -- agora tem
+      // `max-height` (deixando uma margem no topo/rodapé) + `overflow-y:auto` (rola por dentro dela mesma,
+      // sem empurrar o resto da tela).
+      // [22/09/2026] MUDADO -- pedido verbatim: "Deve ser possível redimensionar a janelinha do AP, a barra
+      // de título dela, com o botão 'fechar', deve ficar sempre visível." `el` vira um container flex-column
+      // com `resize:both` (nativo do navegador, alça no canto inferior-direito) + `overflow:hidden` (a
+      // ROLAGEM em si fica só em `_wfmCorpo`, o cabeçalho nunca rola/desaparece). `padding` saiu do `el` (foi
+      // pros dois filhos), senão a alça de resize ficaria por cima do padding.
+      el.style.cssText = 'position:absolute;left:' + (12 + desloc) + 'px;top:' + (12 + desloc) + 'px;pointer-events:auto;background:rgba(16,20,27,.92);border:1px solid #3a4250;border-radius:8px;padding:0;width:230px;height:min(70vh,520px);max-width:min(90vw,480px);max-height:calc(100vh - 24px);min-width:190px;min-height:90px;color:#e8ecf2;font:12px/1.3 system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.4);backdrop-filter:blur(4px);display:flex;flex-direction:column;resize:both;overflow:hidden';
+      const head = document.createElement('div');
+      head.setAttribute('data-wfm-head', '1');
+      head.style.cssText = 'flex:0 0 auto;padding:8px 8px 0 8px';
+      const corpo = document.createElement('div');
+      corpo.setAttribute('data-wfm-corpo', '1');
+      corpo.style.cssText = 'flex:1 1 auto;overflow-y:auto;padding:0 8px 8px 8px;min-height:0';
+      el.appendChild(head); el.appendChild(corpo);
+      box.appendChild(el);
+      // [22/09/2026] NOVO -- separa o cabeçalho (`[data-wfm-cabecalho]`, 1º elemento do HTML de `_wfMiniHtml`)
+      // do resto: o cabeçalho vai pra `head` (fixo, nunca rola), o restante vai pra `corpo` (rola por dentro).
+      const renderAgora = () => {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = this._wfMiniHtml(obj, ap);
+        const cab = tmp.querySelector('[data-wfm-cabecalho]');
+        head.innerHTML = cab ? cab.outerHTML : '';
+        if (cab) cab.remove();
+        corpo.innerHTML = tmp.innerHTML;
+        this._wfMiniWireEl(el, obj, ap, renderAgora);
+      };
+      renderAgora();
+      this._wfMiniHabilitarArrastar(el);
+      return { el, renderAgora };
+    },
+    /** Chamado a CADA quadro por `_updateRedeInteracao`: cria/atualiza/remove as janelinhas de todos os
+     *  APs conforme `ap.miniJanela`. [26/09/2026] CORRIGIDO -- pedido verbatim: "A janelinha deve ser
+     *  estática, não ficar sendo refeita a cada quadro [...] Não está dando para trocar as opções de
+     *  dropdown e potência, parece que fica sempre sendo atualizado." Bug real: antes, `ap.scanning` (true
+     *  o tempo todo durante uma varredura) forçava `renderAgora()` -- refazer o HTML inteiro -- em TODO
+     *  quadro (60x/s), destruindo o foco/clique de qualquer campo/botão no meio da interação (inclusive o
+     *  "Cancelar"). Agora: o HTML inteiro só é refeito (a) no 1º quadro em que a janelinha aparece, (b)
+     *  quando o comando de fechar/mexer nela mesma chama `renderAgora()` diretamente, e (c) numa TRANSIÇÃO
+     *  de `scanning`/`motorAvancado.scanning` (começou ou terminou uma varredura, pra atualizar botões
+     *  scan/cancelar) -- durante a varredura em si, só a barra de progresso é atualizada (leve, sem tocar
+     *  no resto do DOM, ver `_wfMiniAtualizarBarra`). */
+    _wfMiniAtualizarTodas(dt) {
+      const WS = raiz.WifiSignal; if (!WS || !this._map) return;
+      if (!this._wfMiniEls) this._wfMiniEls = {};
+      const janelas = this._wfMiniEls;
+      const vivos = new Set();
+      this._map.objects.forEach((o) => {
+        if (!WS.ehAP(o)) return;
+        const ap = WS.para(o, this._engine);
+        if (!ap.miniJanela) return;
+        vivos.add(o.id);
+        if (!janelas[o.id]) {
+          janelas[o.id] = this._wfMiniCriar(o, ap);
+          janelas[o.id]._scanPrev = ap.scanning; janelas[o.id]._scanAvPrev = ap.motorAvancado.scanning;
+          return;
+        }
+        const j = janelas[o.id];
+        const mudouEstado = (j._scanPrev !== ap.scanning) || (j._scanAvPrev !== ap.motorAvancado.scanning);
+        j._scanPrev = ap.scanning; j._scanAvPrev = ap.motorAvancado.scanning;
+        if (mudouEstado) { j.renderAgora(); return; }
+        if (ap.scanning || ap.motorAvancado.scanning) this._wfMiniAtualizarBarra(j.el, ap);
+      });
+      Object.keys(janelas).forEach((id) => {
+        if (id === '_box') return;
+        if (!vivos.has(id)) { try { janelas[id].el._wfMiniDragCleanup && janelas[id].el._wfMiniDragCleanup(); janelas[id].el.remove(); } catch (e) { /* noop */ } delete janelas[id]; }
+      });
+    },
 
     // ======================================================================
     // 1) PEGAR E CARREGAR
@@ -216,6 +683,114 @@
       // [22/09/2026] MUDADO -- pedido verbatim: remover "a caixa de texto que aparece próxima ao
       // AP" (a etiqueta flutuante em Sprite/canvas), sem mexer no AP em si nem no resto da
       // funcionalidade de Wi-Fi. Chamada removida; `_atualizarEtiquetasAP` (abaixo) fica sem uso.
+      // [22/09/2026] NOVO -- pedido verbatim: "Mesmo que saia do tela do AP e a varredura ainda
+      // estiver acontecendo, uma barra deve aparecer próxima ao AP." Roda a cada quadro,
+      // independente de qual painel/objeto está selecionado (ver `_atualizarBarrasProgressoAP`).
+      this._atualizarBarrasProgressoAP();
+      this._wfMiniAtualizarTodas(dt);
+    },
+
+    // ======================================================================
+    // 3d) BARRA DE PROGRESSO (Sprite/canvas) de todo AP em varredura no mapa
+    // ======================================================================
+    /** [22/09/2026] NOVO -- itera todo AP do mapa que esteja `scanning === true` (não só o mirado/
+     *  selecionado) e atualiza sua barra de progresso flutuante (`WifiSignal.AccessPoint#
+     *  atualizarBarraProgresso`, ver comentário grande dela em wifi-signal.js) -- a varredura roda em
+     *  segundo plano (rAF próprio, ver `AccessPoint._passo`) mesmo com o painel de propriedades fechado
+     *  ou outro objeto selecionado, então a barra precisa do mesmo tratamento (mirror exato de
+     *  `_atualizarEtiquetasAP`, que ficou sem uso — ver comentário acima). Um AP que NÃO está varrendo
+     *  não paga custo nenhum aqui (`WS.para` só cria/reaponta a instância; `atualizarBarraProgresso`
+     *  devolve cedo e remove a barra, se houver, quando `scanning` é `false`). */
+    /** [22/09/2026] NOVO -- "Configurações 3D" → seção "📡 Access Point" → "Desligar o mapa de calor ao
+     *  sair do 'Ver em 3D'". Chamada 1x por `View3D.unmount()` (ver view3d.js). Só entra em ação se a
+     *  opção estiver ligada (padrão desligado -- comportamento de sempre preservado). Desliga `ap.mostrar`
+     *  (o SETTER, não só a malha -- grava `mostrar2D = false` de verdade em `obj.rede.ap`), então a
+     *  checkbox "mostrar mapa" do painel do AP volta DESMARCADA na próxima abertura -- "espelho do que
+     *  realmente acontece" (pedido verbatim), já que o mapa de fato não vai estar visível. */
+    _v3dSairDesligarMapasAP() {
+      const WS = raiz.WifiSignal, cfg = window.MapConfig && window.MapConfig._cache;
+      if (!WS || !cfg || !cfg.apDesligarMapaAoSairDoVer3D || !this._map || !Array.isArray(this._map.objects)) return;
+      this._map.objects.forEach((o) => {
+        if (!WS.ehAP(o)) return;
+        const ap = WS.para(o, this._engine);
+        if (ap.mostrar !== false) ap.mostrar = false;
+      });
+    },
+
+    /** Chamado junto de `_v3dSairDesligarMapasAP` (ver `View3D.unmount()`). [28/09/2026] CORRIGIDO -- pedido
+     *  verbatim: "Ao sair do 'Ver em 3D' (deixei a janelinha aberta lá) e, depois, voltar [...] ficou com
+     *  duas janelinhas." Causa: desde que o container (`_wfMiniContainer`) passou a viver em
+     *  `document.body` com `position:fixed` (pedido anterior: "mover por toda a tela do app", não mais só
+     *  dentro de `this._container`), ele deixou de ser destruído junto com o resto da cena 3D ao sair do
+     *  'Ver em 3D' -- só a REFERÊNCIA em memória (`this._wfMiniEls`) era limpa aqui, o `<div>` de verdade
+     *  ficava órfão no body. Ao voltar pro 'Ver em 3D', uma instância NOVA de View3D criava outro container
+     *  do zero (`_wfMiniAtualizarTodas`/`_wfMiniContainer`), daí 2 janelinhas pro mesmo AP. Agora remove o
+     *  `<div>` de verdade do DOM antes de soltar a referência (`ap.miniJanela` continua salvo, a janelinha
+     *  reaparece sozinha ao voltar). */
+    _wfMiniLimparContainer() {
+      if (this._wfMiniEls) {
+        Object.keys(this._wfMiniEls).forEach((id) => {
+          if (id === '_box') return;
+          try { this._wfMiniEls[id].el._wfMiniDragCleanup && this._wfMiniEls[id].el._wfMiniDragCleanup(); } catch (e) { /* noop */ }
+        });
+        const box = this._wfMiniEls._box;
+        if (box && box.parentNode) box.parentNode.removeChild(box);
+      }
+      this._wfMiniEls = null; this._wfMiniAcc = 0;
+    },
+
+    _atualizarBarrasProgressoAP() {
+      const WS = raiz.WifiSignal, RE = raiz.RedeEquip, eng = this._engine;
+      if (!WS || !RE || !this._map || !Array.isArray(this._map.objects)) return;
+      // [22/09/2026] CORRIGIDO -- pedido verbatim: "ao fazer a varredura pelo AP, sair do 'Ver em 3D' e
+      // entrar de novo, mesmo a opção 'mostrar mapa' do AP estando ativa, o mapa de calor do AP deixa de
+      // ser mostrado." Causa: a malha (`ap.malha`, um `THREE.Mesh`) foi criada dentro do `_group` da cena
+      // 3D ANTERIOR; ao sair do 'Ver em 3D' aquela cena/grupo é descartada, e ao entrar de novo uma engine
+      // NOVA é criada (`this._engine` muda) -- `ap.malha` continua existindo no objeto `AccessPoint`
+      // (que sobrevive entre entradas, ver `instancias` em wifi-signal.js), mas seu `.parent` é o GRUPO
+      // VELHO, então `engine._group.add` nunca foi chamado de novo e nada aparece na cena nova, mesmo com
+      // `mostrar2D` continuando `true` (daí o checkbox "mostrar mapa" continuar marcado, mas o mapa sumido).
+      // Fix: uma vez por engine (`eng._wfRestaurado`, evita refazer a cada quadro), para cada AP com
+      // `mostrar` ativo e uma varredura anterior (`ultimoResultado`) mas cuja malha não está mais anexada
+      // à cena ATUAL, refaz a varredura (mesma config salva -- densidade/meshMode) em segundo plano, que
+      // recria a malha já dentro do `_group` novo.
+      if (eng && !eng._wfRestaurado) {
+        eng._wfRestaurado = true;
+        // [25/09/2026] NOVO -- pedido verbatim: "Ao voltar para o 'Ver em 3D', o AP acaba refazendo a sua
+        // Varredura. Coloque isso como uma opção nas 'configurações 3D' [...] Por padrão desabilitada. A
+        // outra opção é 'Manter a Varredura de Sinal Anterior'." Ver DEFAULTS.apRefazerVarreduraAoEntrarNoVer3D
+        // em mapconfig.js. Com "Manter" (padrão), em vez de refazer o raycast do zero, só REANEXA a malha/
+        // pontos/raios já calculados (sobrevivem entre entradas em "Ver em 3D", ver `instancias` em
+        // wifi-signal.js) no grupo da cena NOVA -- `.add()` troca o `.parent` sozinho, sem custo nenhum de
+        // raycasting. Só refaz de verdade quando NUNCA houve varredura nenhuma (`!ap.ultimoResultado`,
+        // AP novo/nunca escaneado) -- aí não há nada pra reanexar.
+        const cfg = window.MapConfig && window.MapConfig._cache;
+        const refazer = !!(cfg && cfg.apRefazerVarreduraAoEntrarNoVer3D);
+        this._map.objects.forEach((o) => {
+          if (!WS.ehAP(o)) return;
+          const ap = WS.para(o, eng);
+          if (ap.mostrar === false) return;
+          const jaNaCenaAtual = ap.malha && ap.malha.parent === eng._group;
+          if (jaNaCenaAtual || ap.scanning || !ap.emiteSinal) return;
+          if (!ap.ultimoResultado || refazer) {
+            ap.startScan({ densidade: ap.densidade, meshMode: ap.meshMode });
+          } else {
+            if (ap.malha) eng._group.add(ap.malha);
+            ap.cloudRaycastPorNivel.forEach((p) => { if (p) eng._group.add(p); });
+            ap.raiosRaycastPorNivel.forEach((l) => { if (l) eng._group.add(l); });
+          }
+        });
+      }
+      this._map.objects.forEach((o) => {
+        if (!WS.ehAP(o)) return;
+        const ap = WS.para(o, eng);
+        ap.atualizarBarraProgresso();
+        // [29/09/2026] NOVO -- pedido verbatim: "ao clicar em 'Varredura avançada' deve aparecer uma
+        // barrinha enchendo também [...] Se um botão for clicado e a barrinha do outro estiver lá ainda,
+        // elas devem coexistir." Mesmo padrão da chamada acima, só que pro motor avançado (Sprite SEPARADO,
+        // ver `atualizarBarraProgressoAvancado`/wifi-signal.js -- por isso as duas convivem sem conflito).
+        ap.atualizarBarraProgressoAvancado();
+      });
     },
 
     // ======================================================================
@@ -689,6 +1264,13 @@
         const pr = n && r.portas && r.portas[n];
         if (r.labelID || (pr && pr.rotulo)) {
           html = '<div class="t">🏷️ ' + esc((pr && pr.rotulo) || r.labelID) + '</div><div class="s">' + esc(RE.especificar(o.tipo).rotulo) + (n ? ' · porta ' + n : '') + (r.labelID && pr && pr.rotulo ? ' · ' + esc(r.labelID) : '') + '</div>';
+        } else if (RE.ehAP(o.tipo) && raiz.WifiSignal) {
+          // [24/09/2026] NOVO -- pedido verbatim: "Ao posicionar o cursor do mouse sobre um AP, deve
+          // aparecer informações resumidas também. [ícone] Ponto de Acesso / [Faixa] [Potência] [número de
+          // dispositivos conectados]." Sem etiqueta (`labelID`), o AP ainda ganha ESTE resumo (ao contrário
+          // do resumo genérico de porta acima, que só aparece quando há rótulo definido).
+          const WS = raiz.WifiSignal, ap = WS.para(o, eng), nDisp = ap.numDispositivos;
+          html = '<div class="t">📡 Ponto de Acesso</div><div class="s">' + esc(ap.signalFrequency.replace('GHz', ' GHz')) + ' · ' + ap.powerDbm.toFixed(1).replace('.', ',') + ' dBm · ' + nDisp + ' dispositivo' + (nDisp === 1 ? '' : 's') + ' conectado' + (nDisp === 1 ? '' : 's') + '</div>';
         }
       }
       if (!html) return esconder();
@@ -1190,22 +1772,73 @@
       const ehBaia = sp.familia === 'storage', ehNobreak = RE.ehNobreak(obj.tipo);
       let sel = (ray && temPortas) ? (this._engine.redePortaSob(obj, ray.origin, ray.dir) || null) : null;
       if (!sel && ehAp && sp.portas.length === 1) sel = sp.portas[0].n;   // AP: só há 1 porta RJ-45, já vem selecionada
+      // [22/09/2026] NOVO -- pedido verbatim: "Na tela do AP, separe tudo em seções acessíveis por abas na
+      // parte superior... Seções: 'Access Point', 'Sinal', 'Porta'." Aba ATIVA guardada aqui (fecha sobre
+      // `render`, abaixo) -- sobrevive a re-renders do MESMO painel (trocar de aba/mudar um campo re-chama
+      // `render()`), mas reseta pra 'ap' cada vez que o painel é reaberto (nova chamada de `_openRedeMenu`).
+      let apTabAtiva = 'ap';
+      // [23/09/2026] NOVO -- pedido verbatim: "Deve ter um botão para mudar o modo de visualização da
+      // janela do Access Point: 'normal' e 'em abas'. Por padrão, deve ficar 'normal'." Mesmo padrão de
+      // `apTabAtiva` (fechado sobre `render`, sobrevive a re-renders do MESMO painel, reseta pra 'normal'
+      // toda vez que o painel é reaberto). Em 'normal', as 3 seções (Access Point/Sinal/Porta) aparecem
+      // TODAS ao mesmo tempo, uma embaixo da outra (sem a barra de abas nem o truque de altura fixa —
+      // ver `dispAptab`/wiring mais abaixo); em 'abas', é o comportamento com abas já existente.
+      let apModoPainel = 'normal';
       const el = document.createElement('div'); el.className = 'v3d-rede-menu';
-      el.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;min-width:340px;max-width:92vw;max-height:86vh;overflow:auto;background:rgba(20,24,32,.96);color:#e8ecf2;border:1px solid #3a4250;border-radius:10px;padding:12px;font:13px system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.5)';
-      // [21/09/2026 UTC] NOVO -- pedido verbatim: "O 'fechar' desta janela deve ser acima e à direita, não"
-      // "um botão 'fechar' lá em baixo e à direita." `el` vira só a MOLDURA (posição/tamanho/scroll fica no
-      // `corpo` -- um filho por dentro), com um botão ✕ fixo no canto superior direito que NÃO rola junto
-      // com o conteúdo (`corpo` é quem tem `overflow:auto`, não `el`).
-      el.style.padding = '0';
+      // [22/09/2026] CORRIGIDO -- pedido verbatim: "está aparecendo com duas barras de scroll". `el` tinha
+      // `overflow:auto;max-height:86vh` AQUI *e* `corpo` (abaixo) tinha os dois de novo -- duas caixas com
+      // scroll independente, uma dentro da outra, cada uma achando que é ela quem deve rolar. `el` agora só
+      // define o tamanho MÁXIMO (sem overflow/scroll próprio); o scroll fica só no `corpo`.
+      // [23/09/2026] MUDADO -- pedido verbatim: "a janela não deve ocupar toda a altura do 'Ver em 3D'" +
+      // os botões de rodapé ("Ligar clicando nas portas"/"Pegar"/"Ficha do objeto") "devem ficar sempre
+      // visíveis (como um rodapé)". `el` vira um FLEX COLUMN de altura máxima menor (78vh, era 86vh) com 3
+      // filhos empilhados: `corpo` (o único que rola -- `flex:1;min-height:0`), e `rodape` (fixo embaixo,
+      // fora do scroll, `flex:0 0 auto`, ver mais abaixo). O botão ✕ continua sobreposto (position:absolute)
+      // por cima de tudo, sem entrar no fluxo flex.
+      // [29/09/2026] NOVO -- pedido verbatim: "A janela do AP deve ter tamanho fixo." Antes, TODO equipamento
+      // (inclusive o AP) usava só `min-width`/`max-width`/`max-height` -- a janela crescia/encolhia com o
+      // conteúdo (nº de seções, abas, etc.), só travando num teto. Só o painel do AP agora ganha `width`/
+      // `height` FIXOS (além do teto responsivo `max-width:92vw`/`max-height:78vh`, que ainda protege telas
+      // pequenas) -- outros equipamentos (switch, patch panel, DIO...) continuam com o tamanho auto de sempre,
+      // já que só o AP foi pedido. Com altura fixa, `corpo` (que já era `overflow:auto`, ver comentário acima)
+      // passa a rolar sozinho sempre que o conteúdo não couber -- inclusive no modo 'Abas', onde cada aba tem
+      // altura diferente: a aba ativa some se boa parte do espaço fixo, só rolando quando REALMENTE precisa.
+      el.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;' + (ehAp ? 'width:420px;height:640px;' : 'min-width:340px;') + 'max-width:92vw;max-height:78vh;background:rgba(20,24,32,.96);color:#e8ecf2;border:1px solid #3a4250;border-radius:10px;padding:0;font:13px system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.5);display:flex;flex-direction:column';
+      // [26/09/2026] NOVO -- pedido verbatim: "Todo o cabeçalho da janela do AP deve ficar sempre
+      // aparente. Os textos de título (que ficam acima e à esquerda), o botão 'Normal'/'Abas' e o botão
+      // 'fechar'." Antes, o título (nome + subtítulo) entrava dentro de `corpo` (que rola) e o botão
+      // Normal/Abas ficava lá dentro também -- ambos somem de vista ao rolar o painel. Agora viram um
+      // `cabecalho` fixo (`flex:0 0 auto`, fora do scroll), irmão de `corpo`/`rodape`: título à esquerda
+      // (`cabecalhoTitulo`) e os botões Normal/Abas + fechar à direita, na MESMA linha (`cabecalhoBotoes`).
+      const cabecalho = document.createElement('div');
+      cabecalho.style.cssText = 'flex:0 0 auto;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:10px 10px 8px 12px;border-bottom:1px solid #3a4250';
+      const cabecalhoTitulo = document.createElement('div');
+      cabecalhoTitulo.style.cssText = 'min-width:0;flex:1 1 auto';
+      const cabecalhoBotoes = document.createElement('div');
+      cabecalhoBotoes.style.cssText = 'flex:0 0 auto;display:flex;align-items:center;gap:6px';
+      cabecalho.appendChild(cabecalhoTitulo); cabecalho.appendChild(cabecalhoBotoes);
       const corpo = document.createElement('div');
-      corpo.style.cssText = 'overflow:auto;max-height:86vh;padding:12px 34px 12px 12px';
+      corpo.style.cssText = 'overflow:auto;flex:1 1 auto;min-height:0;padding:4px 34px 12px 12px';
+      // [23/09/2026] NOVO -- rodapé fixo (fora do scroll de `corpo`): "Ligar clicando nas portas"/"Pegar"/
+      // "Ficha do objeto" + o texto de ajuda, preenchidos em `render()` (ver mais abaixo) e SEMPRE visíveis,
+      // mesmo com o conteúdo de `corpo` rolado pra baixo.
+      const rodape = document.createElement('div');
+      rodape.style.cssText = 'flex:0 0 auto;padding:8px 34px 10px 12px;border-top:1px solid #3a4250';
       const btnX = document.createElement('button');
       btnX.type = 'button'; btnX.setAttribute('aria-label', 'Fechar'); btnX.textContent = '✕';
-      btnX.style.cssText = 'position:absolute;top:6px;right:8px;z-index:2;background:transparent;border:none;color:#9aa3ad;font-size:18px;line-height:1;cursor:pointer;padding:4px 7px;border-radius:6px';
+      btnX.style.cssText = 'flex:0 0 auto;background:transparent;border:none;color:#9aa3ad;font-size:18px;line-height:1;cursor:pointer;padding:2px 5px;border-radius:6px';
       btnX.onmouseenter = () => { btnX.style.background = 'rgba(255,255,255,.1)'; btnX.style.color = '#e8ecf2'; };
       btnX.onmouseleave = () => { btnX.style.background = 'transparent'; btnX.style.color = '#9aa3ad'; };
-      el.appendChild(btnX); el.appendChild(corpo);
-      const fechar = () => { if (ehAp) { const a0 = raiz.WifiSignal.para(obj, this._engine); a0.onProgress = null; a0.onDone = null; } el.remove(); window.removeEventListener('keydown', onKey, true); document.removeEventListener('mousedown', onFora, true); if (this._menuFecharRede === fechar) this._menuFecharRede = null; };
+      cabecalhoBotoes.appendChild(btnX);
+      el.appendChild(cabecalho); el.appendChild(corpo); el.appendChild(rodape);
+      // [22/09/2026] NOVO -- pedido verbatim: "Toda janela que toma o foco no app, deve ficar mais à
+      // frente das outras." Antes, este `el` só tinha um `z-index:60` fixo no `style.cssText` acima, sem
+      // NENHUMA chamada de `Utils.bringToFront`/`WindowManager.focus` -- por isso a janela do AP abria por
+      // baixo da janela de propriedades do objeto (2D), que já segue o padrão correto (ver `Utils.
+      // bringToFront` em mapview.js, ex.: linhas 22449-22454/24749-24752). `Utils.releaseFront` no fechar
+      // devolve o elemento pro seu z-index-base normal (mesmo padrão de `_hideOrRemovePanel`/
+      // `_closeLayersPanelImpl` em mapview.js).
+      const fechar = () => { if (ehAp) { const a0 = raiz.WifiSignal.para(obj, this._engine); a0.onProgress = null; a0.onDone = null; } raiz.Utils.releaseFront(el); el.remove(); window.removeEventListener('keydown', onKey, true); document.removeEventListener('mousedown', onFora, true); if (this._menuFecharRede === fechar) this._menuFecharRede = null; };
       btnX.onclick = () => fechar();
       const salvar = () => { DB.saveMap(this._map); };
       const reconstruir = () => { DB.saveMap(this._map); if (this._engine) this._engine.rebuildObjectIncremental(obj); };
@@ -1228,9 +1861,31 @@
         const r = RE.garantirRede(obj), cabosObj = RE.cabosDoObjeto(this._map, obj.id);
         const estados = ehSw ? RE.estadosDasPortas(this._map, obj) : [];
         const ativas = estados.filter((x) => x === 'active').length;
-        let html = '<style>' + RE.REDE_LED_CSS + '</style><div style="font-weight:600;margin-bottom:2px">' + (ICONE[sp.familia] || '📦') + ' ' + esc(sp.rotulo) + ' — ' + esc(nomeDe(obj)) + '</div>';
-        html += '<div style="opacity:.7;font-size:12px;margin-bottom:6px">' + (sp.alturaU ? sp.alturaU + 'U' : sp.alturaMm + ' mm') + (ehBaia ? ' · ' + sp.nPortas + ' baias' : (temPortas ? ' · ' + sp.nPortas + ' portas · ' + cabosObj.length + ' cabo(s)' : '')) + (obj.rackId && obj.rackU ? ' · rack, U' + obj.rackU : ' · fora de rack') + (ehSw ? ' · ' + ativas + ' porta(s) ativa(s)' : '') + '</div>';
-        if (ehSw || ehAp) html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span class="rede-led ' + (r.ligado ? 'idle' : 'off') + '"></span><b>' + (r.ligado ? 'Ligado' : 'Desligado') + '</b><button type="button" data-rp="1" style="' + BTN + '">⏻ ' + (r.ligado ? 'Desligar' : 'Ligar') + '</button><input data-rh="1" placeholder="hostname" value="' + esc(r.hostname) + '" style="' + INP + ';flex:1;min-width:80px"></div>';
+        // [26/09/2026] MUDADO -- título (nome + subtítulo) sai daqui (que ia pra `corpo`, rolável) e vai
+        // pro `cabecalhoTitulo`, fixo (ver `cabecalho` acima) -- fica sempre visível mesmo rolando o painel.
+        cabecalhoTitulo.innerHTML = '<style>' + RE.REDE_LED_CSS + '</style><div style="font-weight:600;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (ICONE[sp.familia] || '📦') + ' ' + esc(sp.rotulo) + ' — ' + esc(nomeDe(obj)) + '</div>'
+          + '<div style="opacity:.7;font-size:12px">' + (sp.alturaU ? sp.alturaU + 'U' : sp.alturaMm + ' mm') + (ehBaia ? ' · ' + sp.nPortas + ' baias' : (temPortas ? ' · ' + sp.nPortas + ' portas · ' + cabosObj.length + ' cabo(s)' : '')) + (obj.rackId && obj.rackU ? ' · rack, U' + obj.rackU : ' · fora de rack') + (ehSw ? ' · ' + ativas + ' porta(s) ativa(s)' : '') + '</div>';
+        // [26/09/2026] NOVO -- botão "Normal ⇄ Em abas" (pedido verbatim: "deve ficar no mesmo nível do
+        // botão 'fechar'") -- entra em `cabecalhoBotoes`, ANTES do ✕, só pro AP (único que tem abas).
+        cabecalhoBotoes.querySelectorAll('[data-apmodo]').forEach((b) => b.remove());
+        if (ehAp) {
+          const btnModo = document.createElement('button');
+          btnModo.type = 'button'; btnModo.setAttribute('data-apmodo', '1');
+          btnModo.title = 'Alterna entre mostrar as 3 seções juntas (normal) ou uma aba de cada vez (em abas)';
+          btnModo.style.cssText = 'background:transparent;border:1px solid #3a4250;border-radius:6px;color:#9aa3ad;font-size:11px;padding:3px 8px;cursor:pointer;white-space:nowrap';
+          btnModo.textContent = apModoPainel === 'normal' ? '⬚ Normal' : '🗂️ Em abas';
+          btnModo.onclick = () => { apModoPainel = apModoPainel === 'normal' ? 'abas' : 'normal'; render(); };
+          cabecalhoBotoes.insertBefore(btnModo, btnX);
+        }
+        let html = '';
+        // [25/09/2026] MUDADO -- pedido verbatim: "Na janela do AP, no modo de 'Abas', na aba '📡 Access
+        // Point', deve ficar o que, atualmente está acima das três abas. O retângulo verde [...], o texto
+        // 'Ligado', o botão 'Desligar', o campo para colocar o nome do host, o 'labelId' e o campo para
+        // colocar o seu nome." Pro AP, este bloco (LED+Ligado/Desligar+hostname) some daqui de cima e vira
+        // `htmlLigadoAp` -- inserido dentro da aba "📡 Access Point" mais abaixo, no lugar de aparecer
+        // sempre (independente do modo Normal/Abas). Pra switch/patch panel/etc. (não-AP) nada muda.
+        const htmlLigadoAp = (ehSw || ehAp) ? ('<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span class="rede-led ' + (r.ligado ? 'idle' : 'off') + '" title="' + (r.ligado ? 'Ligado — o equipamento está energizado.' : 'Desligado — o equipamento está sem energia.') + '"></span><b>' + (r.ligado ? 'Ligado' : 'Desligado') + '</b><button type="button" data-rp="1" style="' + BTN + '" title="' + (r.ligado ? 'Desliga o equipamento (para de emitir/passar sinal).' : 'Liga o equipamento.') + '">⏻ ' + (r.ligado ? 'Desligar' : 'Ligar') + '</button><input data-rh="1" placeholder="hostname" value="' + esc(r.hostname) + '" style="' + INP + ';flex:1;min-width:80px" title="Nome do equipamento na rede (uso interno de catalogação/identificação), não é o SSID transmitido pelo Wi-Fi."></div>') : '';
+        if (!ehAp && htmlLigadoAp) html += htmlLigadoAp;
         // configuracao fisica das portas (DIO: conector/fibra; keystones: categoria/blindagem)
         let cfg = '';
         if (sp.familia === 'dio') {
@@ -1240,44 +1895,172 @@
           cfg += '<span>Keystone</span><select data-cc="categoria" style="' + INP + '">' + Object.keys(RP.CATEGORIAS).map((k) => '<option value="' + k + '"' + ((r.categoria || 'cat6') === k ? ' selected' : '') + '>' + (RP.CATEGORIAS[k].rotulo || k) + '</option>').join('') + '</select>';
           cfg += '<span>Blindagem</span><select data-cc="blindagem" style="' + INP + '">' + Object.keys(RP.BLINDAGENS).map((k) => '<option value="' + k + '"' + ((r.blindagem || 'U/UTP') === k ? ' selected' : '') + '>' + k + '</option>').join('') + '</select>';
         }
-        cfg += '<span>labelID</span><input data-lb="1" value="' + esc(r.labelID || '') + '" placeholder="ex.: PP-A01 / TOM-12" style="' + INP + '">';
-        html += '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;padding:2px 0">' + cfg + '</div>';
+        cfg += '<span>labelID</span><input data-lb="1" value="' + esc(r.labelID || '') + '" placeholder="ex.: PP-A01 / TOM-12" style="' + INP + '" title="Etiqueta física de identificação deste item no catálogo (aparece no rótulo ao passar a mira em cima). Não é o SSID nem nenhum nome transmitido pela rede — é só uma referência interna/inventário.">';
+        // [25/09/2026] NOVO -- "campo para colocar o seu nome" (pedido verbatim, junto do bloco acima) --
+        // não existia campo editável pro NOME do objeto (`obj.nome`) neste painel antes, só o título
+        // estático no topo (`nomeDe(obj)`). Pro AP, entra junto do labelID dentro da aba "Access Point".
+        const cfgNomeAp = ehAp ? ('<span>Nome</span><input data-on="1" value="' + esc(obj.nome || '') + '" placeholder="' + esc(sp.rotulo) + '" style="' + INP + '" title="Nome deste AP no catálogo (aparece nas listagens e no título desta janela). Vazio usa o nome padrão do tipo.">') : '';
+        const htmlCfg = '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;padding:2px 0">' + cfg + cfgNomeAp + '</div>';
+        if (!ehAp) html += htmlCfg;
         // [21/09/2026 UTC] NOVO -- painel do Access Point: faixa, potência, densidade da varredura, botão
         // "Refazer Varredura de Sinal" e barra de progresso animada (`scanProgress` 0-100, some ao chegar em 100%).
         if (ehAp) {
-          const WS = raiz.WifiSignal, ap = WS.para(obj, this._engine), emite = ap.emiteSinal, res = ap.ultimoResultado;
+          const WS = raiz.WifiSignal, ap = WS.para(obj, this._engine), emite = ap.emiteSinal, res = ap.ultimoResultado, resAv = ap.ultimoResultadoAvancado;
           const opts = (mapa, atual) => Object.keys(mapa).map((k) => '<option value="' + k + '"' + (atual === k ? ' selected' : '') + '>' + esc(mapa[k].rotulo) + '</option>').join('');
-          html += '<style>' + WS.CSS + '</style><div style="border-top:1px solid #3a4250;margin-top:6px;padding-top:6px">'
+          const apTabBtn = (id, label) => '<button type="button" data-aptab-btn="' + id + '" style="flex:1;padding:6px 4px;border:none;border-bottom:2px solid ' + (apTabAtiva === id ? '#4f8cff' : 'transparent') + ';background:transparent;color:' + (apTabAtiva === id ? '#e8ecf2' : '#9aa3ad') + ';cursor:pointer;font:inherit;font-size:12px">' + label + '</button>';
+          // [23/09/2026] NOVO -- pedido verbatim: em modo 'normal' as 3 seções aparecem TODAS ao mesmo
+          // tempo (sem a barra de abas/truque de altura fixa); em 'abas', só a ativa. Um pequeno
+          // subtítulo substitui a aba como separador visual quando em 'normal'.
+          const dispAptab = (id) => (apModoPainel === 'normal' ? 'block' : (apTabAtiva === id ? 'block' : 'none'));
+          const subtitAptab = (label) => apModoPainel === 'normal' ? ('<div style="font-weight:600;font-size:12px;opacity:.75;margin:8px 0 4px;' + (label === '📡 Access Point' ? 'margin-top:0' : '') + '">' + label + '</div>') : '';
+          html += '<style>' + WS.CSS + '</style><div>'
+            // [26/09/2026] MUDADO -- o botão "normal ⇄ em abas" saiu daqui, agora vive no `cabecalho` fixo
+            // (ver `cabecalhoBotoes` acima, montado no topo de `render()`), junto do botão fechar.
+            // [22/09/2026] NOVO -- 3 abas (pedido verbatim, ver comentário grande de `apTabAtiva` acima).
+            // Tamanho fixo entre abas: `_apTabsFixarAltura` (chamada no wiring, mais abaixo) mede a altura
+            // NATURAL de cada `[data-aptab]` (mesmo as ocultas) e aplica a maior como `min-height` do
+            // `#ap-tabs-content` -- trocar de aba nunca encolhe/cresce a janela. Só existe em modo 'abas'.
+            + (apModoPainel === 'abas' ? ('<div style="display:flex;border-bottom:1px solid #3a4250;margin-bottom:8px">' + apTabBtn('ap', '📡 Access Point') + apTabBtn('sinal', '📶 Sinal') + apTabBtn('porta', '🔌 Porta') + '</div>') : '')
+            + '<div id="ap-tabs-content">'
+            + '<div data-aptab="ap" style="display:' + dispAptab('ap') + '">'
+            + subtitAptab('📡 Access Point')
+            // [25/09/2026] NOVO -- pedido verbatim: "deve ficar o que, atualmente está acima das três
+            // abas. O retângulo verde [...], o texto 'Ligado', o botão 'Desligar', o campo para colocar o
+            // nome do host, o 'labelId' e o campo para colocar o seu nome." (ver `htmlLigadoAp`/`htmlCfg`,
+            // montados mais acima em `render()` — o mesmo bloco de sempre, só que agora só aparece AQUI
+            // pro AP, em vez de sempre acima das abas.)
+            + htmlLigadoAp + htmlCfg
+            // [24/09/2026] NOVO -- pedido verbatim: "[ícone] Ponto de Acesso / [Faixa] [Potência] [número
+            // de dispositivos conectados]" no tooltip ao mirar o AP em 3D (ver `_hoverRotulo3D` abaixo) --
+            // o número de dispositivos é um CONTADOR PRÓPRIO (Wi-Fi não tem cabo físico por cliente pra
+            // contar de verdade), editável aqui.
+            + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:4px"><span>Dispositivos conectados</span><input data-wf="numDispositivos" type="number" min="0" step="1" value="' + ap.numDispositivos + '" style="' + INP + '" title="Só um valor informativo (aparece no resumo ao apontar pro AP) — não afeta a varredura de sinal."></div>'
+            // [25/09/2026] NOVO -- pedido verbatim: "deve ter uma opção para habilitar uma janelinha
+            // simplista do AP (mesmo fechando a janela do AP, a janelinha deve ficar ativa, se a opção [...]
+            // estiver habilitada)." Ver `_wfMiniHtml`/`_wfMiniAtualizarTodas` mais abaixo.
+            + '<label style="font-size:12px;margin-top:6px;display:block" title="Mostra uma janelinha compacta e flutuante, com os mesmos controles principais, que continua na tela mesmo depois de fechar esta janela."><input type="checkbox" data-wf-mini="1"' + (ap.miniJanela ? ' checked' : '') + '> janelinha simplista (fica na tela mesmo fechando esta janela)</label>'
+            + '</div>'   // fecha data-aptab="ap"
+            + '<div data-aptab="sinal" style="display:' + dispAptab('sinal') + '">'
+            + subtitAptab('📶 Sinal')
+            // [24/09/2026] MUDADO -- pedido verbatim: "o texto 'Emitindo sinal - cabo conectado' deve ir
+            // para a aba 'Sinal' [...] aparecendo na mesma ordem em que aparece, quando está no modo de
+            // visualização 'Normal'" -- ou seja, primeira coisa dentro da aba/seção Sinal, antes de Faixa/
+            // Potência (mantém a ordem visual de cima pra baixo que já existia em modo 'Normal').
             + '<div style="font-size:12px;margin-bottom:4px">📡 <b style="color:' + (emite ? '#3ecb6e' : '#ffb454') + '">' + (emite ? 'Emitindo sinal' : (!ap.isOn ? 'Desligado — sem sinal' : 'Sem cabo na porta RJ-45 — sem sinal')) + '</b> · ' + (ap.hasCableConnected ? 'cabo conectado' : 'sem cabo') + '</div>'
-            + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center"><span>Faixa</span><select data-wf="frequencia" style="' + INP + '">' + opts(WS.FAIXAS, ap.signalFrequency) + '</select>'
+            + SEC_HDR('📶', 'Varredura normal')
+            + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:4px"><span>Faixa</span><select data-wf="frequencia" style="' + INP + '" title="Faixa de frequência do rádio (2,4 GHz / 5 GHz / 6 GHz) — muda o alcance físico e a potência padrão usada na varredura.">' + opts(WS.FAIXAS, ap.signalFrequency) + '</select>'
             // [21/09/2026 UTC] CORRIGIDO -- pedido verbatim: "coloque valores reais de potência de sinal de
             // dispositivos wi-fi do mercado. Por exemplo, 28 dBm (630 mW) em 2,4 GHz e 27 dBm (501 mW) em
             // 5 GHz." O campo continua em Watts (unidade que o motor de física usa), mas agora mostra o
             // equivalente em dBm ao lado (`WS.wattsParaDbm`) e o teto (`max`) foi de 100 W (irreal pra RF de
             // Wi-Fi) pra 2 W -- bem acima de qualquer faixa comercial, só pra não travar valores customizados.
-            + '<span>Potência (W)</span><div style="display:flex;gap:6px;align-items:center"><input data-wf="potencia" type="number" min="0.01" max="2" step="0.001" value="' + ap.powerWatts + '" style="' + INP + ';flex:1"><span data-wf-dbm="1" style="font-size:11px;opacity:.7;white-space:nowrap">≈ ' + ap.powerDbm.toFixed(1).replace('.', ',') + ' dBm</span></div>'
-            + '<span>Densidade da varredura</span><select data-wf="densidade" style="' + INP + '">' + opts(WS.DENSIDADES, ap.densidade) + '</select></div>'
+            + '<span>Potência (W)</span><div style="display:flex;gap:6px;align-items:center"><input data-wf="potencia" type="number" min="0.01" max="2" step="0.001" value="' + ap.powerWatts + '" style="' + INP + ';flex:1" title="Potência de transmissão do rádio, em watts. Quanto maior, mais longe o sinal chega antes de cair abaixo do nível mais fraco."><span data-wf-dbm="1" style="font-size:11px;opacity:.7;white-space:nowrap">≈ ' + ap.powerDbm.toFixed(1).replace('.', ',') + ' dBm</span></div>'
+            + '<span>Densidade da varredura</span><select data-wf="densidade" style="' + INP + '" title="Quantos raios são lançados pra medir o sinal. Mais denso = malha mais fiel aos obstáculos, porém mais lento.">' + opts(WS.DENSIDADES, ap.densidade) + '</select>'
+            // [22/09/2026] NOVO -- seletor de `meshMode` (ver `MODOS_MALHA`/`optimizeSignalMesh` em
+            // wifi-signal.js): permite aumentar a densidade da varredura sem inflar a malha renderizada.
+            + '<span>Modo de malha</span><select data-wf="meshMode" style="' + INP + '" title="Malha real: 1 vértice por raio (sem otimização). Malha simplificada: mesma precisão de varredura, mas funde regiões planas em poucos polígonos e só refina onde há curvatura/obstáculos — recomendado.">' + opts(WS.MODOS_MALHA, ap.meshMode) + '</select></div>'
             + '<div style="font-size:11px;opacity:.6;margin-top:3px">Mais detalhada = mais raios = mais precisa e mais lenta (não trava a tela: roda em lotes por quadro). Potência padrão baseada em APs comerciais reais (28 dBm/630 mW em 2,4 GHz; 27 dBm/501 mW em 5 GHz).</div>'
-            + '<div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap"><button type="button" data-wf-scan="1" style="' + BTN + (emite ? '' : ';opacity:.5') + '"' + (ap.scanning ? ' disabled' : '') + '>🔄 Refazer Varredura de Sinal</button>'
-            + (ap.scanning ? '<button type="button" data-wf-cancel="1" style="' + BTN + '">Cancelar</button>' : '')
-            + '<label style="font-size:12px"><input type="checkbox" data-wf-show="1"' + (ap.mostrar || !ap.temMalha ? ' checked' : '') + '> mostrar mapa</label></div>'
+            + '<div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap"><button type="button" data-wf-scan="1" title="Relança os raios da varredura normal com a Faixa/Potência/Densidade/Modo de malha configurados acima." style="' + BTN + (emite ? '' : ';opacity:.5') + '"' + (ap.scanning ? ' disabled' : '') + '>🔄 Refazer Varredura de Sinal</button>'
+            + (ap.scanning ? '<button type="button" data-wf-cancel="1" style="' + BTN + '" title="Interrompe a varredura normal em andamento.">Cancelar</button>' : '') + '</div>'
+            // [22/09/2026] REMOVIDO -- pedido verbatim: "Retire o botão 'mostrar mapa' da varredura normal."
+            + this._wfMalhaNiveisHtml(ap)
+            // [24/09/2026] NOVO, [25/09/2026] AMPLIADO -- pedido verbatim: "além do controle de 'mostrar
+            // mapa', deve ter um outro controle de exibir os pontos da última batida do raycaster [...] e
+            // outra opção de ver os raios do raycaster" + "Faça os 'raios do raycaster' ir trocando a cor
+            // conforme os níveis da malha de cor dos 5 níveis que tem [...] Cada parte do raio pode ser
+            // ativada individualmente." -- 5 checkboxes de pontos + 5 de raios, 1 por nível de sinal (ver
+            // `_wfNiveisHtml`/`_wfNiveisWire` mais abaixo, reaproveitados pela janelinha compacta também).
+            + this._wfNiveisHtml(ap)
             + '<div class="wf-bar' + (ap.scanning ? '' : ' wf-fim') + '" data-wf-bar="1"><div class="wf-fill" data-wf-fill="1" style="width:' + ap.scanProgress + '%"></div></div>'
             + '<div data-wf-txt="1" style="font-size:11px;opacity:.8;min-height:14px">' + (ap.scanning ? 'Varrendo… ' + ap.scanProgress + '%' : '') + '</div>'
             + '<div style="font-size:11px;margin-top:2px"><span class="wf-leg" style="background:#22c55e;margin-left:0"></span>excelente<span class="wf-leg" style="background:#facc15"></span>médio<span class="wf-leg" style="background:#ef4444"></span>fraco/sem sinal'
             + (res ? ' · última varredura: ' + res.raios + ' raios em ' + res.tempoMs + ' ms · alcance ' + res.alcanceM.toFixed(1).replace('.', ',') + ' m' : '') + '</div>'
+            // [22/09/2026] NOVO -- pedido verbatim: "Mostrar quantos pontos são usados para gerar toda a
+            // malha dos níveis de sinal." `raiosBrutos` = amostragem física (sempre na densidade escolhida,
+            // nunca reduzida); `pontosMalha`/`trianglesMalha` = o que de fato chega à GPU depois do
+            // `meshMode` (idênticos entre si no modo 'malha_real' — ver `ultimoResultado` em wifi-signal.js).
+            + (res ? '<div style="font-size:11px;opacity:.7;margin-top:2px">🔺 Malha: ' + res.pontosMalha.toLocaleString('pt-BR') + ' pontos / ' + res.trianglesMalha.toLocaleString('pt-BR') + ' triângulos'
+              + (res.meshMode === 'malha_simplificada' ? ' (de ' + res.raiosBrutos.toLocaleString('pt-BR') + ' pontos amostrados · −' + Math.max(0, Math.round(100 - (res.pontosMalha / res.raiosBrutos) * 100)) + '%)' : ' (amostragem bruta, sem redução)') + '</div>' : '')
+            // [29/09/2026] NOVO -- pedido verbatim: "Faça a opção de 'Vista em Corte' para a varredura
+            // normal." Ver comentário grande de `_wfCorteHtml`/`WS.AccessPoint#atualizarCorte` (wifi-signal.js).
+            + this._wfCorteHtml(ap)
+            // [22/09/2026] NOVO -- painel do motor AVANÇADO (`WS.SignalPropagationEngine`, opt-in, coexiste
+            // com a varredura de malha acima): reflexão/refração multi-salto, resultado em nuvem de pontos
+            // (`THREE.Points`), só disponível com `this._engine` vivo (precisa da cena 3D pra lançar raios).
+            + (this._engine ? (SEC_HDR('🛰️', 'Varredura avançada')
+              // [29/09/2026] MUDADO -- pedido verbatim: "coloque o checkbox antes do '🛰️ Reflexão' e remova
+              // o texto 'habilitada' [...] o mesmo pra Refração [...] Para os dois, o campo de número deve
+              // vir logo à direita." Antes: `<span>🛰️ Reflexão</span><label><input checkbox> habilitada</label>`
+              // (2 células de grid separadas, texto do nível redundante). Agora: 1 única célula
+              // checkbox+rótulo (`<label>` com o input NA FRENTE do texto "🛰️ Reflexão"), e o campo numérico
+              // continua na célula ao lado (2ª coluna do grid), like antes -- só que agora é a PRIMEIRA coisa
+              // à direita do checkbox+rótulo, não de um `<span>` textual solto.
+              + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:4px">'
+              + '<label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer" title="Raio que bate numa superfície pode ricochetear (mudando de direção) em vez de parar ali."><input type="checkbox" data-wfa="enableReflection"' + (ap.enableReflection ? ' checked' : '') + '> 🛰️ Reflexão</label><input data-wfa="maxReflections" type="number" min="0" max="5" step="1" value="' + ap.maxReflections + '" style="' + INP + '" title="Quantos ricochetes seguidos um mesmo raio pode dar antes de parar."' + (ap.enableReflection ? '' : ' disabled') + '>'
+              + '<label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer" title="Raio que bate numa superfície pode continuar reto do outro lado (com perda de sinal pela espessura/material), como sinal atravessando paredes."><input type="checkbox" data-wfa="enableRefraction"' + (ap.enableRefraction ? ' checked' : '') + '> 🛰️ Refração</label><input data-wfa="maxRefractions" type="number" min="0" max="3" step="1" value="' + ap.maxRefractions + '" style="' + INP + '" title="Quantas superfícies seguidas um mesmo raio pode atravessar antes de parar."' + (ap.enableRefraction ? '' : ' disabled') + '>'
+              + '<span>Limiar (dBm)</span><input data-wfa="rssiThreshold" type="number" min="-80" max="20" step="1" value="' + ap.rssiThreshold + '" style="' + INP + '" title="Abaixo deste dBm nem o ponto/raio é desenhado, e a varredura para de ricochetear ali — mesmo comportamento do fim de alcance da varredura normal.">'
+              + '</div>'
+              // [29/09/2026] NOVO -- pedido verbatim: "Na varredura avançada, deve ser possível ver a forma
+              // 3D gerada com o mapa de calor do sinal (superfície mais externa (como na varredura normal)
+              // e forma. Ambas por nível, os 5 níveis)." Ver comentário grande de `_wfMalhaNiveisAvancadaHtml`
+              // acima -- malha calculada SEM reflexão/refração (mesma física da varredura normal, só que com
+              // a Faixa/Potência/Densidade do motor avançado), reconstruída a cada "Varredura avançada".
+              + this._wfMalhaNiveisAvancadaHtml(ap)
+              // [22/09/2026] MUDADO -- pedido verbatim: "coloque os botões de níveis para os pontos e para os
+              // raios, assim como na varredura normal. Retire os checkbox 'mostrar pontos' e 'mostrar raios',
+              // pois os botões de níveis já vão executar esta função." Substitui os antigos checkboxes únicos
+              // ("mostrar pontos"/"grade quadriculada"/"mostrar raios") pelos botões de nível de
+              // `_wfNiveisAvancadaHtml` (mesmo padrão visual da varredura normal, `_wfNiveisHtml`).
+              + this._wfNiveisAvancadaHtml(ap)
+              + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px"><span style="font-size:12px;opacity:.7">Densidade dos raios</span><select data-wfa="avancadoDensidadeRaios" style="' + INP + '" title="Fração dos raios lançados que ganham uma linha desenhada na cena. Só vale a partir da próxima varredura avançada.">' + DENSIDADES_RAIOS_OPTS(ap.avancadoDensidadeRaios) + '</select></div>'
+              // [22/09/2026] NOVO -- pedido verbatim: "configuração própria (com 'usar mesmas configurações')"
+              // pro motor avançado: Faixa/Potência/Densidade PRÓPRIAS, ou espelhando o motor original (padrão).
+              + '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #3a4250">'
+              + '<label style="font-size:12px" title="Quando marcado, a varredura avançada usa a mesma Faixa/Potência/Densidade configuradas na Varredura normal acima, em vez de valores próprios."><input type="checkbox" data-wfa="avancadoUsarMesmoConfig"' + (ap.avancadoUsarMesmoConfig ? ' checked' : '') + '> usar as mesmas configurações do motor original (Faixa/Potência/Densidade)</label>'
+              + (ap.avancadoUsarMesmoConfig ? '' : ('<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:4px">'
+                + '<span>Faixa (motor avançado)</span><select data-wfa="avancadoFrequencia" style="' + INP + '" title="Faixa de frequência usada só pela varredura avançada.">' + opts(WS.FAIXAS, ap.avancadoFrequencia) + '</select>'
+                + '<span>Potência (W, motor avançado)</span><input data-wfa="avancadoPotenciaW" type="number" min="0.01" max="2" step="0.001" value="' + ap.avancadoPotenciaW + '" style="' + INP + '" title="Potência de transmissão usada só pela varredura avançada.">'
+                + '<span>Densidade (motor avançado)</span><select data-wfa="avancadoDensidade" style="' + INP + '" title="Densidade de raios usada só pela varredura avançada.">' + opts(WS.DENSIDADES, ap.avancadoDensidade) + '</select>'
+                + '</div>'))
+              + '</div>'
+              + '<div style="font-size:11px;opacity:.6;margin-top:3px">Motor alternativo (Ray Launching multi-bounce): simula ricochete em paredes/vidros/metal e atravessamento com perda por material, gerando uma nuvem de pontos 3D à parte da malha acima. Mais realista, porém mais lento com densidade alta + reflexão/refração juntas.</div>'
+              + '<div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap"><button type="button" data-wfa-scan="1" title="Lança o motor de reflexão/refração multi-salto com as configurações acima, gerando uma nuvem de pontos 3D à parte da malha da varredura normal." style="' + BTN + (emite ? '' : ';opacity:.5') + '"' + (ap.motorAvancado.scanning ? ' disabled' : '') + '>🛰️ Varredura avançada (reflexão/refração)</button>'
+              + (ap.motorAvancado.scanning ? '<button type="button" data-wfa-cancel="1" style="' + BTN + '" title="Interrompe a varredura avançada em andamento.">Cancelar</button>' : '')
+              + (ap.cloudAvancado ? '<button type="button" data-wfa-clear="1" style="' + BTN + '" title="Remove a nuvem de pontos da última varredura avançada.">🗑️ Limpar nuvem</button>' : '') + '</div>'
+              + '<div class="wf-bar' + (ap.motorAvancado.scanning ? '' : ' wf-fim') + '" data-wfa-bar="1"><div class="wf-fill" data-wfa-fill="1" style="width:' + (ap.motorAvancado.progress || 0) + '%"></div></div>'
+              + '<div data-wfa-txt="1" style="font-size:11px;opacity:.8;min-height:14px">' + (ap.motorAvancado.scanning ? 'Varrendo (avançado)… ' + (ap.motorAvancado.progress || 0) + '%' : '') + '</div>'
+              // [28/09/2026] NOVO -- pedido verbatim: "Na varredura avançada, coloque as mesmas informações
+              // quanto a varredura avançada feita." Mesmo formato de 2 linhas do motor original (legenda +
+              // 'última varredura: raios/tempo/alcance' e '🔺 Malha: pontos/triângulos'), usando
+              // `ultimoResultadoAvancado` (ver wifi-signal.js) -- aqui não há malha fechada (é nuvem de
+              // pontos), então a 2ª linha mostra raios totais/primários em vez de triângulos.
+              + '<div style="font-size:11px;margin-top:2px"><span class="wf-leg" style="background:#22c55e;margin-left:0"></span>excelente<span class="wf-leg" style="background:#facc15"></span>médio<span class="wf-leg" style="background:#ef4444"></span>fraco/sem sinal'
+              + (resAv ? ' · última varredura avançada: ' + resAv.raiosTotais.toLocaleString('pt-BR') + ' raios em ' + resAv.tempoMs + ' ms · alcance ' + resAv.alcanceM.toFixed(1).replace('.', ',') + ' m' : '') + '</div>'
+              + (resAv ? '<div style="font-size:11px;opacity:.7;margin-top:2px">🛰️ Nuvem: ' + resAv.n.toLocaleString('pt-BR') + ' pontos de colisão (' + resAv.raiosPrimarios.toLocaleString('pt-BR') + ' raios primários)</div>' : '')) : '')
             // [21/09/2026 UTC] NOVO -- projeção do mapa de calor sobre o mapa 2D (Planta Baixa): método
             // ('fatiamento' = Opção A, corte vetorial da própria malha 3D, padrão; 'textura' = Opção B,
             // bitmap renderizado por câmera ortográfica) e opacidade (0–100%, equivalente ao pedido
             // "heatmap2D.material.opacity"). Ver comentário grande em wifi-signal.js (`METODOS2D`).
-            + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:6px;border-top:1px solid #3a4250;padding-top:6px">'
-            + '<span>Mapa 2D — método</span><select data-wf="metodo2D" style="' + INP + '">' + opts(WS.METODOS2D, ap.metodo2D) + '</select>'
-            + '<span>Mapa 2D — opacidade</span><input data-wf-opacidade="1" type="range" min="0" max="100" step="5" value="' + Math.round(ap.opacidade2D * 100) + '" style="width:100%">'
+            // [23/09/2026] MUDADO -- pedido verbatim: "remova a opção 'Varredura 2D' [...] remova do código
+            // também" -- a 3ª opção ('varredura2d', motor `SignalPropagationEngine2D` em plano horizontal
+            // próprio) foi removida por completo (UI e código em wifi-signal.js/mapview-rede-2d.js); ficam
+            // só 'fatiamento' e 'textura'.
+            + SEC_HDR('🗺️', 'Mapa 2D')
+            + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:4px">'
+            + '<span>Mapa 2D — método</span><select data-wf="metodo2D" style="' + INP + '" title="Como o mapa de calor 3D é projetado sobre a Planta Baixa (2D): fatiamento (corte vetorial da própria malha 3D) ou textura (bitmap renderizado por câmera ortográfica).">' + opts(WS.METODOS2D, ap.metodo2D) + '</select>'
+            + '<span>Mapa 2D — opacidade</span><input data-wf-opacidade="1" type="range" min="0" max="100" step="5" value="' + Math.round(ap.opacidade2D * 100) + '" style="width:100%" title="Opacidade do mapa de calor projetado sobre a Planta Baixa (2D).">'
             + '</div>'
-            + '<div style="font-size:11px;opacity:.6;margin-top:3px">O mapa 2D (Planta Baixa) reaproveita a malha 3D já varrida acima — mesmos obstáculos (paredes, portas, janelas, pilares, vigas, piso/teto, escada).</div></div>';
+            + '<div style="font-size:11px;opacity:.6;margin-top:3px">O mapa 2D (Planta Baixa) reaproveita a malha 3D já varrida acima — mesmos obstáculos (paredes, portas, janelas, pilares, vigas, piso, escada).</div></div>';
         }
+        // [22/09/2026] NOVO -- pra um AP, o resto desta função (seleção de porta/conectar cabo, abaixo)
+        // é a 3ª aba ("🔌 Porta") -- abre o wrapper aqui (fecha logo depois dos dois `if` que montam esse
+        // conteúdo, e junto fecha `#ap-tabs-content`/o wrapper externo abertos lá em cima). Pra qualquer
+        // OUTRO equipamento com porta (switch, patch panel...), `ehAp` é falso e nada disto entra em jogo
+        // -- o painel deles continua idêntico a sempre, sem abas.
+        if (ehAp) html += '<div data-aptab="porta" style="display:' + (apModoPainel === 'normal' ? 'block' : (apTabAtiva === 'porta' ? 'block' : 'none')) + '">' + (apModoPainel === 'normal' ? '<div style="font-weight:600;font-size:12px;opacity:.75;margin:8px 0 4px">🔌 Porta</div>' : '');
         if (temPortas && !ehBaia) {
           const opcoes = sp.portas.map((p) => { const c = RE.caboDaPorta(this._map, obj.id, p.n, 'frente'); return '<option value="' + p.n + '"' + (p.n === sel ? ' selected' : '') + '>' + (p.tipo === 'sfp' ? 'SFP ' : '') + p.n + ((r.portas[p.n] && r.portas[p.n].rotulo) ? ' — ' + esc(r.portas[p.n].rotulo) : '') + (c ? '  ● cabeada' : '') + '</option>'; }).join('');
-          html += '<div style="border-top:1px solid #3a4250;margin-top:6px;padding-top:6px"><label>Porta: <select data-rs="1" style="' + INP + '"><option value="">— escolha (ou mire) —</option>' + opcoes + '</select></label></div>';
+          html += '<div style="border-top:1px solid #3a4250;margin-top:6px;padding-top:6px"><label title="Porta física deste equipamento a destacar/selecionar (ou mire numa porta em 3D pra selecioná-la automaticamente).">Porta: <select data-rs="1" style="' + INP + '"><option value="">— escolha (ou mire) —</option>' + opcoes + '</select></label></div>';
         }
         // [19/09/2026 UTC] NOVO (RODADA 174) -- painel de BAIAS do Storage: grade com o status de
         // cada slot + botões inserir/remover disco (config simples: HDD_SATA 4TB por padrão, ver
@@ -1326,7 +2109,7 @@
               + '<div style="font-size:12px;opacity:.8;margin-top:3px">Percurso ' + (info ? info.comprimentoM.toFixed(2).replace('.', ',') + ' m' : '—') + (cabo.length > 0 ? ' · cabo de ' + cabo.length + ' m' : ' · comprimento automático') + (cabo.labelID ? ' · 🏷️ ' + esc(cabo.labelID) : '') + '</div>'
               + (info && info.esticado ? '<div style="color:#ff8787;font-size:12px">⚠ Cabo curto: o percurso é maior que o comprimento do cabo.</div>' : '')
               + (cabo.avisos || []).map((a) => '<div style="color:#ffb454;font-size:12px">⚠ ' + esc(a) + '</div>').join('')
-              + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:5px"><span>Comprimento (m)</span><input data-cl="' + cabo.id + '" type="number" min="0" step="0.5" value="' + (cabo.length || 0) + '" style="' + INP + '" title="0 = automático"><span>labelID do cabo</span><input data-cb="' + cabo.id + '" value="' + esc(cabo.labelID || '') + '" style="' + INP + '">'
+              + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:5px"><span>Comprimento (m)</span><input data-cl="' + cabo.id + '" type="number" min="0" step="0.5" value="' + (cabo.length || 0) + '" placeholder="0 = automático" style="' + INP + '" title="0 = automático"><span>labelID do cabo</span><input data-cb="' + cabo.id + '" value="' + esc(cabo.labelID || '') + '" style="' + INP + '">'
               + '</div>'
               // [22/09/2026] MUDADO -- cor individual do cabo (`cabo.cor`, campo já
               // existente e já usado por `Engine3D.rebuildCabos` -- ver comentário da rodada mais
@@ -1342,23 +2125,53 @@
               + '<span>Porta</span><select data-rop="1" style="' + INP + '"></select>'
               + '<span>Cabo</span><select data-rct="1" style="' + INP + '">' + tiposCabo.map((k) => '<option value="' + k + '"' + (padrao === k ? ' selected' : '') + '>' + esc(CABOS[k].rotulo) + '</option>').join('') + '</select>'
               + '<span>Conector</span><select data-rcx="1" style="' + INP + '"><option value="">automático</option>' + ['LC', 'SC', 'ST'].map((k) => '<option value="' + k + '">' + k + '</option>').join('') + '</select>'
-              + '<span>Comprimento (m)</span><input data-rcl="1" type="number" min="0" step="0.5" value="0" style="' + INP + '" title="0 = automático"><span>labelID</span><input data-rcb="1" placeholder="ex.: CB-0142" style="' + INP + '"></div>'
+              + '<span>Comprimento (m)</span><input data-rcl="1" type="number" min="0" step="0.5" value="" placeholder="0 = automático" style="' + INP + '" title="0 = automático"><span>labelID</span><input data-rcb="1" placeholder="ex.: CB-0142" style="' + INP + '"></div>'
               + '<div style="font-size:11px;opacity:.6;margin-top:3px">Cobre em porta óptica (ou conector diferente) é recusado; categoria/blindagem menor que a da porta, ou fibra SMF↔MMF, conecta com aviso.</div>'
               + '<div style="margin-top:6px"><button type="button" data-rcn="1" style="' + BTN + '">🔌 Conectar cabo</button></div>';
           }
         }
+        // [22/09/2026] NOVO -- fecha data-aptab="porta" + #ap-tabs-content + o wrapper externo (border-top)
+        // abertos lá em cima, todos só quando `ehAp` (ver comentário grande logo acima).
+        if (ehAp) html += '</div></div></div>';
         // [21/09/2026 UTC] NOVO -- estas ações (mirar/clicar portas, "Pegar", retirar do rack, "Ficha do
         // objeto") dependem da cena 3D viva (`this._engine`) -- quando este painel é aberto pelo mapa 2D
         // (ver `abrirPainelEquipamento`), não fazem sentido e ficam OCULTAS (o resto do painel -- estado
         // ligado/desligado, config do AP, conectar cabo por nome -- continua funcionando normalmente).
+        // [23/09/2026] MUDADO -- pedido verbatim: "os botões mais abaixo [...] devem ficar sempre visíveis
+        // (como um rodapé)". Este bloco NÃO entra mais em `html`/`corpo` (que rola) -- vira `rodapeHtml`,
+        // aplicado em `rodape.innerHTML` (fixo, fora do scroll) logo abaixo. De quebra, corrige um bug
+        // (achado nesta mesma revisão): o texto de ajuda "Esc fecha..." tinha virado uma instrução `+
+        // 'string'` ÓRFÃ (fora da concatenação de `html`, por causa de uma chave `}` fechando o `if`
+        // ANTES dela) -- nunca aparecia, o `+` unário era só descartado silenciosamente.
+        let rodapeHtml = '';
         if (this._engine) {
-          html += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">' + (temPortas && !ehBaia ? '<button type="button" data-lig="1" style="' + BTN + '">🔌 Ligar clicando nas portas (L)</button>' : '') + '<button type="button" data-pg="1" style="' + BTN + '">✋ Pegar (E)</button>';
-          if (obj.rackId) html += '<button type="button" data-rret="1" style="' + BTN + '">Retirar do rack</button>';
-          html += '<button type="button" data-rf="1" style="' + BTN + '">Ficha do objeto</button></div>';
+          rodapeHtml = '<div style="display:flex;gap:8px;flex-wrap:wrap">' + (temPortas && !ehBaia ? '<button type="button" data-lig="1" style="' + BTN + '">🔌 Ligar clicando nas portas (L)</button>' : '') + '<button type="button" data-pg="1" style="' + BTN + '">✋ Pegar (E)</button>';
+          if (obj.rackId) rodapeHtml += '<button type="button" data-rret="1" style="' + BTN + '">Retirar do rack</button>';
+          rodapeHtml += '<button type="button" data-rf="1" style="' + BTN + '">Ficha do objeto</button></div>'
+            + '<div style="opacity:.55;margin-top:6px;font-size:11px">Esc fecha. “Pegar” leva o item com você e permite encaixá-lo numa U do rack. “Ligar clicando nas portas” fecha este menu e deixa mirar/clicar direto nas portas (2 cliques por ponta) pra ligar o cabo, sem menu nenhum — tecla L liga/desliga esse modo a qualquer momento. No Modo Navegação, dois cliques ' + (ehSw ? 'ligam/desligam o switch' : 'mostram o resumo do item') + '.</div>';
         }
-          + '<div style="opacity:.55;margin-top:6px;font-size:11px">Esc fecha. “Pegar” leva o item com você e permite encaixá-lo numa U do rack. “Ligar clicando nas portas” fecha este menu e deixa mirar/clicar direto nas portas (2 cliques por ponta) pra ligar o cabo, sem menu nenhum — tecla L liga/desliga esse modo a qualquer momento. No Modo Navegação, dois cliques ' + (ehSw ? 'ligam/desligam o switch' : 'mostram o resumo do item') + '.</div>';
+        rodape.style.display = rodapeHtml ? '' : 'none';
+        rodape.innerHTML = rodapeHtml;
         corpo.innerHTML = html;
-        const q = (s2) => corpo.querySelector(s2);
+        // [23/09/2026] MUDADO -- `q` agora busca em `el` inteiro (não só `corpo`), já que o rodapé fixo
+        // (`rodape`, ver comentário grande acima) é um irmão de `corpo`, fora do scroll.
+        const q = (s2) => el.querySelector(s2);
+        // [22/09/2026] NOVO -- wiring das abas do AP (ver comentário grande de `apTabAtiva`/`apTabBtn`
+        // acima). Clicar numa aba só troca `apTabAtiva` (fechada nesta chamada de `_openRedeMenu`,
+        // sobrevive ao `render()` seguinte) e re-renderiza -- qualquer varredura em andamento continua
+        // (os motores vivem no `AccessPoint`, não no DOM).
+        // [27/09/2026] MUDADO -- pedido verbatim: "no modo 'Abas', o scroll só deve aparecer se for
+        // necessário na parte do conteúdo daquela aba." Antes, `tabsWrap.style.minHeight` era fixado na
+        // MAIOR altura entre TODAS as abas (mesmo as ocultas) -- evitava a janela encolher/crescer ao
+        // trocar de aba, mas o efeito colateral era `corpo` reservar aquele espaço todo (e rolar) mesmo
+        // numa aba bem mais curta que as outras (ex.: "Porta", curta, herdava a altura de "Sinal", que
+        // agora tem bem mais seções). Removido -- `corpo` agora sempre segue só a altura REAL da aba
+        // ativa (o scroll só aparece quando o conteúdo DELA não cabe).
+        if (ehAp) {
+          corpo.querySelectorAll('[data-aptab-btn]').forEach((btn) => {
+            btn.onclick = () => { apTabAtiva = btn.getAttribute('data-aptab-btn'); render(); };
+          });
+        }
         // Access Point: sincroniza malha de sinal + LED do corpo do AP (ligado/cabo) e liga a UI à varredura.
         // [21/09/2026 UTC] `this._engine` guardado (`&&`) -- este painel agora também pode ser aberto pelo
         // mapa 2D (Planta Baixa), sem nenhuma engine 3D viva (ver `abrirPainelEquipamento`/botão "⚙️
@@ -1380,23 +2193,79 @@
             if (k === 'frequencia') ap.signalFrequency = e.target.value;
             else if (k === 'potencia') ap.powerWatts = e.target.value;
             else if (k === 'metodo2D') ap.metodo2D = e.target.value;   // [21/09/2026] Opção A (fatiamento) / B (textura), ver wifi-signal.js
+            // [22/09/2026] NOVO -- só toma efeito na PRÓXIMA varredura ("Refazer Varredura de Sinal"), como
+            // Densidade/Faixa/Potência acima -- não altera uma malha já construída sem refazer o raycast.
+            else if (k === 'meshMode') ap.meshMode = e.target.value;
+            else if (k === 'numDispositivos') ap.numDispositivos = e.target.value;
             else ap.densidade = e.target.value;
             salvar(); render();
           }; });
           // [21/09/2026 UTC] NOVO -- slider de opacidade do mapa 2D (não recria o painel a cada `input`,
           // só salva -- `render()` reconstruiria o slider no meio do arraste do usuário, perdendo o foco).
           if (q('[data-wf-opacidade]')) q('[data-wf-opacidade]').oninput = (e) => { ap.opacidade2D = Number(e.target.value) / 100; salvar(); };
+          // [22/09/2026] NOVO -- pedido verbatim: "ao alterar o valor de potência (deixando o botão do input
+          // clicado), o valor dos dBm deve variar imediatamente. Atualmente, só varia depois de soltar o
+          // botão do mouse." O handler em `[data-wf]` acima só ouve `change` (dispara só ao soltar/perder
+          // foco); aqui, um `oninput` À PARTE no campo de potência atualiza `ap.powerWatts` + o `≈ N dBm` ao
+          // lado a CADA tecla/clique-segurando das setinhas do <input type=number>, sem chamar `render()`
+          // (que reconstruiria o campo inteiro e derrubaria o foco/o "segurar" do usuário).
+          if (q('[data-wf="potencia"]')) q('[data-wf="potencia"]').oninput = (e) => {
+            const v = Number(e.target.value);
+            if (v > 0) { ap.powerWatts = v; salvar(); const dbm = q('[data-wf-dbm]'); if (dbm) dbm.textContent = '≈ ' + ap.powerDbm.toFixed(1).replace('.', ',') + ' dBm'; }
+          };
           if (q('[data-wf-scan]')) q('[data-wf-scan]').onclick = () => {
-            const res = ap.startScan({ densidade: ap.densidade });
+            const res = ap.startScan({ densidade: ap.densidade, meshMode: ap.meshMode });
             if (!res.ok) toast(res.erro, { type: 'warn', duration: 3000 });
             render();
           };
           if (q('[data-wf-cancel]')) q('[data-wf-cancel]').onclick = () => { ap.cancelScan(); render(); };
-          if (q('[data-wf-show]')) q('[data-wf-show]').onchange = (e) => { ap.mostrar = e.target.checked; };
+          this._wfNiveisWire(corpo, ap, render);
+          this._wfMalhaNiveisWire(corpo, ap);
+          // [29/09/2026] NOVO -- "Vista em Corte" (varredura normal) -- ver `_wfCorteHtml`/`_wfCorteWire` acima.
+          this._wfCorteWire(corpo, ap, render);
+          if (q('[data-wf-mini]')) q('[data-wf-mini]').onchange = (e) => { ap.miniJanela = e.target.checked; salvar(); this._wfMiniAtualizarTodas(); };
+          // [22/09/2026] NOVO -- wiring do painel do motor AVANÇADO (reflexão/refração, `ap.motorAvancado`/
+          // `startScanAvancado`). Checkboxes/números tomam efeito só na PRÓXIMA "Varredura avançada", mesmo
+          // padrão de Densidade/Faixa/Potência/Modo de malha acima (não refaz o raycast sozinho).
+          if (this._engine) {
+            ap.onProgressAvancado = (p) => {
+              const bar = corpo.querySelector('[data-wfa-bar]'), fill = corpo.querySelector('[data-wfa-fill]'), txt = corpo.querySelector('[data-wfa-txt]');
+              if (!fill) return;
+              fill.style.width = p + '%'; if (txt) txt.textContent = p < 100 ? 'Varrendo (avançado)… ' + p + '%' : '';
+              if (bar) bar.classList.toggle('wf-fim', p >= 100);
+            };
+            ap.onDoneAvancado = () => { render(); };
+            corpo.querySelectorAll('[data-wfa]').forEach((c) => { c.onchange = (e) => {
+              const k = c.getAttribute('data-wfa'), v = c.type === 'checkbox' ? c.checked : e.target.value;
+              if (k === 'enableReflection') ap.enableReflection = v;
+              else if (k === 'maxReflections') ap.maxReflections = v;
+              else if (k === 'enableRefraction') ap.enableRefraction = v;
+              else if (k === 'maxRefractions') ap.maxRefractions = v;
+              else if (k === 'rssiThreshold') ap.rssiThreshold = v;
+              else if (k === 'avancadoDensidadeRaios') ap.avancadoDensidadeRaios = v;
+              else if (k === 'avancadoUsarMesmoConfig') ap.avancadoUsarMesmoConfig = v;
+              else if (k === 'avancadoFrequencia') ap.avancadoFrequencia = v;
+              else if (k === 'avancadoPotenciaW') ap.avancadoPotenciaW = v;
+              else if (k === 'avancadoDensidade') ap.avancadoDensidade = v;
+              salvar(); render();
+            }; });
+            if (q('[data-wfa-scan]')) q('[data-wfa-scan]').onclick = () => {
+              const res = ap.startScanAvancado();
+              if (!res.ok) toast(res.erro, { type: 'warn', duration: 3000 });
+              render();
+            };
+            if (q('[data-wfa-cancel]')) q('[data-wfa-cancel]').onclick = () => { ap.cancelScanAvancado(); render(); };
+            if (q('[data-wfa-clear]')) q('[data-wfa-clear]').onclick = () => { ap.clearAvancado(); render(); };
+            // [29/09/2026] NOVO -- superfície 3D do motor avançado, por nível (ver `_wfMalhaNiveisAvancadaHtml` acima).
+            this._wfMalhaNiveisAvancadaWire(corpo, ap);
+            // [22/09/2026] NOVO -- botões de nível dos pontos/raios do motor avançado (ver `_wfNiveisAvancadaHtml`).
+            this._wfNiveisAvancadaWire(corpo, ap);
+          }
         }
         if (q('[data-rh]')) q('[data-rh]').onchange = (e) => { r.hostname = e.target.value.trim(); salvar(); };
         corpo.querySelectorAll('[data-cc]').forEach((s2) => { s2.onchange = (e) => { r[s2.getAttribute('data-cc')] = e.target.value; reconstruir(); render(); }; });
         q('[data-lb]').onchange = (e) => { r.labelID = e.target.value.trim(); salvar(); };
+        if (q('[data-on]')) q('[data-on]').onchange = (e) => { obj.nome = e.target.value.trim(); salvar(); render(); };
         if (q('[data-rs]')) q('[data-rs]').onchange = (e) => { sel = Number(e.target.value) || null; render(); };
         if (q('[data-rr]')) q('[data-rr]').onchange = (e) => { r.portas[sel] = r.portas[sel] || {}; r.portas[sel].rotulo = e.target.value.trim(); RE.notificarMudanca(this._map, {}); render(); };
         if (q('[data-rst]')) q('[data-rst]').onchange = (e) => { r.portas[sel] = r.portas[sel] || {}; r.portas[sel].status = e.target.value; salvar(); };
@@ -1444,10 +2313,15 @@
         if (q('[data-rf]')) q('[data-rf]').onclick = () => { fechar(); const pk = this._engine.pickables && this._engine.pickables.find((p) => p.ref === obj && p.type === 'object'); if (pk) this._tryPick(pk); };
       };
       const onKey = (e) => { if (e.code === 'Escape') { e.preventDefault(); e.stopPropagation(); fechar(); } };
-      const onFora = (e) => { if (!el.contains(e.target)) fechar(); };
+      // [28/09/2026] MUDADO -- pedido verbatim: "Ao clicar na AP e abrir a sua janela, ela deve permanecer
+      // aberta, mesmo clicando fora dela. Só deve fechar ao clicar no seu botão de 'fechar'." Só pro AP
+      // (`ehAp`) -- os demais equipamentos continuam fechando ao clicar fora, comportamento inalterado.
+      const onFora = (e) => { if (ehAp) return; if (!el.contains(e.target)) fechar(); };
       container.appendChild(el); render(); this._menuFecharRede = fechar;
+      raiz.Utils.bringToFront(el);
+      el.addEventListener('pointerdown', () => raiz.Utils.bringToFront(el), true);
       window.addEventListener('keydown', onKey, true);
-      setTimeout(() => document.addEventListener('mousedown', onFora, true), 0);
+      if (!ehAp) setTimeout(() => document.addEventListener('mousedown', onFora, true), 0);
     },
 
     /**

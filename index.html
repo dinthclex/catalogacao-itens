@@ -338,6 +338,16 @@
      assim que um `.config.js` carrega, então este módulo precisa já existir
      nesse instante. -->
 <script src="js/objmeshsource.js"></script>
+<!-- [22/09/2026] NOVO -- pedido verbatim: "Coloque uma entrada de informação no index.html do projeto sobre
+     usar o sistema de foco de janelas (WindowManager/Utils.bringToFront). Informe nesse comentário o nome
+     do arquivo que tem este recurso." SISTEMA DE FOCO DE JANELAS (traz uma janela flutuante pra frente das
+     demais, devolve ao fechar): `Utils.bringToFront(el)`/`Utils.releaseFront(el)` -- IMPLEMENTADOS EM
+     js/utils.js (não em js/windowmanager.js, que só tem o `WindowManager` de baixo nível que eles chamam por
+     baixo dos panos -- ver comentário logo abaixo). Toda janela flutuante nova do app (painel/modal/popup)
+     deve chamar `Utils.bringToFront(el)` ao abrir/ganhar foco (e de novo a cada `pointerdown` nela, pro caso
+     de haver várias abertas ao mesmo tempo) e `Utils.releaseFront(el)` ao fechar -- ver js/mapview.js (painéis
+     2D: Ferramentas/Camadas/Histórico/propriedades de objeto) e `_openRedeMenu` em js/view3d-rede.js (janela
+     do AP) como exemplos já usando o padrão. -->
 <script src="js/utils.js"></script>
 <!-- NOVO (07/09/2026), pedido verbatim: "Faça uma função de gerenciamento
      de janelas para todo o app" — ver js/windowmanager.js. Carregado logo
@@ -509,6 +519,8 @@
 <script src="js/rede-storage-energia.js"></script>
 <!-- [19/09/2026 UTC] NOVO (RODADA 178) -- PatchCord dinâmico (sem Three.js na lógica, testável em Node): classe PatchCord (estados idle/ghost/connected), Plug_A/Plug_B com exitVector de ancoragem, curva de Bézier cúbica com barriga de gravidade e restrição anti-clipping contra a porta do rack (constrainCableCurvature). AINDA NÃO conectado a nenhuma tela do app (arquitetura pronta, integração com o cabeamento existente é trabalho futuro) -- ver comentário completo no topo de js/patch-cord.js. -->
 <script src="js/patch-cord.js"></script>
+<!-- [23/09/2026 UTC] NOVO -- `RealisticCableBend` (window.RealisticCableBend): algoritmo isolado de curvatura física de cabos (raio de curvatura mínimo + "barriga" elástica em dobras fechadas, ver comentário grande no topo de js/realistic-cable-bend.js). Consumido por `Engine3D._curvaDeRotaCabo` (js/engine3d-rede-mesh.js) para as curvas de cabo desenhadas no modo 'Lógica' (tecla L) -- ver comentário grande lá. -->
+<script src="js/realistic-cable-bend.js"></script>
 <!-- [13/09/2026] NOVO — geradores de sala reutilizáveis (Sala de
      Monitoramento/Câmeras por andar/Copa/Banheiro), ver comentário grande
      no topo de js/geradores-salas.js. Só registra `window.GeradoresSalas`

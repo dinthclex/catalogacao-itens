@@ -6072,12 +6072,17 @@ class Engine3D {
       const tipo = m.userData?.pick?.type;
       if (tipo !== 'object' && tipo !== 'item') return;
       const p = m.userData.pick.pos;
+      // [22/09/2026] NOVO — `radius` (já calculado em `raioPick`/`itemPick.radius`,
+      // ver `_buildOneObjectMesh`) guardado junto pra `_updateDistanceCulling` testar
+      // a distância até a BORDA do objeto, não só o centro dele (ver comentário lá:
+      // "objetos desaparecendo/aparecendo repentinamente ... com objetos muito
+      // extensos como o Piso" — pedido verbatim do usuário, 22/09/2026).
+      this._cullMeshes.push({ mesh: m, x: p.x, z: p.z, radius: m.userData.pick.radius || 0, piso: m.userData.pick.ref?.piso || 0 });
       // [13/09/2026 UTC] NOVO — `piso` guardado junto (mesmo campo de
       // sempre, `ref.piso`, já usado pra empilhar andares — ver `baseY` em
       // `_buildOneObjectMesh`) pra `_updateSectorOcclusionCulling` (mais
       // abaixo) achar o setor de cada objeto sem precisar reconsultar
       // `userData.pick.ref` todo quadro.
-      this._cullMeshes.push({ mesh: m, x: p.x, z: p.z, piso: m.userData.pick.ref?.piso || 0 });
     });
   }
 
@@ -6437,7 +6442,26 @@ class Engine3D {
       });
     } else {
       lista.forEach((c) => {
-        const visivel = Math.hypot(c.x - camera.x, c.z - camera.z) <= rd;
+        // [22/09/2026] CORRIGIDO — pedido verbatim: "objetos estão desaparecendo/
+        // aparecendo repentinamente quando estão próximos do limite ... fica
+        // perceptível somente com objetos muito extensos como o Piso ... em vez de
+        // desaparecer do nada, mesmo com a neblina ativada, deve ser fatiado para
+        // que a parte que está visível ainda permaneça visível." Antes, a distância
+        // testada era sempre até o CENTRO do objeto (`c.x`/`c.z`) — para um objeto
+        // pequeno isso é igual a testar a borda mais próxima (raio pequeno), mas
+        // pra um objeto muito extenso (ex.: uma placa de "Piso" grande) o centro
+        // pode já estar bem além de `rd` enquanto boa parte do objeto (a ponta mais
+        // próxima da câmera) ainda estaria dentro do alcance — resultado: o objeto
+        // inteiro sumia de uma vez (`mesh.visible = false`) mesmo com metade dele
+        // ainda "deveria" aparecer, e a neblina (que é por-fragmento, suave) nunca
+        // chegava a entrar em ação porque o Three.js nem desenhava a malha. Corrigido
+        // subtraindo o raio do objeto (`c.radius`, mesmo campo usado no picking —
+        // ver `_setupCullMeshes`) da distância: agora só fica invisível quando até a
+        // BORDA mais próxima já passou de `rd` — a parte visível permanece desenhada
+        // e a neblina cuida sozinha de esmaecer gradualmente a parte distante dela,
+        // exatamente como já acontecia com paredes (que nunca entram nesta lista —
+        // ver comentário de `_setupCullMeshes` — e por isso só dependiam da neblina).
+        const visivel = Math.max(0, Math.hypot(c.x - camera.x, c.z - camera.z) - (c.radius || 0)) <= rd;
         c.mesh.visible = (forcado && forcado.has(c.mesh)) ? false : visivel;
         this._syncInstanceVisibility(c.mesh);
       });

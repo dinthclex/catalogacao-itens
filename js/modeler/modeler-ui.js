@@ -1905,11 +1905,33 @@ const ModelerUI = {
     const temMalha = !!obj.customMesh;
     const xf0 = obj.customMeshXform || {};
 
+    // [22/09/2026] CORRIGIDO -- pedido verbatim: "ao variar os valores dos campos das propriedades, eles
+    // estão variando muito devagar, parece que há uma lentidão por conta de acessos ao banco de dados. As
+    // variações de valores devem ser imediatas e a aplicação do efeito deve ser imediata, também."
+    // CAUSA RAIZ: durante um arraste (`_createNumField`/`onMove`, acima), `commit()` -- e portanto este
+    // `persist` -- dispara a CADA passo de `cfg.step` arrastado (a cada ~10px de mouse, dezenas de vezes
+    // por segundo num arraste rápido), e ANTES disso fazia, TODA VEZ: `Mapping.updateObject` (que chama
+    // `recalcBounds(map)` -- percorre TODOS os objetos do mapa pra recalcular os limites) + `DB.saveMap`
+    // (serializa/agenda a gravação do mapa inteiro) -- dois custos que crescem com o tamanho do mapa,
+    // pagos a cada pixel arrastado, não só quando o usuário solta o botão.
+    // CORRIGIDO: a mutação do objeto (`Object.assign`) e o rebuild da malha 3D (o que dá a resposta
+    // "imediata" que o pedido pede) continuam acontecendo NA HORA, a cada passo -- só o par caro
+    // (`Mapping.updateObject`/`recalcBounds` + `DB.saveMap`) foi adiado/agrupado (`_persistDebounce`,
+    // 200 ms de silêncio) -- o valor exibido e o efeito na malha nunca esperam esse prazo, só a GRAVAÇÃO
+    // em si (que de qualquer forma já era assíncrona) e o recálculo de bounds do mapa inteiro.
+    let _persistDebounce = null, _persistPendente = null;
+    const _persistAgora = () => {
+      if (!_persistPendente) return;
+      Mapping.updateObject(view3d._map, obj.id, _persistPendente);
+      DB.saveMap(view3d._map);
+      _persistPendente = null;
+    };
     const persist = (patch) => {
       Object.assign(obj, patch);
-      Mapping.updateObject(view3d._map, obj.id, patch);
-      DB.saveMap(view3d._map);
-      view3d._refreshObjectLiveTransform?.(obj);
+      view3d._refreshObjectLiveTransform?.(obj);   // efeito na malha 3D: IMEDIATO, sem esperar debounce nenhum
+      _persistPendente = Object.assign(_persistPendente || {}, patch);
+      clearTimeout(_persistDebounce);
+      _persistDebounce = setTimeout(_persistAgora, 200);
     };
 
     // ---------- Posição ----------

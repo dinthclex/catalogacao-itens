@@ -84,6 +84,7 @@
     len: (a) => Math.hypot(a.x, a.y, a.z),
     dist: (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z),
     lerp: (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t }),
+    cross: (a, b) => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }),
   };
 
   /** Diâmetro externo (mm) de um cabo de cobre: base da categoria + acréscimo da blindagem. */
@@ -198,6 +199,62 @@
     return out;
   }
 
+  /**
+   * [22/09/2026] NOVO -- pedido verbatim: "Liguei um patch cord de frente em um AP e, depois, virei o AP
+   * 180°. Então, o patch cord ficou ao contrário direto, sem fazer uma curva como é no mundo real [...] Deve
+   * haver um vetor de saída e, quando houver uma dobra, o ponto de dobra deve impedir que, em um mesmo ponto,
+   * curve-se 180° direto [...] 2 ou 3 pontos de controle em uma Bézier [...] Isso deve ser feito sempre
+   * quando houver uma dobra fechada em uma cabo, em quaisquer partes dele, inclusive nas partes que se ligam
+   * aos conectores que ficam nas pontas do cabo/patch cord." CAUSA RAIZ do bug: `amostrarSpline` (Catmull-Rom
+   * centrípeta, acima) INTERPOLA através de cada ponto de controle -- ela suaviza a TANGENTE em cada ponto,
+   * mas não evita um "bico" visível quando o trecho de ENTRADA e o de SAÍDA de um ponto apontam quase em
+   * direções opostas (dobra fechada, perto de 180°): não há folga geométrica nenhuma pra curvar, só um ponto
+   * onde o cabo é forçado a "voltar" quase sobre a mesma reta -- exatamente o caso de um conector cujo vetor
+   * de saída (`na`/`nb` em `rotaCabo`) vira 180° ao girar o objeto, ficando apontado praticamente na direção
+   * inversa do resto do trajeto. CORRIGIDO: varre a sequência de pontos de controle (rodando ANTES de
+   * `amostrarSpline`, sobre os MESMOS pontos que ela já recebe -- ver `amostrarRotaComRetas` logo abaixo, que
+   * é o único chamador) e, em todo ponto interno cujo ângulo entrada→saída seja "fechado" (< ~110° entre os
+   * dois trechos, `cosA < -0.35` -- cobre também o caso extremo de reversão quase exata de 180°), substitui
+   * ESSE ÚNICO ponto por 3 pontos formando um pequeno "laço" lateral (perpendicular ao trecho de entrada, do
+   * lado estável dado por `cross(entrada, mundoY)`) -- a spline passa a ter folga geométrica de verdade pra
+   * curvar em vez de reverter em cima da própria reta, exatamente como um cabo real faz ao dobrar apertado
+   * (forma uma volta/curva, nunca um "V" ou reversão instantânea). O raio do laço é proporcional ao menor dos
+   * dois trechos adjacentes (nunca maior que eles, pra não "vazar" pra fora do espaço real entre os pontos
+   * vizinhos), clampado entre 3cm e 25cm (mesma ordem de grandeza do raio mínimo de curvatura já usado em
+   * `rotaCabo`/`saida`). Roda em QUALQUER trecho curvo do cabo -- pontos de controle normais (`pontosExtras`/
+   * zonas de passagem) e as próprias pontas de conector (`a1`/`b1` de `rotaCabo`) igualmente, já que todos
+   * entram na mesma sequência `ctrl` amostrada aqui -- exatamente o "em quaisquer partes dele, inclusive nas
+   * pontas com conectores" do pedido.
+   */
+  function _suavizarDobrasFechadas(pts) {
+    if (!Array.isArray(pts) || pts.length < 3) return pts;
+    const out = [pts[0]];
+    for (let i = 1; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1], p1 = pts[i], p2 = pts[i + 1];
+      const din = _v.sub(p1, p0), dout = _v.sub(p2, p1);
+      const Lin = _v.len(din), Lout = _v.len(dout);
+      if (Lin < 1e-6 || Lout < 1e-6) { out.push(p1); continue; }
+      const dinN = _v.mul(din, 1 / Lin), doutN = _v.mul(dout, 1 / Lout);
+      const cosA = dinN.x * doutN.x + dinN.y * doutN.y + dinN.z * doutN.z;
+      if (cosA < -0.35) {
+        let perp = _v.cross(dinN, { x: 0, y: 1, z: 0 }), pl = _v.len(perp);
+        if (pl < 1e-6) { perp = _v.cross(dinN, { x: 1, y: 0, z: 0 }); pl = _v.len(perp); }
+        perp = pl > 1e-6 ? _v.mul(perp, 1 / pl) : { x: 1, y: 0, z: 0 };
+        const r = Math.max(0.03, Math.min(0.25, Math.min(Lin, Lout) * 0.35));
+        // 3 pontos do laço: um pouco ANTES de p1 (recuando pela entrada) + deslocado pro lado; o ápice do
+        // laço (bem deslocado pro lado, em cima de p1); um pouco DEPOIS de p1 (avançando pela saída) +
+        // deslocado pro lado -- a spline centrípeta (`amostrarSpline`) conecta os 3 com curvatura suave.
+        out.push(_v.add(_v.add(p1, _v.mul(dinN, -r * 0.6)), _v.mul(perp, r)));
+        out.push(_v.add(p1, _v.mul(perp, r * 1.4)));
+        out.push(_v.add(_v.add(p1, _v.mul(doutN, r * 0.6)), _v.mul(perp, r)));
+      } else {
+        out.push(p1);
+      }
+    }
+    out.push(pts[pts.length - 1]);
+    return out;
+  }
+
   /** [19/09/2026 UTC] NOVO (RODADA 192) — pedido verbatim: "Deve ser possível [...] ativar
    *  desativar o bézier em partes do cabo [...] uma tecla pode servir para trocar de bézier para
    *  linha reta, então, fica um traço reto mesmo (entre um nó e outro)." `amostrarSpline` (acima)
@@ -228,7 +285,11 @@
     if (atual.length > 1) runs.push({ reto: false, pts: atual });
     const out = [];
     runs.forEach((run, ri) => {
-      let pts = run.reto ? [run.pts[0], run.pts[1]] : amostrarSpline(run.pts, nPorSeg);
+      // [22/09/2026] NOVO -- ver comentário grande de `_suavizarDobrasFechadas`: só faz sentido em trechos
+      // CURVOS (`amostrarSpline`) -- um trecho `reto` já é intencionalmente uma reta pura (usuário pediu
+      // explicitamente), então uma dobra fechada ali é respeitada como está, sem "arredondar" por cima da
+      // escolha manual do usuário.
+      let pts = run.reto ? [run.pts[0], run.pts[1]] : amostrarSpline(_suavizarDobrasFechadas(run.pts), nPorSeg);
       if (ri > 0) pts = pts.slice(1); // evita duplicar o ponto de junção entre trechos consecutivos
       out.push(...pts);
     });

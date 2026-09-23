@@ -128,6 +128,20 @@ const MapConfig = {
     // view3d.js `_trena3DSnap`/`_trena3DSnapStep`) — arredonda X/Y/Z de
     // cada ponta clicada pro múltiplo mais próximo deste passo (metros).
     trena3DSnapMetros: 0.1,
+    // [22/09/2026] NOVO -- pedido verbatim: "Nas 'configurações 3D', faça uma seção para o Access Point,
+    // com uma opção de ao sair do 'Ver em 3D', desligar o mapa de calor do Access Point." Padrão `false`
+    // (mantém o comportamento de sempre: o mapa de calor volta ao reentrar, ver view3d-rede.js
+    // `_atualizarBarrasProgressoAP`) -- ligar isto faz o AP "esquecer" a preferência "mostrar mapa" (a
+    // varredura em si continua salva, só o mapa some) toda vez que o "Ver em 3D" é fechado.
+    apDesligarMapaAoSairDoVer3D: false,
+    // [25/09/2026] NOVO -- pedido verbatim: "Ao voltar para o 'Ver em 3D', o AP acaba refazendo a sua
+    // Varredura. Coloque isso como uma opção nas 'configurações 3D' [...] Por padrão desabilitada. A outra
+    // opção é 'Manter a Varredura de Sinal Anterior'. Estas opções alternam entre si." Uma única flag
+    // guarda as DUAS opções (mutuamente exclusivas por natureza — "manter" é sempre `!refazer`, ver UI em
+    // mapconfig.js e o uso em view3d-rede.js `_atualizarBarrasProgressoAP`): `false` (padrão) = "Manter a
+    // Varredura de Sinal Anterior" — ao reentrar no "Ver em 3D", a malha/pontos/raios já calculados são só
+    // REANEXADOS na cena nova (sem refazer o raycast); `true` = refaz a varredura do zero, como sempre foi.
+    apRefazerVarreduraAoEntrarNoVer3D: false,
     // [16/09/2026 UTC] NOVO — pedido verbatim, seção "📏 Trena 3D" ganhando
     // várias subseções novas de aparência/comportamento. Ver view3d.js
     // (`_trena3DRebuildLines`/`_trena3DUpdatePreview`/`_trena3DEndpointMesh`)
@@ -3187,6 +3201,31 @@ const MapConfig = {
           <label class="map-panel-field" style="margin-top:8px"><span>Cor</span><input type="color" id="mc-luzambiente-cor" value="${cfg.luzAmbienteCor || '#ffffff'}"></label>
           <button type="button" class="btn secondary sm" id="mc-luzambiente-reset" style="margin-top:8px">Restaurar padrão (1x, branco)</button>
         </div>
+        <!-- [22/09/2026] NOVO -- pedido verbatim: "Nas 'configurações 3D', faça uma seção para o Access
+             Point, com uma opção de ao sair do 'Ver em 3D', desligar o mapa de calor do Access Point (a
+             opção 'mostrar mapa' na tela do AP deve ser um espelho do que acontecer)." Ver
+             DEFAULTS.apDesligarMapaAoSairDoVer3D acima e view3d-rede.js _v3dSairDesligarMapasAP
+             (chamada ao fechar o "Ver em 3D", quando esta opção está ligada). -->
+        <div class="mapconfig-section">
+          <h4>📡 Access Point</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-ap-desligar-ao-sair" ${cfg.apDesligarMapaAoSairDoVer3D ? 'checked' : ''}>
+            <span><span class="t">Desligar o mapa de calor ao sair do "Ver em 3D"</span><br><span class="d">Por padrão, o mapa de calor de cada Access Point volta a aparecer automaticamente ao reentrar no "Ver em 3D" (se a varredura já tiver sido feita e "mostrar mapa" estiver ativo). Ligando esta opção, o mapa de calor de TODO AP é desligado ao fechar o "Ver em 3D" — a checkbox "mostrar mapa" na tela de cada AP reflete sempre o estado real (aparecendo desmarcada na próxima vez, já que o mapa não vai estar visível).</span></span>
+          </label>
+          <!-- [25/09/2026] NOVO -- pedido verbatim: "Ao voltar para o 'Ver em 3D', o AP acaba refazendo a
+               sua Varredura. Coloque isso como uma opção [...] Por padrão desabilitada. A outra opção é
+               'Manter a Varredura de Sinal Anterior'. Estas opções alternam entre si, não podendo ficar
+               selecionadas ao mesmo tempo." As duas caixas abaixo espelham a MESMA flag
+               (apRefazerVarreduraAoEntrarNoVer3D) — marcar uma desmarca a outra na hora (ver wiring). -->
+          <label class="radio-opt" style="margin-top:10px">
+            <input type="checkbox" id="mc-ap-refazer-ao-entrar" ${cfg.apRefazerVarreduraAoEntrarNoVer3D ? 'checked' : ''}>
+            <span><span class="t">Refazer Varredura de Sinal ao entrar no "Ver em 3D"</span><br><span class="d">Desabilitada por padrão. Ligando esta opção, todo AP com "mostrar mapa" ativo refaz o raycast do zero toda vez que o "Ver em 3D" é reaberto (comportamento de sempre, mais lento). Mutuamente exclusiva com a opção abaixo.</span></span>
+          </label>
+          <label class="radio-opt" style="margin-top:6px">
+            <input type="checkbox" id="mc-ap-manter-anterior" ${cfg.apRefazerVarreduraAoEntrarNoVer3D ? '' : 'checked'}>
+            <span><span class="t">Manter a Varredura de Sinal Anterior</span><br><span class="d">Habilitada por padrão. Ao reentrar no "Ver em 3D", o mapa de calor (e os pontos/raios do raycaster) já calculados são reaproveitados na hora, sem refazer o raycast — se "mostrar mapa" estiver ativo na tela do AP, o mapa de calor continua aparecendo, exatamente como estava.</span></span>
+          </label>
+        </div>
         <!-- Seção "🔗 Item associado" (pedido do usuário, 26/08/2026) — mesmo
              destaque azul do mapa 2D (contorno + selo) pra objetos com um
              patrimônio associado (obj.itemId, ver o novo botão "📍 Adicionar
@@ -6085,6 +6124,22 @@ const MapConfig = {
       const lbl = modal.querySelector('#mc-luzambiente-int-label');
       if (lbl) lbl.textContent = '1.00x';
     });
+    // [22/09/2026] NOVO -- seção "📡 Access Point" (ver HTML acima).
+    modal.querySelector('#mc-ap-desligar-ao-sair')?.addEventListener('change', async (e) => { await this.set({ apDesligarMapaAoSairDoVer3D: e.target.checked }); });
+    // [25/09/2026] NOVO -- as 2 caixas "Refazer Varredura..."/"Manter a Varredura..." espelham a MESMA
+    // flag (`apRefazerVarreduraAoEntrarNoVer3D`) e se desmarcam uma à outra na hora (mutuamente exclusivas
+    // -- pedido verbatim: "ao selecionar uma, a outra é deselecionada").
+    {
+      const elRefazer = modal.querySelector('#mc-ap-refazer-ao-entrar'), elManter = modal.querySelector('#mc-ap-manter-anterior');
+      elRefazer?.addEventListener('change', async (e) => {
+        const v = e.target.checked; if (elManter) elManter.checked = !v;
+        await this.set({ apRefazerVarreduraAoEntrarNoVer3D: v });
+      });
+      elManter?.addEventListener('change', async (e) => {
+        const v = e.target.checked; if (elRefazer) elRefazer.checked = !v;
+        await this.set({ apRefazerVarreduraAoEntrarNoVer3D: !v });
+      });
+    }
     // NOVO (04/09/2026), item 5 — os 3 rádios do "🚀 Modo de voo 3D" (ver
     // HTML acima) gravam direto em `modoVoo3D`, lido por App.verNoMapa3D.
     modal.querySelectorAll('input[name="mc-modovoo3d"]').forEach((el) => {

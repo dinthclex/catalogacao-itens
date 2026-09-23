@@ -50,8 +50,10 @@ const APP_SHELL = [
   './js/rede-equip.js',
   './js/rede-storage-energia.js',
   './js/patch-cord.js',
+  './js/realistic-cable-bend.js',
   './js/maptxt.js',
   './js/engine3d.js',
+  './js/engine3d-rede-mesh.js',
   './js/modeler/modeler-mesh.js',
   './js/modeler/modeler-gizmo.js',
   './js/modeler/modeler-render.js',
@@ -129,4 +131,4 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
-const CACHE_VERSION = 'catalogo-v676';
+const CACHE_VERSION = 'catalogo-v698';

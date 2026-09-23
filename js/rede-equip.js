@@ -1273,11 +1273,24 @@
       else if (fam === 'ventilacao') this._box(s.larguraCorpo, H - 4, profCorpo, matCorpo, 0, H / 2, zPlacaTras - profCorpo / 2);
       else if (fam === 'tomada') this._box(W - 8, H - 8, profCorpo, matCorpo, 0, H / 2, zPlacaTras - profCorpo / 2);
       else if (fam === 'ap') {
-        // Corpo do AP + 'lente' de antena (painel escuro em relevo) + LED de status (cor conforme ligado/ativo).
+        // Corpo do AP + 'lente' de antena (painel escuro em relevo) + LEDs de status.
         this._box(W - 8, H - 8, profCorpo, matCorpo, 0, H / 2, zPlacaTras - profCorpo / 2);
         this._box(W - 60, H - 90, 2, this._mat(0xcfd4da, 0.05, 0.7), 0, H / 2 + 24, F + 1);
-        const ligado = this.opt && this.opt.apAtivo;
-        this._box(8, 4, 1.2, this._mat(ligado ? 0x3ecb6e : 0x545a63, 0.1, 0.4), 0, 14, F + 0.6);
+        // [22/09/2026] NOVO -- pedido verbatim: "Coloque LEDs no modelo do Access Point como no padrão
+        // usado no mercado." Um AP de parede/teto real (Ubiquiti/Cisco/TP-Link/Aruba etc.) costuma ter
+        // uma FILEIRA de LEDs redondos pequenos na frente, cada um indicando um estado PRÓPRIO -- Energia
+        // (aceso quando ligado), Rede/LAN (aceso quando há cabo na porta RJ-45) e Wi-Fi/Sinal (aceso só
+        // quando de fato EMITINDO sinal, ou seja, ligado E com cabo). Antes havia só 1 LED quadrado único
+        // já combinando "ligado+cabo" num estado só (`apAtivo`, ver `engine3d-rede-mesh.js`) -- virou 3
+        // LEDs redondos (mais próximo do padrão real), cada um refletendo só o seu próprio estado.
+        const ligado = !!(this.opt && this.opt.ligado);
+        const emiteSinal = !!(this.opt && this.opt.apAtivo); // já é "ligado E com cabo" (ver engine3d-rede-mesh.js)
+        const temCabo = emiteSinal; // AP só chega a `apAtivo` com energia + cabo — mesma condição aqui
+        const matLed = (on, corOn) => this._mat(on ? corOn : 0x2c3034, on ? 0.1 : 0.3, on ? 0.35 : 0.75);
+        const ledGeo = () => { const g = new T.CylinderGeometry(1.7, 1.7, 1.1, 14); g.rotateX(Math.PI / 2); return g; };
+        this._mesh(ledGeo(), matLed(ligado, 0x3ecb6e), -11, 14, F + 0.6);       // Energia (verde)
+        this._mesh(ledGeo(), matLed(temCabo, 0x2f6fdb), 0, 14, F + 0.6);        // Rede/LAN (azul)
+        this._mesh(ledGeo(), matLed(emiteSinal, 0xf5c518), 11, 14, F + 0.6);    // Wi-Fi/Sinal (âmbar)
         [-1, 1].forEach((sx) => this._box(4, H - 100, 6, this._mat(0xb9bec6, 0.2, 0.6), sx * (W / 2 - 22), H / 2 + 24, F + 3));   // aletas de antena
       }
       else if (fam === 'frente') this._box(s.larguraCorpo, H - 4, profCorpo, matCorpo, 0, H / 2, zPlacaTras - profCorpo / 2);

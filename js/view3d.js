@@ -1167,6 +1167,22 @@ const View3D = {
         this._camera.pitch = Number.isFinite(cfgInicial.mapa2DApontamentoRecargaPitch) ? cfgInicial.mapa2DApontamentoRecargaPitch : 0;
       }
     }
+    // [22/09/2026] NOVO -- pedido verbatim: "Ao voltar para o 'Ver em 3D', o personagem deve preservar os
+    // seus estados de posição, apontamento de câmera e se a gravidade estava desligada ou não [...]
+    // Atualmente, se o personagem está com a gravidade desligada [...] e 'voando' no mapa 3D, quando sai do
+    // 3D e volta de novo, acaba por voltar no chão." `View3D` é um módulo SINGLETON (nunca `new View3D()`,
+    // ver comentário grande no topo do arquivo) -- `this` sobrevive intacto entre um `unmount()` e o próximo
+    // `mount()`, então basta guardar o estado final em `this._v3dEstadoSalvo` (ver `unmount()`, mais abaixo)
+    // e reaplicá-lo aqui, DEPOIS de tudo acima (inclusive do ramo `_personagem2D`, que só tem x/z/yaw, sem
+    // pitch/gravidade) -- este bloco tem prioridade porque carrega o estado MAIS COMPLETO e MAIS RECENTE
+    // (a última vez que "Ver em 3D" foi fechado), independente de o jogador ter mexido no 2D nesse meio-tempo.
+    if (this._v3dEstadoSalvo) {
+      const s = this._v3dEstadoSalvo;
+      if ([s.x, s.y, s.z, s.yaw, s.pitch].every(Number.isFinite)) {
+        this._camera = { x: s.x, y: s.y, z: s.z, yaw: s.yaw, pitch: s.pitch };
+      }
+      if (typeof s.gravityEnabled === 'boolean') this._gravityEnabled = s.gravityEnabled;
+    }
     // Guarda a pose do personagem só depois de parada pelo tempo configurado em "configurações do app" (ver MapConfig.autoGuardarPose).
     if (this._stopAutoPose3D) this._stopAutoPose3D();
     this._stopAutoPose3D = (typeof MapConfig !== 'undefined' && MapConfig.autoGuardarPose) ? MapConfig.autoGuardarPose(() => {
@@ -1350,6 +1366,14 @@ const View3D = {
 
   unmount() {
     if (this._stopAutoPose3D) { this._stopAutoPose3D(); this._stopAutoPose3D = null; }
+    // [22/09/2026] NOVO -- "Configurações 3D" → seção "📡 Access Point" → "Desligar o mapa de calor ao
+    // sair do 'Ver em 3D'" (ver mapconfig.js DEFAULTS.apDesligarMapaAoSairDoVer3D). Roda ANTES de
+    // qualquer outro passo (mesmo motivo do comentário grande logo abaixo sobre a Trena 3D: se algo
+    // adiante falhar, isto ainda precisa ter rodado) -- desliga `ap.mostrar` (não só esconde a malha:
+    // grava a PREFERÊNCIA, pra a checkbox "mostrar mapa" de cada AP vir DESMARCADA da próxima vez,
+    // "espelho do que realmente acontece" como pedido).
+    try { this._v3dSairDesligarMapasAP?.(); } catch (err) { /* nada a limpar */ }
+    try { this._wfMiniLimparContainer?.(); } catch (err) { /* nada a limpar */ }
     // [18/09/2026 UTC] RODADA 167 -- devolve o item carregado / remove overlays (view3d-rede.js)
     try {
       this._menuFecharRede?.(); this._redeCancelar?.(false); this._redeHint?.(null);
@@ -1439,6 +1463,18 @@ const View3D = {
     // câmera montada (`this._camera` existe desde o início de mount(), mas
     // só faz sentido escrever de volta se chegou a haver mapa/cena de
     // verdade — `this._map`).
+    // [22/09/2026] NOVO -- ver comentário grande em `mount()` (bloco `_v3dEstadoSalvo`). Guarda o estado
+    // COMPLETO (posição/apontamento/gravidade) do personagem pra a PRÓXIMA `mount()` restaurar exatamente --
+    // antes do reset feito por `dispose()`/dos campos abaixo, e independente do checkbox
+    // `mapa2DPersistirApontamentoPersonagem` (que só cobre yaw/pitch entre SESSÕES/recarregamentos de
+    // página; isto aqui é dentro da MESMA sessão, sempre ativo, sem opção pra desligar -- pedido verbatim).
+    if (this._camera) {
+      this._v3dEstadoSalvo = {
+        x: this._camera.x, y: this._camera.y, z: this._camera.z,
+        yaw: this._camera.yaw, pitch: this._camera.pitch,
+        gravityEnabled: this._gravityEnabled,
+      };
+    }
     if (this._camera && this._map && window.MapView) {
       // yaw -> ângulo 2D é o inverso exato da conversão em mount() (yaw =
       // angulo - 90°), logo angulo = yaw + 90°.
@@ -7961,6 +7997,18 @@ const View3D = {
       // em `window`, ver Modeler3D._bindEvents) — os dois nunca devem agir
       // ao mesmo tempo sobre a mesma tecla.
       if (window.Modeler3D?.isActive?.()) return;
+      // [22/09/2026] NOVO -- pedido verbatim: "quando um campo de inserção de valor assumir o foco, as
+      // setas devem ficar nele [...] ao clicar em um campo de número [...] e pressionar a seta [...] o
+      // scroll é que acaba acontecendo". Causa: este handler global de teclado (câmera/atalhos) capturava
+      // TODA tecla, inclusive com um <input>/<select>/<textarea> focado (ex.: campos da janela do AP), sem
+      // nenhum guard -- a seta chegava tanto no campo (spinner nativo) quanto aqui (`_keys.ArrowUp`/
+      // `ArrowDown`, usado pro voo vertical da câmera). Com um campo de formulário focado, este handler
+      // simplesmente não age (deixa o navegador tratar a tecla normalmente no campo) -- Escape continua
+      // passando, pra não travar o Esc de sair/fechar.
+      {
+        const alvoTecla = e.target;
+        if (alvoTecla && e.code !== 'Escape' && (alvoTecla.tagName === 'INPUT' || alvoTecla.tagName === 'TEXTAREA' || alvoTecla.tagName === 'SELECT' || alvoTecla.isContentEditable)) return;
+      }
       // [18/09/2026 UTC] NOVO (RODADA 154) — pedido verbatim do usuário,
       // depois de ver (via watchdog/log) que o salto de yaw/pitch ainda
       // sobrevivia às camadas de guard anteriores (`_pointerLockExitBlocking`

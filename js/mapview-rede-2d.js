@@ -119,6 +119,19 @@ class Map2DRendererRedeMixin {
       const opacidade = (apExistente && apExistente.opacidade2D != null) ? apExistente.opacidade2D
         : ((obj.rede && obj.rede.ap && obj.rede.ap.opacidade2D) != null ? obj.rede.ap.opacidade2D : 1);
       if (opacidade <= 0) return;
+      // [22/09/2026] NOVO -- pedido verbatim: "mesmo estando a opção 'mostrar mapa' já ativada ... tem que
+      // desativar e ativar de novo para o desenho do mapa de calor do sinal aparecer no mapa 2D." Causa raiz:
+      // nem o caminho principal (malha 3D projetada, logo abaixo) nem este método como um todo checavam
+      // `mostrar`/`mostrar2D` -- só o FALLBACK (`WS.calcularCorte2D`, mais abaixo) respeitava o toggle. Ou
+      // seja, assim que existisse uma instância de AP com malha 3D anexada (`apExistente.temMalha`), o mapa
+      // de calor 2D era desenhado incondicionalmente, ignorando "mostrar mapa" -- e só "desligava" de fato
+      // quando `temMalha` ficava falso (engine 3D não mais viva) e caía no fallback, que aí sim checava o
+      // flag. Agora este método consulta `mostrar` (fonte única de verdade -- `ap.mostrar`/`obj.rede.ap.
+      // mostrar2D`, ver getter/setter em wifi-signal.js) UMA VEZ, ANTES de escolher qualquer caminho, então o
+      // toggle vale pros dois (principal e fallback) e é respeitado a cada quadro, sem precisar re-clicar o
+      // checkbox pra "forçar" um redesenho.
+      const mostrarLigado = apExistente ? apExistente.mostrar : !(obj.rede && obj.rede.ap && obj.rede.ap.mostrar2D === false);
+      if (!mostrarLigado) return;
 
       // Caminho principal (malha 3D real, com todos os obstáculos) -- só disponível depois de 1 varredura.
       if (apExistente && apExistente.emiteSinal && apExistente.temMalha) {

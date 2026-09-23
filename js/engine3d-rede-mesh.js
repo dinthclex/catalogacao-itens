@@ -418,9 +418,18 @@ class Engine3DRedeMeshMixin {
    *  ainda envolvêssemos o resultado inteiro numa única `CatmullRomCurve3`, como o código fazia antes).
    *  Sem nenhum ponto `reto`, o resultado equivale a uma única `CatmullRomCurve3(ctrl)` (comportamento de
    *  sempre). Devolve `null` se `ctrl` tiver menos de 2 pontos. */
-  _curvaDeRotaCabo(ctrl) {
+  // [23/09/2026 UTC] AMPLIADO -- pedido verbatim do usuário: "O cabo está torcido ao fazer uma conexão a
+  // 180°." + "Onde está a implementação do 'realistic-cable-bend' [...] isto é para quando se chega em um
+  // equipamento e pressiona a tecla 'L' [...] é aí que esta implementação das curvas do cabo devem
+  // funcionar." `js/realistic-cable-bend.js` (módulo isolado, ver comentário grande dele) passa a ser
+  // consumido AQUI -- a função que monta a curva de TODO cabo desenhado no modo 'Lógica' (`rebuildCabos`)
+  // e durante o arraste ao vivo (`caboAtualizarTuboVivo`), ambos já chamavam `_curvaDeRotaCabo`. Novo 2º
+  // parâmetro opcional `minRaioDobraM` (raio de curvatura físico mínimo, em metros -- ver chamadores).
+  _curvaDeRotaCabo(ctrl, minRaioDobraM) {
     const THREE = this.THREE;
     if (!Array.isArray(ctrl) || ctrl.length < 2) return null;
+    const RCB = window.RealisticCableBend;
+    const minR = Math.max(0.01, minRaioDobraM || 0.025); // ~raio de curvatura mínimo físico (Cat6/Cat6A: ~4x o diâmetro)
     const runs = [];
     let atual = [ctrl[0]];
     for (let i = 0; i < ctrl.length - 1; i++) {
@@ -435,8 +444,30 @@ class Engine3DRedeMeshMixin {
     if (atual.length > 1) runs.push({ reto: false, pts: atual });
     const path = new THREE.CurvePath();
     runs.forEach((run) => {
-      const vs = run.pts.map((p) => new THREE.Vector3(p.x, p.y, p.z));
-      path.add(run.reto ? new THREE.LineCurve3(vs[0], vs[1]) : new THREE.CatmullRomCurve3(vs, false, 'centripetal'));
+      if (run.reto) {
+        const vs = run.pts.map((p) => new THREE.Vector3(p.x, p.y, p.z));
+        path.add(new THREE.LineCurve3(vs[0], vs[1]));
+        return;
+      }
+      // CAUSA RAIZ do torcer em 180°: mesmo com o "Parallel Transport Frame" de `_buildTuboEstavel` (ver
+      // comentário grande lá -- aquele bug, de saltar 180° de referência entre 2 pontos vizinhos, já foi
+      // corrigido antes), uma dobra LITERALMENTE de ~180° entre só 2-3 pontos de controle crus ainda faz a
+      // TANGENTE da curva reverter quase instantaneamente num único ponto -- o PTF então precisa girar a
+      // seção transversal quase 180° num único anel pra continuar "de pé" (perpendicular à tangente), o
+      // que parece uma torção mesmo sem nenhum bug de referência: é a rota em si que dobra de forma não
+      // física ali. CORRIGIDO: antes de montar a spline, os pontos deste trecho passam por
+      // `RealisticCableBend.generateRealisticBendPath` -- nunca deixa a rota reverter em cima de si mesma:
+      // dobras moderadas viram um arco circular de raio físico mínimo (`minR`), dobras fechadas (perto de
+      // 180°) viram uma pequena "barriga" lateral de alívio de tensão (ver comentário grande no próprio
+      // arquivo `realistic-cable-bend.js`). Com a tangente nunca mais revertendo de golpe, o PTF não
+      // precisa mais girar a seção quase 180° num só anel -- some a última fonte visual de torção.
+      let vs = run.pts;
+      if (RCB && vs.length >= 3) {
+        const suavizados = RCB.generateRealisticBendPath(vs[0], vs[vs.length - 1], vs.slice(1, -1), minR);
+        if (Array.isArray(suavizados) && suavizados.length >= 2) vs = suavizados;
+      }
+      const vsThree = vs.map((p) => new THREE.Vector3(p.x, p.y, p.z));
+      path.add(new THREE.CatmullRomCurve3(vsThree, false, 'centripetal'));
     });
     return path;
   }
@@ -673,8 +704,8 @@ class Engine3DRedeMeshMixin {
     // `.reto` via `amostrarRotaComRetas`; a curva do TUBO (`curva`) é montada à parte, DIRETO de `r.ctrl`
     // (ver `_curvaDeRotaCabo`), pra um trecho reto ficar de fato reto (sem re-suavizar numa 2ª spline).
     const pts = RP ? RP.amostrarRotaComRetas(r.ctrl, 12) : r.ctrl;
-    const curva = this._curvaDeRotaCabo(r.ctrl) || new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(p.x, p.y, p.z)), false, 'centripetal');
     const dMm = RE.diametroCabo(c), raio = Math.max(0.0012, dMm / 2000);
+    const curva = this._curvaDeRotaCabo(r.ctrl, Math.max(0.02, raio * 8)) || new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(p.x, p.y, p.z)), false, 'centripetal');
     const novaGeo = this._buildTuboEstavel(curva, Math.min(220, Math.max(24, pts.length * 2)), raio, 6);
     let tubo = null;
     this._cabosGroup.traverse((n) => { if (!tubo && n.isMesh && n.userData.caboId === caboId && n.geometry?.type === 'TubeGeometry') tubo = n; });
@@ -854,9 +885,9 @@ class Engine3DRedeMeshMixin {
       // tubo é montada DIRETO dos pontos de controle via `_curvaDeRotaCabo` (respeita `.reto` -- trecho
       // reto fica reto de verdade). Com bunching, `r.ctrl` não sobrevive a `agruparFeixes` (as amostras já
       // foram puxadas em direção às cintas), então cai no comportamento de sempre (spline sobre `r.pts`).
-      const curva = (r.ctrl && this._curvaDeRotaCabo(r.ctrl))
-        || new THREE.CatmullRomCurve3(r.pts.map((p) => new THREE.Vector3(p.x, p.y, p.z)), false, 'centripetal');
       const raio = Math.max(0.0012, m.dMm / 2000);
+      const curva = (r.ctrl && this._curvaDeRotaCabo(r.ctrl, Math.max(0.02, raio * 8)))
+        || new THREE.CatmullRomCurve3(r.pts.map((p) => new THREE.Vector3(p.x, p.y, p.z)), false, 'centripetal');
       const tubo = new THREE.Mesh(this._buildTuboEstavel(curva, Math.min(220, Math.max(24, r.pts.length * 2)), raio, 6), mat);
       tubo.userData.caboId = c.id;
       g.add(tubo);

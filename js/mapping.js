@@ -230,7 +230,7 @@ const Mapping = {
       (map.objects || []).forEach((o) => {
         if (!window.RedeEquip.ehEquipRede(o.tipo)) return;
         window.RedeEquip.garantirRede(o);
-        if (o.forma !== 'retangulo') Object.assign(o, window.RedeEquip.patchParaObjeto(o.tipo));
+        if (o.tipo !== 'access_point' && o.forma !== 'retangulo') Object.assign(o, window.RedeEquip.patchParaObjeto(o.tipo));
         if (!(Array.isArray(o.components) && o.components.length)) o.components = window.RedeEquip.componentesPadrao(o.tipo, (p) => Utils.uid(p));
       });
       window.RedeEquip.sincronizarNoRack(map);
@@ -1333,7 +1333,13 @@ const Mapping = {
     // isso ja define a elevacao, entao o empilhamento automatico abaixo nao entra.
     if (window.RedeEquip?.ehEquipRede(tipo)) {
       window.RedeEquip.garantirRede(obj);
-      Object.assign(obj, window.RedeEquip.patchParaObjeto(tipo));
+      // [22/09/2026] MUDADO -- pedido verbatim: o Access Point deve ficar com a MESMA forma
+      // (retangular, com o desenho do SVG) tanto no "ghost" quanto no objeto colocado no mapa.
+      // O patch abaixo vem do catálogo de rede (js/rede-equip.js), que guarda dimensões em
+      // milímetros pensadas pra equipamento de rack (switch/patch panel) -- pro AP, aplicado
+      // por cima, ele reintroduzia a forma antiga (fina, sem ícone visível). O AP já ganhou a
+      // forma certa em applyDefaultShapeToObject (acima) usando o perfil 3D -- não sobrescreve.
+      if (tipo !== 'access_point') Object.assign(obj, window.RedeEquip.patchParaObjeto(tipo));
       if (!(Array.isArray(obj.components) && obj.components.length)) {
         obj.components = window.RedeEquip.componentesPadrao(tipo, (p) => Utils.uid(p));
       }
@@ -1631,11 +1637,30 @@ const Mapping = {
     if (!tipo) return null;
     const perfil = window.OBJECT3D_PROFILES?.[tipo] || window.OBJECT3D_DEFAULT_PROFILE;
     if (!perfil) return null;
-    const cor = `#${(perfil.color ?? 0x8a92a3).toString(16).padStart(6, '0')}`;
+    // [24/09/2026] CORRIGIDO -- pedido verbatim: "Acho que sei por que o SVG não aparece, no mapa 2D, é
+    // porque o fundo da caixa é branca e o SVG é branco, então, não gera contraste. Faça no mesmo modelo
+    // do Rack (fundo preto e SVG branco)." Confere: o AP usa `perfil.color` (0xe9ebee, quase branco — a cor
+    // real da placa frontal dele em 3D, onde o cabo é ligado) também como cor de FUNDO do retângulo no
+    // mapa 2D — e o ícone (Icons.dataUrlForKey) é um SVG branco, então sumia sem contraste nenhum. O Rack
+    // nunca teve esse problema porque seu `perfil.color` (0x2b2f36, escuro) já é de fábrica — reusa a
+    // MESMA cor aqui só pro FUNDO 2D do AP (não mexe no 3D, onde o branco da placa é real/intencional).
+    const cor = (tipo === 'access_point') ? '#2b2f36' : `#${(perfil.color ?? 0x8a92a3).toString(16).padStart(6, '0')}`;
     if (perfil.shape === 'cylinder' || perfil.shape === 'cone') {
       return { forma: 'poligono', raio: perfil.r || 0.3, lados: 24, altura: perfil.h || 0.5, cor };
     }
-    return { forma: 'retangulo', largura: perfil.w || 0.4, profundidade: perfil.d || 0.4, altura: perfil.h || 0.5, cor };
+    // [22/09/2026] CORRIGIDO -- pedido verbatim: "ao colocar na grade do mapa 2D, fica com um desenho
+    // retangular e sem o desenho do SVG. Ambos devem ser iguais (Retangular e com o desenho do SVG)."
+    // O ícone (Icons.dataUrlForKey) JÁ era desenhado por cima da forma daqui (ver mapview.js
+    // _drawFormaShape) -- mas o perfil 3D do AP (engine3d-profiles.js: `w:0.2, d:0.04`) é uma caixa
+    // BEM FINA -- os 4cm são a espessura do aparelho saindo da parede em 3D, não um tamanho pra ver de
+    // CIMA -- e o tamanho do ícone usa o MENOR lado da caixa (`Math.min(iconBoxPx.w, iconBoxPx.h)`),
+    // então saía minúsculo/quase invisível. Uma tentativa anterior forçou footprint QUADRADO (lado =
+    // w) pro AP -- ficou com o ícone visível, mas o usuário pediu retangular, não quadrado. Em vez de
+    // usar o `d` fino (3D) ou igualar a `w` (quadrado), a profundidade 2D usa uma fração maior de `w`
+    // -- retangular de verdade, mas funda o suficiente pro ícone não ficar espremido.
+    const largura2D = perfil.w || 0.4;
+    const profundidade2D = (tipo === 'access_point') ? Math.max(perfil.d || 0.04, largura2D * 0.55) : (perfil.d || 0.4);
+    return { forma: 'retangulo', largura: largura2D, profundidade: profundidade2D, altura: perfil.h || 0.5, cor };
   },
 
   /** Aplica o formato padrão acima (ver defaultShapeForTipo) num objeto que
@@ -1647,6 +1672,24 @@ const Mapping = {
    *  forma desenhada de propósito, nem quando não há perfil conhecido pro
    *  tipo (tipo vazio ou window.OBJECT3D_PROFILES ainda não carregado). */
   applyDefaultShapeToObject(o) {
+    // [23/09/2026] NOVO -- pedido verbatim: "No mapa 2D, o ghost do Access Point aparece quadrado e com o
+    // SVG, porém, ao colocar na grade do mapa 2D, fica retangular e sem o SVG." Causa: este método GRAVA
+    // (`Object.assign`) `forma`/`largura`/`profundidade` DIRETO no objeto na hora da criação -- depois disso
+    // `objectFootprintFor` vê `o.forma === 'retangulo'` já explícito e usa esses valores CONGELADOS pra
+    // sempre, sem nunca re-consultar `defaultShapeForTipo` de novo. APs criados/salvos ANTES da correção do
+    // footprint 2D do AP (que passou a ser quadrado, ver `defaultShapeForTipo` abaixo) ficaram com a largura/
+    // profundidade RETANGULAR antiga (herdada do perfil 3D fino de parede, 0,2×0,04m) congelada — e como o
+    // ícone SVG é dimensionado por `Math.min(largura,altura)` (ver mapview.js `_drawFormaShape`), a
+    // profundidade de 4cm reduzia o ícone a ~0px (por isso "sem o SVG"). O ghost (objeto temporário sem
+    // `forma` ainda gravada) sempre usava `defaultShapeForTipo` ao vivo, por isso já saía quadrado — daí a
+    // diferença visual reportada. Correção: pro Access Point, sempre RE-DERIVA do `defaultShapeForTipo`
+    // atual (ignora o que já estava congelado), tanto na criação quanto na migração de mapas antigos
+    // (`ensureNewFields`, mais abaixo, roda isto pra todo objeto do mapa ao carregar).
+    if (o && o.tipo === 'access_point') {
+      const shape = this.defaultShapeForTipo(o.tipo);
+      if (shape) Object.assign(o, shape);
+      return;
+    }
     if (!o || o.forma === 'retangulo' || o.forma === 'poligono' || o.forma === 'imagem') return;
     const shape = this.defaultShapeForTipo(o.tipo);
     if (!shape) return;
