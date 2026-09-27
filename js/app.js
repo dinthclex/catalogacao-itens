@@ -73,7 +73,8 @@ const App = {
     },
     caixa: {
       async mount(container) {
-        await PhotoGrid.mountCaixaScreen(container, { onClose: () => App.back('tabela') });
+        // [26/09/2026] MUDADO -- sem histórico, "Fechar" volta pra 'Mapa' em 'Mapeamento de ambientes' ('Tabela' não existe no rodapé desse modo).
+        await PhotoGrid.mountCaixaScreen(container, { onClose: () => App.back(window.ClassicMode?.isModoMapeamento?.() ? 'mapa' : 'tabela') });
         return PhotoGrid;
       },
       // `App.navigate()` chama `prev.unmount()` SEM argumento nenhum (ver
@@ -138,9 +139,50 @@ const App = {
     host.id = 'save-status-host';
     host.style.cssText = [
       'position:fixed', 'top:calc(8px + env(safe-area-inset-top,0))', 'right:calc(8px + env(safe-area-inset-right,0))',
-      'z-index:9999', 'pointer-events:none', 'display:flex', 'flex-direction:column', 'align-items:flex-end', 'gap:4px',
+      // [26/09/2026] CORRIGIDO -- pedido verbatim: "As mensagens 'Lendo
+      // arquivo (x/x)...' e 'Salvando mapa, tipo, fotos' e 'Salvando
+      // (x/x)...' devem ficar acima de tudo. Em algum momento, já tendo
+      // feito ao menos uma importação, em uma outra importação, as
+      // mensagens ficaram atrás da tela das 'configurações do app'." --
+      // z-index era 9999, alto mas não necessariamente maior que TUDO no
+      // app (ex.: WindowManager registra alguns painéis com z-index bem
+      // maiores, como 2147483600 no modal de confirmação da Fábrica em
+      // settings.js, que eleva o piso usado por outros painéis
+      // dinâmicos depois disso). Sobe pro maior z-index válido em CSS
+      // (2147483647), garantindo "acima de tudo" de forma incondicional.
+      'z-index:2147483647', 'pointer-events:none', 'display:flex', 'flex-direction:column', 'align-items:flex-end', 'gap:4px',
     ].join(';');
     document.body.appendChild(host);
+    // [25/09/2026] NOVO -- pedido verbatim: "Enquanto não estiver tudo
+    // finalizado, deve aparecer junto um ícone girando animado. Pois a
+    // barrinha chega ao 100%, porém ainda vai salvar os arquivos. Durante
+    // todo o processo deve ter algum ícone animado, informando visualmente
+    // que está sendo processado o 'importar backup'." -- linha (row) com o
+    // ícone girando à esquerda do selo; o ícone só aparece enquanto o "modo
+    // em lote" (setBulkSaveStatus) estiver ativo, e só some em
+    // clearBulkSaveStatus (chamado no finally do #st-import, DEPOIS de
+    // tudo -- fotos, mapas, itens e atualização das telas -- terminar).
+    if (!document.getElementById('save-status-spin-style')) {
+      const st = document.createElement('style');
+      st.id = 'save-status-spin-style';
+      st.textContent = '@keyframes catSaveSpin { to { transform: rotate(360deg); } }';
+      document.head.appendChild(st);
+    }
+    const row = document.createElement('div');
+    row.id = 'save-status-row';
+    row.style.cssText = 'display:flex; align-items:center; gap:6px; pointer-events:none';
+    host.appendChild(row);
+    const spin = document.createElement('div');
+    spin.id = 'save-status-spinner';
+    spin.setAttribute('aria-label', 'Processando');
+    spin.style.cssText = [
+      'display:none', 'width:16px', 'height:16px', 'border-radius:50%', 'box-sizing:border-box',
+      'border:3px solid rgba(79,140,255,.25)', 'border-top-color:#4f8cff',
+      'animation:catSaveSpin .8s linear infinite', 'box-shadow:0 2px 8px rgba(0,0,0,.35)',
+      'background:rgba(10,13,17,.55)', 'flex:0 0 auto',
+    ].join(';');
+    row.appendChild(spin);
+    this._saveStatusSpinner = spin;
     const el = document.createElement('div');
     el.id = 'save-status-bar';
     el.style.cssText = [
@@ -151,7 +193,7 @@ const App = {
       'transition:opacity .25s ease, background-color .25s ease',
       'white-space:nowrap', 'max-width:60vw', 'overflow:hidden', 'text-overflow:ellipsis',
     ].join(';');
-    host.appendChild(el);
+    row.appendChild(el);   // [25/09/2026] MUDADO -- dentro da linha do ícone girando (antes: host.appendChild)
     // Barrinha de progresso do "modo em lote" (pedido do usuário v310: itens
     // 1-3 — ver comentário grande logo abaixo de `setBulkSaveStatus`) — fica
     // dentro do MESMO host fixo do selo acima, logo abaixo dele, escondida
@@ -237,6 +279,8 @@ const App = {
     if (!this._saveStatusEl) this._initSaveStatusBar();
     this._bulkSaveActive = true;
     this._saveStatusShow(text, bg);
+    // [25/09/2026] NOVO -- ícone girando durante TODO o modo em lote (ver comentário em _initSaveStatusBar).
+    if (this._saveStatusSpinner) this._saveStatusSpinner.style.display = 'block';
     if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {
       const pct = Math.max(0, Math.min(100, (current / total) * 100));
       this._saveStatusBarFill.style.width = pct + '%';
@@ -254,6 +298,7 @@ const App = {
    *  fixo, não substitui esse resumo. */
   clearBulkSaveStatus() {
     this._bulkSaveActive = false;
+    if (this._saveStatusSpinner) this._saveStatusSpinner.style.display = 'none';   // [25/09/2026] NOVO -- só aqui o ícone girando some
     if (this._saveStatusBarWrap) this._saveStatusBarWrap.style.opacity = '0';
     if (this._saveStatusEl) this._saveStatusHideLater?.(400);
   },
@@ -388,7 +433,13 @@ const App = {
       // atualizado na mesma rodada pra chamar `BSPLayout.mount()` na 1ª
       // vez em vez de só `_render()`) — nunca antes disso, nunca
       // bloqueando a tela Clássica.
-      const prefereClassico = ClassicMode.readCachedPref() === 'classic';
+      // [24/09/2026] MUDADO -- pedido verbatim: "O padrao de fabrica do app
+      // o 'layout classico'. Atualmente, esta o 'Workspace'." `null` (cache
+      // ainda ausente -- 1a visita/instalacao nova) agora tambem conta como
+      // preferindo o Clássico, ja que esse passou a ser o padrao de fabrica
+      // (ver mesma mudanca em classicmode.js `restoreFromSettings()`).
+      const _cachedLayoutPref = ClassicMode.readCachedPref();
+      const prefereClassico = _cachedLayoutPref === 'classic' || _cachedLayoutPref === null;
       if (prefereClassico) {
         console.log('[BOOT] modo Clássico em cache — entrando direto (Workspace/BSP não é montado agora)...');
         this._safe('Session.init', () => Session.init());
@@ -499,7 +550,11 @@ const App = {
         // [19/09/2026 UTC] RODADA 192 -- pedido verbatim: "por padrao, quando for
         // o modo 'Mapeamento de ambientes', deve ficar a tela do 'Caixa'"
         // -- trocado de 'planta' (RODADA de 15/09) pra 'caixa'.
-        if (telaInicialPadrao === 'mapa' && typeof MapView !== 'undefined') MapView._forcarTelaInicial = 'caixa';
+        // [26/09/2026] CORRIGIDO -- pedido verbatim: "Certifique-se que sempre que um dos botões de rodapé ('Tabela', 'Cartões', 'Foto', 'Mapa', 'Buscar' (modo de operação 'Conferência de patrimônios') ou '3D', 'Caixa', 'Foto', 'Mapa', 'Buscar' (modo de operação 'Mapeamento de ambientes')) estiver destacado, a tela que deve estar aparecendo é a tela correspondente àquele botão do rodapé que estiver habilitado." -- antes, o boot em
+        // 'Mapeamento de ambientes' abria App 'mapa' com a sub-tela Caixa do MapView (o rodapé destacava 'Mapa'
+        // mostrando a Caixa). Agora abre direto a tela 'caixa' do roteador (a MESMA PhotoGrid.mountCaixaScreen),
+        // que é a tela do botão 'Caixa' do rodapé -- o destaque bate com o que está na tela.
+        if (telaInicialPadrao === 'mapa') telaInicialPadrao = 'caixa';
         console.log(`[BOOT] navigate(${telaInicialPadrao}): iniciando (tela principal ainda não está na tela)...`);
         await this.navigate(telaInicialPadrao);
         console.log(`[BOOT] navigate(${telaInicialPadrao}): concluído em ${(performance.now() - this._dbgBootInicio).toFixed(0)}ms desde o início do boot — tela principal já visível a partir daqui.`);
@@ -717,12 +772,21 @@ const App = {
     const banner = document.getElementById('conf-nome-banner');
     if (!banner) return;
     try {
-      const [nome, modoOperacao] = await Promise.all([
-        DB.getSetting('conferenciaNome', ''),
-        DB.getSetting(window.ClassicMode?._OPMODE_KEY || 'classicOperationMode', ''),
-      ]);
+      const nome = await DB.getSetting('conferenciaNome', '');
       const temNome = !!(nome && nome.trim());
-      const modoMapeamento = modoOperacao === 'mapeamento';
+      // [26/09/2026] CORRIGIDO -- pedido verbatim: "Em 'configurações do
+      // app', ao voltar as configurações de fábrica, ainda fica atrás da
+      // Tela de Abertura sendo exibido a mesma mensagem em uma caixa
+      // amarela ('Defina o nome para a conferência de patrimônios'). Está
+      // mensagem é do modo de operação do app 'Conferência de
+      // patrimônios'." CAUSA: aqui lia a config crua 'classicOperationMode'
+      // no banco, que fica vazia ('') até o usuário escolher um modo
+      // explicitamente — mesmo a Configuração de Fábrica já deixando o
+      // app no modo "Mapeamento de ambientes" por padrão (ver
+      // classicmode.js isModoMapeamento(), que trata modo não-definido
+      // como Mapeamento). Agora usa esse mesmo heurístico em cache/síncrono
+      // em vez de reler a config crua, então o banner já nasce escondido.
+      const modoMapeamento = window.ClassicMode ? window.ClassicMode.isModoMapeamento() : false;
       banner.classList.toggle('hidden', temNome || modoMapeamento);
     } catch (e) {
       // Sem banco disponível ainda (ex: bem no início do boot) — deixa
@@ -807,12 +871,19 @@ const App = {
       <div class="settings-fullscreen-body" id="settings-fullscreen-body"></div>
     `;
     document.body.appendChild(el);
+    // [26/09/2026] NOVO -- HUD de performance e botões ↶/↷ ficam À FRENTE da tela de Configurações enquanto ela está
+    // aberta (pedido verbatim: "devem ter a sua ativação imediata e ficar mais a frente de tudo") -- ver
+    // Perf.trazerParaFrente / History.trazerParaFrente.
+    try { window.Perf?.trazerParaFrente?.(true); } catch (e) { /* ignora */ }
+    try { window.History?.trazerParaFrente?.(true); } catch (e) { /* ignora */ }
     const fechar = () => {
       // SettingsView.unmount() só zera a referência interna do container
       // (ver settings.js) — não precisa "desfazer" nada visualmente porque o
       // <div> inteiro (com tudo dentro) é removido do DOM logo em seguida.
       window.SettingsView?.unmount?.();
       el.remove();
+      try { window.Perf?.trazerParaFrente?.(false); } catch (e) { /* ignora */ }
+      try { window.History?.trazerParaFrente?.(false); } catch (e) { /* ignora */ }
     };
     el.querySelector('#settings-fullscreen-close').onclick = fechar;
     // Esc fecha também (mesmo padrão de outras telas cheias do app, como o
@@ -978,6 +1049,20 @@ const App = {
     return 'tabela';
   },
 
+  /** [26/09/2026] NOVO -- pedido verbatim: "Certifique-se que sempre que um dos botões de rodapé [...] estiver
+   *  destacado, a tela que deve estar aparecendo é a tela correspondente àquele botão do rodapé que estiver
+   *  habilitado." -- reaplica o destaque (.active) dos 2 rodapés (Clássico .bottomnav e 'Botões' do Workspace)
+   *  a partir de App.currentView. Chamado depois das trocas animadas de botões (troca de modo de operação),
+   *  cujos botões novos só entram no DOM ~400ms depois (Utils.animateFooterButtonSwap). */
+  _sincronizarDestaqueRodape() {
+    const aplicar = () => {
+      const v = this.currentView;
+      document.querySelectorAll('.bottomnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
+    };
+    aplicar();
+    setTimeout(aplicar, 450);
+  },
+
   async back(fallback = 'tabela') {
     const target = this._navStack.pop() || fallback;
     await this.navigate(target, { isBack: true });
@@ -1106,7 +1191,9 @@ const App = {
     const target = veioDoRodape
       ? (this._navStack.pop() || await this._prevViewFallbackPadrao())
       : (this._prevView || 'tabela');
-    document.querySelectorAll('.bsp-botoes-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === target));
+    // [26/09/2026] CORRIGIDO -- inclui '.bottomnav button' (rodapé do layout Clássico): antes só o painel 'Botões'
+    // do Workspace era atualizado aqui, e o rodapé Clássico continuava destacando '3D' com outra tela aberta.
+    document.querySelectorAll('.bsp-botoes-btn, .bottomnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === target));
     document.getElementById('view-title').textContent = this.titles[target] || 'Catalogação de Itens';
     document.body.classList.toggle('view-mapa', target === 'mapa');
     const container = document.getElementById('view');
@@ -1150,7 +1237,7 @@ const App = {
     // — daqui pra baixo NUNCA passa por `navigate()`/`back()` de novo (eles
     // chamariam `unmount()` uma 2ª vez em cima do que já foi desmontado).
     const target = this._navStack.pop() || 'mapa';
-    document.querySelectorAll('.bsp-botoes-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === target));
+    document.querySelectorAll('.bsp-botoes-btn, .bottomnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === target));   // [26/09/2026] CORRIGIDO -- idem closeView3D (rodapé Clássico)
     document.getElementById('view-title').textContent = this.titles[target] || 'Catalogação de Itens';
     document.body.classList.toggle('view-mapa', target === 'mapa');
     const container = document.getElementById('view');
@@ -1342,6 +1429,15 @@ const App = {
         let beforeSnapshot = null; // usado só pra permitir desfazer, quando é uma EDIÇÃO
         if (alvo) {
           beforeSnapshot = { ...alvo };
+          // [25/09/2026] CORRIGIDO -- pedido verbatim: "Em 'Tabela', ao editar um patrimônio e trocar suas
+          // informações, os efeitos devem ser imediatos. Troquei um tipo, porém o ícone acabou por não atualizar
+          // imediatamente." Causa: itens vindos de um backup importado guardam 'avatarSvg' (o ícone congelado na
+          // exportação, ver avatar.js itemIconSvg), que tem prioridade sobre o cálculo por tipo/descrição -- ao
+          // trocar o tipo, o ícone antigo continuava sendo usado. Trocou tipo ou descrição -> descarta o ícone
+          // congelado, e o ícone passa a ser recalculado a partir dos dados novos. Vale para QUALQUER edição salva
+          // (não só quando o tipo muda nesta edição): cobre também um item cujo tipo já tinha sido trocado antes
+          // desta correção e ficou com o ícone antigo congelado -- basta abrir "Editar" e salvar.
+          if (alvo.avatarSvg) patch.avatarSvg = null;
           saved = await DB.updateItem(alvo.id, patch);
         } else {
           // Nenhum ícone/avatar é mais gerado/gravado aqui — o ícone colorido
@@ -1360,6 +1456,19 @@ const App = {
         modal.remove();
         Utils.toast(alvo ? 'Item substituído ✓' : 'Item salvo ✓', { type: 'ok' });
         this._refreshCurrentView();
+        // [25/09/2026] CORRIGIDO -- "os efeitos devem ser imediatos" (ver comentário grande acima): redesenha já o
+        // ícone da linha na Tabela (TableView.updateRowIcon) e, se a Tabela estiver montada mas não for a tela
+        // "atual" (ex.: numa divisão do Workspace), recarrega-a também -- _refreshCurrentView só cobre a atual.
+        try {
+          if (typeof TableView !== 'undefined') {
+            TableView.updateRowIcon?.(saved);
+            if (TableView._container && this.currentView !== 'tabela') TableView.refresh?.();
+          }
+        } catch (e) { /* melhor esforço */ }
+        if (alvo && ((saved.tipo || '') !== (beforeSnapshot?.tipo || '') || (saved.descricao || '') !== (beforeSnapshot?.descricao || ''))) {
+          // tipo/descrição novos podem precisar de um ícone da internet (mesmo fluxo de um item novo)
+          Icons.maybeEnrichWithRemoteIcon(saved).then(() => { try { if (typeof TableView !== 'undefined') TableView.updateRowIcon?.(saved); } catch (e) { /* ignora */ } }).catch(() => {});
+        }
         AmbientePhotos.refreshIfOpen?.(); // se um orb mostrava o patrimônio/descrição antigos, atualiza na hora
         AutoSave.pushItem(saved, { isUpdate: !!alvo }).catch(() => {});
         P2PModule.pushItem(saved).catch(() => {}); // envia direto pro outro aparelho conectado (sem servidor), se houver
@@ -1427,7 +1536,13 @@ const App = {
           <div class="handle"></div>
           <div style="display:flex; align-items:center; justify-content:space-between; gap:8px">
             <h3 style="margin:0">Escolher foto para anexar</h3>
-            <button type="button" class="icon-btn sm" id="pp-new-photo" title="Tirar uma foto nova agora e já anexar">📷 Tirar foto</button>
+            <!-- [26/09/2026] MUDADO -- pedido verbatim: "Na mesma janela ainda ('Escolher foto para anexar'), há um botão no canto superior direito ('📷 Tirar foto'). Faça este botão um pouco maior." -->
+            <button type="button" class="icon-btn" id="pp-new-photo" title="Tirar uma foto nova agora e já anexar" style="font-size:15px; padding:10px 16px; min-height:44px; font-weight:600">📷 Tirar foto</button>
+          </div>
+          <!-- [26/09/2026] NOVO -- pedido verbatim: "Deve ter uma seletor ali que possibilite selecionar que apareçam só as fotos do mapa atual selecionado ou todas as fotos de todos os mapas. Por padrão, deve aparecer só as fotos do mapa atual." -->
+          <div id="pp-escopo" style="display:flex; gap:6px; margin:10px 0 4px; flex-wrap:wrap" role="radiogroup" aria-label="Quais fotos mostrar">
+            <button type="button" class="btn secondary sm" data-escopo="atual" aria-pressed="true" title="Mostrar só as fotos do mapa atualmente selecionado">🗺️ Só do mapa atual<span id="pp-escopo-nome"></span></button>
+            <button type="button" class="btn secondary sm" data-escopo="todos" aria-pressed="false" title="Mostrar as fotos de todos os mapas">🌐 Todos os mapas</button>
           </div>
           <p id="pp-loading" style="font-size:12.5px; color:var(--text-dim); text-align:center; padding:10px 0">Carregando fotos…</p>
           <div class="photo-pick-grid hidden" id="pp-grid"></div>
@@ -1460,25 +1575,50 @@ const App = {
       // uma vez), então elas vão "aparecendo" conforme o navegador decodifica
       // cada imagem, em vez de travar tudo até a última terminar.
       (async () => {
-        const fotos = await DB.getAllAmbientePhotos();
+        const [todasFotos, mapaAtual] = await Promise.all([DB.getAllAmbientePhotos(), DB.getOrCreateSingleMap().catch(() => null)]);
         if (resolved) return; // já foi fechado (ex: cancelado) antes da busca terminar
         const loading = modal.querySelector('#pp-loading');
         const grid = modal.querySelector('#pp-grid');
-        if (!fotos.length) {
-          if (loading) loading.textContent = 'Nenhuma foto no mapa ainda — tire uma na tela "Fotos", em Mapa → Foto, ou pelo botão "📷 Tirar foto" acima.';
-          return;
-        }
-        loading?.remove();
-        grid?.classList.remove('hidden');
-        fotos.forEach((f) => {
-          const tile = document.createElement('button');
-          tile.type = 'button';
-          tile.className = 'photo-pick-tile';
-          tile.title = f.nome || 'Escolher esta foto';
-          tile.innerHTML = `<img src="${f.thumbDataUrl || f.dataUrl || ''}" alt="">`;
-          tile.onclick = () => finish(f);
-          grid?.appendChild(tile);
+        // [26/09/2026] NOVO -- seletor "Só do mapa atual" (padrão) / "Todos os mapas" (ver #pp-escopo acima).
+        // Estado só desta janela: sempre abre em "mapa atual", como pedido.
+        let escopo = 'atual';
+        const nomeEl = modal.querySelector('#pp-escopo-nome');
+        if (nomeEl && mapaAtual) nomeEl.textContent = ' (' + (mapaAtual.nome || 'sem nome') + ')';
+        const botoesEscopo = [...modal.querySelectorAll('#pp-escopo [data-escopo]')];
+        const pintarBotoes = () => botoesEscopo.forEach((b) => {
+          const ativo = b.dataset.escopo === escopo;
+          b.setAttribute('aria-pressed', ativo ? 'true' : 'false');
+          b.classList.toggle('secondary', !ativo);
+          b.classList.toggle('primary', ativo);
         });
+        const renderGrade = () => {
+          pintarBotoes();
+          const fotos = escopo === 'atual' && mapaAtual ? todasFotos.filter((f) => f.ambienteId === mapaAtual.id) : todasFotos;
+          if (grid) grid.innerHTML = '';
+          if (!fotos.length) {
+            grid?.classList.add('hidden');
+            if (loading) {
+              loading.classList.remove('hidden');
+              loading.textContent = (escopo === 'atual' && todasFotos.length)
+                ? 'Nenhuma foto neste mapa — toque em "🌐 Todos os mapas" para ver as fotos dos outros mapas, ou use "📷 Tirar foto" acima.'
+                : 'Nenhuma foto no mapa ainda — tire uma na tela "Fotos", em Mapa → Foto, ou pelo botão "📷 Tirar foto" acima.';
+            }
+            return;
+          }
+          loading?.classList.add('hidden');
+          grid?.classList.remove('hidden');
+          fotos.forEach((f) => {
+            const tile = document.createElement('button');
+            tile.type = 'button';
+            tile.className = 'photo-pick-tile';
+            tile.title = f.nome || 'Escolher esta foto';
+            tile.innerHTML = `<img src="${f.thumbDataUrl || f.dataUrl || ''}" alt="">`;
+            tile.onclick = () => finish(f);
+            grid?.appendChild(tile);
+          });
+        };
+        botoesEscopo.forEach((b) => { b.onclick = () => { escopo = b.dataset.escopo; renderGrade(); }; });
+        renderGrade();
       })();
     });
   },
@@ -1545,7 +1685,20 @@ const App = {
         const dataUrl = await Utils.resizeImage(canvas, 2400, 0.85);
         const thumbDataUrl = await Utils.resizeImage(canvas, 220, 0.75);
         const map = await DB.getOrCreateSingleMap();
-        const photo = await DB.addAmbientePhoto({ ambienteId: map.id, dataUrl, thumbDataUrl, nome: '', setor: sessionStorage.getItem('catalogo_setor_sessao') || '' });
+        // [25/09/2026] NOVO -- pedido verbatim: "a foto tratada por este
+        // metodo [Anexar foto -> Foto desse patrimonio] acaba aparecendo
+        // junto com as outras fotos em 'Mapa'->'Fotos'. Nao deve ser assim
+        // [...] Fica, entao, 'fotos do ambiente' [...] e as 'fotos de
+        // patrimonio'." -- esta e a UNICA chamada de _takeQuickPhoto (vem
+        // do botao "Tirar foto" dentro do seletor de "Anexar foto", ver
+        // App._pickExistingPhoto acima), entao toda foto tirada por aqui e,
+        // por definicao, uma foto de patrimonio -- tipo: 'patrimonio'
+        // (MESMA convencao que capture.js ja usa pra "Este e um
+        // patrimonio", ver comentario grande em db.js addAmbientePhoto) ja
+        // a exclui de 'Mapa'->'Fotos' por padrao (ver db.js
+        // getPhotosByAmbiente) e a coloca na fileira separada revelada pelo
+        // botao "Fotos de patrimonio" (ver ambientephotos.js).
+        const photo = await DB.addAmbientePhoto({ ambienteId: map.id, dataUrl, thumbDataUrl, nome: '', setor: sessionStorage.getItem('catalogo_setor_sessao') || '', tipo: 'patrimonio' });
         finish(photo);
       };
     });
@@ -1634,15 +1787,18 @@ const App = {
    */
   async _autoPlaceItem(itemId) {
     try {
-      const map = await DB.getOrCreateSingleMap();
+      // [26/09/2026] MUDADO -- pedido verbatim: "há uma vinculação automática
+      // a uma posição no mapa. Isto deve ser removido do app. [...] deve ser
+      // feita manualmente (por meio dos botões/métodos de vinculação do
+      // próprio app)." Antes, "deixar sem vínculo por enquanto" ainda dava ao
+      // item uma posição "reserva" automática na periferia do mapa
+      // (mapaAuto:true — ver Mapping.findPeripheralSlot). Agora o item fica
+      // SEMPRE sem nenhuma posição (mapaX/mapaY ausentes) até alguém vincular
+      // manualmente (🗺️ no mapa, ou uma posição numa foto).
       const item = await DB.getItem(itemId);
       if (!item) return;
-      const todosItens = await DB.getAllItems();
-      const index = todosItens.filter((it) => it.id !== itemId && it.mapaAuto === true).length;
-      const slot = Mapping.findPeripheralSlot(map, index);
-      await DB.updateItem(itemId, { mapaX: slot.x, mapaY: slot.y, mapaPiso: slot.piso || 0, mapaAuto: true });
       await MapView._refreshMapaIfShowing?.();
-      Utils.toast('Patrimônio guardado na 📦 Caixa — dá para vincular a um lugar depois.', { type: 'ok' });
+      Utils.toast('Patrimônio guardado na 📦 Caixa, sem posição no mapa — vincule manualmente quando quiser.', { type: 'ok' });
     } catch (err) {
       console.error('Falha ao posicionar item automaticamente:', err);
       Utils.toast('Não foi possível guardar a posição do patrimônio: ' + (err?.message || err), { type: 'danger', duration: 5000 });
@@ -1691,7 +1847,17 @@ const App = {
    *  na foto certa, com o orb destacado (ver mapview.js _showScreen/
    *  photogrid.js mountFotoScreen/ambientephotos.js AmbientePhotos.open,
    *  todos com `startPhotoId`/`highlightOrbId` novos nesta mesma rodada). */
-  async verMarcacaoEmFoto(itemId) {
+  // [25/09/2026] MUDADO -- pedido verbatim: "Em 'Tabela', ao acessa um
+  // patrimonio e clicar em 'Ver a marcacao deste patrimonio na foto', o
+  // botao de 'voltar' que aparece na 'foto' deve fazer com que volte para
+  // o que estava antes de clicar naquele botao. Ou seja, voltar para
+  // 'Tabela' com a janela do patrimonio selecionado ainda ativa. Ela deve
+  // continuar ativa, 'por baixo', nao deve ser refeita." Novo parametro
+  // `opts.onReturn` (opcional) e repassado ate o "voltar" da tela "Foto"
+  // (ver mapview.js _showScreen) -- quem chama esta funcao escondendo (em
+  // vez de destruindo) alguma janela propria passa aqui uma funcao que a
+  // reexibe.
+  async verMarcacaoEmFoto(itemId, opts = {}) {
     const found = await DB.findOrbFotoByItem(itemId);
     if (!found) { Utils.toast('Este patrimônio ainda não tem nenhuma marcação (orb) em foto nenhuma.', { type: 'warn' }); return; }
     // NOVO (04/09/2026), "sistematização da pilha de retorno" — pedido
@@ -1708,7 +1874,7 @@ const App = {
     const origin = this.currentView;
     if (found.photo.ambienteId) await DB.setSetting('ambienteAtualId', found.photo.ambienteId);
     await this.navigate('mapa');
-    await MapView._showScreen('foto', { startPhotoId: found.photo.id, highlightOrbId: found.orb.id, returnTo: origin !== 'mapa' ? origin : null });
+    await MapView._showScreen('foto', { startPhotoId: found.photo.id, highlightOrbId: found.orb.id, returnTo: origin !== 'mapa' ? origin : null, onReturn: opts.onReturn });
   },
 
   async verNoMapa3D(pos) {
@@ -2015,6 +2181,16 @@ const App = {
         <div style="display:flex; gap:8px; margin:10px 3px 3px; flex-wrap:wrap">
           <button class="btn secondary" id="di-edit" title="Editar os dados deste item">✏️ Editar</button>
           <button class="btn secondary" id="di-email" title="Enviar este item por email, conforme configurado">✉️ Enviar por email</button>
+          <!-- [25/09/2026] NOVO -- pedido verbatim: "coloque um botão para
+               exportar. Ao clicar neste botão, vai-se para a janela
+               'Exportar backup' com este patrimônio marcado, a(s) foto(s)
+               em que ele aparece e o mapa a que ele pertence (ou seja tudo
+               relacionado a este patrimônio)." Reaproveita o mesmo
+               mecanismo de pré-seleção já usado pelo botão de exportar de
+               mapa (ver mapview.js _openMapSwitcherModal, organizeview.js
+               classe organize-map-export-btn), estendido em settings.js
+               (_openExportModal) para aceitar opts.onlyItemId. -->
+          <button class="btn secondary" id="di-export" title="Exportar este patrimônio, sua(s) foto(s) e o mapa dele">⬇️ Exportar</button>
           <button class="btn danger" id="di-delete" title="Excluir este item definitivamente">🗑️ Excluir</button>
           <button class="btn block" id="di-close" style="flex:1" title="Fechar esta janela">Fechar</button>
         </div>
@@ -2023,6 +2199,10 @@ const App = {
     modal.addEventListener('mousedown', (e) => { if (e.target === modal) modal.remove(); });
     modal.querySelector('#di-close').onclick = () => modal.remove();
     modal.querySelector('#di-edit').onclick = () => { modal.remove(); this.openItemForm(item); };
+    modal.querySelector('#di-export').onclick = () => {
+      modal.remove();
+      window.SettingsView?._openExportModal?.({ onlyItemId: item.id });
+    };
     // NOVO (03/09/2026), pedido verbatim: "Assim como em 'Mapa'->'Foto' tem
     // o botão 'Editar a posição desta foto no mapa', deve haver um botão
     // igual a este ao acessar os patrimônios já cadastrados." — fecha esta
@@ -2063,9 +2243,20 @@ const App = {
     // foto" (ver HTML acima); nasce `disabled` quando não há marcação (ver
     // `marcacaoFoto` calculado no topo desta função), então nem precisa de
     // checagem extra aqui dentro (mesmo padrão de #di-map-view2d/3d acima).
+    // [25/09/2026] MUDADO -- pedido verbatim: "o botao de 'voltar' que
+    // aparece na 'foto' deve fazer com que volte para o que estava antes
+    // de clicar naquele botao. Ou seja, voltar para 'Tabela' com a janela
+    // do patrimonio selecionado ainda ativa. Ela deve continuar ativa,
+    // 'por baixo', nao deve ser refeita." Antes, `modal.remove()` destruia
+    // esta ficha de vez ao navegar pra foto -- ao voltar, ela nao existia
+    // mais pra ser reaberta (só a TELA de origem era restaurada, vazia de
+    // novo). Agora ela só fica ESCONDIDA (display:none, continua "por
+    // baixo" no DOM) enquanto a foto está aberta, e `opts.onReturn` (ver
+    // App.verMarcacaoEmFoto/mapview.js _showScreen) a reexibe de volta,
+    // intacta, em vez de reconstruí-la do zero.
     modal.querySelector('#di-marcacao-foto').onclick = () => {
-      modal.remove();
-      this.verMarcacaoEmFoto(item.id);
+      modal.style.display = 'none';
+      this.verMarcacaoEmFoto(item.id, { onReturn: () => { modal.style.display = ''; } });
     };
     modal.querySelector('#di-map-view2d').onclick = async () => {
       modal.remove();

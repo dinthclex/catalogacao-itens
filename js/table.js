@@ -541,6 +541,35 @@ const TableView = {
 
   async refresh() { await this._load(); },
 
+  /** [25/09/2026] NOVO -- pedido verbatim: "Em 'Tabela', ao editar um
+   *  patrimonio e trocar suas informacoes, os efeitos devem ser imediatos.
+   *  Troquei um tipo, porem o icone acabou por nao atualizar
+   *  imediatamente." Chamada logo depois de um item ser salvo/editado (ver
+   *  app.js openItemForm) para redesenhar o ícone daquela linha na hora,
+   *  em vez de depender só do refresh completo assíncrono da tabela
+   *  (App._refreshCurrentView -> refresh() -> _load(), que já corrige o
+   *  ícone mas só depois de recarregar TODOS os resumos do banco -- nesse
+   *  meio-tempo a linha ficava visivelmente com o ícone antigo). Também
+   *  atualiza a cópia em memória (`_data`/`_filtered`) para que um
+   *  re-render por scroll, antes do refresh completo terminar, já use os
+   *  dados novos também. */
+  async updateRowIcon(item) {
+    if (!item || !item.id) return;
+    // [25/09/2026] MUDADO -- sempre recarrega o estado dos ícones (um ícone novo pode ter acabado de ser baixado).
+    try { this._iconState = await Avatar.loadIconState(); } catch (e) { if (!this._iconState) return; }
+    const atualizarArray = (arr) => {
+      if (!Array.isArray(arr)) return;
+      const idx = arr.findIndex((it) => it && it.id === item.id);
+      if (idx !== -1) arr[idx] = { ...arr[idx], ...item };
+    };
+    atualizarArray(this._data);
+    atualizarArray(this._filtered);
+    const row = this._container?.querySelector(`.vtable-row[data-id="${item.id}"]`);
+    if (!row) return; // linha fora da janela visível agora -- o próximo render já usa os dados atualizados acima
+    const thumbSvgEl = row.querySelector('.thumb-svg');
+    if (thumbSvgEl) thumbSvgEl.innerHTML = Avatar.itemIconSvg(item, this._iconState, { size: 32 });
+  },
+
   _setSelectMode(on) {
     this._selectMode = on;
     if (!on) this._selected.clear();

@@ -2712,24 +2712,11 @@ datalist {}
 .map-layer-name-label { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map-layer-vis { flex: none; } /* olho sempre à direita — a ordem no HTML já cuida disso, isto só evita que encolha */
 
-/* [13/09/2026 UTC] Painel 'Grupos' (botão 🏷️ #map-grupos) — pedido verbatim:
-   'Monte um sistema para poder agrupar objetos de tal modo que depois em
-   uma lista de opções, ao clicar em uma delas, seja possível ativar/
-   desativar aquele grupo na tela para ser renderizado. E mais, além disso
-   (habilitar/desabilitar a renderização), também, apenas destacar
-   visualmente.' + 'Uma opção para fazer todas as paredes sumirem e ficar
-   apenas os objetos que não são parede, nem piso.' + (resposta do usuário
-   à pergunta de esclarecimento sobre o botão 'Andar') 'criar um sistema
-   para poder agrupar ativações e desativações ao selecionar uma das
-   opções disponíveis'. Reaproveita a base '.map-obj-picker-panel' (ver
-   acima) sem as sobrescritas mais elaboradas de '.map-layers-panel'
-   (esta caixa não é redimensionável nem tem lista com scroll próprio
-   isolado do cabeçalho — mais simples que '_openLayersPanelImpl',
-   decisão de escopo documentada em mapview.js). */
-/* [14/09/2026 UTC] largura 260px -> 340px — o editor de regras (nome +
-   seletor + efeito, ver _renderGruposPanelBody em mapview.js) precisa de
-   mais espaço que a lista simples de antes; painel 3D usa a MESMA classe,
-   ganha a largura nova de graça. */
+/* [26/09/2026] Painel 'Scripts' (2D: botão 🎬 #map-scripts / 3D: #v3d-scripts)
+   — a lista de scripts (2D) e o resumo somente-toggle (3D) reaproveitam
+   estas classes '.map-grupos-*' (nome histórico — vinham do antigo painel
+   'Grupos', removido; as classes ficaram porque o Scripts as reaproveita
+   por baixo, ver comentário grande em js/mapview.js/js/view3d.js). */
 .map-grupos-panel { width: 340px; }
 .map-grupos-body { display: flex; flex-direction: column; gap: 2px; padding-top: 4px; }
 .map-grupos-row {
@@ -2737,35 +2724,35 @@ datalist {}
   padding: 6px 4px; border-radius: 6px;
 }
 .map-grupos-row:hover { background: var(--bg-elev-2); }
-/* Linha fixa 'Paredes e Piso' — visualmente destacada das linhas de
-   classe/andar por um traço à esquerda, pra deixar claro que não é uma
-   classe do usuário e sim uma opção embutida do app. */
-.map-grupos-row-fixa { border-left: 2px solid var(--border); padding-left: 8px; }
 .map-grupos-label { flex: 1 1 auto; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 👁️/🚫 — mesmo padrão visual do olho de '.map-layer-vis', mas com estado
-   'apagado' (.off) pra ficar óbvio que aquele grupo está oculto mesmo com
-   o painel fechado depois. */
+   'apagado' (.off) pra ficar óbvio que aquele script/regra está desligado
+   mesmo com o painel fechado depois. */
 .map-grupos-eye { flex: none; background: none; border: none; cursor: pointer; font-size: 15px; padding: 2px 4px; opacity: .9; }
 .map-grupos-eye.off { opacity: .45; }
-/* ✨ — toggle de destaque visual (o "apenas destacar todos os elementos
-   internos de uma sala", pedido do usuário), independente do 👁️ acima —
-   por isso os dois botões convivem lado a lado na mesma linha. */
-.map-grupos-star { flex: none; background: none; border: none; cursor: pointer; font-size: 15px; padding: 2px 4px; opacity: .45; }
-.map-grupos-star.active { opacity: 1; filter: drop-shadow(0 0 3px #ffd54a); }
-.map-grupos-sep { height: 1px; background: var(--border); margin: 6px 2px; }
 .map-grupos-vazio { font-size: 12px; color: var(--text-dim); padding: 6px 4px; text-align: center; }
 
-/* [14/09/2026 UTC] NOVO — editor de regras do sistema "Grupos" generalizado (ver
-   Mapping.getGrupoRegras/comentário grande em mapping.js e
-   MapView._renderGruposPanelBody). Cada regra ocupa 2 linhas: nome +
-   toggle + excluir (row1), seletor + efeito + valor opcional (row2). */
+/* [26/09/2026] NOVO — lista de scripts (painel '🎬 Scripts', ver
+   MapView._renderScriptsPanelBody em mapview.js). Cada script ocupa 2
+   linhas: nome + toggle + excluir (row1), seletor + método + valor
+   opcional (row2). */
 .map-grupos-regra {
   display: flex; flex-direction: column; gap: 3px;
   padding: 6px 4px; border-radius: 6px; border-left: 2px solid transparent;
 }
 .map-grupos-regra:hover { background: var(--bg-elev-2); }
 .map-grupos-regra.ativa { border-left-color: #7cffb2; }
-.map-grupos-regra-row1, .map-grupos-regra-row2 { display: flex; align-items: center; gap: 4px; }
+/* [27/09/2026] CORRIGIDO — pedido verbatim: "ao lado esquerdo do seletor
+   (em que ficou marcado 'Opacidade'), fica uma entrada espremida [...] Se
+   for os seletores, devem ficar visíveis também." A "entrada espremida" É
+   o próprio `.map-grupos-selector-input` (o campo do seletor, ex. `.ap`,
+   `andar=0`) — com `min-width:0` ele cedia espaço pro `<select>` de efeito
+   E pro campo "valor" (só aparece com 'Opacidade') até sobrar quase nada
+   pra digitar/ler o seletor. Corrigido com `flex-wrap` na linha (o campo
+   "valor" pula pra baixo se não houver espaço, em vez de espremer o
+   seletor) + um `min-width` real no seletor, pra ele nunca ficar ilegível. */
+.map-grupos-regra-row1 { display: flex; align-items: center; gap: 4px; }
+.map-grupos-regra-row2 { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .map-grupos-nome-input {
   flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 600;
   background: transparent; border: 1px solid transparent; border-radius: 4px;
@@ -2773,27 +2760,83 @@ datalist {}
 }
 .map-grupos-nome-input:hover, .map-grupos-nome-input:focus { border-color: var(--border); background: var(--bg-elev-1); }
 .map-grupos-selector-input {
-  flex: 1 1 auto; min-width: 0; font-size: 11px; font-family: monospace;
+  flex: 3 1 90px; min-width: 90px; font-size: 11px; font-family: monospace;
   background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: 4px;
   color: var(--text-dim); padding: 2px 4px;
 }
 .map-grupos-selector-input:focus { color: var(--text); border-color: #7cffb2; }
 .map-grupos-efeito-select {
-  flex: none; font-size: 11px; background: var(--bg-elev-1); border: 1px solid var(--border);
+  flex: 1 1 auto; min-width: 84px; font-size: 11px; background: var(--bg-elev-1); border: 1px solid var(--border);
   border-radius: 4px; color: var(--text); padding: 1px 2px; max-width: 108px;
-}
-.map-grupos-valor-input {
-  flex: none; width: 46px; font-size: 11px; background: var(--bg-elev-1);
-  border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 1px 4px;
 }
 .map-grupos-del { flex: none; background: none; border: none; cursor: pointer; font-size: 13px; padding: 2px 4px; opacity: .55; }
 .map-grupos-del:hover { opacity: 1; }
-.map-grupos-add {
+
+/* [26/09/2026] NOVO — painel '🎬 Scripts' (js/mapview.js `_renderScriptsPanelBody`/
+   `_renderScriptEditorBody`, ver js/automation.js). */
+/* [26/09/2026] AUMENTADO — pedido verbatim: "A janela dos scripts deve ser
+   maior." — E [26/09/2026, RODADA seguinte] REESCRITO — pedido verbatim: "A
+   janela dos scripts, ao movê-la, acaba se redimensionando sozinha na parte
+   de baixo. Deve ser possível redimensioná-la." CAUSA RAIZ do
+   redimensionar-sozinho: `_openScriptsPanel` (mapview.js) ancorava o painel
+   com `style.bottom` (nunca `top`) — um `position:fixed` com `top` E
+   `bottom` FIXOS AO MESMO TEMPO (o que `_makePanelDraggable` passa a fazer
+   assim que o título é arrastado, setando `top` sem nunca limpar o
+   `bottom` original) faz o navegador ESTICAR a altura entre os dois, em vez
+   de manter a altura original — exatamente o "redimensiona sozinha na parte
+   de baixo" relatado. CORRIGIDO adotando o MESMO padrão já usado por
+   `.map-layers-panel`/`.map-obj-picker-panel-resizable` (largura/altura
+   FIXAS em px + `top`, nunca `bottom`, ver `_openScriptsPanel`): largura/
+   altura próprias (sobrescrevendo os 420px/34vh herdados de
+   `.map-obj-picker-panel`), `overflow:visible` (as alças de redimensionar
+   de `_makePanelResizable` — NOVO, mesma função das outras janelas —
+   transbordam de propósito, ver comentário grande em `.map-layers-panel`),
+   com o conteúdo de verdade recortado nos cantos redondos por dentro de um
+   `.map-panel-clip` (mesmo invólucro que Camadas/Objetos já usam). */
+.map-scripts-panel {
+  display: flex; flex-direction: column;
+  left: 10px; right: auto; margin: 0;
+  width: 560px; max-width: none; height: 520px; max-height: none;
+  overflow: visible; padding: 0;
+}
+.map-scripts-panel.dragged { right: auto; margin: 0; }
+.map-scripts-panel .map-panel-head { padding: 8px 12px; margin: 0; }
+.map-scripts-body { display: flex; flex-direction: column; gap: 2px; padding: 4px 12px 10px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* [27/09/2026] REMOVIDO — `.map-scripts-code-scroll` (wrapper de scroll da
+   folha "Ver/editar código" DENTRO do painel pequeno de Scripts) não
+   existe mais: pedido verbatim "deve abrir a janela expandida [...] Se
+   for aberto só na janela do 'Scripts', fica pouco espaço horizontal" —
+   agora a folha abre num overlay tela-cheia (`_openScriptCodeFullscreen`,
+   js/mapview.js, mesmo mecanismo do editor de Componentes), que já tem
+   scroll e largura de sobra por conta própria. */
+.map-scripts-vazio { font-size: 12px; color: var(--text-dim); padding: 6px 4px; text-align: center; }
+/* [27/09/2026] REESCRITO — pedido verbatim: "Faça a janela do botão
+   'Scripts' semelhante a janela do botão 'Grupos'." Cada linha de script
+   agora reaproveita as MESMAS classes de uma regra de Grupos
+   (`.map-grupos-regra`/`.map-grupos-eye`/`.map-grupos-nome-input`/
+   `.map-grupos-del`/`.map-grupos-regra-row2`/`.map-grupos-selector-input`/
+   `.map-grupos-efeito-select` — ver `_scriptRowHtml`, js/mapview.js) em vez
+   de um conjunto de classes `.map-scripts-item*` paralelo — a barra rápida
+   ("Executar"/"Desexecutar" por um <select>) e os dois botões por script
+   saíram junto (substituídos pelo botão único de ativar/desativar do
+   Grupos). `.map-scripts-regra` é só uma classe extra pra diferenciar o
+   `querySelectorAll` de scripts do de regras de Grupos — sem estilo próprio. */
+.map-scripts-add {
   margin-top: 4px; align-self: stretch; text-align: center; font-size: 13px;
   background: var(--bg-elev-1); border: 1px dashed var(--border); border-radius: 6px;
   color: var(--text); padding: 6px; cursor: pointer;
 }
-.map-grupos-add:hover { background: var(--bg-elev-2); border-color: #7cffb2; }
+.map-scripts-add:hover { background: var(--bg-elev-2); border-color: #7cffb2; }
+.map-scripts-editor-body { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
+.map-scripts-editor-body .CodeMirror { height: 260px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+#map-scripts-textarea { width: 100%; height: 260px; }
+.map-scripts-editor-help {
+  font-size: 10.5px; line-height: 1.5; color: var(--text-dim);
+  background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+}
+.map-scripts-editor-help code {
+  background: var(--bg-elev-2); border-radius: 3px; padding: 0 3px; color: var(--text);
+}
 
 
 /* Barra de ações — 7 botões quadrados, alinhados à ESQUERDA, na parte de
@@ -3170,6 +3213,11 @@ datalist {}
    type:'danger'), mostrado no cabecalho do bloco Script quando
    Components.getScriptError(c) tiver algo -- ver js/mapview.js
    scriptBlockHtml/_refreshComponentErrorFlags. */
+/* [27/09/2026] NOVO — pedido verbatim: "ao lado direito deve aparecer o nome
+   do script (por exemplo, 'Script 1', 'Script 2')." Peso normal (a própria
+   palavra "Script" já está em negrito antes) e uma leve transparência, pra
+   ficar claro que é o IDENTIFICADOR do bloco, não um título de mesmo peso. */
+.comp-script-nome { font-weight: 400; opacity: .75; }
 .comp-script-error-flag {
   display: inline-flex; align-items: center; gap: 3px;
   font-size: 11px; font-weight: 600; line-height: 1;
@@ -4275,6 +4323,18 @@ datalist {}
   width: fit-content; max-width: 100%;
 }
 .ambphotos-strip.hidden { display: none; }
+/* [25/09/2026] NOVO -- pedido verbatim: "as fotos de patrimônio [...] um
+   botão ativa que elas aparecem em outra linha." -- MESMA aparência da
+   fileira de "fotos do ambiente" acima (.ambphoto-thumb reaproveitado tal
+   qual), só numa fileira separada (nunca a mesma linha) com uma borda
+   pontilhada no topo, pra ficar visualmente clara a distinção entre
+   "fotos do ambiente" (linha de cima) e "fotos de patrimônio" (linha de
+   baixo, revelada pelo botão "📎"). `top` é sempre calculado via JS (ver
+   ambientephotos.js _syncStripOffset), igual à fileira de cima. */
+.ambphotos-strip-patrimonio {
+  border-top: 1px dashed rgba(255,255,255,.18);
+  padding-top: 12px;
+}
 /* Botão de retorno pro Organizar (ver ambientephotos.js, _voltarParaOrganizar)
    — só aparece quando "Fotos" foi aberta a partir de um clique numa
    miniatura em "Mapa" → "Organizar" (organizeview.js, _abrirFoto). Fica
@@ -5171,7 +5231,23 @@ datalist {}
   position: relative; z-index: 1;
 }
 .organize-vinc-chip-foto { background: rgba(255,209,102,.16); color: #ffe1a0; border-color: rgba(255,209,102,.45); cursor: pointer; }
-.organize-vinc-chip:hover { transform: scale(1.06); z-index: 5; }
+/* [26/09/2026] MUDADO -- pedido verbatim: "Ao posicionar o cursor em cima de
+   uma caixa de vinculação de patrimônio ao mapa [...] ainda acaba aparecendo
+   um scroll [...] mesmo quando o cursor do mouse apenas esteja em cima."
+   Causa raiz: mesmo sem mudar o LAYOUT (é `transform`, que nunca afeta o
+   fluxo normal), um `transform: scale()` AINDA conta pra "scrollable
+   overflow" do ancestral rolável mais próximo (aqui, `.organize-list-wrap`,
+   overflow:auto — o scroll de toda a tela do Organizar) — é assim que a
+   spec de CSS define a área rolável: inclui a caixa já transformada, não a
+   original. Cada chip crescendo 6% no hover empurrava esse total além do
+   necessário, fazendo a barra de rolagem aparecer/piscar só de passar o
+   mouse, mesmo com `.organize-vinc-list-gridcols` já cabendo tudo sem
+   estourar (ver comentário grande lá). Troca `transform: scale()` por
+   `box-shadow` + `border-color` — mesmo destaque visual de "por cima dos
+   vizinhos" (via `z-index`, preservado), zero crescimento de caixa, então
+   zero efeito na área rolável de qualquer ancestral. */
+.organize-vinc-chip:hover { z-index: 5; border-color: rgba(79,140,255,.9); box-shadow: 0 0 0 2px rgba(79,140,255,.35); }
+.organize-vinc-chip-foto:hover { border-color: rgba(255,209,102,.95); box-shadow: 0 0 0 2px rgba(255,209,102,.35); }
 /* NOVO (02/09/2026), pedido do usuário verbatim: "Deve ser possível trocar
    de posição os patrimônios (vinculações, em baixo das fotos) entre eles
    também." Classe aplicada pelo `Flip.makeSortable` (ver `draggingClass` em
@@ -5199,6 +5275,21 @@ datalist {}
 .organize-foto-thumb-wrap { position: relative; width: 100%; aspect-ratio: 4/3; border-radius: 6px; overflow: hidden; background: var(--bg-elev-2); }
 .organize-foto-thumb-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .organize-foto-thumb-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 22px; opacity: .5; }
+/* [26/09/2026] NOVO -- pedido verbatim: "Em 'Mapa'->'Organizar', no modo 'Cartões', as fotos de patrimônio
+   devem aparecer também, assim como no modo 'Grade' [...] com 1/4 do tamanho da foto de ambiente." Ver
+   comentário grande em `_renderFotosColumnPatrimonio` (organizeview.js) pro raciocínio completo -- aqui só o
+   CSS da fileira (`flex-wrap`, diferente da coluna vertical `.organize-foto-list` padrão, ver acima) e do
+   tamanho reduzido de cada item (`flex-basis` ~23%, a miniatura em si -- `.organize-foto-thumb-wrap`, mesma
+   classe da foto de ambiente -- já encolhe sozinha porque é sempre `width:100%` do que a contém). */
+.organize-card-fotos-title-patrimonio { margin-top: 18px; }
+.organize-card-fotos-list-patrimonio { flex-direction: row; flex-wrap: wrap; gap: 10px; }
+.organize-card-foto-item-patrimonio {
+  flex: 0 0 calc(25% - 8px); min-width: 64px;
+  padding-top: 0 !important; border-top: none !important; /* sobrescreve `.organize-foto-item:not(:first-child)`, pensado pra lista vertical -- aqui é uma fileira, cada item já tem espaço próprio pelo `gap` */
+}
+.organize-card-foto-name-patrimonio {
+  font-size: 9.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 /* ITEM A18 (rodada 57/v311), pedido do usuário verbatim: "Deve aparecer na
    parte de baixo a esquerda da foto o ícone indicando quantos orbs tem na
    foto. Deve aparecer outro ícone indicando a quantidade de medidas feitas
@@ -5214,6 +5305,13 @@ datalist {}
    vinculações (📍N, `.organize-foto-badge-vinc`) — os dois cabem juntos
    quando a foto tem as duas coisas. */
 .organize-foto-badge-medidas { bottom: 24px; background: rgba(255,209,102,.9); color: #221a05; }
+/* [26/09/2026] NOVO -- pedido verbatim: "deve ficar claro [...] quais fotos são de ambiente e quais fotos são
+   de patrimônio." Badge no canto SUPERIOR esquerdo (os outros 2 badges já ocupam o inferior esquerdo, ver
+   comentário acima) -- 🖼️ (ambiente, cor neutra) ou 🏷️ (patrimônio, mesma cor de destaque usada pra "plaquinha
+   de patrimônio" em outros lugares do app). */
+.organize-foto-badge-tipo { top: 4px; left: 4px; bottom: auto; }
+.organize-foto-badge-tipo-ambiente { background: rgba(120,130,145,.85); }
+.organize-foto-badge-tipo-patrimonio { background: rgba(255,209,102,.92); color: #221a05; }
 
 .organize-select-overlay {
   position: absolute; z-index: 5; pointer-events: none;
@@ -5398,7 +5496,15 @@ datalist {}
    de fato aplica largura/altura/box-sizing/overflow mora só aqui, uma vez,
    em vez de repetida como 5 propriedades inline por instância. */
 .organize-inline-host-locked {
-  box-sizing: border-box; overflow: hidden;
+  /* [26/09/2026] CORRIGIDO -- pedido verbatim: "ao clicar em cima do nome, o texto do nome deve ficar
+     totalmente aparente. Atualmente, a parte de baixo do texto fica cortada, pois a altura é pouca."
+     CAUSA: `overflow: hidden` nos DOIS eixos + a altura travada exatamente na medida do texto ORIGINAL
+     (`<strong>`) cortava o "pé" de letras com descendente (ex.: 'ç', 'p') quando o `<input>` (elemento
+     substituído, com métricas de fonte levemente diferentes de um texto puro) desenha o texto um pouco
+     mais baixo. `overflow-y: visible` deixa o texto vazar verticalmente sem ser cortado (a largura
+     continua travada em `overflow-x: hidden`, que é o que evita o elemento crescer de LARGURA e empurrar
+     o resto do cabeçalho — o pedido original desta trava). */
+  box-sizing: border-box; overflow-x: hidden; overflow-y: visible;
   width: var(--inline-w, auto); height: var(--inline-h, auto);
 }
 .organize-inline-input {
@@ -5784,6 +5890,22 @@ datalist {}
    `.organize-grid-fotos` em si), mesmo padrão de
    `.organize-grid-patrimonios-col`/`.organize-grid-section-head` acima. */
 .organize-grid-fotos-col { display: flex; flex-direction: column; gap: 6px; }
+/* [26/09/2026] NOVO -- pedido verbatim: "Além do selo, deve ter um título dizendo que é 'Fotos de ambiente' e
+   'Fotos de patrimônios'." Título simples acima de cada seção (ver comentário grande em `_gridCardHtml`). */
+.organize-grid-fotos-title {
+  margin: 4px 0 2px; font-size: 11.5px; font-weight: 700; color: var(--text-dim);
+}
+.organize-grid-fotos-title-patrimonio { color: #ffd166; }
+/* [26/09/2026] NOVO -- pedido verbatim (reforço): "Separe em uma grid/box separada para colocar as fotos de
+   patrimônio [...] Uma foto de patrimônio acaba ficando do lado da foto de ambiente parecendo, visualmente,
+   que são ambas fotos de ambiente." Cada seção (título + grade) agora vive dentro da SUA PRÓPRIA caixa com
+   borda visível, em vez de só um título solto acima da grade -- fica claro, de longe, que são 2 blocos
+   diferentes, mesmo com poucas fotos em cada um. */
+.organize-grid-fotos-section {
+  border: 1px solid var(--border); border-radius: var(--radius-md, 8px);
+  padding: 6px 6px 8px; display: flex; flex-direction: column; gap: 4px;
+}
+.organize-grid-fotos-section-patrimonio { border-color: rgba(255,209,102,.4); background: rgba(255,209,102,.04); }
 /* CORRIGIDO (rodada seguinte, 02/09/2026), pedido do usuário verbatim: "os
    blocos das fotos estão ficando sobrepostos. O retângulo que representa o
    mapa é que deve ir aumentando de largura para acomodar todos os blocos
@@ -5884,7 +6006,12 @@ datalist {}
    `.organize-vinc-list-gridcols` mesmo (ver abaixo), pelo mesmo motivo do
    bloco acima: aqui não sobra nenhum ancestral com overflow restrito acima
    de nenhum menu flutuante. */
-.organize-grid-mapa-wrap { overflow-x: visible; overflow-y: visible; }
+/* [26/09/2026] MUDADO -- de `overflow-x: visible` pra `hidden`: rede de segurança final pro pedido "uma [caixa
+   interna] não deve ocupar o espaço da outra" (ver comentário grande em `.organize-vinc-list-gridcols`, que já
+   resolve a causa raiz específica) -- garante que NADA dentro desta coluna (largura fixa 230px, ver
+   `.organize-grid-card-body`) vaze visualmente pra coluna de fotos vizinha, mesmo que outro elemento
+   filho um dia volte a crescer mais largo que a coluna. */
+.organize-grid-mapa-wrap { overflow-x: hidden; overflow-y: visible; }
 /* Cabeçalho da seção (busca + toggle + orb de colunas) — "em cima e à
    direita do grupo de patrimônios", pedido do usuário verbatim (ITEM A11).
    `flex-wrap` pra não quebrar layout em cartões estreitos (@media 900px). */
@@ -6070,18 +6197,27 @@ datalist {}
    w` — prioriza "nunca se reposicionar" sobre "sem sobra lateral", igual
    já decidido pra plaquinha (ver comentário grande lá). */
 .organize-vinc-list-gridcols {
-  display: grid !important; grid-template-columns: repeat(var(--organize-cols, 2), var(--organize-vincchip-w, 132px));
-  /* CORRIGIDO (01/09/2026, rodada seguinte) — MESMO bug/correção do
-     `overflow-x:auto`→`overflow:visible` de `.organize-grid-patrimonios`
-     (ver comentário grande lá): o hover do chip (`.organize-vinc-chip:hover`,
-     `transform: scale()`) fazia esta grade "crescer"/cortar por causa do
-     `overflow-x:auto` forçar `overflow-y:auto` junto (mesmo comportamento
-     do CSS). Changelog anterior, preservado por contexto: mesma mudança de
-     `.organize-grid-patrimonios` acima (ver comentário grande lá):
-     `overflow-x: auto` desceu do container pai (`.organize-grid-mapa-wrap`)
-     pra cá, a grade de chips em si, que não tem nenhum menu flutuante
-     dentro. */
-  overflow: visible;
+  display: grid !important;
+  /* [26/09/2026] MUDADO (2ª correção) -- pedido verbatim: "Elimine os scroll nas caixas de vinculação, deve
+     haver área o suficiente para que apareçam, sem precisar dos scrolls." A correção anterior (rolagem própria
+     via `overflow-x:auto`, ver changelog preservado abaixo) resolveu a invasão da coluna vizinha, mas trocou
+     por um scroll horizontal que o usuário não quer -- ele prefere que a grade simplesmente CAIBA, quebrando
+     linha sozinha. `repeat(var(--organize-cols,2), ...)` sempre reservava EXATAMENTE `--organize-cols` colunas
+     de largura fixa (132px cada), então com `--organize-cols:2` (padrão) a grade sempre tentava 264px, mais
+     larga que os 230px fixos de `.organize-grid-mapa-wrap` -- dava overflow (e por isso o scroll) mesmo com
+     poucos chips. `repeat(auto-fill, minmax(90px, 1fr))` deixa o NAVEGADOR decidir quantas colunas cabem de
+     verdade na largura disponível (nunca mais que ela permite) -- o "orb de Colunas" desta lista específica
+     (`_colOrbHtml`/`--organize-cols`) deixa de controlar a quantidade aqui (o valor salvo não muda, só passa a
+     não ser CONSULTADO por esta regra -- outras listas que ainda usam `--organize-cols` de propósito, como
+     `.organize-grid-patrimonios`, não são afetadas), mas em troca a grade NUNCA mais precisa de scroll nem
+     invade a coluna vizinha: o que não cabe na linha desce pra próxima, sempre dentro da própria caixa.
+     Changelog anterior, preservado por contexto: esta grade crescia mais larga que a coluna FIXA de 230px de
+     `.organize-grid-mapa-wrap` (ver `.organize-grid-card-body`) e, com `overflow: visible` (decisão de uma
+     rodada anterior ainda mais antiga, pra não cortar o anel de hover do chip), esse excesso vazava
+     visualmente por CIMA da coluna de fotos vizinha, à direita -- ali, a correção tinha sido `overflow-x: auto`
+     (rolagem própria em vez de vazar), agora substituída pelo `auto-fill` acima. */
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  max-width: 100%; overflow: visible;
 }
 /* CORRIGIDO (31/08/2026, 2ª rodada de ajuste), pedido verbatim (vale pro
    CHIP de vinculação embaixo, ver regra logo abaixo — a plaquinha de
@@ -6986,6 +7122,16 @@ html.catalogo-boot-classic #app { display: none; }
    cabeçalho (ver mapview.js _mountTopbarMapa) — o widget flutuante global
    some pra não duplicar. */
 body.view-mapa .history-widget:not(.always) { display: none; }
+/* [26/09/2026] NOVO -- pedido verbatim: "No 'Ver em 3D', os botões de desfazer/refazer ficam sempre aparentes. Eles
+   devem seguir a decisão do botão presente em 'configurações do app', em 'Mapa. 3D e aparelho', em '↶ Desfazer/Refazer'
+   ('Sempre mostrar os botões ↶/↷ na tela')." -- com a Visualização 3D na tela (.view3d-wrap, ver view3d.js), o widget
+   flutuante só aparece se "Sempre mostrar" estiver marcado (.always), igual à tela Mapa. */
+body:has(.view3d-wrap) .history-widget:not(.always) { display: none; }
+body.view3d-aberto .history-widget:not(.always) { display: none; }
+/* [26/09/2026] NOVO -- HUD e ↶/↷ À FRENTE de tudo enquanto a tela de Configurações está aberta (ver
+   Perf.trazerParaFrente/History.trazerParaFrente e App._openSettingsFullscreen). */
+#perf-hud.na-frente-de-tudo, #history-widget.na-frente-de-tudo { z-index: 2147483000 !important; }
+#perf-hud.na-frente-de-tudo.perf-hud-canvas { position: fixed !important; }
 .history-widget button {
   width: 38px; height: 38px; border-radius: 50%;
   border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--text);
@@ -8034,8 +8180,24 @@ body.classic-mode-active .bsp-shell-reset-btn { display: none; }
    organizar) e do próprio BSPLayout (que não usa z-index especial, corre
    no fluxo normal do documento), abaixo apenas de toasts/popups globais
    (900-999, ver #toast-host z-index:999 acima). */
+/* [24/09/2026] CORRIGIDO -- pedido verbatim (sobre o botão "🏭 Carregar
+   Configurações de Fábrica"): "Acho que o botão [...] acaba ficando por
+   baixo da tela das 'configurações do app'." z-index subido de 950 pra
+   970: 950 é a mesma faixa documentada como "modal-backdrop" em
+   windowmanager.js (KNOWN_LAYERS), mas a faixa "floating-panels" dos
+   painéis flutuantes do Mapa (Ferramentas/Camadas/Histórico) começa em
+   961 e cresce a cada painel aberto/focado — ou seja, um painel do Mapa
+   deixado aberto (ou focado) antes de abrir as Configurações do app podia
+   nascer com z-index MAIOR que 950 e cobrir a tela cheia de Configurações
+   inteira (inclusive os botões da barra do topo, como "🏭 Carregar
+   Configurações de Fábrica"), interceptando o clique. 970 garante que a
+   tela de Configurações sempre nasce acima de qualquer painel flutuante
+   na sua base (961+), sem chegar perto de toasts/modais de verdade
+   (900-2100, ver #toast-host). Ver também settings.js `_abrirFabrica`
+   (mesma data) para o outro lado do mesmo tipo de bug, na própria janela
+   de confirmação. */
 .settings-fullscreen-overlay {
-  position: fixed; inset: 0; z-index: 950;
+  position: fixed; inset: 0; z-index: 970;
   background: var(--bg, #0b0d10);
   display: flex; flex-direction: column;
   animation: organizeFadeIn .2s ease; /* reaproveita a mesma keyframe já definida acima (organizeview) */

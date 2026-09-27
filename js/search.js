@@ -53,6 +53,16 @@ const SearchView = {
 
     const canvas = container.querySelector('#srch-canvas');
     this._renderer2d = new Map2DRenderer(canvas);
+    // [26/09/2026] NOVO -- pedido verbatim: "o mapa 2D, que aparece logo em
+    // baixo da entrada de busca, fica travado não dando para movê-lo." Esta
+    // prévia nunca teve NENHUM fio de pan/zoom (confirmado por busca no
+    // arquivo inteiro) -- só `animateTo` (mapview.js) move a câmera, e só
+    // sozinha, ao selecionar um item. Adaptado o padrão mínimo já usado em
+    // `OrganizeView._wireGridLiveMap` (organizeview.js) -- que já resolve a
+    // mesma necessidade (arrastar pra fazer pan + roda do mouse ancorada no
+    // cursor pra zoom, sobre um `Map2DRenderer` isolado) -- em vez do
+    // `MapView._attachPanZoom`, gigante e amarrado a estado só do Mapa.
+    this._wireCanvasPanZoom(canvas, this._renderer2d);
 
     // NOVO (03/09/2026), pedido verbatim (item 4): "Inserir um novo item de
     // busca ou refazer a mesma (tirar algum caractere e colocar o mesmo de
@@ -106,7 +116,18 @@ const SearchView = {
     // item selecionado) — sem isso, trocar de aba e voltar reiniciava a busca
     // do zero.
     if (this._query) this._doSearch(this._query);
-    if (this._currentItem) await this._selectItem(this._currentItem.id);
+    // [26/09/2026] CORRIGIDO -- pedido verbatim: "ao clicar em 'Sair do
+    // 3D', acaba voltando para o 'Ver em 3D' em um loop." CAUSA RAIZ: esta
+    // restauração chamava `_selectItem` incondicionalmente ao remontar a
+    // aba -- e isso também acontecia quando `App.closeView3D()` remontava
+    // 'Buscar' como tela de retorno (ver app.js). Com `_viewMode` ainda
+    // '3d' (nunca resetado ao sair do 3D), a própria restauração
+    // reexecutava o bloco que chama `App.verNoMapa3D`, reabrindo o 3D --
+    // um loop fechado 'Sair do 3D' <-> 'Ver em 3D'. Corrigido: a
+    // restauração passa `{ isRestore: true }`, que `_selectItem` usa pra
+    // NUNCA navegar de volta pro 3D nesta chamada (só mostra o flashcard e
+    // deixa a prévia 2D pronta por baixo).
+    if (this._currentItem) await this._selectItem(this._currentItem.id, { isRestore: true });
 
     this._running = true;
     this._loop();
@@ -116,6 +137,51 @@ const SearchView = {
   unmount() {
     this._running = false;
     this._container = null;
+  },
+
+  /** [26/09/2026] NOVO -- pan (arrastar) + zoom (roda do mouse, ancorado no
+   *  cursor) para a prévia 2D embutida (`#srch-canvas`). Padrão adaptado de
+   *  `OrganizeView._wireGridLiveMap` (organizeview.js): mutua diretamente
+   *  `renderer.view.{cx,cy,zoom}` -- o mesmo objeto que `animateTo` já usa
+   *  --, convertendo delta de tela pra pixels INTERNOS do canvas via
+   *  `getBoundingClientRect()` (funciona igual mesmo se o CSS redimensionar
+   *  o canvas). Sem `baseZoom` aqui (esta prévia não tem um "zoom de
+   *  encaixe" calculado como a miniatura do Organizar) -- usa limites fixos
+   *  de px-por-metro, generosos o bastante pra qualquer planta baixa
+   *  catalogada. */
+  _wireCanvasPanZoom(canvas, renderer) {
+    const ZOOM_MIN = 4, ZOOM_MAX = 400;
+    let dragging = false, lastX = 0, lastY = 0;
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      dragging = true;
+      lastX = e.clientX; lastY = e.clientY;
+      canvas.setPointerCapture(e.pointerId);
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const view = renderer.view;
+      const rect = canvas.getBoundingClientRect();
+      const dx = (e.clientX - lastX) * (canvas.width / rect.width);
+      const dy = (e.clientY - lastY) * (canvas.height / rect.height);
+      lastX = e.clientX; lastY = e.clientY;
+      view.cx -= dx / view.zoom;
+      view.cy -= dy / view.zoom;
+    });
+    const endDrag = () => { dragging = false; };
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', endDrag);
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const view = renderer.view;
+      const rect = canvas.getBoundingClientRect();
+      const sx = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const sy = (e.clientY - rect.top) * (canvas.height / rect.height);
+      const worldBefore = renderer.screenToWorld(sx, sy);
+      view.zoom = Utils.clamp(view.zoom * (e.deltaY > 0 ? 0.9 : 1.1), ZOOM_MIN, ZOOM_MAX);
+      view.cx = worldBefore.x - (sx - canvas.width / 2) / view.zoom;
+      view.cy = worldBefore.y - (sy - canvas.height / 2) / view.zoom;
+    }, { passive: false });
   },
 
   _loop() {
@@ -211,7 +277,7 @@ const SearchView = {
     await this._selectItem(id);
   },
 
-  async _selectItem(id) {
+  async _selectItem(id, opts = {}) {
     const item = await DB.getItem(id);
     if (!item) return;
     await DB.touchLastConsulted(id);
@@ -235,7 +301,7 @@ const SearchView = {
     // funil — ver App.verNoMapa2D pra troca de mapa quando for de fato
     // navegar pra "Mapa"/Planta baixa (não usado AQUI de propósito, porque
     // a busca já tem sua própria prévia sem precisar sair da aba).
-    if (this._viewMode === '3d') {
+    if (this._viewMode === '3d' && !opts.isRestore) {
       this._showFlashcardOverlay(item);
       await App.verNoMapa3D({ x: item.mapaX, y: item.mapaY, ambienteId: item.ambienteId });
       return;

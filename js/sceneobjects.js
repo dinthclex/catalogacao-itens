@@ -117,6 +117,26 @@ window.SceneObjects = {
     return true;
   },
 
+  /** FILHOS — todas as entidades do mapa cujo `paiId` é o `id` de `nome`
+   *  (ver "HIERARQUIA" no comentário grande do topo de js/automation.js,
+   *  pedido verbatim: "Faça o mapa possuir uma hierarquia real semelhante
+   *  ao DOM"). Qualquer entidade de QUALQUER coleção pode ter um `paiId`
+   *  apontando pra outra — não é um campo novo por coleção, é só uma
+   *  convenção de dado (`paiId` = `id` de outra entidade do mesmo mapa). */
+  filhos(map, nome) {
+    const entry = this.byName(map, nome);
+    if (!entry) return [];
+    return this.all(map).filter((e) => e.ref.paiId === entry.ref.id);
+  },
+
+  /** PAI — a entidade "mãe" de `nome` (via `paiId`), ou `null` se `nome`
+   *  não existe ou não tem pai definido. */
+  pai(map, nome) {
+    const entry = this.byName(map, nome);
+    if (!entry?.ref?.paiId) return null;
+    return this.all(map).find((e) => e.ref.id === entry.ref.paiId) || null;
+  },
+
   /** Renomeia um objeto — atalho que também valida que o novo nome não
    *  colide com outro já existente no mapa (mesma checagem usada na
    *  criação, `Mapping._allSceneNames`). Devolve `true` se renomeou,

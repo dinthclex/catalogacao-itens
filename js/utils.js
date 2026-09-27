@@ -151,6 +151,43 @@ const Utils = {
     return null; // o botão novo só existe depois do fim da animação (assíncrono) — chamador não precisa da referência aqui
   },
 
+  /** [27/09/2026] NOVO — pedido verbatim: "havia um analisador de sintaxe
+   *  para avisar se o código estava com algum erro ou não. Atualmente,
+   *  não está funcionando [...] No 'Scripts' [...] deve ter um aviso
+   *  semelhante." CAUSA RAIZ do "não está funcionando": o único analisador
+   *  que existia (`Components.getScriptError`, js/components.js) só
+   *  detecta erro quando o script REALMENTE RODA (`tickEntity`/
+   *  `invokeScriptComponent`, chamado quadro a quadro só durante "Ver em
+   *  3D") — editando a folha de código no Mapa 2D (sem nenhum "Ver em 3D"
+   *  aberto tickando a entidade), o script nunca é executado nenhuma vez,
+   *  então nenhum erro é detectado, mesmo com um erro de sintaxe óbvio no
+   *  meio do código — parecia simplesmente "não funcionar".
+   *
+   *  Este helper faz uma checagem ESTÁTICA e instantânea, sem executar
+   *  nada do código de verdade: `new Function(...)` só COMPILA o texto
+   *  (nunca chama a função resultante), então pega erro de SINTAXE (chave/
+   *  parêntese não fechado, vírgula faltando, etc.) na hora que o usuário
+   *  digita, sem precisar de "Ver em 3D" nenhum — mas não pega erro de
+   *  RUNTIME (ex.: chamar `.foo()` de algo `undefined`), que só mesmo
+   *  rodando de verdade revela (aí sim é o `getScriptError` que continua
+   *  cobrindo, como aviso complementar). Devolve a mensagem de erro
+   *  (string) ou `null` se compilar sem problema. `paramsExtras` — nomes
+   *  dos parâmetros extras que o código pode referenciar sem dar
+   *  "ReferenceError" aqui (ex.: `Select`/`Object`/`TWEEN` dos Scripts,
+   *  ou `obj`/`SceneObjects`/`map` dos Componentes) — `new Function` já
+   *  não reclama de identificador livre nenhum (isso só falharia em
+   *  RUNTIME, não na compilação), então na prática não muda o resultado,
+   *  mas documenta a intenção pra quem for reaproveitar/estender depois. */
+  checkJsSyntax(code, paramsExtras = []) {
+    try {
+      // eslint-disable-next-line no-new-func
+      new Function(...paramsExtras, code || '');
+      return null;
+    } catch (err) {
+      return err && err.message ? err.message : String(err);
+    }
+  },
+
   escapeHtml(str) {
     return (str ?? '').toString()
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -441,7 +478,7 @@ const Utils = {
    *  com { value, checked } em vez de só `value` (usado, por exemplo, para
    *  um "aplicar esta escolha a todos" na importação de backup). Sem
    *  `checkbox`, o comportamento é o de sempre: resolve só com `value`. */
-  showChoiceModal({ title, message, choices, checkbox }) {
+  showChoiceModal({ title, message, choices, checkbox, detalhesHtml }) {
     return new Promise((resolve) => {
       const modal = document.createElement('div');
       modal.className = 'modal-backdrop';
@@ -450,6 +487,7 @@ const Utils = {
           <div class="handle"></div>
           <h3 style="margin-top:0">${this.escapeHtml(title)}</h3>
           ${message ? `<p style="font-size:13px; color:var(--text-dim); white-space:pre-wrap">${this.escapeHtml(message)}</p>` : ''}
+          ${detalhesHtml ? `<div class="choice-modal-detalhes" style="text-align:left; max-height:40vh; overflow-y:auto; margin-top:8px">${detalhesHtml}</div>` : ''}
           ${checkbox ? `<label style="display:flex; align-items:center; gap:8px; justify-content:center; margin-top:10px; font-size:12.5px; color:var(--text-dim); cursor:pointer">
             <input type="checkbox" id="choice-modal-chk" ${checkbox.defaultChecked !== false ? 'checked' : ''}>
             <span>${this.escapeHtml(checkbox.label)}</span>
@@ -553,6 +591,7 @@ const Utils = {
   showMapMergeBatchModal({ title, message, conflicts }) {
     return new Promise((resolve) => {
       const escolhas = new Map(conflicts.map((c) => {
+        if (c.identico) return [c.mapId, 'manter'];   // [26/09/2026] idênticos: nada a trocar -- padrão "manter"
         const totalLocal = c.local.itens + c.local.fotos + c.local.objetos;
         const totalNovo = c.novo.itens + c.novo.fotos + c.novo.objetos;
         return [c.mapId, totalNovo > totalLocal ? 'substituir' : 'manter'];
@@ -561,18 +600,21 @@ const Utils = {
       modal.className = 'modal-backdrop';
       const linhaHtml = (c) => `
         <div class="uf-mapmerge-row" data-map-id="${this.escapeHtml(c.mapId)}" style="border:1px solid var(--border); border-radius:10px; padding:8px 10px; margin-bottom:8px">
-          <div style="font-weight:700; margin-bottom:6px">🗺️ ${this.escapeHtml(c.nome)}</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:6px">
+            <div style="font-weight:700">🗺️ ${this.escapeHtml(c.nome)} ${this._chipIdentidadeMapa(c)}</div>
+            <button type="button" class="btn secondary sm uf-mapmerge-detalhes" data-map-id="${this.escapeHtml(c.mapId)}" title="Ver o que diverge entre os dois mapas">🔍 Detalhes</button>
+          </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap">
             <button type="button" class="btn secondary sm uf-mapmerge-opt" data-map-id="${this.escapeHtml(c.mapId)}" data-value="manter" style="flex:1; min-width:150px; text-align:left; height:auto; padding:8px 10px">
               <div style="font-weight:700">📱 Já existe neste aparelho</div>
               <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap">
-                <span class="badge">🏷️ ${c.local.itens}</span><span class="badge">📷 ${c.local.fotos}</span><span class="badge">🧱 ${c.local.objetos}</span>
+                ${this._badgesLadoMapa(c.local)}
               </div>
             </button>
             <button type="button" class="btn secondary sm uf-mapmerge-opt" data-map-id="${this.escapeHtml(c.mapId)}" data-value="substituir" style="flex:1; min-width:150px; text-align:left; height:auto; padding:8px 10px">
               <div style="font-weight:700">📥 Versão nova</div>
               <div style="display:flex; gap:6px; margin-top:4px; flex-wrap:wrap">
-                <span class="badge">🏷️ ${c.novo.itens}</span><span class="badge">📷 ${c.novo.fotos}</span><span class="badge">🧱 ${c.novo.objetos}</span>
+                ${this._badgesLadoMapa(c.novo)}
               </div>
             </button>
           </div>
@@ -601,9 +643,105 @@ const Utils = {
           marcarSelecionado(btn.dataset.mapId);
         };
       });
+      // [26/09/2026] NOVO -- pedido verbatim: "deve aparecer um botão que informa tudo em detalhes o que há de
+      // diferente entre os dois mapas [...] Em '🔀 Mesclar — escolher versão de cada mapa', ao clicar neste botão
+      // de detalhamento, nas duas caixas [...] deve exibir o que está diferente." Abre uma janela EM CIMA desta
+      // (pilha de janelas, mesmo espírito do Cancelar de importMapsWithConflictUI) -- fechar volta pra aqui, sem
+      // perder as escolhas já marcadas nas outras linhas.
+      modal.querySelectorAll('.uf-mapmerge-detalhes').forEach((btn) => {
+        btn.onclick = async () => {
+          const c = conflicts.find((x) => x.mapId === btn.dataset.mapId);
+          if (c) await this.showMapDiffDetalheModal(c);
+        };
+      });
       modal.querySelector('#mapmerge-batch-confirm').onclick = () => { modal.remove(); resolve(escolhas); };
       modal.querySelector('#mapmerge-batch-cancel').onclick = () => { modal.remove(); resolve(null); };
       modal.addEventListener('mousedown', (e) => { if (e.target === modal) { modal.remove(); resolve(null); } });
+    });
+  },
+
+  // [26/09/2026] NOVO -- badges de um lado (aparelho/backup) na janela de mesclagem: patrimônios, fotos de
+  // ambiente, fotos de patrimônio (quando conhecidas separadamente), objetos e o hash "tudo" do mapa.
+  _badgesLadoMapa(lado) {
+    const fotos = (typeof lado.fotosAmbiente === 'number')
+      ? `<span class="badge" title="Fotos de ambiente">🏞️ ${lado.fotosAmbiente}</span><span class="badge" title="Fotos de patrimônio">📎 ${lado.fotosPatrimonio}</span>`
+      : `<span class="badge" title="Fotos">📷 ${lado.fotos}</span>`;
+    const hash = lado.hashTudo ? `<span class="badge" title="Hash do mapa (planta + patrimônios + fotos)" style="font-family:monospace">#${this.escapeHtml(String(lado.hashTudo).slice(0, 8))}</span>` : '';
+    return `<span class="badge" title="Patrimônios">🏷️ ${lado.itens}</span>${fotos}<span class="badge" title="Objetos na planta">🧱 ${lado.objetos}</span>${hash}`;
+  },
+  _chipIdentidadeMapa(c) {
+    if (c.identico) return '<span class="badge" style="background:rgba(62,203,110,.18); color:#3ecb6e; border:1px solid #3ecb6e" title="Planta, patrimônios, fotos e carimbos de tempo exatamente iguais (mesmo hash)">✅ Idênticos</span>';
+    if (c.plantaIdentica) return '<span class="badge" style="background:rgba(250,204,21,.14); color:#facc15; border:1px solid #facc15" title="A planta (paredes/objetos/portas/janelas...) é exatamente igual; os patrimônios e/ou fotos ligados a ela diferem (ou não vieram no backup)">🟰 Planta idêntica</span>';
+    return '<span class="badge" style="background:rgba(239,68,68,.12); color:#ef4444; border:1px solid #ef4444" title="Os dois mapas têm diferenças">≠ Diferentes</span>';
+  },
+
+  // [26/09/2026] NOVO -- nomes amigáveis dos campos comparados (ver DB._FP_PERMITIR_MAPA/_ITEM/_FOTO) -- só pra
+  // exibição no botão "🔍 Detalhes"; a lista de campos em si vem do db.js (uma fonte só de verdade).
+  _ROTULOS_CAMPO_MAPA: { walls: 'Paredes', points: 'Pontos', trilha: 'Trilha', objects: 'Objetos', textos: 'Textos', portas: 'Portas', janelas: 'Janelas', layers: 'Camadas', bounds: 'Contorno', modo: 'Modo' },
+  _ROTULOS_CAMPO_ITEM: { patrimonio: 'Número de patrimônio', descricao: 'Descrição', tipo: 'Tipo', setor: 'Setor', ambienteId: 'Ambiente', mapaX: 'Posição X no mapa', mapaY: 'Posição Y no mapa', mapaPiso: 'Piso', fotoAnexadaId: 'Foto anexada', marcacoesFotos: 'Marcações em fotos', marcacoesMapa: 'Marcações no mapa', modificadoEm: 'Modificado em', ultimaConsultaEm: 'Última consulta em', criadoOriginalmenteEm: 'Criado originalmente em' },
+  _ROTULOS_CAMPO_FOTO: { ambienteId: 'Ambiente', tipo: 'Tipo', nome: 'Nome', setor: 'Setor', dataUrl: 'Arquivo da foto', thumbDataUrl: 'Miniatura', orbs: 'Marcações (orbs)', mapaX: 'Posição X no mapa', mapaY: 'Posição Y no mapa', mapaPiso: 'Piso', mapaLayerId: 'Camada' },
+
+  /** Janela "🔍 Detalhes" (pedido verbatim, ver showMapMergeBatchModal acima): mostra EXATAMENTE o que diverge
+   *  entre "Já existe neste aparelho" e "Versão nova" pro mapa `c` -- planta, patrimônios e fotos ligados a ele,
+   *  campo a campo. Empilha sobre a janela de mesclagem (fechar/Voltar só fecha esta, sem afetar as escolhas). */
+  async showMapDiffDetalheModal(c) {
+    return new Promise((resolve) => {
+      const raw = c._raw || {};
+      const dif = DB.diferencasMapa(raw.mapaLocal, raw.itensLocal, raw.fotosLocal, raw.mapaNovo, raw.itensNovo, raw.fotosNovo);
+      const esc = (x) => this.escapeHtml(String(x ?? ''));
+      const rotulos = (lista, mapa) => lista.length ? lista.map((k) => mapa[k] || k).join(', ') : null;
+      const semBackupInfo = !raw.itensNovo?.length && !raw.fotosNovo?.length && (c.novo?.itens > 0 || c.novo?.fotos > 0);
+
+      const blocoPlanta = dif.plantaDiff.length
+        ? `<div class="uf-diff-bloco"><div style="font-weight:700; color:#ef4444">🧱 Planta — campos diferentes:</div><div style="font-size:13px">${esc(rotulos(dif.plantaDiff, this._ROTULOS_CAMPO_MAPA))}</div></div>`
+        : `<div class="uf-diff-bloco"><div style="font-weight:700; color:#3ecb6e">🧱 Planta — idêntica nos dois lados</div></div>`;
+
+      const blocoLista = (titulo, grupo, rotulosMapa) => {
+        const partes = [];
+        if (grupo.diferentes.length) {
+          partes.push(`<div style="font-weight:600; margin-top:4px">✏️ Diferentes (${grupo.diferentes.length}):</div>` + grupo.diferentes.map((d) =>
+            `<div style="font-size:12px; margin:2px 0 2px 8px">• <b>${esc(d.rotulo)}</b> — ${esc(rotulos(d.campos, rotulosMapa))}</div>`).join(''));
+        }
+        if (grupo.apenasLocal.length) {
+          partes.push(`<div style="font-weight:600; margin-top:4px">📱 Só neste aparelho (${grupo.apenasLocal.length}):</div>` + grupo.apenasLocal.map((x) =>
+            `<div style="font-size:12px; margin:2px 0 2px 8px">• ${esc(x.patrimonio || x.descricao || x.nome || x.tipo || x.id)}</div>`).join(''));
+        }
+        if (grupo.apenasNovo.length) {
+          partes.push(`<div style="font-weight:600; margin-top:4px">📥 Só no backup (${grupo.apenasNovo.length}):</div>` + grupo.apenasNovo.map((x) =>
+            `<div style="font-size:12px; margin:2px 0 2px 8px">• ${esc(x.patrimonio || x.descricao || x.nome || x.tipo || x.id)}</div>`).join(''));
+        }
+        const semNadaDiferente = !grupo.diferentes.length && !grupo.apenasLocal.length && !grupo.apenasNovo.length;
+        const corTitulo = semNadaDiferente ? '#3ecb6e' : '#facc15';
+        return `<div class="uf-diff-bloco">
+          <div style="font-weight:700; color:${corTitulo}">${titulo} — ${semNadaDiferente ? `todos iguais (${grupo.iguais})` : `${grupo.iguais} igual/iguais, o resto diverge`}</div>
+          ${partes.join('') || ''}
+        </div>`;
+      };
+
+      const blocoItens = blocoLista('🏷️ Patrimônios', dif.itens, this._ROTULOS_CAMPO_ITEM);
+      const blocoFotos = blocoLista('🖼️ Fotos', dif.fotos, this._ROTULOS_CAMPO_FOTO);
+      const avisoSemInfo = semBackupInfo
+        ? `<p style="font-size:12px; color:var(--text-dim); margin:8px 0 0">⚠️ O backup não trouxe aqui a lista de patrimônios/fotos deste mapa pra comparar item a item — os contadores de "Versão nova" vêm só de uma contagem simples.</p>` : '';
+
+      const modal = document.createElement('div');
+      modal.className = 'modal-backdrop';
+      modal.innerHTML = `
+        <div class="modal-sheet" style="text-align:left; max-width:min(96vw, 560px)">
+          <div class="handle"></div>
+          <h3 style="margin-top:0; text-align:center">🔍 ${esc(c.nome)}</h3>
+          <p style="font-size:12px; color:var(--text-dim); text-align:center; margin-top:-6px">O que diverge entre "📱 Já existe neste aparelho" e "📥 Versão nova"</p>
+          <div style="max-height:55vh; overflow-y:auto; margin-top:8px; display:flex; flex-direction:column; gap:10px">
+            ${blocoPlanta}${blocoItens}${blocoFotos}
+          </div>
+          ${avisoSemInfo}
+          <div style="display:flex; margin-top:12px">
+            <button type="button" class="btn block" id="mapdiff-fechar">Voltar</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+      const fechar = () => { modal.remove(); resolve(); };
+      modal.querySelector('#mapdiff-fechar').onclick = fechar;
+      modal.addEventListener('mousedown', (e) => { if (e.target === modal) fechar(); });
     });
   },
 
@@ -615,71 +753,109 @@ const Utils = {
    * (28/08/2026): "Deve haver a possibilidade de mesclar mapas... Deve ser
    * possível decidir qual mapa vai ficar." A opção "🔀 Mesclar" abre um
    * ÚNICO modal (`showMapMergeBatchModal`, ver acima) com TODOS os mapas
-   * colidentes de uma vez — pedido do usuário (28/08/2026, correção):
-   * "se há várias coisas para decidir, deve aparecer em uma única janela.
-   * Não ficar aparecendo uma janela por decisão a se tomar" (antes desta
-   * correção, cada mapa colidente abria seu PRÓPRIO modal, um atrás do
-   * outro, dentro do loop de `DB.importMaps`). As decisões já vêm prontas
-   * (num Map mapId -> 'manter'/'substituir') ANTES de chamar `DB.importMaps`,
-   * então o loop de import não pergunta mais nada — só consulta o Map.
+   * colidentes de uma vez. As decisões já vêm prontas (num Map mapId ->
+   * 'manter'/'substituir') ANTES de chamar `DB.importMaps`.
    * Devolve o mesmo formato de `DB.importMaps`, ou `null` se cancelado.
+   *
+   * [26/09/2026] MUDADO -- pedidos verbatim:
+   *  - "Esta janela só trata de mapa [...] porém deve trazer a informação sobre os patrimônios e imagens (de
+   *    ambiente e de patrimônio) contidos nele (se houverem)." -- cada mapa colidente é listado com, dos DOIS
+   *    lados (aparelho / backup): patrimônios, fotos de ambiente, fotos de patrimônio e objetos.
+   *  - "deve haver algum hash de mapa para identificar que são idênticos em tudo [...] Está informação de que
+   *    os mapas são 'idênticos' deve estar presente." -- hash (DB.resumoIdentidadeMapa: planta + patrimônios +
+   *    fotos) de cada lado e o selo "✅ Idênticos" / "🟰 Planta idêntica" / "≠ Diferentes".
+   *  - "Ao clicar em 'Cancelar' nesta janela [mesclar], deve ser como um pilha de janelas, deve voltar para
+   *    última." -- Cancelar na janela de mesclagem volta pra janela anterior (a das opções), não encerra tudo.
+   * `opts.identidadeNovoLado(m)` (opcional) devolve o resumo do lado do backup (com os itens/fotos que vieram
+   * junto); sem ele (ex.: unify.js), o lado novo usa `countNewSide` e o hash só da planta.
    */
-  async importMapsWithConflictUI(maps, { title = 'Mapas já existentes encontrados', countNewSide } = {}) {
+  async importMapsWithConflictUI(maps, { title = 'Mapas já existentes encontrados', countNewSide, identidadeNovoLado, rawNovoLado } = {}) {
     if (!maps?.length) return { idRemap: new Map(), criados: 0, atualizados: 0, mantidos: 0, criadosMaps: [], atualizadosAntes: [] };
     const conflitos = await DB.countMapConflicts(maps);
-    // `OrganizeView.invalidate()` (rodada 52, item 9 — pedido do usuário:
-    // "quando a janela [Organizar] já foi montada deve ser preservada até a
-    // página ser recarregada. Só deve atualizar se um mapa novo for criado
-    // ou uma nova importação ocorrer...") — marca que a lista de mapas
-    // cacheada em Organizar ficou desatualizada; se a tela estiver fechada
-    // agora, o próximo `open()` recarrega do banco antes de mostrar algo
-    // velho. Opcional (`?.`) — este arquivo carrega ANTES de organizeview.js
-    // no index.html, então a checagem de existência é sempre necessária, e
-    // o app inteiro deve continuar funcionando normalmente mesmo se este
-    // hook nunca for chamado (não é crítico pra importação em si).
+    // `OrganizeView.invalidate()` (rodada 52, item 9) — marca que a lista de
+    // mapas cacheada em Organizar ficou desatualizada. Opcional (`?.`).
     if (!conflitos) { const r = await DB.importMaps(maps, 'ambos'); window.OrganizeView?.invalidate?.(); return r; }
 
-    const resultado = await this.showChoiceModal({
-      title,
-      message: `${conflitos} de ${maps.length} mapa(s) já existem aqui (mesmo id). O que fazer com eles?`,
-      choices: [
-        { value: 'manter', label: '✅ Manter o que já existe aqui (ignora a versão nova)' },
-        { value: 'substituir', label: '🔁 Substituir a planta pela nova', secondary: true },
-        { value: 'mesclar', label: '🔀 Mesclar — escolher versão de cada mapa', secondary: true },
-        { value: 'ambos', label: '➕ Manter os dois (importar como mapa novo)', secondary: true },
-        { value: 'cancelar', label: 'Cancelar', secondary: true },
-      ],
-    });
-    if (!resultado || resultado === 'cancelar') return null;
-    if (resultado !== 'mesclar') { const r = await DB.importMaps(maps, resultado); window.OrganizeView?.invalidate?.(); return r; }
-
-    // Mesclar — monta a lista COMPLETA de conflitos ANTES de perguntar nada
-    // (uma leitura de contagem por mapa, sem UI ainda), pra abrir UM ÚNICO
-    // modal com todas as linhas juntas, em vez de um modal por mapa.
+    // [26/09/2026] NOVO -- monta ANTES das janelas o resumo/identidade de cada mapa colidente (dos 2 lados).
     const pares = await DB.findMapConflicts(maps);
+    // [26/09/2026] NOVO -- fotos locais buscadas uma vez só (fora do loop) pra montar o "raw" de cada mapa
+    // (ver `_raw` abaixo) -- usado pelo botão "🔍 Detalhes" da janela de mesclagem.
+    const todasFotosLocaisRaw = await DB.getAllAmbientePhotos();
     const conflicts = [];
     for (const { m, existente } of pares) {
-      const localCounts = await DB.countLinkedToMap(existente.id);
+      const idLocal = await DB.resumoIdentidadeMapaLocal(existente.id);
+      let idNovo = null;
+      try { idNovo = identidadeNovoLado ? identidadeNovoLado(m) : null; } catch (e) { idNovo = null; }
       const novoCounts = countNewSide ? countNewSide(m) : { itens: 0, fotos: 0 };
+      const hashPlantaNovo = idNovo ? idNovo.hashPlanta : DB._hash(DB.fpMapa(m));
+      const plantaIdentica = !!idLocal && idLocal.hashPlanta === hashPlantaNovo;
+      const identico = !!idLocal && !!idNovo && idLocal.hashTudo === idNovo.hashTudo;
+      // [26/09/2026] NOVO -- dados crus dos 2 lados, só pro botão "🔍 Detalhes" calcular o que diverge campo a
+      // campo (DB.diferencasMapa) -- não entra em `local`/`novo` (que só têm os contadores/hash já existentes,
+      // usados nos badges) pra não pesar a janela principal.
+      let itensNovoRaw = [], fotosNovoRaw = [];
+      try { const r = rawNovoLado ? rawNovoLado(m) : null; if (r) { itensNovoRaw = r.itens || []; fotosNovoRaw = r.fotos || []; } } catch (e) { /* melhor esforço */ }
+      let itensLocalRaw = [];
+      try { itensLocalRaw = await DB.getItemsByAmbiente(existente.id); } catch (e) { /* melhor esforço */ }
+      const fotosLocalRaw = todasFotosLocaisRaw.filter((f) => f && f.ambienteId === existente.id);
       conflicts.push({
         mapId: m.id,
         nome: existente.nome || m.nome || 'Ambiente',
-        local: { itens: localCounts.itens, fotos: localCounts.fotos, objetos: (existente.objects || []).length },
-        novo: { itens: novoCounts.itens, fotos: novoCounts.fotos, objetos: (m.objects || []).length },
+        identico, plantaIdentica,
+        local: {
+          itens: idLocal ? idLocal.itens : 0, fotos: idLocal ? idLocal.fotosAmbiente + idLocal.fotosPatrimonio : 0,
+          fotosAmbiente: idLocal ? idLocal.fotosAmbiente : 0, fotosPatrimonio: idLocal ? idLocal.fotosPatrimonio : 0,
+          objetos: (existente.objects || []).length, hashTudo: idLocal ? idLocal.hashTudo : null,
+        },
+        novo: idNovo ? {
+          itens: idNovo.itens, fotos: idNovo.fotosAmbiente + idNovo.fotosPatrimonio,
+          fotosAmbiente: idNovo.fotosAmbiente, fotosPatrimonio: idNovo.fotosPatrimonio,
+          objetos: (m.objects || []).length, hashTudo: idNovo.hashTudo,
+        } : { itens: novoCounts.itens, fotos: novoCounts.fotos, objetos: (m.objects || []).length },
+        _raw: { mapaLocal: existente, mapaNovo: m, itensLocal: itensLocalRaw, fotosLocal: fotosLocalRaw, itensNovo: itensNovoRaw, fotosNovo: fotosNovoRaw },
       });
     }
-    const decisoes = await this.showMapMergeBatchModal({
-      title: 'Qual versão de cada mapa deve virar a planta?',
-      message: 'A outra versão contribui só com fotos/itens vinculados àquele mapa — a planta (paredes/objetos) escolhida é a única que fica.',
-      conflicts,
-    });
-    if (!decisoes) return null;
+    const nIdenticos = conflicts.filter((c) => c.identico).length;
+    const esc = (x) => this.escapeHtml(x);
+    const linhaLado = (rotulo, l) => `<div style="font-size:12px; margin-top:3px"><span style="color:var(--text-dim)">${rotulo}:</span> ${this._badgesLadoMapa(l)}</div>`;
+    const detalhesHtml = conflicts.map((c) => `
+      <div style="border:1px solid var(--border); border-radius:10px; padding:8px 10px; margin-bottom:8px">
+        <div style="font-weight:700">🗺️ ${esc(c.nome)} ${this._chipIdentidadeMapa(c)}</div>
+        ${linhaLado('📱 Neste aparelho', c.local)}
+        ${linhaLado('📥 No backup', c.novo)}
+      </div>`).join('') + `<p style="font-size:11px; color:var(--text-dim); margin:4px 0 0">🏷️ patrimônios · 🏞️ fotos de ambiente · 📎 fotos de patrimônio · 🧱 objetos na planta · #hash do mapa (planta + patrimônios + fotos)</p>`;
+    const mensagem = `${conflitos} de ${maps.length} mapa(s) já existem aqui (mesmo id)`
+      + (nIdenticos ? ` — ${nIdenticos === conflitos ? (conflitos === 1 ? 'é IDÊNTICO' : 'todos IDÊNTICOS') : `${nIdenticos} IDÊNTICO(S)`} ao que já está no aparelho (mesmo hash)` : '')
+      + '. O que fazer com eles?';
 
-    // As decisões já foram todas tomadas na janela única acima — o loop de
-    // `DB.importMaps` só CONSULTA o Map, sem abrir nada novo.
-    const r = await DB.importMaps(maps, (m) => decisoes.get(m.id) || 'manter');
-    window.OrganizeView?.invalidate?.();
-    return r;
+    // [26/09/2026] MUDADO -- pilha de janelas: Cancelar na janela de mesclagem volta pra esta aqui.
+    while (true) {
+      const resultado = await this.showChoiceModal({
+        title,
+        message: mensagem,
+        detalhesHtml,
+        choices: [
+          { value: 'manter', label: '✅ Manter o que já existe aqui (ignora a versão nova)' },
+          { value: 'substituir', label: '🔁 Substituir a planta pela nova', secondary: true },
+          { value: 'mesclar', label: '🔀 Mesclar — escolher versão de cada mapa', secondary: true },
+          { value: 'ambos', label: '➕ Manter os dois (importar como mapa novo)', secondary: true },
+          { value: 'cancelar', label: 'Cancelar', secondary: true },
+        ],
+      });
+      if (!resultado || resultado === 'cancelar') return null;
+      if (resultado !== 'mesclar') { const r = await DB.importMaps(maps, resultado); window.OrganizeView?.invalidate?.(); return r; }
+
+      const decisoes = await this.showMapMergeBatchModal({
+        title: 'Qual versão de cada mapa deve virar a planta?',
+        message: 'A outra versão contribui só com fotos/itens vinculados àquele mapa — a planta (paredes/objetos) escolhida é a única que fica.',
+        conflicts,
+      });
+      if (!decisoes) continue; // Cancelar -> volta pra janela anterior (pilha)
+
+      const r = await DB.importMaps(maps, (m) => decisoes.get(m.id) || 'manter');
+      window.OrganizeView?.invalidate?.();
+      return r;
+    }
   },
 
   /** Janela de busca simples para escolher um item do catálogo — usada tanto

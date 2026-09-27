@@ -405,10 +405,10 @@ window.ObjectPanelCard = {
       <!-- [13/09/2026 UTC] NOVO — pedido verbatim: "o atributo 'class',
            então, deve ser implementado." Mesmo espírito do 'class' do
            HTML: várias classes por objeto, separadas por vírgula/espaço
-           (ver 'Mapping.parseClassesInput'). Usado pelo painel '🏷️
-           Grupos' (mapview.js/view3d.js) pra ocultar/destacar todo
-           objeto de uma mesma classe de uma vez. -->
-      <label class="map-panel-field"><span>🏷️ Classes</span><input type="text" id="obj-classes" value="${Utils.escapeHtml((Mapping.getObjectClasses(obj) || []).join(', '))}" placeholder="ex: sala-reuniao, mobiliario" title="Uma ou mais 'classes' (separadas por vírgula ou espaço) — igual ao atributo 'class' do HTML. Use o painel '🏷️ Grupos' pra ocultar/destacar todos os objetos de uma mesma classe de uma vez."></label>
+           (ver 'Mapping.parseClassesInput'). Usado pelo painel '🎬
+           Scripts' (mapview.js/view3d.js, via seletor '.classe') pra
+           ocultar/destacar todo objeto de uma mesma classe de uma vez. -->
+      <label class="map-panel-field"><span>🏷️ Classes</span><input type="text" id="obj-classes" value="${Utils.escapeHtml((Mapping.getObjectClasses(obj) || []).join(', '))}" placeholder="ex: sala-reuniao, mobiliario" title="Uma ou mais 'classes' (separadas por vírgula ou espaço) — igual ao atributo 'class' do HTML. Use o painel '🎬 Scripts' (seletor '.classe') pra ocultar/destacar todos os objetos de uma mesma classe de uma vez."></label>
       ${grupoFieldHtml}
       <!-- [19/09/2026 UTC] CORRIGIDO (RODADA 194) -- pedido verbatim: "Implemente as setas na janela de
            propriedades para todos os objetos que há no catálogo [...] é uma janela padrão que carrega
@@ -661,6 +661,17 @@ window.ObjectPanelCard = {
       salvarCampo({ nome: nomeGerado });
     }
     panel.querySelector('#obj-nome').oninput = (e) => salvarCampo({ nome: e.target.value });
+    // [27/09/2026] NOVO — ver comentário grande de `Mapping.ensureUniqueName`:
+    // garante nome único em TODA a cena ao sair do campo (não a cada tecla —
+    // corrigir "no meio" da digitação, tipo virar ".001" antes do usuário
+    // terminar de escrever, seria uma experiência ruim). Corrige o valor
+    // exibido no campo também, pra não ficar mostrando um nome que na
+    // prática já foi trocado por outro (por colisão) por baixo dos panos.
+    panel.querySelector('#obj-nome').onchange = (e) => {
+      const corrigido = Mapping.ensureUniqueName(ctx._map, e.target.value, obj);
+      if (corrigido !== e.target.value) { e.target.value = corrigido; }
+      salvarCampo({ nome: corrigido });
+    };
     panel.querySelector('#obj-classes').oninput = (e) => salvarCampo({ classes: Mapping.parseClassesInput(e.target.value) });
     // NOVO (07/09/2026), pedido verbatim: "ligar objetos separados como no
     // Blender" — wiring do campo "🔗 Grupo" (HTML montado em

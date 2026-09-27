@@ -142,6 +142,19 @@ const MapConfig = {
     // Varredura de Sinal Anterior" — ao reentrar no "Ver em 3D", a malha/pontos/raios já calculados são só
     // REANEXADOS na cena nova (sem refazer o raycast); `true` = refaz a varredura do zero, como sempre foi.
     apRefazerVarreduraAoEntrarNoVer3D: false,
+    // [24/09/2026] NOVO -- pedido verbatim: "Faça com que todas as opções que aparecem na janela do AP (e
+    // também na janelinha do AP) aparecerem nas 'configurações 3D', na seção '📡 Access Point'." As duas
+    // opções "Manter a varredura X anterior visível ao fazer uma nova" (ver `_wfConfigApHtml` em
+    // view3d-rede.js) são, por natureza, POR-AP (`obj.rede.ap.manterAnterior`/`obj.rede.apAvancado.manterAnterior`
+    // -- cada Access Point guarda a sua própria preferência, ao contrário das duas opções acima, que são
+    // globais de verdade). Estas DUAS chaves aqui servem de PADRÃO -- usado (a) para inicializar
+    // `manterAnterior` de um AP que ainda nunca teve o valor definido (ver `AccessPoint`/`AccessPointAvancado`
+    // em wifi-signal.js/wifi-signal-avancado.js) e (b) aplicado imediatamente a TODO Access Point do mapa
+    // aberto ao serem alteradas aqui (ver wiring, `_wfAplicarManterAnteriorGlobal` em view3d-rede.js) -- assim
+    // a opção em "Configurações 3D" tem o mesmo efeito prático de "valer para todos os APs" que as outras 3,
+    // mesmo o dado real ficando por-AP (pra continuar podendo ser ajustado individualmente na janela do AP).
+    apManterVarreduraNormalAnteriorPadrao: false,
+    apManterVarreduraAvancadaAnteriorPadrao: false,
     // [16/09/2026 UTC] NOVO — pedido verbatim, seção "📏 Trena 3D" ganhando
     // várias subseções novas de aparência/comportamento. Ver view3d.js
     // (`_trena3DRebuildLines`/`_trena3DUpdatePreview`/`_trena3DEndpointMesh`)
@@ -1454,8 +1467,16 @@ const MapConfig = {
     // Valores: 'nao' | 'vazio' | 'sim'. Padrão 'sim' — reproduz o
     // comportamento ATUAL confirmado em capture.js `_autoPlacePhoto`
     // (sempre posicionava automaticamente, sem exceção — ver comentário lá).
-    // Consumida por capture.js `_autoPlacePhoto`. ----------
-    fotoAutoAtribuirCamera: 'sim',
+    // Consumida por capture.js `_autoPlacePhoto`.
+    // [26/09/2026] MUDADO -- pedido verbatim: "há uma vinculação automática a
+    // uma posição no mapa. Isto deve ser removido do app. [...] deve ser
+    // feita manualmente (por meio dos botões/métodos de vinculação do
+    // próprio app)." `_autoPlacePhoto` (capture.js) agora IGNORA este campo e
+    // nunca posiciona automaticamente, então o valor abaixo é só o padrão
+    // pra quem ainda tenha um config antigo salvo com 'sim'/'vazio' -- a UI
+    // (ver mapconfig.js "Atribuir a um lugar no mapa automaticamente") passou
+    // a mostrar só a opção 'Não', travada. ----------
+    fotoAutoAtribuirCamera: 'nao',
 
     // ---------- [22/09/2026] NOVO — pedido verbatim: "Se ainda não tem nas
     // 'configurações 2D', uma seção para o objeto 'Câmera', deve haver.
@@ -2603,6 +2624,17 @@ const MapConfig = {
           <span class="d" style="display:block; margin-bottom:8px">Switch, patch panel, DIO, guias, bandejas, PDU, espelhos, caixas de piso, abraçadeiras: veja o que cada objeto é, o que faz e pode fazer, as teclas usadas e uma renderização de cada um.</span>
           <button type="button" class="btn" id="mc-rede-docs-btn">📖 Descrição dos objetos de rede</button>
         </div>
+        <!-- [27/09/2026] NOVO — pedido verbatim: "Coloque nas 'configurações 2D',
+             uma seção com a documentação sobre o 'Scripts', tudo detalhado, o
+             parser, 'Select()' como querySelectorAll(), porém adaptado ao app,
+             tudo. Faça do mesmo jeito que na seção '🔌 Infraestrutura de rede'."
+             Seção só INFORMATIVA (sem config): a janela mora em
+             js/scripts-docs.js (ScriptsDocs.abrir). -->
+        <div class="mapconfig-section">
+          <h4>🎬 Scripts</h4>
+          <span class="d" style="display:block; margin-bottom:8px">O motor de seleção Select() (equivalente ao querySelectorAll() do DOM, adaptado ao app), a API de cada seleção, Object(nome), os ganchos de ciclo de vida e o rollback automático — tudo detalhado.</span>
+          <button type="button" class="btn" id="mc-scripts-docs-btn">📖 Guia do parser e da API de Scripts</button>
+        </div>
         <!-- Seção "🧱 Parede" no contexto 2D (pedido do usuário: "nas
              configurações 2D deve ter uma seção também chamada 'parede' e
              uma subseção idêntica à das configurações 3D, a subseção
@@ -3201,76 +3233,332 @@ const MapConfig = {
           <label class="map-panel-field" style="margin-top:8px"><span>Cor</span><input type="color" id="mc-luzambiente-cor" value="${cfg.luzAmbienteCor || '#ffffff'}"></label>
           <button type="button" class="btn secondary sm" id="mc-luzambiente-reset" style="margin-top:8px">Restaurar padrão (1x, branco)</button>
         </div>
-        <!-- [22/09/2026] NOVO -- pedido verbatim: "Nas 'configurações 3D', faça uma seção para o Access
-             Point, com uma opção de ao sair do 'Ver em 3D', desligar o mapa de calor do Access Point (a
-             opção 'mostrar mapa' na tela do AP deve ser um espelho do que acontecer)." Ver
-             DEFAULTS.apDesligarMapaAoSairDoVer3D acima e view3d-rede.js _v3dSairDesligarMapasAP
-             (chamada ao fechar o "Ver em 3D", quando esta opção está ligada). -->
-        <div class="mapconfig-section">
-          <h4>📡 Access Point</h4>
-          <label class="radio-opt">
-            <input type="checkbox" id="mc-ap-desligar-ao-sair" ${cfg.apDesligarMapaAoSairDoVer3D ? 'checked' : ''}>
-            <span><span class="t">Desligar o mapa de calor ao sair do "Ver em 3D"</span><br><span class="d">Por padrão, o mapa de calor de cada Access Point volta a aparecer automaticamente ao reentrar no "Ver em 3D" (se a varredura já tiver sido feita e "mostrar mapa" estiver ativo). Ligando esta opção, o mapa de calor de TODO AP é desligado ao fechar o "Ver em 3D" — a checkbox "mostrar mapa" na tela de cada AP reflete sempre o estado real (aparecendo desmarcada na próxima vez, já que o mapa não vai estar visível).</span></span>
-          </label>
-          <!-- [25/09/2026] NOVO -- pedido verbatim: "Ao voltar para o 'Ver em 3D', o AP acaba refazendo a
-               sua Varredura. Coloque isso como uma opção [...] Por padrão desabilitada. A outra opção é
-               'Manter a Varredura de Sinal Anterior'. Estas opções alternam entre si, não podendo ficar
-               selecionadas ao mesmo tempo." As duas caixas abaixo espelham a MESMA flag
-               (apRefazerVarreduraAoEntrarNoVer3D) — marcar uma desmarca a outra na hora (ver wiring). -->
-          <label class="radio-opt" style="margin-top:10px">
-            <input type="checkbox" id="mc-ap-refazer-ao-entrar" ${cfg.apRefazerVarreduraAoEntrarNoVer3D ? 'checked' : ''}>
-            <span><span class="t">Refazer Varredura de Sinal ao entrar no "Ver em 3D"</span><br><span class="d">Desabilitada por padrão. Ligando esta opção, todo AP com "mostrar mapa" ativo refaz o raycast do zero toda vez que o "Ver em 3D" é reaberto (comportamento de sempre, mais lento). Mutuamente exclusiva com a opção abaixo.</span></span>
-          </label>
-          <label class="radio-opt" style="margin-top:6px">
-            <input type="checkbox" id="mc-ap-manter-anterior" ${cfg.apRefazerVarreduraAoEntrarNoVer3D ? '' : 'checked'}>
-            <span><span class="t">Manter a Varredura de Sinal Anterior</span><br><span class="d">Habilitada por padrão. Ao reentrar no "Ver em 3D", o mapa de calor (e os pontos/raios do raycaster) já calculados são reaproveitados na hora, sem refazer o raycast — se "mostrar mapa" estiver ativo na tela do AP, o mapa de calor continua aparecendo, exatamente como estava.</span></span>
-          </label>
-        </div>
-        <!-- Seção "🔗 Item associado" (pedido do usuário, 26/08/2026) — mesmo
-             destaque azul do mapa 2D (contorno + selo) pra objetos com um
-             patrimônio associado (obj.itemId, ver o novo botão "📍 Adicionar
-             orb" da hotbar 3D). Ver DEFAULTS acima e engine3d.js
-             _addItemAssociadoDestaque pro significado de cada campo. -->
+        <!-- [24/09/2026] MOVIDO -- a seção "📡 Access Point" (desligar mapa ao sair / refazer ou manter varredura ao entrar no
+             "Ver em 3D") agora vive na janela do Access Point, seção "⚙️ Configurações do Access Point" (e na janelinha do AP):
+             pedido verbatim: "Já pegue as configurações que têm nas 'configurações 3D', na seção '📡 Access Point' e coloque junto."
+             As chaves em MapConfig (apDesligarMapaAoSairDoVer3D e apRefazerVarreduraAoEntrarNoVer3D) continuam as mesmas. -->
+        <!-- Seção "🔗 Item associado" no contexto 2D (pedido do usuário,
+             26/08/2026: "Esse 'destaque a mais' deve ter também no 2D e com
+             uma opção também nas 'configurações 2D'.") — mesma ideia da
+             seção equivalente no 3D (mais abaixo), só que com uma única
+             opção (o 2D já mostra 🔗/contorno azul sempre, sem opção de
+             desligar — só o destaque EXTRA é opcional aqui). Ver
+             mapview.js Map2DRenderer._drawDestaqueExtraObj/
+             _drawDestaqueExtraPin. -->
         <div class="mapconfig-section">
           <h4>🔗 Item associado</h4>
           <label class="radio-opt">
-            <input type="checkbox" id="mc-itemassoc-contorno" ${cfg.itemAssociado3DContorno !== false ? 'checked' : ''}>
-            <span><span class="t">Contorno azul</span><br><span class="d">Objetos com um patrimônio associado ganham um contorno azul nas arestas, igual ao mapa 2D. Desligue se notar impacto de desempenho em mapas com muitos itens associados.</span></span>
+            <input type="checkbox" id="mc-destaque-extra-dourado-2d" ${cfg.destaqueExtra2DDouradoAtivo !== false ? 'checked' : ''}>
+            <span><span class="t">Destacar mais — anel dourado (padrão)</span><br><span class="d">Soma um anel dourado bem visível de longe ao redor dos objetos com patrimônio associado e dos pinos de itens ainda não associados a nenhum objeto — útil pra achar rápido o que falta associar em mapas grandes.</span></span>
           </label>
           <label class="radio-opt" style="margin-top:10px">
-            <input type="checkbox" id="mc-destaque-extra-raio-3d" ${cfg.destaqueExtra3DRaioAtivo !== false ? 'checked' : ''}>
-            <span><span class="t">Destacar mais — raio azul (padrão)</span><br><span class="d">Soma um facho de luz azul bem visível de longe, tanto nos objetos com patrimônio associado quanto nos pinos-pirâmide de itens ainda não associados a nenhum objeto — útil pra achar rápido o que falta associar em mapas grandes.</span></span>
+            <input type="checkbox" id="mc-destaque-extra-raio-2d" ${cfg.destaqueExtra2DRaioAtivo ? 'checked' : ''}>
+            <span><span class="t">Destacar mais — raio azul</span><br><span class="d">Versão 2D (vista de cima) do facho de luz azul do 3D — um brilho azul ao redor do objeto/pino. Pode ficar ligado junto com o anel dourado acima.</span></span>
           </label>
-          <label class="radio-opt" style="margin-top:10px">
-            <input type="checkbox" id="mc-destaque-extra-dourado-3d" ${cfg.destaqueExtra3DDouradoAtivo ? 'checked' : ''}>
-            <span><span class="t">Destacar mais — anel dourado</span><br><span class="d">Versão 3D do anel dourado do mapa 2D — um halo dourado no chão, na base do objeto/pino. Pode ficar ligado junto com o raio azul acima.</span></span>
-          </label>
-          <label class="field" style="margin-top:10px">
-            <span class="lbl">Selo do item associado</span>
-            <select id="mc-itemassoc-selo">
-              <option value="plaquinha" ${(cfg.itemAssociado3DSelo || 'plaquinha') === 'plaquinha' ? 'selected' : ''}>Plaquinha (padrão)</option>
-              <option value="bolinha" ${cfg.itemAssociado3DSelo === 'bolinha' ? 'selected' : ''}>Bolinha azul (como no 2D)</option>
-            </select>
-            <span class="d">"Plaquinha": uma placa pequena com 🔗 numa altura de visão confortável do objeto — se ele for muito alto, a plaquinha fica numa altura mais baixa em vez de subir até o topo (onde não daria pra ver). "Bolinha azul": uma bolinha com 🔗, mesmo visual do mapa 2D.</span>
-          </label>
-          <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border)">
-            <span style="display:block; font-size:14px; font-weight:600">Ver através das paredes</span>
-            <span class="d" style="display:block; margin-top:2px; margin-bottom:4px">Cada peça acima pode ficar visível mesmo com uma parede na frente, ou respeitar profundidade normal (escondendo atrás delas) — independente uma da outra. A plaquinha/bolinha nunca fica escondida atrás do PRÓPRIO objeto, mesmo com a opção dela desligada — só atrás de paredes/portas/janelas.</span>
-            <label class="radio-opt" style="padding-left:6px">
-              <input type="checkbox" id="mc-atravesparedes-plaquinha" ${cfg.itemBadge3DAtravesParedesAtivo !== false ? 'checked' : ''}>
-              <span><span class="t">Plaquinhas/bolinhas</span><br><span class="d">O selo "🔗 item associado" e as flags de duplicação/multi-item.</span></span>
-            </label>
-            <label class="radio-opt" style="padding-left:6px">
-              <input type="checkbox" id="mc-atravesparedes-dourado" ${cfg.anelDourado3DAtravesParedesAtivo !== false ? 'checked' : ''}>
-              <span><span class="t">Círculo dourado</span><br><span class="d">O halo dourado do "Destacar mais" (ver mais acima).</span></span>
-            </label>
-            <label class="radio-opt" style="padding-left:6px">
-              <input type="checkbox" id="mc-atravesparedes-raio" ${cfg.raioAzul3DAtravesParedesAtivo !== false ? 'checked' : ''}>
-              <span><span class="t">Raio azul</span><br><span class="d">O facho de luz do "Destacar mais" (ver mais acima).</span></span>
-            </label>
-          </div>
           ${this._flagsLegendHtml()}
         </div>
+        <!-- NOVO (06/09/2026), pedido verbatim: "ao tirar um foto é possível
+             vincular a uma posição do mapa 2D, após clicar em 'Marcar aqui',
+             acaba voltando para a tela do 'Mapa'. Deve permanecer na tela
+             'Mapa'->'Planta baixa' [...] deve haver duas ações padrão: uma,
+             é conforme acabei de descrever; outra, é voltar para a tela de
+             'Fotos' [...] Isto deve ficar em uma seção chamada 'Fotos', nas
+             'configurações 2D'. Por padrão deve permanecer na tela
+             'Mapa'->'Planta baixa'." — seção NOVA, separada da seção "Foto"
+             logo abaixo (que é sobre 'Mapa'->'Foto', um conceito diferente
+             — ver comentário ali) — ícone 📍 (o mesmo espírito de "Marcar
+             aqui") escolhido de propósito, diferente do ícone da seção
+             "Foto" abaixo E do emoji usado pelo botão "Fotos" do rodapé do
+             app, pra não confundir as três. Lida/gravada direto por
+             DB.getSetting/setSetting (ver 'fotosMarcarAquiAcao' acima, e
+             mapview.js '_placePhotoPinAtWorld'), fora do blob 'mapa3dConfig'
+             — segue o padrão de outras prefs "soltas" do mapa 2D (ex.
+             'mapa2dSnapGrade'), não o padrão do resto deste arquivo.
+             NOVO (06/09/2026), pedido verbatim: "Na seção 'Fotos' das
+             'configurações 2D', em vez do ícone '📍', coloque o ícone '📷'."
+             — troca simples de emoji do cabeçalho desta seção. -->
+        <!-- [15/09/2026 UTC] MUDADO -- pedido verbatim: "Troque as referencias
+             nas 'configuracoes 2D' tambem de acordo com os novos nomes."
+             Botao do rodape (capturar) trocou de Fotos para Foto; botao
+             Mapa->Foto trocou para Mapa->Fotos. Titulos e textos destas
+             duas secoes atualizados na mesma direcao. -->
+        <div class="mapconfig-section">
+          <h4>🧰 Janela "Ferramentas"</h4>
+          <span class="d" style="display:block; margin-bottom:6px">Distribuição dos botões da janela "Ferramentas": clique e arraste para mudar de lugar (como em Objetos → "Livre"), ✕ remove e "➕ Adicionar" traz de volta um botão removido ou coloca qualquer objeto do catálogo. Os ícones são os mesmos de "Objetos".</span>
+          <div id="mc-layout-ferr" class="map2d-toolsidebar-grid mc-layout-grid"></div>
+        </div>
+        <div class="mapconfig-section">
+          <h4>📷 Foto</h4>
+          <span class="d" style="display:block; margin-bottom:5px">Ao confirmar "✅ Marcar aqui" (vincular uma foto a uma posição no mapa, em "Foto" → tirar/escolher foto → 🗺️), o que fazer depois:</span>
+          <label class="radio-opt">
+            <input type="radio" name="mc-fotos-marcar-aqui" value="permanecer" ${fotosMarcarAquiAcao !== 'fotos' ? 'checked' : ''}>
+            <span><span class="t">Permanecer em Mapa → Planta baixa (padrão)</span><br><span class="d">Continua na tela onde o botão "Marcar aqui" está — dá pra ajustar mais coisas no mapa em seguida, sem precisar entrar de novo.</span></span>
+          </label>
+          <label class="radio-opt">
+            <input type="radio" name="mc-fotos-marcar-aqui" value="fotos" ${fotosMarcarAquiAcao === 'fotos' ? 'checked' : ''}>
+            <span><span class="t">Voltar para Foto</span><br><span class="d">Volta pra tela "Foto" (o mesmo botão do rodapé do app) — comportamento de antes desta rodada.</span></span>
+          </label>
+        </div>
+        <!-- RODADA 53 [15/09/2026 UTC], pedido verbatim (item B): "Ao tirar
+             uma foto, um objeto Câmera está sendo atribuída a ela
+             automaticamente [...] deve ter uma opção nas 'configurações 2D'
+             para decidir se isto acontece ou não. Subseção 'Atribuir a um
+             lugar no mapa automaticamente' [...] Opções: 'Não', 'Apenas
+             quando o mapa estiver vazio' e 'Sim'." Lido por capture.js
+             _autoPlacePhoto (chamado quando a pessoa NÃO clica em
+             "📍 Vincular a um lugar no mapa", ou toca fora da tela de
+             opções — ver _openPhotoLinkModal). -->
+                <!-- [15/09/2026 UTC] MUDADO -- pedido verbatim: "A secao '🗺️
+             Atribuir a um lugar no mapa automaticamente' deve ficar logo
+             abaixo da secao '📷 Foto'. A secao '🏷️ Nome automatico da foto'
+             vai junto (ficando logo abaixo de '🗺️ Atribuir...' na sua nova
+             posicao)." Estas duas secoes foram reordenadas pra cá (antes
+             ficavam depois da secao com o SVG "Fotos", que agora foi
+             empurrada pra baixo delas -- nenhum conteudo mudou, só a ORDEM
+             de exibição). -->
+        <div class="mapconfig-section">
+          <h4>🗺️ Atribuir a um lugar no mapa automaticamente</h4>
+          <span class="d" style="display:block; margin-bottom:5px">Quando uma foto é tirada e NÃO se vincula ela a um lugar no mapa (não se clica em "📍 Vincular a um lugar no mapa", ou se toca fora da tela de opções), o que fazer:</span>
+          <label class="radio-opt">
+            <input type="radio" name="mc-foto-auto-camera" value="nao" ${cfg.fotoAutoAtribuirCamera === 'nao' ? 'checked' : ''}>
+            <span><span class="t">Não</span><br><span class="d">A foto fica sem posição no mapa — só aparece na 📦 Caixa, até alguém vincular ela manualmente.</span></span>
+          </label>
+          <!-- [15/09/2026 UTC] MUDADO — pedido verbatim: "a opção 'Apenas
+               quando o mapa estiver vazio' deve trocar sua função para
+               quando houver apenas câmeras no mapa. O nome também deve
+               trocar para 'Quando houver apenas câmeras no mapa'." Antes,
+               "vazio" checava se não havia NENHUMA OUTRA foto/Câmera
+               posicionada (ver capture.js _autoPlacePhoto, variável
+               mapaVazio) — agora checa se o mapa não tem NENHUM objeto/
+               parede/porta/janela/texto (paredes, map.objects,
+               map.portas, map.janelas, map.textos), permitindo
+               qualquer quantidade de Câmeras/fotos já posicionadas. Valor
+               salvo continua 'vazio' (compatibilidade, não precisa migrar
+               dado antigo), só o SIGNIFICADO e o rótulo mudaram. -->
+          <label class="radio-opt" style="margin-top:6px">
+            <input type="radio" name="mc-foto-auto-camera" value="vazio" ${cfg.fotoAutoAtribuirCamera === 'vazio' ? 'checked' : ''}>
+            <span><span class="t">Quando houver apenas câmeras no mapa</span><br><span class="d">Só posiciona automaticamente se o mapa não tiver NENHUM objeto/parede/porta/janela/texto ainda (Câmeras/fotos já posicionadas não contam) — assim que o mapa ganhar algo além de Câmeras, fica sem posição (como em "Não").</span></span>
+          </label>
+          <label class="radio-opt" style="margin-top:6px">
+            <input type="radio" name="mc-foto-auto-camera" value="sim" ${(cfg.fotoAutoAtribuirCamera || 'sim') === 'sim' ? 'checked' : ''}>
+            <span><span class="t">Sim (padrão)</span><br><span class="d">Sempre posiciona automaticamente numa grade a partir da origem definida abaixo.</span></span>
+          </label>
+          <div style="margin-top:10px; padding:10px; border:1px dashed var(--border, #ccc); border-radius:8px">
+            <span class="d" style="display:block; margin-bottom:6px">Como a grade automática de Câmeras é montada:</span>
+            <!-- [15/09/2026 UTC] NOVO — pedido verbatim: "Deve ter uma
+                 opção para considerar colisão com quaisquer objetos. Isto
+                 evita a câmera ser colocada dentro de um objeto. No 2D,
+                 pode não ser um problema, porém no 3D ela ficaria
+                 ocultada." -->
+            <label class="checkbox-opt" style="display:flex; align-items:flex-start; gap:8px; margin-bottom:10px">
+              <input type="checkbox" id="mc-foto-grade-evitar-colisao" ${cfg.fotoGradeEvitarColisao ? 'checked' : ''}>
+              <span><span class="t">Evitar colocar em cima de objetos</span><br><span class="d">Ao posicionar automaticamente, pula posições da grade que colidam com qualquer objeto/forma já no mapa — no 2D pode não incomodar, mas no 3D a Câmera ficaria escondida dentro do objeto.</span></span>
+            </label>
+            <label class="field">
+              <span class="lbl">Distância entre uma Câmera e outra (m)</span>
+              <input type="number" id="mc-foto-grade-dist" min="0.1" step="0.1" value="${cfg.fotoGradeDistancia ?? 1.2}" style="width:100%">
+            </label>
+            <label class="field" style="margin-top:8px">
+              <span class="lbl">Câmeras por linha (antes de quebrar linha)</span>
+              <input type="number" id="mc-foto-grade-porlinha" min="1" step="1" value="${cfg.fotoGradePorLinha ?? 6}" style="width:100%">
+            </label>
+            <div style="display:flex; gap:8px; margin-top:8px">
+              <label class="field" style="flex:1">
+                <span class="lbl">Origem X (m)</span>
+                <input type="number" id="mc-foto-grade-origx" step="0.1" value="${cfg.fotoGradeOrigemX ?? 0}" style="width:100%">
+              </label>
+              <label class="field" style="flex:1">
+                <span class="lbl">Origem Y (m)</span>
+                <input type="number" id="mc-foto-grade-origy" step="0.1" value="${cfg.fotoGradeOrigemY ?? 0}" style="width:100%">
+              </label>
+            </div>
+            <button type="button" class="btn secondary sm block" id="mc-foto-grade-mover" style="margin-top:8px" title="Escolha a origem clicando no mapa (a janela de configurações fica escondida enquanto isso, igual ao botão 'Girar arrastando')">🗺️ Definir origem no mapa</button>
+
+            <!-- RODADA 54 [15/09/2026 UTC], pedido original (reproduzido na
+                 RODADA 54): seletor visual de direção primária (4 setas) +
+                 sentido de quebra de linha (2 setas perpendiculares às
+                 primárias) — 8 combinações no total. Em vez de "câmeras
+                 ghost" desenhadas numa grade completa, optou-se por um
+                 diagrama compacto de setas rotuladas (implementação
+                 legítima do pedido, mesma intenção) que já alimenta o
+                 preview em canvas logo abaixo com o resultado real. -->
+            <div style="margin-top:10px">
+              <span class="lbl" style="display:block; margin-bottom:4px">Direção do avanço (a partir da origem)</span>
+              <div id="mc-foto-grade-dir" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; max-width:150px">
+                <span></span>
+                <button type="button" class="btn secondary sm" data-dir="cima" title="De cima para baixo">↑</button>
+                <span></span>
+                <button type="button" class="btn secondary sm" data-dir="esquerda" title="Da direita para esquerda">←</button>
+                <span style="text-align:center; align-self:center; font-size:11px">▦</span>
+                <button type="button" class="btn secondary sm" data-dir="direita" title="Da esquerda para direita">→</button>
+                <span></span>
+                <button type="button" class="btn secondary sm" data-dir="baixo" title="De baixo para cima">↓</button>
+                <span></span>
+              </div>
+              <span class="lbl" style="display:block; margin:8px 0 4px">Ao trocar de linha, a próxima linha vai para...</span>
+              <div id="mc-foto-grade-quebra" style="display:flex; gap:6px"></div>
+            </div>
+            <div style="margin-top:10px">
+              <span class="lbl" style="display:block; margin-bottom:4px">Pré-visualização (exemplo com várias linhas)</span>
+              <canvas id="mc-foto-grade-preview" width="260" height="140" style="width:100%; max-width:260px; border:1px solid var(--border, #ccc); border-radius:6px; background:#0a0d11"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- [22/09/2026] NOVA seção — pedido verbatim: "Se ainda não tem nas
+             'configurações 2D', uma seção para o objeto 'Câmera', deve
+             haver. Nela, coloque uma opção para excluir o objeto Câmera ao
+             excluir a imagem associada a Câmera." Lida/gravada via
+             cameraExcluirObjetoAoExcluirFotoAtivo (ver DEFAULTS acima) —
+             consumida por ambientephotos.js _deletePhoto. -->
+        <div class="mapconfig-section">
+          <h4>📷 Câmera</h4>
+          <span class="d" style="display:block; margin-bottom:6px">Ao excluir, em "Mapa" → "Fotos", uma foto que está associada a um objeto Câmera no mapa 2D:</span>
+          <label class="checkbox-opt" style="display:flex; align-items:flex-start; gap:8px">
+            <input type="checkbox" id="mc-camera-excluir-objeto" ${cfg.cameraExcluirObjetoAoExcluirFotoAtivo ? 'checked' : ''}>
+            <span><span class="t">Excluir também o objeto Câmera automaticamente</span><br><span class="d">Ligado: a Câmera é excluída junto com a foto, sem perguntar. Desligado (padrão): ao excluir, uma janela pergunta se você quer excluir a Câmera também — respondendo que não, só a foto some, a Câmera continua no mapa (posição, direção, altura, campo de visão e scripts preservados), sem foto nenhuma até anexar outra.</span></span>
+          </label>
+        </div>
+
+        <!-- RODADA 53, pedido verbatim (item D): "Deve haver outra
+             subseção para definir um nome automático para as fotos que são
+             tiradas. Por padrão fica ativada. O nome deve indicar a data e
+             hora [...] Deve ser possível definir se nesse nome automático
+             vai ser a hora local do aparelho ou se vai ser UTC [...] em vez
+             de 'Seguir relógio do mundo', deve ser 'Seguir horário UTC'."
+             [15/09/2026 UTC] RODADA 55 — trocados os 2 radio buttons pelo
+             MESMO widget "Hora do dia" agora extraído/modular (ver
+             _horaDoDiaWidgetHtml/_wireHoraDoDiaWidget), como pedido
+             ("torne-as modulares e reaproveitáveis"): aqui SEM presets/
+             globo/trilha (mostrarGlobo/mostrarTrilha: false — não há
+             "hora contínua" nenhuma pra escolher, só 2 estados nomeados:
+             local ou UTC), só o par de botões "seguir X" reaproveitado —
+             mesmo texto/HTML/estado-disabled mutuamente exclusivo do uso
+             3D, com altValue='utc' (em vez de 'mundo') e os rótulos
+             ajustados. -->
+        <div class="mapconfig-section">
+          <h4>🏷️ Nome automático da foto</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-foto-nome-auto" ${cfg.fotoNomeAutomaticoAtivo !== false ? 'checked' : ''}>
+            <span><span class="t">Nomear a foto automaticamente com data/hora (padrão: ativado)</span><br><span class="d">Ex.: 2026-06-07_14-30-00. Desligado, a foto fica sem nome até alguém nomear na mão.</span></span>
+          </label>
+          <div style="margin-top:8px">
+            ${this._horaDoDiaWidgetHtml({
+              idPrefix: 'mc-fotonome-hora',
+              presets: [],
+              mostrarGlobo: false,
+              mostrarTrilha: false,
+              valorAtual: cfg.fotoNomeHoraUTC ? 'utc' : null,
+              altValue: 'utc',
+              altLabel: '🌐 Seguir horário UTC',
+              autoLabel: '🕐 Hora local do aparelho',
+            })}
+          </div>
+        </div>
+
+        <!-- Seção "Foto" (pedido do usuário, 26/08/2026) — opções da
+             ferramenta "📏 Medidas" de "Mapa" → "Foto" (ver ambientephotos.js
+             _drawMedida/_openMedidaValorModal). Ver DEFAULTS acima pro
+             significado de cada campo.
+             ATUALIZADO (06/09/2026), pedido verbatim: "o ícone dessa seção
+             deve ser igual ao ícone presente em 'Mapa'->'Foto'. Para não
+             confundir visualmente com o botão 'Fotos' [do rodapé] e sua
+             seção 'Fotos' [acima] (ambos com o mesmo ícone)." — causa raiz:
+             este h4 usava o emoji 📷, visualmente muito parecido com o
+             emoji da seção/botão "Fotos" (rodapé) — trocado pelo MESMO SVG
+             inline usado pelo botão de verdade "Mapa"->"Foto" (ver
+             mapview.js '_photoIconSvg()' — moldura + sol/montanha —,
+             copiado aqui porque MapConfig é um módulo à parte, sem acesso
+             direto aos métodos de MapView). -->
+        <div class="mapconfig-section">
+          <h4><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-4px; margin-right:2px"><rect x="3" y="4" width="18" height="16" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.6" fill="currentColor" stroke="none"/><path d="M3 16l5.5-5 4 4 3-3L21 16"/></svg> Fotos</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-medida-setas" ${cfg.medidaSetasAtivo !== false ? 'checked' : ''}>
+            <span><span class="t">Seta nas extremidades da medida</span><br><span class="d">Depois de tocar em "✅ Inserir medida" (ferramenta 📏 Medidas de "Mapa" → "Fotos"), a reta ganha uma pequena seta em cada ponta.</span></span>
+          </label>
+          <label class="radio-opt" style="margin-top:10px">
+            <input type="checkbox" id="mc-medida-circulo" ${cfg.medidaCirculoAposInserirAtivo ? 'checked' : ''}>
+            <span><span class="t">Círculo nas extremidades depois de inserir</span><br><span class="d">O contorno de círculo que marca cada ponta enquanto a medida ainda está sendo posicionada continua aparecendo depois de inserida. Desligue pra deixar só a reta (e a seta, se ligada acima).</span></span>
+          </label>
+          <label class="radio-opt" style="margin-top:10px">
+            <input type="checkbox" id="mc-medida-reposicionar" ${cfg.medidaReposicionarExtremidadesAtivo ? 'checked' : ''}>
+            <span><span class="t">Reposicionar medidas feitas pelas suas extremidades</span><br><span class="d">Depois de "✅ Inserir medida", toque e arraste numa ponta da reta pra mover ela. Desligado por padrão — uma medida já inserida fica fixa, sem jeito de mexer nas pontas sem querer.</span></span>
+          </label>
+          <!-- NOVO (04/09/2026), pedido verbatim (item 3) — mesma estrutura
+               da opção "Reposicionar medidas..." logo acima, só que pra
+               "✏️ Traço guia" de 'Mapa'->'Fotos'. Ver DEFAULTS acima
+               (tracoFotoReposicionarExtremidadesAtivo). -->
+          <label class="radio-opt" style="margin-top:10px">
+            <input type="checkbox" id="mc-traco-foto-reposicionar" ${cfg.tracoFotoReposicionarExtremidadesAtivo ? 'checked' : ''}>
+            <span><span class="t">Reposicionar traços feitos pelas suas extremidades</span><br><span class="d">Com a ferramenta "✏️ Traço guia" ativa, toque e arraste numa ponta de um traço já inserido pra mover ela. Desligado por padrão — um traço já inserido fica fixo, sem jeito de mexer nas pontas sem querer.</span></span>
+          </label>
+          <!-- ITEM A1 (rodada 57/v311) — ver DEFAULTS acima pro texto do pedido verbatim -->
+          <label class="radio-opt" style="margin-top:10px; display:block">
+            <span class="t">Formato do arquivo em "⬇️ Baixar esta foto"</span><br>
+            <span class="d">Tipo de imagem gerado ao clicar em "Baixar esta foto" em "Mapa" → "Fotos".</span>
+            <select id="mc-foto-fmt-atual" style="margin-top:4px; display:block">
+              <option value="jpg" ${(cfg.fotoDownloadFormatoAtual || 'jpg') === 'jpg' ? 'selected' : ''}>JPG</option>
+              <option value="png" ${cfg.fotoDownloadFormatoAtual === 'png' ? 'selected' : ''}>PNG</option>
+              <option value="webp" ${cfg.fotoDownloadFormatoAtual === 'webp' ? 'selected' : ''}>WEBP</option>
+            </select>
+          </label>
+          <label class="radio-opt" style="margin-top:10px; display:block">
+            <span class="t">Formato do arquivo em "⬇️ Baixar todas"</span><br>
+            <span class="d">Tipo de imagem usado dentro do .zip gerado por "Baixar todas".</span>
+            <select id="mc-foto-fmt-todas" style="margin-top:4px; display:block">
+              <option value="jpg" ${(cfg.fotoDownloadFormatoTodas || 'jpg') === 'jpg' ? 'selected' : ''}>JPG</option>
+              <option value="png" ${cfg.fotoDownloadFormatoTodas === 'png' ? 'selected' : ''}>PNG</option>
+              <option value="webp" ${cfg.fotoDownloadFormatoTodas === 'webp' ? 'selected' : ''}>WEBP</option>
+            </select>
+          </label>
+        </div>
+
+        <!-- NOVO (03/09/2026), pedido verbatim: "Deve haver uma seção nas
+             'configurações 2D' para a ferramenta 'Trena'. E deve ter a opção
+             igual tem na seção 'Fotos', que é, 'Reposicionar medidas feitas
+             pelas suas extremidades'." — mesma estrutura/mesmo texto da
+             opção irmã da seção "📷 Foto" acima (ainda dentro do ternário
+             opts.context === '2d' aberto lá em cima — fecha logo abaixo, não
+             tem ternário próprio), só que pra ferramenta "📏 Trena" do
+             próprio mapa 2D (mapview.js medidas2d). Ver DEFAULTS acima
+             (medida2DReposicionarExtremidadesAtivo). -->
+        <div class="mapconfig-section">
+          <h4>📏 Trena</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-medida2d-reposicionar" ${cfg.medida2DReposicionarExtremidadesAtivo ? 'checked' : ''}>
+            <span><span class="t">Reposicionar medidas feitas pelas suas extremidades</span><br><span class="d">Com a ferramenta "📏 Trena" ativa, passe o cursor sobre uma ponta de uma medida já feita (ela é destacada) e toque nela — ela passa a seguir o cursor até o próximo toque, que a solta ali (também dá pra tocar e arrastar segurando). Desligado por padrão — uma medida já inserida fica fixa, sem jeito de mexer nas pontas sem querer.</span></span>
+          </label>
+        </div>
+
+        <!-- NOVO (04/09/2026), pedido verbatim: "A ferramenta 'Traço guia',
+             também, deve ter o seu habilitador para poder reposicionar os
+             que já foram inseridos na grade." — MESMA estrutura da seção
+             "📏 Trena" logo acima. Ver DEFAULTS acima
+             (traco2DReposicionarExtremidadesAtivo). -->
+        <div class="mapconfig-section">
+          <h4>✏️ Traço guia</h4>
+          <label class="radio-opt">
+            <input type="checkbox" id="mc-traco2d-reposicionar" ${cfg.traco2DReposicionarExtremidadesAtivo ? 'checked' : ''}>
+            <span><span class="t">Reposicionar traços feitos pelas suas extremidades</span><br><span class="d">Com a ferramenta "✏️ Traço guia" ativa, passe o cursor sobre uma ponta de um traço já feito (ela é destacada) e toque nela — ela passa a seguir o cursor até o próximo toque, que a solta ali. Desligado por padrão — um traço já inserido fica fixo, sem jeito de mexer nas pontas sem querer.</span></span>
+          </label>
+        </div>
+        <!-- [24/09/2026] NOVO -- pedido verbatim: "Faça um botão de documentação do AP explicando as
+             funcionalidades com renderizações também e coloque como um botão. Ao clicar neste botão,
+             abre-se uma janela com as informações da documentação. Deve estar presente nas
+             'configurações 3D' e na janela do AP." Seção só INFORMATIVA (sem config), mesmo padrão de
+             "🔌 Infraestrutura de rede" (mc-rede-docs-btn, ver mais acima) -- janela mora em
+             js/ap-docs.js (ApDocs.abrir). A seção "📡 Access Point" que existia neste painel foi movida
+             para a janela do AP (ver comentário "MOVIDO" mais acima), então este botão fica no fim do
+             1º bloco de "Configurações 3D", perto de onde "📡 Access Point" costumava aparecer. -->
+        <div class="mapconfig-section">
+          <h4>📡 Documentação do Access Point</h4>
+          <span class="d" style="display:block; margin-bottom:8px">Como funciona a varredura de sinal Wi-Fi (normal e avançada, com reflexão/refração), o que cada opção faz e uma ilustração de cada tipo de raio (direto, refletido, refratado).</span>
+          <button type="button" class="btn" id="mc-ap-docs-btn">📖 Documentação do Access Point</button>
+        </div>
+        ` : ''}
+
+        ${opts.context === '3d' ? `
+        <!-- [24/09/2026] REMOVIDO -- pedido verbatim: secoes "Apresentacao", "Modo de voo 3D", "Hora do dia", "Raycasting (mira do 3D)", "Scripts (exemplo)", "Luz ambiente", "Access Point" e "Item associado" foram removidas DAQUI por estarem repetidas (ja existem mais acima, no primeiro bloco opts.context === '3d', logo apos o cabecalho). Pedido verbatim: "remova, pois esta repetido" (dito para cada uma dessas secoes, nesta ordem). -->
         <!-- Pedido do usuário: "uma opção nas configurações 3D do que
              acontece com os itens adicionados enquanto se está no 3D [...]
              onde ficou a opção [...]? É pra essa opção ficar nas
@@ -5123,7 +5411,15 @@ const MapConfig = {
     // pra 1a secao do grupo (a principal); clicar na seta abre um dropdown
     // listando cada subsecao (rotulo = só o texto depois de " — "), cada
     // uma rolando pra sua propria secao.
-    const _mcTocSecoes = Array.from(modal.querySelectorAll('.mapconfig-section'));
+    // [24/09/2026] REMOVIDO -- pedido verbatim: "Remova os botões de atalho
+    // do cabeçalho das 'configurações 3D' também." Os botões de atalho
+    // (TOC) continuam existindo normalmente nas "Configurações 2D" -- só
+    // NÃO são mais construídos quando `opts.context === '3d'`.
+    // [26/09/2026] MUDADO -- pedido verbatim: "Assim como nas 'configurações 2D' ('Mapa'->'Planta baixa'->'configurações
+    // 2D') há botões no cabeçalho que levam direto para cada seção, deve haver, também, botões que levam direto para
+    // cada seção nas 'configurações 3D'." -- desfaz a remoção de 24/09/2026: a barra de atalhos (mesmo código,
+    // agrupada por " — " com dropdown de subseções) volta a ser construída também no contexto '3d'.
+    const _mcTocSecoes = Array.from(modal.querySelectorAll('.mapconfig-section')).filter((sec) => sec.style.display !== 'none');
     if (_mcTocSecoes.length) {
       const _mcTituloTexto = (sec) => {
         const h4 = sec.querySelector('h4');
@@ -6125,20 +6421,31 @@ const MapConfig = {
       if (lbl) lbl.textContent = '1.00x';
     });
     // [22/09/2026] NOVO -- seção "📡 Access Point" (ver HTML acima).
+    // [24/09/2026] NOVO -- pedido verbatim: "Faça com que todas as opções que aparecem na janela do AP [...]
+    // aparecerem nas 'configurações 3D'." As 2 caixas "Manter a varredura X anterior..." gravam o PADRÃO
+    // global e, na hora, aplicam o valor em TODO Access Point do mapa atualmente aberto (se houver um --
+    // `App.mapaAtual`/`window.currentMap`, ver `_wfAplicarManterAnteriorGlobal`), pra ter o mesmo efeito
+    // prático de "vale pra todos" que as 3 opções abaixo, mesmo o dado real (`manterAnterior`) sendo por-AP.
+    modal.querySelector('#mc-ap-manter-normal-anterior')?.addEventListener('change', async (e) => {
+      const v = e.target.checked;
+      await this.set({ apManterVarreduraNormalAnteriorPadrao: v });
+      if (window.View3D && typeof window.View3D._wfAplicarManterAnteriorGlobal === 'function') window.View3D._wfAplicarManterAnteriorGlobal('normal', v);
+    });
+    modal.querySelector('#mc-ap-manter-avancada-anterior')?.addEventListener('change', async (e) => {
+      const v = e.target.checked;
+      await this.set({ apManterVarreduraAvancadaAnteriorPadrao: v });
+      if (window.View3D && typeof window.View3D._wfAplicarManterAnteriorGlobal === 'function') window.View3D._wfAplicarManterAnteriorGlobal('avancada', v);
+    });
     modal.querySelector('#mc-ap-desligar-ao-sair')?.addEventListener('change', async (e) => { await this.set({ apDesligarMapaAoSairDoVer3D: e.target.checked }); });
-    // [25/09/2026] NOVO -- as 2 caixas "Refazer Varredura..."/"Manter a Varredura..." espelham a MESMA
-    // flag (`apRefazerVarreduraAoEntrarNoVer3D`) e se desmarcam uma à outra na hora (mutuamente exclusivas
-    // -- pedido verbatim: "ao selecionar uma, a outra é deselecionada").
+    // [25/09/2026] NOVO -- as 2 opções "Refazer Varredura..."/"Manter a Varredura..." espelham a MESMA
+    // flag (`apRefazerVarreduraAoEntrarNoVer3D`) -- pedido verbatim: "ao selecionar uma, a outra é
+    // deselecionada". [24/09/2026] MUDADO -- pedido verbatim: "os checkbox não é a melhor opção de UI para
+    // isso." Viraram `<input type="radio">` do MESMO `name` (`mc-ap-entrar-ver3d`, ver HTML acima) -- o
+    // navegador já garante que só 1 fica marcado, não precisa mais desmarcar o outro manualmente aqui.
     {
       const elRefazer = modal.querySelector('#mc-ap-refazer-ao-entrar'), elManter = modal.querySelector('#mc-ap-manter-anterior');
-      elRefazer?.addEventListener('change', async (e) => {
-        const v = e.target.checked; if (elManter) elManter.checked = !v;
-        await this.set({ apRefazerVarreduraAoEntrarNoVer3D: v });
-      });
-      elManter?.addEventListener('change', async (e) => {
-        const v = e.target.checked; if (elRefazer) elRefazer.checked = !v;
-        await this.set({ apRefazerVarreduraAoEntrarNoVer3D: !v });
-      });
+      elRefazer?.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ apRefazerVarreduraAoEntrarNoVer3D: true }); });
+      elManter?.addEventListener('change', async (e) => { if (e.target.checked) await this.set({ apRefazerVarreduraAoEntrarNoVer3D: false }); });
     }
     // NOVO (04/09/2026), item 5 — os 3 rádios do "🚀 Modo de voo 3D" (ver
     // HTML acima) gravam direto em `modoVoo3D`, lido por App.verNoMapa3D.
@@ -6259,6 +6566,11 @@ const MapConfig = {
     modal.querySelector('#mc-trena3d-sobre-btn')?.addEventListener('click', () => this._abrirDocTrena3D());
     // RODADA 168 — botão da seção "🔌 Infraestrutura de rede" (só existe no contexto 2D).
     modal.querySelector('#mc-rede-docs-btn')?.addEventListener('click', () => { if (window.RedeDocs) window.RedeDocs.abrir(); else Utils.toast?.('Guia de rede indisponível (módulo não carregado).', { type: 'danger' }); });
+    // [27/09/2026] NOVO — botão da seção "🎬 Scripts" (só existe no contexto 2D), mesmo padrão de wiring do botão de "🔌 Infraestrutura de rede" acima.
+    modal.querySelector('#mc-scripts-docs-btn')?.addEventListener('click', () => { if (window.ScriptsDocs) window.ScriptsDocs.abrir(); else Utils.toast?.('Guia de Scripts indisponível (módulo não carregado).', { type: 'danger' }); });
+    // [24/09/2026] NOVO -- botão da seção "📡 Documentação do Access Point" (só existe no contexto 3D),
+    // mesmo padrão de wiring do botão de "🔌 Infraestrutura de rede" acima.
+    modal.querySelector('#mc-ap-docs-btn')?.addEventListener('click', () => { if (window.ApDocs) window.ApDocs.abrir(); else Utils.toast?.('Guia do Access Point indisponível (módulo não carregado).', { type: 'danger' }); });
     // [16/09/2026 UTC] NOVO (RODADA 92) — botão "↺ Restaurar padrões da
     // Trena 3D": reseta TODO campo cuja chave comece com "trena3D" (Snap,
     // Aparência, Visibilidade, Espessura/cores, Pontas, Destaque de mira,

@@ -595,14 +595,19 @@ const DBApi = {
     // App._updateConfNomeBanner, pede pra definir um nome).
     const conferenciaNome = data.conferenciaNome ?? (await this.getSetting('conferenciaNome', ''));
     const conferenciaId = data.conferenciaId || this.computeConferenciaId(conferenciaNome);
+    // [26/09/2026] NOVO -- `norm` = os campos que definem "o mesmo patrimônio" (mesma função usada por fpItem
+    // pra COMPARAR, ver bloco grande de identidade acima) -- gravar A PARTIR DELA (em vez de repetir o mesmo
+    // `data.X || padrão` duas vezes, uma aqui e outra em fpItem) garante que o registro salvo e o fp calculado
+    // NUNCA voltem a divergir por um default esquecido de um lado só.
+    const norm = this._normCamposItem(data);
     const item = {
       id,
       conferenciaId,
       conferenciaNome,
-      patrimonio: data.patrimonio || '',
-      descricao: data.descricao || '',
-      tipo: data.tipo || '',
-      setor: data.setor || '',
+      patrimonio: norm.patrimonio,
+      descricao: norm.descricao,
+      tipo: norm.tipo,
+      setor: norm.setor,
       // Pedido do usuário (27/08/2026): o ícone colorido do item (Tabela/
       // Cartões, quando não há foto) passou a ser desenhado em SVG em tempo
       // de execução (ver avatar.js Avatar.iconSvgMarkup), a partir só de
@@ -637,10 +642,10 @@ const DBApi = {
       // servindo apenas para SUGERIR o número de patrimônio na hora de
       // cadastrar (ver capture.js `patrimonioSugerido`/app.js
       // `prefillPatrimonio`).
-      ambienteId: data.ambienteId || null,
-      mapaX: typeof data.mapaX === 'number' ? data.mapaX : null,
-      mapaY: typeof data.mapaY === 'number' ? data.mapaY : null,
-      mapaPiso: data.mapaPiso || 0,
+      ambienteId: norm.ambienteId,
+      mapaX: norm.mapaX,
+      mapaY: norm.mapaY,
+      mapaPiso: norm.mapaPiso,
       // `true` quando mapaX/mapaY acima foram preenchidos AUTOMATICAMENTE pelo
       // app como posição de reserva (ver Mapping.findPeripheralSlot) — ex.:
       // uma foto virou "isto é um patrimônio" mas o usuário ainda não marcou
@@ -664,7 +669,7 @@ const DBApi = {
       // "com lugar" (não aparece na 📦 Caixa) mesmo sem mapaX/mapaY próprio
       // (ver js/photogrid.js getUnsorted) — o vínculo com o patrimônio já é,
       // por si só, um "lugar" pra ela.
-      fotoAnexadaId: data.fotoAnexadaId || null,
+      fotoAnexadaId: norm.fotoAnexadaId,
       // Posição GLOBAL (GPS), além da posição relativa ao mapa acima —
       // opcional, só preenchida quando o navegador tem/permite geolocalização
       // (ver geo.js). Útil para diferenciar locais distantes entre si.
@@ -715,8 +720,8 @@ const DBApi = {
       // histórico real do item, então devem ser PRESERVADOS quando vierem
       // preenchidos num import/backup — só caem em "agora" numa criação
       // nova de verdade (Capturar/+Novo), quando `data` não traz nada.
-      modificadoEm: data.modificadoEm || ts,
-      ultimaConsultaEm: data.ultimaConsultaEm || ts,
+      modificadoEm: norm.modificadoEm || ts,
+      ultimaConsultaEm: norm.ultimaConsultaEm || ts,
       // Data de criação ORIGINAL, IMUTÁVEL — diferente de criadoEm/
       // modificadoEm acima (que mudam por natureza: criadoEm reflete quando
       // o registro foi inserido NESTE aparelho/DB, podendo ser bem depois da
@@ -730,7 +735,7 @@ const DBApi = {
       // registro ANTIGO, de antes deste campo existir), usa ele como melhor
       // estimativa disponível; só cai em "agora" (ts) quando é mesmo uma
       // criação nova de verdade (Capturar/+Novo).
-      criadoOriginalmenteEm: data.criadoOriginalmenteEm || data.criadoEm || ts,
+      criadoOriginalmenteEm: norm.criadoOriginalmenteEm || ts,
       // Pedido do usuário (27/08/2026): "se o patrimônio estiver vinculado a
       // uma imagem [...] ele recebe, no seu pacote próprio de informações, a
       // resolução da imagem, a posição relativa de sua marcação na imagem, o
@@ -743,7 +748,7 @@ const DBApi = {
       // foi marcado nela. `fotoId` também vai junto (além dos 5 campos
       // pedidos) só para permitir religar com a foto de verdade quando ela
       // ainda existir (ex.: abrir a foto a partir do item).
-      marcacoesFotos: Array.isArray(data.marcacoesFotos) ? data.marcacoesFotos : [],
+      marcacoesFotos: norm.marcacoesFotos,
       // Mesma ideia acima, só que para marcações no MAPA (2D/3D) em vez de
       // numa foto — pedido do usuário: "se foi marcado em uma posição do
       // mapa também deve ficar guardado nele. Podem acabar sendo várias
@@ -753,7 +758,7 @@ const DBApi = {
       // marcacoesFotos acima: histórico de "onde este item já foi marcado",
       // não só a posição atual (que continua em mapaX/mapaY/mapaPiso, como
       // sempre foi).
-      marcacoesMapa: Array.isArray(data.marcacoesMapa) ? data.marcacoesMapa : [],
+      marcacoesMapa: norm.marcacoesMapa,
     };
     item.buscaTokens = [
       ...new Set([
@@ -1120,11 +1125,42 @@ const DBApi = {
   // slot global) porque duplicar um ambiente salva vários mapas em sequência
   // (ver `_duplicarComFilhos` abaixo) — cada um deve poder ter sua própria
   // janela sem interferir nas dos outros.
-  async saveMap(mapObj) {
+  async saveMap(mapObj, opts = {}) {
     const id = mapObj.id || uuid();
-    const rec = { ...mapObj, id, atualizadoEm: nowISO() };
+    // [26/09/2026] NOVO -- opts.preservarCarimbo: usado só por importMaps (mapa NOVO vindo de backup), pra o mapa
+    // importado manter o atualizadoEm original do backup (senão todo mapa importado ganharia a hora da importação).
+    const rec = { ...mapObj, id, atualizadoEm: (opts.preservarCarimbo && mapObj.atualizadoEm) || nowISO() };
     const map = await _mapsCache.ensure();
     map.set(id, rec); // otimista — ver comentário acima
+    // [26/09/2026] NOVO -- opts.immediate: pedido verbatim: "Veja por que
+    // demora entre a mensagem 'Lendo arquivo (x/x)...' e 'Salvando mapa,
+    // tipo, fotos' e 'Salvando (x/x)...'. O que está acontecendo enquanto
+    // estas mensagens estão na tela." CAUSA RAIZ: `importMaps` (abaixo)
+    // chama `saveMap` uma vez por mapa importado, SEQUENCIALMENTE (await
+    // dentro de um for), e o debounce padrão (1s) é pago inteiro em CADA
+    // chamada, porque cada mapa novo abre sua PRÓPRIA janela (`id` só
+    // existe depois do primeiro `saveMap` daquele mapa) — importar N mapas
+    // novos custa ~N segundos de espera pura, só pra agrupar rajadas de
+    // edição interativa que não existem numa importação em lote. Com
+    // `immediate:true`, pula o debounce (que só faz sentido pra edição
+    // manual, uma tela por vez) e grava direto: se já havia uma janela
+    // pendente pra este mapa (outra edição em andamento), cancela o timer
+    // dela e absorve o registro mais recente nesta gravação imediata.
+    if (opts.immediate) {
+      const pendingAntigo = _pendingMapSaves.get(id);
+      if (pendingAntigo) {
+        clearTimeout(pendingAntigo.timer);
+        _pendingMapSaves.delete(id);
+      }
+      try {
+        await tx([STORES.maps], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.maps).put(rec)));
+        if (pendingAntigo) pendingAntigo.waiters.forEach((w) => w.resolve(cloneRec(rec)));
+        return cloneRec(rec);
+      } catch (e) {
+        if (pendingAntigo) pendingAntigo.waiters.forEach((w) => w.reject(e));
+        throw e;
+      }
+    }
     let pending = _pendingMapSaves.get(id);
     let abrindoJanelaNova = false;
     const resultado = new Promise((resolve, reject) => {
@@ -1243,7 +1279,12 @@ const DBApi = {
    *  devolve, e o que toda tela do Mapa (Planta baixa/Foto/Caixa) usa ao
    *  ser (re)montada. */
   async setCurrentMap(id) {
+    // [26/09/2026] NOVO -- pedido verbatim: "Ao exportar o mapa, a informações do personagem devem ser guardadas junto com o mapa (posição, apontamento de câmera)." -- o personagem passa a ter um estado POR MAPA
+    // (ver js/personagem-mapa.js): ao trocar de mapa, guarda o do que sai e aplica o do que entra.
+    let antigoId = null;
+    try { antigoId = await this.getSetting('ambienteAtualId', null); } catch (e) { /* ignora */ }
     await this.setSetting('ambienteAtualId', id);
+    if (antigoId !== id) { try { await window.PersonagemMapa?.aoTrocarMapa?.(antigoId, id); } catch (e) { console.warn('[DB] personagem por mapa (troca):', e); } }
   },
 
   async deleteMap(id) {
@@ -1318,9 +1359,12 @@ const DBApi = {
   async addAmbientePhoto(data) {
     const id = data.id || uuid();
     const ts = nowISO();
+    // [26/09/2026] NOVO -- mesma ideia de `norm` em addItem acima: `_normCamposFoto` é a MESMA função usada por
+    // fpFoto pra comparar, então gravar a partir dela garante que gravação e comparação nunca mais divirjam.
+    const norm = this._normCamposFoto(data);
     const rec = {
       id,
-      ambienteId: data.ambienteId || null,
+      ambienteId: norm.ambienteId,
       // NOVO (03/09/2026), pedido verbatim: "Deve haver uma separação entre
       // as fotos dos ambientes e as fotos que objetivam que apareça só o
       // número de patrimônio." — antes disto, TODA foto tirada em 'Fotos'
@@ -1333,8 +1377,8 @@ const DBApi = {
       // _openPhotoLinkModal quando a foto vira o anexo de um item — ver
       // item.fotoAnexadaId). Ver DB.getPhotosByAmbiente/PhotoGrid.getUnsorted
       // pra onde esse filtro é aplicado.
-      tipo: data.tipo === 'patrimonio' ? 'patrimonio' : 'ambiente',
-      nome: data.nome || '',
+      tipo: norm.tipo,
+      nome: norm.nome,
       // Setor do ambiente NO MOMENTO em que a foto foi tirada — pedido do
       // usuário (27/08/2026), parte dos 5 dados que uma marcação em foto
       // carrega consigo para o item marcado nela (ver `marcacoesFotos` em
@@ -1342,15 +1386,15 @@ const DBApi = {
       // foto nova (capture.js/ambientephotos.js/app.js) a partir do setor da
       // sessão de captura corrente; ausente em fotos já existentes de antes
       // desta mudança (fica string vazia, igual a um item sem setor).
-      setor: data.setor || '',
-      dataUrl: data.dataUrl || null,
-      thumbDataUrl: data.thumbDataUrl || data.dataUrl || null,
-      orbs: data.orbs || [],
-      mapaX: typeof data.mapaX === 'number' ? data.mapaX : null,
-      mapaY: typeof data.mapaY === 'number' ? data.mapaY : null,
-      mapaPiso: typeof data.mapaPiso === 'number' ? data.mapaPiso : null,
+      setor: norm.setor,
+      dataUrl: norm.dataUrl,
+      thumbDataUrl: norm.thumbDataUrl,
+      orbs: norm.orbs,
+      mapaX: norm.mapaX,
+      mapaY: norm.mapaY,
+      mapaPiso: norm.mapaPiso,
       mapaAuto: data.mapaAuto === true,
-      mapaLayerId: data.mapaLayerId || null,
+      mapaLayerId: norm.mapaLayerId,
       criadoEm: ts,
       atualizadoEm: ts,
     };
@@ -1387,9 +1431,59 @@ const DBApi = {
       .sort((a, b) => (a.criadoEm || '').localeCompare(b.criadoEm || ''));
   },
 
+  /** [25/09/2026] NOVO -- pedido verbatim: "Há uma opção ('Foto desse patrimônio') que é possível 'Anexar
+   *  foto' de um patrimônio. Atualmente, a foto tirada por este método acaba aparecendo junto com as outras
+   *  fotos em 'Mapa'->'Fotos'. Não deve ser assim". Fotos tiradas por "Anexar foto" -> "Tirar foto" ANTES da
+   *  correção (que passou a gravar tipo: 'patrimonio' na hora, ver App._takeQuickPhoto) ficaram gravadas como
+   *  tipo 'ambiente' e continuavam aparecendo junto das fotos do ambiente. Migração ÚNICA (flag no settings):
+   *  reclassifica como 'patrimonio' só as fotos que têm TODAS estas características de uma foto de anexo --
+   *  (1) são a foto anexada (fotoAnexadaId) de algum patrimônio, (2) não têm nenhum orb/marcação, e (3) não
+   *  estão vinculadas a nenhum lugar do mapa (mapaX/mapaY vazios). Uma foto de ambiente de verdade quase
+   *  sempre tem orbs ou posição no mapa, então fica como está. Nada é apagado -- só muda de fileira (continua
+   *  aparecendo pelo botão "📎 Fotos de patrimônio" e continua indo nos backups). */
+  async migrarFotosAnexadasDePatrimonio() {
+    try {
+      if (await this.getSetting('_migFotosPatrimonio25set', false)) return 0;
+      const itens = await this.getAllItems();
+      const anexadas = new Set(itens.map((it) => it && it.fotoAnexadaId).filter(Boolean));
+      let n = 0;
+      if (anexadas.size) {
+        const map = await _mapPhotosCache.ensure();
+        for (const r of [...map.values()]) {
+          if (!anexadas.has(r.id) || r.tipo === 'patrimonio') continue;
+          if (Array.isArray(r.orbs) && r.orbs.length) continue;
+          if (typeof r.mapaX === 'number' || typeof r.mapaY === 'number') continue;
+          await this.saveAmbientePhoto({ ...r, tipo: 'patrimonio' });
+          n++;
+        }
+      }
+      await this.setSetting('_migFotosPatrimonio25set', true);
+      if (n) console.log('[DB] migrarFotosAnexadasDePatrimonio: ' + n + ' foto(s) reclassificada(s) como foto de patrimônio.');
+      return n;
+    } catch (e) { console.warn('[DB] migrarFotosAnexadasDePatrimonio falhou (ignorado):', e); return 0; }
+  },
+
   async getAllAmbientePhotos() {
     const map = await _mapPhotosCache.ensure();
     return [...map.values()].map(cloneRec);
+  },
+
+  // [25/09/2026] NOVO -- pedido verbatim: "Fica, então, 'fotos do ambiente'
+  // (por padrão, é as que aparecem de cara) e as 'fotos de patrimônio' (um
+  // botão ativa que elas aparecem em outra linha)." -- contraparte de
+  // getPhotosByAmbiente acima, mas devolvendo EXATAMENTE o oposto (só
+  // `tipo: 'patrimonio'`) -- usada por ambientephotos.js pra alimentar a
+  // fileira separada, escondida por padrão, revelada pelo botão "📎 Fotos
+  // de patrimônio". Não mexe em getAllAmbientePhotos/backup (autoexport.js,
+  // settings.js exportar backup) -- esses continuam trazendo AMBOS os tipos
+  // de propósito, já que são sobre integridade dos dados, não sobre esta
+  // tela de navegação visual.
+  async getPatrimonioPhotosByAmbiente(ambienteId) {
+    const map = await _mapPhotosCache.ensure();
+    return [...map.values()]
+      .filter((r) => r.ambienteId === ambienteId && r.tipo === 'patrimonio')
+      .map(cloneRec)
+      .sort((a, b) => (a.criadoEm || '').localeCompare(b.criadoEm || ''));
   },
 
   /** NOVO (04/09/2026), pedido verbatim: "No card de informações do
@@ -1620,11 +1714,234 @@ const DBApi = {
       // customizado sem nenhuma forma de recuperar.
       this.getAllObjectModels(),
     ]);
+    // [26/09/2026] NOVO -- cada mapa sai com o estado do personagem (ver js/personagem-mapa.js).
+    let mapsComPersonagem = maps;
+    try { mapsComPersonagem = (await window.PersonagemMapa?.anexarAosMapas?.(maps)) || maps; } catch (e) { /* melhor esforço */ }
     return {
       versao: 1,
       exportadoEm: nowISO(),
-      items, types, sectors, maps, mapPhotos, settings, objectModels,
+      items, types, sectors, maps: mapsComPersonagem, mapPhotos, settings, objectModels,
     };
+  },
+
+  // ==========================================================================
+  // [26/09/2026] NOVO -- IDENTIDADE EXATA DE PATRIMÔNIOS / FOTOS / MAPAS (hash)
+  // Pedidos verbatim: "Às vezes, dois mapas têm os mesmos exatos patrimônios. Ao carregar estes mapas pelo
+  // 'Importar backup', acaba ficando como patrimônios duplicados. Deve haver algum jeito de identificar que se
+  // trata de patrimônios exatamente iguais, mesmas exatas informações (Número de patrimônio (se está marcado em
+  // algum foto/mapa ou não e posição, tudo), Descrição, Tipo, Setor / Local, Foto anexada ou não (e se o arquivo
+  // de foto é exatamente o mesmo) e os carimbos de tempo. [...] e não ficar dois patrimônios [...] extamente
+  // iguais dizendo que estão duplicados." e "deve haver algum hash de mapa para identificar que são idênticos em
+  // tudo [...] Está informação de que os mapas são 'idênticos' deve estar presente."
+  // "Impressão digital" (fp) = JSON com chaves ORDENADAS do registro inteiro, sem os campos que são só do
+  // aparelho/derivados (nunca informação do patrimônio/mapa em si):
+  //  - item: criadoEm (= quando entrou NESTE banco; a criação real é criadoOriginalmenteEm, que conta),
+  //    avatarSvg/avatarDataUrl/thumbDataUrl (ícone derivado de tipo/descrição, regenerado na exportação);
+  //  - mapa: atualizadoEm (carimbo de gravação local, reescrito a cada saveMap) e personagem (estado de
+  //    visualização, não conteúdo do mapa);
+  //  - qualquer chave iniciada por '_' (campos internos/temporários).
+  // O hash é Utils.hashString (cyrb53, síncrono; funciona em file:///). Mapa "idêntico em tudo" = mesma planta
+  // + mesmos patrimônios (fp de cada um) + mesmas fotos (ambiente e patrimônio, conteúdo incluído) ligados a ele.
+  // [26/09/2026] CORRIGIDO -- pedido verbatim: "Fiz um teste, coloque o app
+  // nas configurações de fábrica, depois, importei um mapa (com seus
+  // patrimônios e fotos). Depois e imediatamente após o mapa ser carregado,
+  // importei o mesmo mapa (mesmo exata arquivo de backup), porém o hash
+  // ainda fazia com que apresentasse '🟰 Planta idêntica'. Deveria ser
+  // '✅ Idênticos'. O que aconteceu para ser considerado '🟰 Planta idêntica'
+  // apenas e não '✅ Idênticos', nesta situação?" CAUSA RAIZ: a abordagem
+  // anterior (lista de BLOQUEIO -- "tudo, exceto estes campos") comparava o
+  // registro LOCAL (depois de passar por addItem/addAmbientePhoto, que
+  // preenchem campos derivados/padrão como buscaTokens, mapaAuto, geoLat/
+  // geoLng, capturaIpPublico, conferenciaId etc.) contra o registro CRU do
+  // backup (que pode não ter esses campos, ou tê-los com valor levemente
+  // diferente) -- então o fp do item local nunca batia com o fp do item
+  // importado, mesmo sendo o "mesmo" patrimônio pela própria definição do
+  // usuário (número, descrição, tipo, setor, posição, foto, carimbos).
+  // Agora é lista de PERMISSÃO (allowlist) -- só os campos que o usuário
+  // listou como "a mesma exata informação" entram no fp; qualquer campo
+  // derivado/interno do aparelho (esteja ele no lado local, no lado
+  // importado, ou nasça amanhã como novo campo derivado) nunca entra e
+  // nunca pode causar um falso "diferente".
+  _FP_PERMITIR_ITEM: ['patrimonio', 'descricao', 'tipo', 'setor', 'ambienteId', 'mapaX', 'mapaY', 'mapaPiso', 'fotoAnexadaId', 'marcacoesFotos', 'marcacoesMapa', 'modificadoEm', 'ultimaConsultaEm', 'criadoOriginalmenteEm', 'id'],
+  // Planta do mapa = os mesmos campos que `importMaps` (abaixo) já trata como "a planta em si" ao mesclar
+  // (CAMPOS_PLANTA) + o id -- não reinventa outra lista, reusa essa.
+  _FP_PERMITIR_MAPA: ['walls', 'points', 'trilha', 'objects', 'textos', 'portas', 'janelas', 'layers', 'bounds', 'modo', 'id'],
+  _FP_PERMITIR_FOTO: ['id', 'ambienteId', 'tipo', 'nome', 'setor', 'dataUrl', 'thumbDataUrl', 'orbs', 'mapaX', 'mapaY', 'mapaPiso', 'mapaLayerId'],
+
+  // [26/09/2026] NOVO -- REFATORAÇÃO, pedido verbatim: "Refatore o código de modo que se [...] não se alterou
+  // nenhuma informação [...] deve ser considerados idênticos. O que muda ao ser carregado no app, na 1ª
+  // importação, deve ficar no mesmo formato do que está sendo importado (o mesmo exato arquivo), na 2ª
+  // importação." A allowlist (rodada anterior) já resolvia campos DERIVADOS (buscaTokens, geoLat...), mas ainda
+  // deixava uma fresta mais sutil: `_stableStringify` OMITE do fp qualquer chave ausente/`undefined` (um backup
+  // que não trouxe `marcacoesMapa`, por exemplo, simplesmente não tem essa chave) — só que o registro LOCAL,
+  // depois de passar por `addItem`, tem TODAS as chaves sempre PRESENTES com um valor padrão (`marcacoesMapa:
+  // []`, `mapaX: null` etc). "Chave ausente" e "chave presente com o valor padrão" são a MESMA informação, mas
+  // vinham de dois "moldes" (fôrmas) DIFERENTES e por isso podiam gerar fps diferentes mesmo sem nenhuma
+  // divergência real. A correção: uma ÚNICA função (`_normCamposItem`, e as equivalentes de mapa/foto abaixo)
+  // aplica os MESMOS defaults tanto na hora de GRAVAR (`addItem`, `addAmbientePhoto`) quanto na hora de
+  // COMPARAR (`fpItem`/`fpMapa`/`fpFoto`) -- ausente ou já-com-o-padrão passam a produzir exatamente o mesmo
+  // fp, dos dois lados, sempre, por construção (nunca mais por coincidência de o backup já trazer tudo
+  // preenchido). Datas (`modificadoEm`/`ultimaConsultaEm`/`criadoOriginalmenteEm`) são a ÚNICA exceção: aqui,
+  // pra COMPARAR, o "ausente" vira `null` (nunca "agora") -- diferente do que `addItem` grava de verdade
+  // (`|| ts`, ver abaixo), porque "agora" é a hora da importação, não informação do patrimônio; comparar contra
+  // um "agora" mudando a cada chamada é que causaria falso-diferente, não o contrário.
+  _normCamposItem(d) {
+    d = d || {};
+    return {
+      patrimonio: d.patrimonio || '',
+      descricao: d.descricao || '',
+      tipo: d.tipo || '',
+      setor: d.setor || '',
+      ambienteId: d.ambienteId || null,
+      mapaX: typeof d.mapaX === 'number' ? d.mapaX : null,
+      mapaY: typeof d.mapaY === 'number' ? d.mapaY : null,
+      mapaPiso: d.mapaPiso || 0,
+      fotoAnexadaId: d.fotoAnexadaId || null,
+      marcacoesFotos: Array.isArray(d.marcacoesFotos) ? d.marcacoesFotos : [],
+      marcacoesMapa: Array.isArray(d.marcacoesMapa) ? d.marcacoesMapa : [],
+      // Só pra COMPARAÇÃO -- `null` se ausente, nunca "agora" (ver comentário grande acima). `addItem` usa este
+      // mesmo objeto e troca esse `null` por `ts` na hora de gravar de verdade (ver addItem).
+      modificadoEm: d.modificadoEm || null,
+      ultimaConsultaEm: d.ultimaConsultaEm || null,
+      criadoOriginalmenteEm: d.criadoOriginalmenteEm || d.criadoEm || null,
+      id: d.id || null,
+    };
+  },
+  // Mesma ideia, pros campos "planta" de um mapa (CAMPOS_PLANTA) -- ausente e "vazio" contam como igual.
+  _normCamposMapa(d) {
+    d = d || {};
+    const arr = (v) => Array.isArray(v) ? v : [];
+    return {
+      walls: arr(d.walls), points: arr(d.points), trilha: arr(d.trilha), objects: arr(d.objects),
+      textos: arr(d.textos), portas: arr(d.portas), janelas: arr(d.janelas), layers: arr(d.layers),
+      bounds: d.bounds || null, modo: d.modo || '', id: d.id || null,
+    };
+  },
+  // Mesma ideia, pra foto (mapPhotos) -- reflete os defaults de `addAmbientePhoto` (thumbDataUrl cai pra
+  // dataUrl quando ausente, orbs vazio, mapaPiso pode ser 0 de verdade então não usa `|| 0`).
+  _normCamposFoto(d) {
+    d = d || {};
+    return {
+      id: d.id || null,
+      ambienteId: d.ambienteId || null,
+      tipo: d.tipo === 'patrimonio' ? 'patrimonio' : 'ambiente',
+      nome: d.nome || '',
+      setor: d.setor || '',
+      dataUrl: d.dataUrl || null,
+      thumbDataUrl: d.thumbDataUrl || d.dataUrl || null,
+      orbs: Array.isArray(d.orbs) ? d.orbs : [],
+      mapaX: typeof d.mapaX === 'number' ? d.mapaX : null,
+      mapaY: typeof d.mapaY === 'number' ? d.mapaY : null,
+      mapaPiso: typeof d.mapaPiso === 'number' ? d.mapaPiso : null,
+      mapaLayerId: d.mapaLayerId || null,
+    };
+  },
+  _stableStringify(v, permitir) {
+    const seen = new WeakSet();
+    const walk = (x, topo) => {
+      if (x === null || typeof x !== 'object') return JSON.stringify(x === undefined ? null : x);
+      if (seen.has(x)) return '"[ciclo]"';
+      seen.add(x);
+      if (Array.isArray(x)) return '[' + x.map((y) => walk(y, false)).join(',') + ']';
+      const chaves = Object.keys(x).filter((k) => x[k] !== undefined && k[0] !== '_' && !(topo && permitir && !permitir.includes(k))).sort();
+      return '{' + chaves.map((k) => JSON.stringify(k) + ':' + walk(x[k], false)).join(',') + '}';
+    };
+    return walk(v, true);
+  },
+  _hash(str) { return (window.Utils && Utils.hashString) ? Utils.hashString(str) : String(str.length); },
+  // [26/09/2026] MUDADO -- normaliza ANTES de comparar (ver bloco grande acima), em vez de comparar o registro
+  // "como veio" contra a allowlist crua -- fecha a fresta de "chave ausente" x "chave com valor padrão".
+  fpItem(it) { return it ? this._stableStringify(this._normCamposItem(it), null) : ''; },
+  fpMapa(m) { return m ? this._stableStringify(this._normCamposMapa(m), null) : ''; },
+  fpFoto(p) { return p ? this._stableStringify(this._normCamposFoto(p), null) : ''; },
+  hashItem(it) { return this._hash(this.fpItem(it)); },
+  hashFoto(p) { return this._hash(this.fpFoto(p)); },
+  /** Resumo + hashes de um mapa com o que está ligado a ele (itens com ambienteId === mapa.id e fotos com
+   *  ambienteId === mapa.id, separadas em "de ambiente" e "de patrimônio" pelo campo tipo). */
+  resumoIdentidadeMapa(mapa, itens, fotos) {
+    const itensDoMapa = (itens || []).filter((it) => it && it.ambienteId === mapa.id);
+    const fotosDoMapa = (fotos || []).filter((f) => f && f.ambienteId === mapa.id);
+    const fotosPat = fotosDoMapa.filter((f) => f.tipo === 'patrimonio').length;
+    const hashPlanta = this._hash(this.fpMapa(mapa));
+    const hItens = itensDoMapa.map((it) => this.hashItem(it)).sort();
+    const hFotos = fotosDoMapa.map((f) => this.hashFoto(f)).sort();
+    const hashTudo = this._hash(hashPlanta + '|' + hItens.join(',') + '|' + hFotos.join(','));
+    return {
+      hashPlanta, hashTudo,
+      itens: itensDoMapa.length, fotosAmbiente: fotosDoMapa.length - fotosPat, fotosPatrimonio: fotosPat,
+      objetos: (mapa.objects || []).length,
+    };
+  },
+  /** Mesmo resumo, do lado LOCAL (banco deste aparelho). */
+  async resumoIdentidadeMapaLocal(mapId) {
+    const [mapsMap, itemsMap, photosMap] = await Promise.all([_mapsCache.ensure(), _itemsCache.ensure(), _mapPhotosCache.ensure()]);
+    const mapa = mapsMap.get(mapId);
+    if (!mapa) return null;
+    return this.resumoIdentidadeMapa(mapa, [...itemsMap.values()], [...photosMap.values()]);
+  },
+  /** `true` quando o item importado `raw` é EXATAMENTE igual ao item local de mesmo id (fp igual) e, se os dois
+   *  lados tiverem a foto anexada disponível (`fotosImportadasPorId` = fotos vindas no backup), o arquivo da foto
+   *  também é o mesmo. */
+  async itemIdenticoAoLocal(raw, fotosImportadasPorId) {
+    if (!raw || !raw.id) return false;
+    const local = await this.getItem(raw.id);
+    if (!local) return false;
+    if (this.fpItem(local) !== this.fpItem(raw)) return false;
+    if (raw.fotoAnexadaId && fotosImportadasPorId && fotosImportadasPorId.has(raw.fotoAnexadaId)) {
+      const fotoLocal = (await _mapPhotosCache.ensure()).get(raw.fotoAnexadaId);
+      if (fotoLocal && fotoLocal.dataUrl !== fotosImportadasPorId.get(raw.fotoAnexadaId).dataUrl) return false;
+    }
+    return true;
+  },
+
+  // [26/09/2026] NOVO -- pedido verbatim: "Para resolver isso e não gerar inconsistências, deve aparecer um
+  // botão que informa tudo em detalhes o que há de diferente entre os dois mapas, para não poluir a janela de
+  // importação com muitas informações. Em '🔀 Mesclar — escolher versão de cada mapa', ao clicar neste botão de
+  // detalhamento, nas duas caixas que aparecem ('Já existe neste aparelho' e 'Versão nova'), deve exibir o que
+  // está diferente (o que diverge entre os dois). Deste modo, ficará claro do porquê há divergência." Compara
+  // campo a campo (usando as MESMAS listas de permissão de fpMapa/fpItem/fpFoto, pra o que conta como
+  // "diferente" aqui ser exatamente o que conta como "diferente" no hash de identidade) e devolve um relatório
+  // pronto pra UI (utils.js showMapDiffDetalheModal).
+  // [26/09/2026] MUDADO -- compara os valores JÁ NORMALIZADOS (mesma normalização de fpItem/fpMapa/fpFoto, ver
+  // bloco grande acima), não os campos crus -- senão esta janela de detalhes acusaria "diferente" num campo
+  // ausente x presente-com-o-padrão mesmo quando fpItem/fpMapa/fpFoto (e o selo ✅/🟰) já consideram igual;
+  // o botão "🔍 Detalhes" tem que sempre poder EXPLICAR o selo mostrado, nunca contradizê-lo.
+  _diffCampos(a, b, campos) {
+    const dif = [];
+    for (const c of campos) {
+      const va = this._stableStringify(a ? { [c]: a[c] } : {}, null);
+      const vb = this._stableStringify(b ? { [c]: b[c] } : {}, null);
+      if (va !== vb) dif.push(c);
+    }
+    return dif;
+  },
+  /** Compara um mapa (planta) e seus patrimônios/fotos ligados dos dois lados (local x novo) e devolve o que
+   *  diverge: `plantaDiff` (campos da planta diferentes), `itens`/`fotos` = { apenasLocal, apenasNovo,
+   *  diferentes:[{id,rotulo,campos}], iguais }. `itensNovo`/`fotosNovo` podem vir vazios (backup sem essa
+   *  informação disponível pro lado novo) -- nesse caso tudo que existir só no local aparece em `apenasLocal`. */
+  diferencasMapa(mapaLocal, itensLocal, fotosLocal, mapaNovo, itensNovo, fotosNovo) {
+    const camposPlanta = this._FP_PERMITIR_MAPA.filter((c) => c !== 'id');
+    const nMapaLocal = mapaLocal ? this._normCamposMapa(mapaLocal) : null;
+    const nMapaNovo = mapaNovo ? this._normCamposMapa(mapaNovo) : null;
+    const plantaDiff = (nMapaLocal && nMapaNovo) ? this._diffCampos(nMapaLocal, nMapaNovo, camposPlanta) : camposPlanta;
+    const porId = (arr, norm) => { const m = new Map(); (arr || []).forEach((x) => { const n = norm(x); if (n && n.id) m.set(n.id, { orig: x, norm: n }); }); return m; };
+    const comparar = (locais, novos, campos, norm, rotularPor) => {
+      const mLocal = porId(locais, norm), mNovo = porId(novos, norm);
+      const apenasLocal = [], apenasNovo = [], diferentes = [];
+      let iguais = 0;
+      new Set([...mLocal.keys(), ...mNovo.keys()]).forEach((id) => {
+        const l = mLocal.get(id), n = mNovo.get(id);
+        if (l && !n) { apenasLocal.push(l.orig); return; }
+        if (!l && n) { apenasNovo.push(n.orig); return; }
+        const camposDif = this._diffCampos(l.norm, n.norm, campos);
+        if (camposDif.length) diferentes.push({ id, rotulo: rotularPor(l.orig), campos: camposDif, local: l.orig, novo: n.orig });
+        else iguais++;
+      });
+      return { apenasLocal, apenasNovo, diferentes, iguais };
+    };
+    const itens = comparar(itensLocal, itensNovo, this._FP_PERMITIR_ITEM.filter((c) => c !== 'id'), (x) => this._normCamposItem(x), (it) => it.patrimonio || it.descricao || it.id);
+    const fotos = comparar(fotosLocal, fotosNovo, this._FP_PERMITIR_FOTO.filter((c) => c !== 'id'), (x) => this._normCamposFoto(x), (f) => f.nome || f.tipo || f.id);
+    return { plantaDiff, itens, fotos };
   },
 
   /** Só CONTA quantos mapas de `maps` já colidem com um mapa local (mesmo
@@ -1717,7 +2034,11 @@ const DBApi = {
       if (!m || !m.id) continue;
       const existente = local.get(m.id);
       if (!existente) {
-        const salvo = await this.saveMap({ ...m });
+        // [26/09/2026] MUDADO -- immediate:true: pedido verbatim (ver
+        // comentário grande em saveMap acima): pula o debounce de 1s, que
+        // aqui era pago sequencialmente por mapa importado sem nenhum
+        // benefício (não é edição interativa em rajada).
+        const salvo = await this.saveMap({ ...m }, { preservarCarimbo: true, immediate: true });   // [26/09/2026] MUDADO -- mantém o atualizadoEm do backup
         idRemap.set(m.id, salvo.id);
         criados++; criadosMaps.push(salvo);
         continue;
@@ -1731,14 +2052,14 @@ const DBApi = {
         const antes = cloneRec(existente);
         const novo = { ...existente };
         for (const campo of CAMPOS_PLANTA) if (m[campo] !== undefined) novo[campo] = m[campo];
-        const salvo = await this.saveMap(novo);
+        const salvo = await this.saveMap(novo, { immediate: true });   // [26/09/2026] MUDADO -- pula debounce (ver saveMap)
         idRemap.set(m.id, salvo.id);
         atualizados++; atualizadosAntes.push({ before: antes, importado: m });
         continue;
       }
       if (decisao === 'ambos') {
         const copia = { ...m, id: uuid(), nome: `${m.nome || 'Ambiente'} (importado)` };
-        const salvo = await this.saveMap(copia);
+        const salvo = await this.saveMap(copia, { immediate: true });   // [26/09/2026] MUDADO -- pula debounce (ver saveMap)
         idRemap.set(m.id, salvo.id);
         criados++; criadosMaps.push(salvo);
         continue;

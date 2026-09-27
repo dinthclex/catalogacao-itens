@@ -144,7 +144,12 @@ const ClassicMode = {
    *  rodapé de botões (aqui e js/bsplayout.js) pra decidir entre os 2
    *  conjuntos de botões (ver `_FOOTER_DEFS_PADRAO`/
    *  `_FOOTER_DEFS_MAPEAMENTO` abaixo). */
-  isModoMapeamento() { return this.readCachedOpMode() === 'mapeamento'; },
+  // [26/09/2026] MUDADO -- pedido verbatim: "ao clicar no botão 'Carregar Configurações de Fábrica', o padrão do app
+  // (no modo de operação) é o 'Mapeamento de ambientes', inclusive o HTML que fica ao fundo da tela (enquanto ainda
+  // está carregando a página) atrás da Tela de Abertura". Cache ausente (null = nada escolhido ainda, instalação
+  // nova/fábrica) agora conta como 'Mapeamento de ambientes' (o padrão de fábrica), não mais como Conferência.
+  // Quem já escolheu algum modo tem o cache espelhado (finish()/restoreFromSettings()).
+  isModoMapeamento() { const m = this.readCachedOpMode(); return m === 'mapeamento' || m === null; },
 
   /** [RODADA 128] Esconde/mostra o botão "👁️ Ver lista simples" do
    *  cabeçalho (`#btn-verlista-top`, ver index.html/app.js) conforme o modo
@@ -248,7 +253,20 @@ const ClassicMode = {
   async openSplashScreen(opts = {}) {
     if (document.getElementById('classicmode-splash-backdrop')) return null; // já aberta — não duplica
     const force = !!opts.force;
+    // [26/09/2026] CORRIGIDO -- pedido verbatim: "Ao carregar as configurações de fábrica, a Tela de Abertura
+    // aparece. Mesmo clicando fora desta janela [...] ela aparece de novo [...] a janela Tela de Abertura deve
+    // aparecer uma única vez ao carregar a página." CAUSA RAIZ: `App._boot()` E `_ensureOperationMode()`
+    // (chamada por `enter()`, ao montar o modo Clássico/BSP) podem cada um chamar `openSplashScreen()` de forma
+    // independente durante o MESMO carregamento -- o guard acima (`getElementById`) só evita duas janelas
+    // abertas AO MESMO TEMPO, não uma reabertura depois que a 1ª já foi fechada (clicando fora, ANTES da 2ª
+    // chamada, ainda em andamento, decidir se mostra a dela). Este flag marca "já decidimos mostrar (ou não) a
+    // splash automática nesta carga de página" ANTES de qualquer `await` -- como funções `async` rodam
+    // síncrono até o 1º `await`, a 2ª chamada (força ou não, mas só quando NÃO é `force`, ver abaixo) desiste
+    // na hora, mesmo que a 1ª ainda não tenha sido fechada/resolvida. `force:true` (reabertura manual via Ajuda
+    // -> "Tela de Abertura") nunca é afetado por este flag, de propósito.
     if (!force) {
+      if (this._splashAutoTentadaNesteBoot) return null;
+      this._splashAutoTentadaNesteBoot = true;
       let sempreMostrar = true;
       try { sempreMostrar = typeof DB !== 'undefined' ? await DB.getSetting(this._SPLASH_SEMPRE_KEY, true) : true; } catch (e) { /* melhor esforço — na dúvida, mostra (padrão) */ }
       if (!sempreMostrar) return null; // preferência desligada — não mostra sozinha (só via Ajuda -> "Tela de Abertura", force:true)
@@ -328,14 +346,20 @@ const ClassicMode = {
         // escolhido é 'mapeamento' (`_forcarTelaInicial`, ver
         // mapview.js `mount()`). Não mexe em nada quando o modo é
         // 'conferencia' (comportamento de sempre — fica onde estava).
-        if (modoMapeamento) {
-          try {
-            // [19/09/2026 UTC] RODADA 192 -- pedido verbatim: tela padrao atras da
-            // splash, no modo 'Mapeamento de ambientes', agora e 'Caixa'.
-            if (typeof MapView !== 'undefined') MapView._forcarTelaInicial = 'caixa';
-            await window.App?.navigate?.('mapa');
-          } catch (e) { console.warn('[ClassicMode] falha ao navegar pra "Planta baixa" após escolher "Mapeamento de ambientes":', e); }
-        }
+        // [26/09/2026] CORRIGIDO -- pedido verbatim: "Certifique-se que sempre que um dos botões de rodapé ('Tabela', 'Cartões', 'Foto', 'Mapa', 'Buscar' (modo de operação 'Conferência de patrimônios') ou '3D', 'Caixa', 'Foto', 'Mapa', 'Buscar' (modo de operação 'Mapeamento de ambientes')) estiver destacado, a tela que deve estar aparecendo é a tela correspondente àquele botão do rodapé que estiver habilitado." -- ao trocar de
+        // modo, a tela aberta tem que ser uma das telas do rodapé NOVO: 'Mapeamento de ambientes' vai pra tela 'caixa'
+        // do roteador (botão 'Caixa' do rodapé -- antes ia pra 'mapa' com a sub-tela Caixa, destacando 'Mapa');
+        // 'Conferência de patrimônios' sai de '3D'/'Caixa' (que não existem no rodapé dela) pra 'Tabela'. Telas
+        // comuns aos dois rodapés (Foto/Mapa/Buscar) ficam como estão.
+        try {
+          const App_ = window.App;
+          if (App_?.navigate) {
+            const cv = App_.currentView;
+            if (modoMapeamento) await App_.navigate('caixa');
+            else if (cv === 'ver3d' || cv === 'caixa' || cv === '__view3d__') await App_.navigate('tabela');
+            App_._sincronizarDestaqueRodape?.();
+          }
+        } catch (e) { console.warn('[ClassicMode] falha ao ajustar a tela após trocar o modo de operação:', e); }
         modal.remove();
         this._opModePickedThisBoot = true;
         // Atualiza o aviso "defina o nome da conferência" na hora (ele
@@ -446,6 +470,8 @@ const ClassicMode = {
     btn.title = def.titulo || '';
     btn.innerHTML = `<span class="ic">${def.ic}</span>${Utils.escapeHtml(def.texto)}`;
     btn.addEventListener('click', () => App.navigate(btn.dataset.view));
+    // [26/09/2026] NOVO -- botão recriado pela troca animada de modo já nasce destacado se for a tela atual.
+    try { if (window.App && App.currentView === def.key) btn.classList.add('active'); } catch (e) { /* ignora */ }
     return btn;
   },
 
@@ -613,8 +639,7 @@ const ClassicMode = {
         ]);
         const instalacaoNova = !modoJaEscolhido && !(nomeJaDefinido && nomeJaDefinido.trim());
         if (instalacaoNova || modoJaEscolhido === 'mapeamento') {
-          alvo = 'mapa';
-          if (typeof MapView !== 'undefined') MapView._forcarTelaInicial = 'caixa';
+          alvo = 'caixa';   // [26/09/2026] MUDADO -- tela 'caixa' do rodapé (antes 'mapa' + sub-tela Caixa, que destacava 'Mapa')
         }
       } catch (e) { /* melhor esforço — na dúvida, mantém 'tabela' */ }
     }
@@ -669,7 +694,12 @@ const ClassicMode = {
   async restoreFromSettings() {
     if (typeof DB === 'undefined') { this._clearBootPrefClass(); return; }
     try {
-      const modo = await DB.getSetting('layoutMode', 'bsp');
+      // [24/09/2026] MUDADO -- pedido verbatim: "O padrao de fabrica do app
+      // o 'layout classico'. Atualmente, esta o 'Workspace'." Padrao de
+      // fabrica trocado de 'bsp' para 'classic' (quem ja tem 'layoutMode'
+      // salvo no IndexedDB/localStorage nao e afetado -- so instalacoes
+      // novas, sem nenhuma preferencia salva ainda).
+      const modo = await DB.getSetting('layoutMode', 'classic');
       this._syncLSCache(modo); // mantém o espelho em dia mesmo em quem nunca tinha ele (1ª visita com esta correção)
       // [15/09/2026 UTC] NOVO — mesmo espírito da linha acima, mas pro
       // "Modo de operação" (Conferência/Mapeamento, `_OPMODE_KEY`) — sem
@@ -680,8 +710,19 @@ const ClassicMode = {
       // mostrando os botões padrão (Tabela/Cartões) por engano até a
       // splash screen aparecer de novo (o que, com um modo já salvo, só
       // acontece se a pessoa reabrir a Tela de Abertura na mão).
-      try { const opModo = await DB.getSetting(this._OPMODE_KEY, ''); if (opModo) this._syncOpModeLSCache(opModo); } catch (e) { /* melhor esforço */ }
+      try {
+        const opModo = await DB.getSetting(this._OPMODE_KEY, '');
+        if (opModo) this._syncOpModeLSCache(opModo);
+        else {
+          // [26/09/2026] NOVO -- instalação antiga (nome de conferência salvo, sem modo gravado): espelha 'conferencia'
+          // pra o rodapé não cair no novo padrão ('Mapeamento', ver isModoMapeamento) por engano.
+          const nome = await DB.getSetting('conferenciaNome', '');
+          if (nome && String(nome).trim()) this._syncOpModeLSCache('conferencia');
+        }
+      } catch (e) { /* melhor esforço */ }
       try { this._updateVerListaTopBtnVisibility(); } catch (e) { /* melhor esforço — ver comentário grande na função */ }
+      // [26/09/2026] NOVO -- se o rodapé já foi montado com um cache desatualizado, corrige os botões pro modo real.
+      try { this.updateFooterForMode(this.isModoMapeamento()); window.BSPLayout?.updateBotoesForMode?.(this.isModoMapeamento()); } catch (e) { /* melhor esforço */ }
       if (modo === 'classic') await this.enter(); // enter() já sincroniza o cache de novo e #app já está/fica escondido — nenhum flash
     } catch (e) {
       console.warn('[ClassicMode] falha ao restaurar o modo de layout salvo:', e);

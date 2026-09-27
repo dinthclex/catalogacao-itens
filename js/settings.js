@@ -185,7 +185,8 @@ const SettingsView = {
     'mapa3dConfig',
     // NOVO (09/09/2026) — ver js/classicmode.js: qual dos 2 modos de
     // apresentação (Workspace/BSP OU Clássico) o app deve abrir da
-    // próxima vez. Resetar volta pro padrão (Workspace).
+    // próxima vez. Resetar volta pro padrão ([25/09/2026] MUDADO: layout Clássico -- pedido verbatim "O padrão
+    // de fábrica do app o 'layout clássico'").
     'layoutMode',
     // [10/09/2026] — ver js/classicmode.js: liga/desliga a Tela de
     // Abertura aparecer sozinha a cada boot. Resetar volta pro padrão
@@ -199,6 +200,9 @@ const SettingsView = {
       try { await DB.deleteSetting(chave); } catch (e) { /* segue tentando as outras — uma falha isolada não deve travar o reset inteiro */ }
     }
     try { localStorage.removeItem('catalogo_localbackup_ativo'); } catch (e) { /* ignora */ }
+    // [25/09/2026] NOVO -- também o espelho síncrono do layout (ver classicmode.js readCachedPref): sem isto, quem
+    // estava no Workspace continuava abrindo nele no 1o boot depois do reset, em vez do padrão de fábrica (Clássico).
+    try { localStorage.removeItem('catalogo_layoutMode'); } catch (e) { /* ignora */ }
     Utils.toast('Padrões do app restaurados ✓ Recarregando...', { type: 'ok' });
     setTimeout(() => location.reload(), 600);
   },
@@ -218,7 +222,27 @@ const SettingsView = {
         <button class="btn sm" id="st-fab-ok" style="background:#c0392b;color:#fff">Restaurar de fábrica</button>
       </div></div>`;
     document.body.appendChild(ov);
-    if (window.WindowManager) { try { WindowManager.register('st-fabrica', { el: ov, kind: 'modal', label: 'Configurações de fábrica' }); } catch (e) { /* ignora */ } }
+    // [24/09/2026] CORRIGIDO -- pedido verbatim: "às vezes, ao clicar em
+    // 'Carregar Configurações de Fábrica', o botão não executa a sua
+    // função. Ele sempre deve apresentar a janela informando o que vai
+    // acontecer e os botões que ficam nesta janela." Causa raiz: `ov` já
+    // nasce com `z-index:2147483600` (inline, acima de TUDO — de propósito,
+    // já que é a última confirmação antes de apagar tudo), mas
+    // `WindowManager.register(id, { el })`, SEM passar `zIndex`, sempre
+    // sobrescreve `el.style.zIndex` por um valor DINÂMICO da faixa
+    // "floating-panels" (base 961, crescente a cada painel — ver
+    // `_nextBaseZ()`/KNOWN_LAYERS em windowmanager.js). Isso jogava o
+    // z-index de 2147483600 pra ~961+, e qualquer painel flutuante do Mapa
+    // (Ferramentas/Camadas/Histórico) já aberto/focado antes — ou aberto
+    // depois — podia acabar com um z-index dinâmico MAIOR, cobrindo esta
+    // janela de confirmação por cima: o clique em "Restaurar de fábrica"
+    // (ou até em "Carregar Configurações de Fábrica" de novo) parecia não
+    // fazer nada, porque a janela abria de verdade, só que escondida atrás
+    // de outra coisa. Corrigido passando `zIndex: 2147483600` explícito no
+    // `register()`, preservando o valor inline (o único jeito de garantir
+    // "sempre acima de tudo" nesta janela, que é a confirmação mais crítica
+    // do app — apaga o vínculo com todos os dados salvos).
+    if (window.WindowManager) { try { WindowManager.register('st-fabrica', { el: ov, kind: 'modal', label: 'Configurações de fábrica', zIndex: 2147483600 }); } catch (e) { /* ignora */ } }
     ov.querySelector('#st-fab-cancel').onclick = () => ov.remove();
     ov.querySelector('#st-fab-ok').onclick = () => {
       try {
@@ -226,6 +250,11 @@ const SettingsView = {
         for (let i = 0; i < localStorage.length; i++) ks.push(localStorage.key(i));
         ks.forEach((k) => { if (k !== 'catalogo_db_sufixo') localStorage.removeItem(k); });
         localStorage.setItem('catalogo_db_sufixo', '_' + Date.now());
+        // [26/09/2026] NOVO -- pedido verbatim: "ao clicar no botão 'Carregar Configurações de Fábrica', o padrão do
+        // app (no modo de operação) é o 'Mapeamento de ambientes', inclusive o HTML que fica ao fundo da tela
+        // (enquanto ainda está carregando a página) atrás da Tela de Abertura." -- espelho síncrono do modo de
+        // operação já nasce 'mapeamento' (rodapé 3D/Caixa/Foto/Mapa/Buscar e tela 'Caixa' desde o 1o paint).
+        localStorage.setItem('catalogo_opMode', 'mapeamento');
       } catch (e) { /* ignora */ }
       try { sessionStorage.clear(); } catch (e) { /* ignora */ }
       Utils.toast('Configurações de fábrica carregadas ✓ Recarregando...', { type: 'ok' });
@@ -346,7 +375,7 @@ const SettingsView = {
           <p style="font-size:13px; color:var(--text-dim)">${total} item(ns) cadastrado(s).</p>
           <div style="display:flex; gap:8px; flex-wrap:wrap">
             <button class="btn secondary sm" id="st-export" title="Escolher o que exportar (campos, itens e formato de arquivo) e baixar o backup">⬇️ Exportar backup (.json)</button>
-            <label class="btn secondary sm" style="cursor:pointer" title="Importar um ou mais backups .json exportados anteriormente (pode selecionar vários arquivos de uma vez)">⬆️ Importar backup
+            <label class="btn secondary sm" style="cursor:pointer" title="Importar um ou mais backups .json exportados anteriormente (pode selecionar vários arquivos de uma vez)">⬆️ Importar backup (.json)
               <input type="file" id="st-import" accept="application/json" multiple class="hidden">
             </label>
             <!-- NOVO (01/09/2026) — item GRANDE #9, decisão do usuário
@@ -426,7 +455,7 @@ const SettingsView = {
           </p>
           <label class="radio-opt" style="margin-top:8px">
             <input type="checkbox" id="st-layout-classico" ${ClassicMode?.isActive?.() ? 'checked' : ''}>
-            <span><span class="t">📱 Usar o layout Clássico (tela cheia, uma tela por vez, barra inferior)</span><br><span class="d">Desmarcado (padrão): 🧩 Workspace — blocos redimensionáveis estilo Blender, com a tela "Info"/"Botões" próprias. Marcado: o jeito antigo — Tabela/Cartões/Fotos/Mapa/Buscar em tela cheia, um de cada vez, com barra inferior fixa (igual o app era antes do Workspace existir).</span></span>
+            <span><span class="t">📱 Usar o layout Clássico (tela cheia, uma tela por vez, barra inferior)</span><br><span class="d">Desmarcado: 🧩 Workspace — blocos redimensionáveis estilo Blender, com a tela "Info"/"Botões" próprias. Marcado (padrão de fábrica): o jeito antigo — Tabela/Cartões/Fotos/Mapa/Buscar em tela cheia, um de cada vez, com barra inferior fixa (igual o app era antes do Workspace existir).</span></span>
           </label>
           <!-- [10/09/2026] Pedido verbatim: "A splash screen deve sempre
                aparecer. Uma opção nas 'configurações do app' deve servir
@@ -1240,6 +1269,14 @@ const SettingsView = {
       // acima forem resolvidos (FASE 2), então a mesclagem de verdade fica
       // pra depois (FASE 3).
       let todosOsTypes = [], todosOsSetores = [], todasMapPhotos = [], todasFotosAmbiente = [];
+      // [26/09/2026] NOVO -- scripts globais de automação (`AutomationManager`,
+      // js/automation.js) num backup (`dump.scripts`, pedido do usuário: "no
+      // botão dos scripts coloque os exemplos funcionais já implementados" —
+      // um mapa de exemplo entregue como backup precisa poder trazer os
+      // próprios scripts junto, não só o mapa, já que scripts são globais
+      // (guardados fora de qualquer mapa). Dedup por id igual a `mapasPorId`
+      // acima -- ver `scriptsPorId`/`AutomationManager.importScripts` abaixo.
+      let todosOsScripts = [];
       // Pedido do usuário (v310): "se são 7 arquivos, deve aparecer algo como
       // 'Salvando (1/7)...' e uma barrinha" + "enquanto as informações estão
       // sendo processadas... deve aparecer no canto da tela uma barrinha...
@@ -1275,6 +1312,7 @@ const SettingsView = {
           // backup exportado só com a categoria "Imagens" simplesmente não
           // trazia nenhuma foto de volta na importação.
           if (Array.isArray(normalizado.fotosDeAmbiente)) todasFotosAmbiente = todasFotosAmbiente.concat(normalizado.fotosDeAmbiente);
+          if (Array.isArray(normalizado.scripts)) todosOsScripts = todosOsScripts.concat(normalizado.scripts);
         } catch (err) {
           falhasLeitura++;
           console.warn(`Falha ao ler "${file.name}":`, err);
@@ -1282,6 +1320,45 @@ const SettingsView = {
       }
       e.target.value = '';
       const mapasEncontrados = [...mapasPorId.values()];
+      // Importa os scripts globais do backup (best-effort — nunca trava o
+      // resto da importação por causa disto). Dedup por id: a última
+      // ocorrência entre os arquivos selecionados vale, igual a `mapasPorId`.
+      if (todosOsScripts.length) {
+        const scriptsPorId = new Map();
+        todosOsScripts.forEach((s) => { if (s?.id) scriptsPorId.set(s.id, s); });
+        try { await window.AutomationManager?.importScripts?.([...scriptsPorId.values()]); } catch (e) { console.warn('Falha ao importar scripts:', e); }
+      }
+      // [26/09/2026] NOVO -- pedido verbatim: "Às vezes, dois mapas têm os mesmos exatos patrimônios. Ao carregar estes mapas pelo 'Importar backup', acaba ficando como patrimônios duplicados. Deve haver algum jeito de identificar que se trata de patrimônios exatamente iguais [...] e não ficar dois patrimônios (ou mais vezes, caso os mesmos exatos patrimônios estejam em vários mapas) extamente iguais dizendo que estão duplicados." 
+      // (1) Dentro do próprio lote: o MESMO patrimônio (mesmo id e mesma impressão digital -- ver DB.fpItem) vindo
+      // em vários arquivos entra UMA vez só. Antes, o 2o em diante colidia por id com o 1o e virava "cópia" com id
+      // novo (daí os duplicados). Mesmo id com conteúdo DIFERENTE continua como antes (vira conflito normal).
+      // O mesmo vale pras fotos (mesmo id + mesmo conteúdo = uma só).
+      let itensIdenticosNoLote = 0;
+      {
+        const vistos = new Map(); // id -> [fp já aceitos]
+        todosOsItens = todosOsItens.filter((it) => {
+          if (!it || !it.id) return true;
+          const fp = DB.fpItem(it);
+          const lista = vistos.get(it.id) || [];
+          if (lista.includes(fp)) { itensIdenticosNoLote++; return false; }
+          lista.push(fp); vistos.set(it.id, lista);
+          return true;
+        });
+        const dedupFotos = (arr) => {
+          const vistasF = new Map();
+          return arr.filter((f) => {
+            if (!f || !f.id) return true;
+            const fp = DB.fpFoto(f);
+            const lista = vistasF.get(f.id) || [];
+            if (lista.includes(fp)) return false;
+            lista.push(fp); vistasF.set(f.id, lista);
+            return true;
+          });
+        };
+        todasMapPhotos = dedupFotos(todasMapPhotos);
+        todasFotosAmbiente = dedupFotos(todasFotosAmbiente);
+      }
+      const fotosImportadasPorId = new Map([...todasMapPhotos, ...todasFotosAmbiente].filter((f) => f && f.id).map((f) => [f.id, f]));
 
       if (!todosOsItens.length && !mapasEncontrados.length && !todasMapPhotos.length && !todasFotosAmbiente.length && !todosOsTypes.length && !todosOsSetores.length) {
         if (falhasLeitura) { Utils.toast(`Não foi possível ler ${falhasLeitura} arquivo(s) — veja o console.`, { type: 'danger' }); return; }
@@ -1307,10 +1384,23 @@ const SettingsView = {
             itens: todosOsItens.filter((it) => it?.ambienteId === m.id).length,
             fotos: [...todasMapPhotos, ...todasFotosAmbiente].filter((p) => p?.ambienteId === m.id).length,
           }),
+          // [26/09/2026] NOVO -- resumo + hash (planta / tudo) do lado do backup, pra janela "Mapas já existentes
+          // encontrados" mostrar patrimônios/fotos de cada mapa e se ele é IDÊNTICO ao do aparelho.
+          identidadeNovoLado: (m) => DB.resumoIdentidadeMapa(m, todosOsItens, [...todasMapPhotos, ...todasFotosAmbiente]),
+          // [26/09/2026] NOVO -- dados CRUS (não só contagem) dos patrimônios/fotos deste mapa vindos no backup,
+          // pedido verbatim: "deve aparecer um botão que informa tudo em detalhes o que há de diferente entre os
+          // dois mapas [...] deve exibir o que está diferente" -- usado pelo botão "🔍 Detalhes" da janela de
+          // mesclagem (Utils.showMapDiffDetalheModal / DB.diferencasMapa) pra comparar campo a campo.
+          rawNovoLado: (m) => ({
+            itens: todosOsItens.filter((it) => it?.ambienteId === m.id),
+            fotos: [...todasMapPhotos, ...todasFotosAmbiente].filter((p) => p?.ambienteId === m.id),
+          }),
         });
         if (!resultado) { Utils.toast('Importação cancelada — nada foi alterado.', { type: 'warn' }); return; }
         rMaps = resultado;
         mapIdRemap = rMaps.idRemap;
+        // [26/09/2026] NOVO -- guarda/aplica o personagem que veio junto com cada mapa (ver js/personagem-mapa.js).
+        try { await window.PersonagemMapa?.aoImportarMapas?.(rMaps); } catch (e) { console.warn('[Importar] personagem dos mapas:', e); }
         if (rMaps.criados || rMaps.atualizados) App._refreshCurrentView?.();
       }
 
@@ -1318,6 +1408,9 @@ const SettingsView = {
       // aqui; as fotos são reencaixadas no mapa CERTO via `mapIdRemap` (o
       // mapa de onde vieram no backup), não mais forçadas no mapa "atual"
       // do aparelho (ver DB.importSupplementary).
+      // [25/09/2026] NOVO -- pedido verbatim: "Durante todo o processo deve ter algum ícone animado, informando
+      // visualmente que está sendo processado o 'importar backup'." -- texto próprio desta fase (antes silenciosa).
+      App.setBulkSaveStatus?.('🖼️ Salvando mapas, tipos e fotos…');
       await DB.importSupplementary(
         { types: todosOsTypes, sectors: todosOsSetores, mapPhotos: todasMapPhotos, fotosDeAmbiente: todasFotosAmbiente },
         { mapIdRemap },
@@ -1328,12 +1421,21 @@ const SettingsView = {
         if (rMaps.criados) partes.push(`${rMaps.criados} mapa(s) novo(s)`);
         if (rMaps.atualizados) partes.push(`${rMaps.atualizados} mapa(s) com a planta substituída`);
         if (rMaps.mantidos) partes.push(`${rMaps.mantidos} mapa(s) mantido(s) como já estavam`);
-        if (todasMapPhotos.length + todasFotosAmbiente.length) partes.push(`${todasMapPhotos.length + todasFotosAmbiente.length} foto(s) de ambiente`);
+        { // [26/09/2026] CORRIGIDO -- fotos de patrimônio (tipo 'patrimonio') contadas à parte, não como "de ambiente"
+          const _fotosImp = todasMapPhotos.concat(todasFotosAmbiente);
+          const _nFotoPat = _fotosImp.filter((f) => f && f.tipo === 'patrimonio').length;
+          if (_fotosImp.length - _nFotoPat) partes.push(`${_fotosImp.length - _nFotoPat} foto(s) de ambiente`);
+          if (_nFotoPat) partes.push(`${_nFotoPat} foto(s) de patrimônio`);
+        }
         if (falhasLeitura) partes.push(`${falhasLeitura} arquivo(s) não lido(s)`);
         Utils.toast(`Backup importado ✓ — ${partes.join(', ') || 'nada a fazer'}.`, { type: 'ok', duration: 5500 });
         EventLog.log(`Backup importado (sem patrimônios): ${partes.join(', ') || 'nada a fazer'} (${files.length} arquivo(s)).`, { tipo: 'ok' });
-        App._refreshCurrentView?.();
-        AmbientePhotos.refreshIfOpen?.();
+        // [25/09/2026] MUDADO -- espera de verdade as gravações/atualizações terminarem antes do finally
+        // desligar o ícone girando (ver comentário grande no fim do fluxo).
+        App.setBulkSaveStatus?.('⏳ Finalizando importação…');
+        try { await DB.flushPendingMapSaves?.(); } catch (e) { /* melhor esforço */ }
+        try { await App._refreshCurrentView?.(); } catch (e) { /* melhor esforço */ }
+        try { await AmbientePhotos.refreshIfOpen?.(); } catch (e) { /* melhor esforço */ }
         return;
       }
 
@@ -1359,6 +1461,34 @@ const SettingsView = {
           remapeados.push(destino === it.ambienteId ? it : { ...it, ambienteId: destino });
         }
         todosOsItens = remapeados;
+      }
+
+      // [26/09/2026] NOVO -- (2) contra o banco local: patrimônio EXATAMENTE igual ao já cadastrado aqui (mesmo id,
+      // mesma impressão digital e, havendo as duas, mesma foto anexada) não é conflito nem cópia -- é o mesmo
+      // registro; simplesmente não entra de novo (contado como "idêntico(s), sem alteração" no resumo).
+      let itensIdenticosAoLocal = 0;
+      {
+        const restantes = [];
+        for (const it of todosOsItens) {
+          if (await DB.itemIdenticoAoLocal(it, fotosImportadasPorId)) itensIdenticosAoLocal++;
+          else restantes.push(it);
+        }
+        todosOsItens = restantes;
+      }
+      if (!todosOsItens.length) {
+        const partes = [];
+        if (itensIdenticosAoLocal + itensIdenticosNoLote) partes.push(`${itensIdenticosAoLocal + itensIdenticosNoLote} patrimônio(s) idêntico(s) — sem alteração`);
+        if (rMaps.criados) partes.push(`${rMaps.criados} mapa(s) novo(s)`);
+        if (rMaps.atualizados) partes.push(`${rMaps.atualizados} mapa(s) com a planta substituída`);
+        if (rMaps.mantidos) partes.push(`${rMaps.mantidos} mapa(s) mantido(s) como já estavam`);
+        if (falhasLeitura) partes.push(`${falhasLeitura} arquivo(s) não lido(s)`);
+        Utils.toast(`Backup importado ✓ — ${partes.join(', ') || 'nada a fazer'}.`, { type: 'ok', duration: 5500 });
+        EventLog.log(`Backup importado: ${partes.join(', ') || 'nada a fazer'} (${files.length} arquivo(s)).`, { tipo: 'ok' });
+        App.setBulkSaveStatus?.('⏳ Finalizando importação…');
+        try { await DB.flushPendingMapSaves?.(); } catch (e) { /* melhor esforço */ }
+        try { await App._refreshCurrentView?.(); } catch (e) { /* melhor esforço */ }
+        try { await AmbientePhotos.refreshIfOpen?.(); } catch (e) { /* melhor esforço */ }
+        return;
       }
 
       // FASE 4: pergunta o que fazer com duplicados, SÓ SE houver algum (mesmo
@@ -1404,6 +1534,7 @@ const SettingsView = {
         if (r.criados) partes.push(`${r.criados} novo(s)`);
         if (r.atualizados) partes.push(`${r.atualizados} atualizado(s)`);
         if (r.ignorados) partes.push(`${r.ignorados} ignorado(s) (sem dados suficientes)`);
+        if (itensIdenticosAoLocal + itensIdenticosNoLote) partes.push(`${itensIdenticosAoLocal + itensIdenticosNoLote} idêntico(s) — sem alteração`);   // [26/09/2026] NOVO
         // Pedido do usuário (28/08/2026): mapas/fotos de ambiente entram no
         // MESMO resumo dos patrimônios quando o backup trouxer as duas
         // coisas juntas (ver FASE 2/3 acima) — antes desta rodada, mapas
@@ -1412,7 +1543,12 @@ const SettingsView = {
         if (rMaps.criados) partes.push(`${rMaps.criados} mapa(s) novo(s)`);
         if (rMaps.atualizados) partes.push(`${rMaps.atualizados} mapa(s) com a planta substituída`);
         if (rMaps.mantidos) partes.push(`${rMaps.mantidos} mapa(s) mantido(s) como já estavam`);
-        if (todasMapPhotos.length + todasFotosAmbiente.length) partes.push(`${todasMapPhotos.length + todasFotosAmbiente.length} foto(s) de ambiente`);
+        { // [26/09/2026] CORRIGIDO -- fotos de patrimônio (tipo 'patrimonio') contadas à parte, não como "de ambiente"
+          const _fotosImp = todasMapPhotos.concat(todasFotosAmbiente);
+          const _nFotoPat = _fotosImp.filter((f) => f && f.tipo === 'patrimonio').length;
+          if (_fotosImp.length - _nFotoPat) partes.push(`${_fotosImp.length - _nFotoPat} foto(s) de ambiente`);
+          if (_nFotoPat) partes.push(`${_nFotoPat} foto(s) de patrimônio`);
+        }
         if (falhasLeitura) partes.push(`${falhasLeitura} arquivo(s) não lido(s)`);
         Utils.toast(`Backup importado ✓ — ${partes.join(', ') || 'nada a fazer'}.`, { type: 'ok', duration: 5500 });
         EventLog.log(`Backup importado: ${partes.join(', ') || 'nada a fazer'} (${files.length} arquivo(s)).`, { tipo: 'ok' });
@@ -1435,8 +1571,14 @@ const SettingsView = {
         Utils.toast('Erro ao importar: ' + err.message, { type: 'danger', duration: 6000 });
         EventLog.log(`Falha ao importar backup: ${err.message}`, { tipo: 'erro' });
       }
-      App._refreshCurrentView?.();
-      AmbientePhotos.refreshIfOpen?.();
+      // [25/09/2026] MUDADO -- pedido verbatim: "a barrinha chega ao 100%, porém ainda vai salvar os arquivos.
+      // Durante todo o processo deve ter algum ícone animado". A barrinha fica cheia (100%) e o ícone continua
+      // girando enquanto as gravações adiadas (mapas) terminam e as telas são recarregadas -- só DEPOIS disso o
+      // finally abaixo desliga o modo em lote (e o ícone).
+      App.setBulkSaveStatus?.('⏳ Finalizando importação…', { current: 1, total: 1 });
+      try { await DB.flushPendingMapSaves?.(); } catch (e) { /* melhor esforço */ }
+      try { await App._refreshCurrentView?.(); } catch (e) { /* melhor esforço */ }
+      try { await AmbientePhotos.refreshIfOpen?.(); } catch (e) { /* melhor esforço */ }
       _loteConcluido = true;
       } finally {
         // Desliga o "modo em lote" do selo (ver App.setBulkSaveStatus) não
@@ -2111,14 +2253,29 @@ const SettingsView = {
    *  janela normal (pode ajustar a seleção antes de baixar), só com o
    *  ponto de partida já filtrado pro mapa que ela clicou (ver
    *  organizeview.js `_wireCard`, botão `.organize-map-export-btn`). */
+  /** [25/09/2026] NOVO -- `opts.onlyItemId` (pedido verbatim, "Tabela"):
+   *  "coloque um botão para exportar. Ao clicar neste botão, vai-se para a
+   *  janela 'Exportar backup' com este patrimônio marcado, a(s) foto(s) em
+   *  que ele aparece e o mapa a que ele pertence (ou seja tudo relacionado a
+   *  este patrimônio)." Mesmo espírito de `opts.onlyMapId` logo abaixo — só
+   *  muda a seleção inicial das 3 listas, reaproveitando toda a janela. */
   async _openExportModal(opts = {}) {
-    const { onlyMapId = null } = opts;
+    const { onlyMapId = null, onlyItemId = null } = opts;
     const total = await DB.countItems();
     const resumo = await DB.getAllSummaries();
     const cfg = await DB.getAllSettings();
-    const ambientePhotos = await DB.getAllAmbientePhotos();
+    // [26/09/2026] CORRIGIDO -- pedido verbatim: "Nas 'configurações do app', em 'Exportar backup', atualize o texto
+    // exibido em 'O que vai nessa exportação:'. Pois, mesmo um mapa tendo 3 fotos (1 foto de ambiente e 2 de
+    // patrimônio), acaba aparecendo: ... + 3 foto(s) de ambiente ... A parte '3 foto(s) de ambiente' deveria ser 1."
+    // -- a store de fotos guarda os DOIS tipos (ambiente e patrimônio, campo tipo); a lista/contagem "de ambiente"
+    // agora exclui as fotos tipo 'patrimonio' que já são a foto anexada de algum patrimônio (elas aparecem só
+    // como "foto de patrimônio"). O registro dessas fotos continua indo no arquivo (em fotosDeAmbiente, que é o
+    // que o importador lê) quando a "foto de patrimônio" correspondente está marcada — ver 'fotosDeAmbiente' abaixo.
+    const todasFotosRegistros = await DB.getAllAmbientePhotos();
     const maps = await DB.getAllMaps();
     const itensComFotoVinculada = resumo.filter((it) => it.fotoAnexadaId);
+    const idsFotosAnexadas = new Set(itensComFotoVinculada.map((it) => it.fotoAnexadaId));
+    const ambientePhotos = todasFotosRegistros.filter((f) => !(f.tipo === 'patrimonio' && idsFotosAnexadas.has(f.id)));
 
     // Pedido do usuário (27/08/2026): "Quando não tem nenhum patrimônio
     // cadastrado, mas existem mapas e fotos, deve ser possível 'exportar'...
@@ -2130,7 +2287,7 @@ const SettingsView = {
     // dentro da janela, cada categoria já mostra sua própria contagem entre
     // parênteses (Patrimônios/Imagens/Mapas, ver mais abaixo), então dá pra
     // perceber ali mesmo o que tem ou não pra exportar.
-    if (total === 0 && ambientePhotos.length === 0 && maps.length === 0) {
+    if (total === 0 && todasFotosRegistros.length === 0 && maps.length === 0) {
       Utils.toast('Ainda não há nenhum patrimônio, foto ou mapa catalogado para exportar.', { type: 'warn' });
       return;
     }
@@ -2142,25 +2299,113 @@ const SettingsView = {
         ? 'Servidor local configurado e ativo — 📦 Patrimônios também são enviados automaticamente pra lá a cada cadastro (💾 Salvamento automático em arquivo); os arquivos abaixo continuam sendo úteis como cópia extra/portátil.'
         : 'Este app foi aberto via servidor, mas o salvamento automático não está ativo — os arquivos abaixo são a única cópia que sai deste navegador (veja "💾 Salvamento automático em arquivo" para automatizar isso).');
 
+    // [25/09/2026] item apontado por onlyItemId (Part L) — usado logo abaixo
+    // pra montar a seleção inicial "tudo relacionado a este patrimônio":
+    // ele mesmo, a foto vinculada a ele (se houver) e o mapa dele (se houver).
+    const onlyItem = onlyItemId ? resumo.find((it) => it.id === onlyItemId) : null;
+
     // Seleção inicial: TUDO marcado nas 3 listas (equivalente ao backup
     // completo de sempre, até alguém desmarcar algo) — OU, com
-    // `onlyMapId`, só o mapa clicado e o que pertence a ele.
-    const selPatrimonios = new Set((onlyMapId ? resumo.filter((it) => it.ambienteId === onlyMapId) : resumo).map((it) => it.id));
-    const selFotosItens = new Set((onlyMapId ? itensComFotoVinculada.filter((it) => it.ambienteId === onlyMapId) : itensComFotoVinculada).map((it) => it.id));
-    const selFotosAmbiente = new Set((onlyMapId ? ambientePhotos.filter((f) => f.ambienteId === onlyMapId) : ambientePhotos).map((f) => f.id));
-    const selMapas = new Set(onlyMapId ? maps.filter((m) => m.id === onlyMapId).map((m) => m.id) : maps.map((m) => m.id));
+    // `onlyMapId`, só o mapa clicado e o que pertence a ele — OU, com
+    // `onlyItemId`, só este patrimônio + a foto dele + o mapa dele.
+    // [25/09/2026] NOVO -- pedido verbatim: "Em 'configurações do app', em 'Exportar backup', se a janela foi
+    // acessada, então, as marcações que foram feitas nas suas opções devem permanecer até a página ser
+    // recarregada. Se fechar a janela do 'Exportar backup' e ir fazer outras coisas no app, depois, voltar para
+    // a janela 'Exportar backup', as mesmas marcações devem estar lá intactas." -- o estado da janela (as 4
+    // seleções, categorias, "Vincular itens associados", ordenação, agrupamento e subpastas) vive em
+    // SettingsView._expEstado, FORA do ciclo de vida do modal: só some ao recarregar a página (é só memória,
+    // nada é gravado no banco). Aberta pelos botões "Exportar" de um mapa/patrimônio (onlyMapId/onlyItemId), a
+    // pré-seleção pedida substitui as seleções guardadas (e passa a ser a nova seleção guardada); as outras
+    // opções guardadas (categorias, ordenação, etc.) continuam valendo. Itens que surgiram depois da última
+    // abertura (nunca vistos por esta janela) entram marcados, como no padrão de fábrica (tudo marcado).
+    // [25/09/2026] NOVO -- "a(s) foto(s) em que ele aparece" (botão Exportar do patrimônio) e cascata
+    // patrimônio -> foto: além da foto anexada, também as fotos de ambiente com uma marcação (orb) dele.
+    const fotosAmbienteDoItem = (itemId) => ambientePhotos.filter((f) => (f.orbs || []).some((o) => o && o.itemId === itemId)).map((f) => f.id);
+    const chavesAtuais = new Set([
+      ...resumo.map((it) => 'p:' + it.id),
+      ...itensComFotoVinculada.map((it) => 'fi:' + it.id),
+      ...ambientePhotos.map((f) => 'fa:' + f.id),
+      ...maps.map((m) => 'm:' + m.id),
+    ]);
+    let estadoExp = this._expEstado;
+    if (!estadoExp) {
+      estadoExp = this._expEstado = {
+        sel: null, conhecidos: new Set(),
+        cats: { patrimonios: true, imagens: true, mapas: true },
+        vincularFlags: { patrimonios: true, imagens: true, mapas: true },
+        ordem: 'criadoOriginalmenteEm', formato: 'junto', subpastas: false,
+      };
+    }
+    let selPatrimonios, selFotosItens, selFotosAmbiente, selMapas;
+    if (onlyMapId || onlyItem || !estadoExp.sel) {
+      selPatrimonios = new Set(
+        onlyMapId ? resumo.filter((it) => it.ambienteId === onlyMapId).map((it) => it.id)
+          : onlyItem ? [onlyItem.id]
+            : resumo.map((it) => it.id));
+      selFotosItens = new Set(
+        onlyMapId ? itensComFotoVinculada.filter((it) => it.ambienteId === onlyMapId).map((it) => it.id)
+          : onlyItem ? (onlyItem.fotoAnexadaId ? [onlyItem.id] : [])
+            : itensComFotoVinculada.map((it) => it.id));
+      selFotosAmbiente = new Set(
+        onlyMapId ? ambientePhotos.filter((f) => f.ambienteId === onlyMapId).map((f) => f.id)
+          : onlyItem ? fotosAmbienteDoItem(onlyItem.id)
+            : ambientePhotos.map((f) => f.id));
+      selMapas = new Set(
+        onlyMapId ? maps.filter((m) => m.id === onlyMapId).map((m) => m.id)
+          : onlyItem ? (onlyItem.ambienteId ? [onlyItem.ambienteId] : [])
+            : maps.map((m) => m.id));
+      estadoExp.sel = { selPatrimonios, selFotosItens, selFotosAmbiente, selMapas };
+    } else {
+      ({ selPatrimonios, selFotosItens, selFotosAmbiente, selMapas } = estadoExp.sel);
+      // remove o que não existe mais; marca o que é novo (nunca visto por esta janela)
+      const sincronizar = (set, prefixo, ids) => {
+        const validos = new Set(ids);
+        [...set].forEach((id) => { if (!validos.has(id)) set.delete(id); });
+        ids.forEach((id) => { if (!estadoExp.conhecidos.has(prefixo + id)) set.add(id); });
+      };
+      sincronizar(selPatrimonios, 'p:', resumo.map((it) => it.id));
+      sincronizar(selFotosItens, 'fi:', itensComFotoVinculada.map((it) => it.id));
+      sincronizar(selFotosAmbiente, 'fa:', ambientePhotos.map((f) => f.id));
+      sincronizar(selMapas, 'm:', maps.map((m) => m.id));
+    }
+    estadoExp.conhecidos = chavesAtuais;
+    // [25/09/2026] NOVO -- pedido verbatim: "Ao exportar o backup (nas 'configurações do app'), deve ser possível
+    // ordená-los assim como em 'Tabela'. Com as opções: 'Criado ↓', 'Modificado ↓', 'Última consulta ↓' e
+    // 'Patrimônio A-Z'." -- MESMO critério de table.js (_sortBy): datas mais recentes primeiro; patrimônio A-Z.
+    // Vale para a lista de Patrimônios, para as fotos de patrimônio (em Imagens) e para a ORDEM dos itens dentro
+    // do(s) arquivo(s) exportado(s).
+    const ordenarResumo = (arr) => {
+      const campo = estadoExp.ordem || 'criadoOriginalmenteEm';
+      return [...arr].sort((a, b) => {
+        if (campo === 'patrimonio') return (a.patrimonio || '').localeCompare(b.patrimonio || '');
+        const va = a[campo] || (campo === 'criadoOriginalmenteEm' ? a.criadoEm : '') || '';
+        const vb = b[campo] || (campo === 'criadoOriginalmenteEm' ? b.criadoEm : '') || '';
+        return vb.localeCompare(va);
+      });
+    };
     const onlyMapNome = onlyMapId ? Utils.escapeHtml((maps.find((m) => m.id === onlyMapId) && window.Mapping?.displayName?.(maps.find((m) => m.id === onlyMapId))) || 'este mapa') : '';
+    const onlyItemLabel = onlyItem ? Utils.escapeHtml(onlyItem.patrimonio || onlyItem.descricao || '(sem número)') : '';
 
     const modal = document.createElement('div');
     modal.className = 'modal-backdrop';
     modal.innerHTML = `
       <div class="modal-sheet">
         <div class="handle"></div>
-        <h3 style="margin-top:0">⬇️ Exportar backup${onlyMapId ? ` — ${onlyMapNome}` : ''}</h3>
+        <h3 style="margin-top:0">⬇️ Exportar backup${onlyMapId ? ` — ${onlyMapNome}` : (onlyItem ? ` — ${onlyItemLabel}` : '')}</h3>
         <p style="font-size:11.5px; color:var(--text-dim)">${situacaoTxt}</p>
         ${onlyMapId ? `<p style="font-size:11.5px; color:var(--text-dim)">Pré-selecionado só o mapa "<b>${onlyMapNome}</b>" e os patrimônios/fotos dele (veio do botão "exportar apenas este mapa" em Organizar) — ajuste as listas abaixo se quiser incluir mais coisa.</p>` : ''}
+        ${onlyItem ? `<p style="font-size:11.5px; color:var(--text-dim)">Pré-selecionado só o patrimônio "<b>${onlyItemLabel}</b>", a foto dele (se houver) e o mapa dele (se houver) — veio do botão "Exportar" na ficha do item — ajuste as listas abaixo se quiser incluir mais coisa.</p>` : ''}
 
         <span style="display:block; font-size:12.5px; color:var(--text-dim); margin-bottom:5px; margin-top:6px">O que exportar — marque para incluir; clique no bloco para ver/escolher os itens de cada categoria</span>
+        <!-- [25/09/2026] NOVO -- ordenação igual à da Tabela (ver ordenarResumo). -->
+        <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-dim); margin-bottom:6px" title="Ordem dos patrimônios nas listas abaixo e dentro do(s) arquivo(s) exportado(s) -- as mesmas opções da Tabela">Ordenar:
+          <select id="exp-ordem">
+            <option value="criadoOriginalmenteEm">Criado ↓</option>
+            <option value="modificadoEm">Modificado ↓</option>
+            <option value="ultimaConsultaEm">Última consulta ↓</option>
+            <option value="patrimonio">Patrimônio A-Z</option>
+          </select>
+        </label>
         <div class="exp-cats">
           <div class="exp-cat-block" data-key="patrimonios">
             <div class="exp-cat-row">
@@ -2172,6 +2417,12 @@ const SettingsView = {
               </button>
             </div>
             <div class="exp-cat-opts hidden" id="exp-opts-patrimonios">
+              <!-- [25/09/2026] NOVO -- pedido verbatim: "Em cada uma das
+                   seções 'Patrimônios', 'Imagens' e 'Mapas' deve ter uma
+                   opção Vincular itens associados. Esta opção deve vir
+                   habilitada por padrão." Ver exp-vincular-* nas outras 2
+                   seções e a lógica de cascata logo abaixo (marcarVinculados). -->
+              <label class="radio-opt" style="margin-bottom:8px"><input type="checkbox" class="exp-vincular" data-key="patrimonios" checked><span><span class="t">Vincular itens associados</span><br><span class="d">Ao marcar um patrimônio, marca também o mapa (se ele tiver posição) e a foto (se ele tiver uma) automaticamente.</span></span></label>
               <input type="text" class="exp-picker-filter" data-list="patrimonios" placeholder="Filtrar por patrimônio, descrição, tipo ou setor…" style="width:100%; margin-bottom:6px">
               <div style="display:flex; gap:8px; margin-bottom:6px">
                 <button type="button" class="btn secondary sm exp-marcar-todos" data-list="patrimonios">Marcar todos</button>
@@ -2192,6 +2443,7 @@ const SettingsView = {
               </button>
             </div>
             <div class="exp-cat-opts hidden" id="exp-opts-imagens">
+              <label class="radio-opt" style="margin-bottom:8px"><input type="checkbox" class="exp-vincular" data-key="imagens" checked><span><span class="t">Vincular itens associados</span><br><span class="d">Ao marcar uma foto, marca também os patrimônios marcados nela e, se ela for o objeto Câmera de um mapa, o mapa também.</span></span></label>
               <div style="display:flex; gap:8px; margin-bottom:6px">
                 <button type="button" class="btn secondary sm exp-marcar-todos" data-list="imagens">Marcar todos</button>
                 <button type="button" class="btn secondary sm exp-desmarcar-todos" data-list="imagens">Desmarcar todos</button>
@@ -2228,6 +2480,7 @@ const SettingsView = {
                  a lista de escolher mapas. -->
             <button type="button" class="btn secondary sm" id="exp-mapas-txt" style="margin:6px 0 4px" title="Gera um .txt por mapa marcado (por padrão, todos) no novo formato simples de texto (paredes/portas/janelas/objetos/patrimônios/andares) — ver 'O que é isso' no próprio arquivo">📄 Baixar mapa(s) como texto (.txt)</button>
             <div class="exp-cat-opts hidden" id="exp-opts-mapas">
+              <label class="radio-opt" style="margin-bottom:8px"><input type="checkbox" class="exp-vincular" data-key="mapas" checked><span><span class="t">Vincular itens associados</span><br><span class="d">Ao marcar um mapa, marca também todas as fotos e todos os patrimônios daquele mapa.</span></span></label>
               <div style="display:flex; gap:8px; margin-bottom:6px">
                 <button type="button" class="btn secondary sm exp-marcar-todos" data-list="mapas">Marcar todos</button>
                 <button type="button" class="btn secondary sm exp-desmarcar-todos" data-list="mapas">Desmarcar todos</button>
@@ -2288,12 +2541,12 @@ const SettingsView = {
     const listas = {
       patrimonios: {
         el: modal.querySelector('#exp-list-patrimonios'), sel: selPatrimonios,
-        rows: () => resumo.map((it) => ({ id: it.id, label: `${Utils.escapeHtml(it.patrimonio || '(sem número)')} — ${Utils.escapeHtml(it.descricao || it.tipo || 'sem descrição')}`, hay: `${it.patrimonio} ${it.descricao} ${it.tipo} ${it.setor}`.toLowerCase() })),
+        rows: () => ordenarResumo(resumo).map((it) => ({ id: it.id, label: `${Utils.escapeHtml(it.patrimonio || '(sem número)')} — ${Utils.escapeHtml(it.descricao || it.tipo || 'sem descrição')}`, hay: `${it.patrimonio} ${it.descricao} ${it.tipo} ${it.setor}`.toLowerCase() })),
       },
       imagens: {
         el: modal.querySelector('#exp-list-imagens'), sel: null, // combina os 2 sets abaixo, um por linha (r.set)
         rows: () => [
-          ...itensComFotoVinculada.map((it) => ({ id: `item:${it.id}`, realId: it.id, set: selFotosItens, label: `📎 ${Utils.escapeHtml(it.patrimonio || it.descricao || '(sem número)')} (foto vinculada)`, hay: `${it.patrimonio} ${it.descricao}`.toLowerCase(), thumb: null })),
+          ...ordenarResumo(itensComFotoVinculada).map((it) => ({ id: `item:${it.id}`, realId: it.id, set: selFotosItens, label: `📎 ${Utils.escapeHtml(it.patrimonio || it.descricao || '(sem número)')} (foto vinculada)`, hay: `${it.patrimonio} ${it.descricao}`.toLowerCase(), thumb: null })),
           ...ambientePhotos.map((f) => ({ id: `amb:${f.id}`, realId: f.id, set: selFotosAmbiente, label: `🏞️ ${Utils.escapeHtml(f.nome || 'Foto de ambiente')}`, hay: `${f.nome || ''}`.toLowerCase(), thumb: f.thumbDataUrl || f.dataUrl })),
         ],
       },
@@ -2341,6 +2594,60 @@ const SettingsView = {
         : '<li>Nenhuma categoria marcada — nada será exportado.</li>';
     };
 
+    // [25/09/2026] NOVO -- Parts G/H/I/J, pedido verbatim (ver os 3 checkboxes
+    // "Vincular itens associados" no HTML acima, um por seção, cada um
+    // habilitado por padrão e governando SÓ a cascata que a própria seção
+    // dispara ao marcar um item dela — decisão de arquitetura: 3 flags
+    // independentes (não uma única compartilhada) porque cada seção descreve
+    // uma direção diferente de cascata (H: patrimônio->mapa/foto; I:
+    // imagem->patrimônios/mapa; J: mapa->fotos/patrimônios) e isso bate
+    // direto com o enunciado de cada checkbox. Mapa de fotos por id (mesma
+    // coleção usada tanto pra "foto de patrimônio" quanto "foto de
+    // ambiente" -- ver DB.getAllAmbientePhotos) permite achar, a partir de
+    // fotoAnexadaId OU do id de uma foto de ambiente, se ela tem
+    // mapaX/mapaY (ou seja, é o objeto Câmera colocado no mapa 2D -- ver
+    // ambientephotos.js `temCameraAssociada`) e qual o mapa dela
+    // (photo.ambienteId).
+    // REGRA GERAL (as 4 partes): a cascata só MARCA, nunca desmarca nada --
+    // por isso só roda dentro do `if (e.target.checked)` abaixo, nunca no
+    // else (desmarcar um item nunca desmarca outro).
+    const vincularFlags = estadoExp.vincularFlags;   // [25/09/2026] MUDADO -- persistente (ver estadoExp acima)
+    const photoById = new Map(todasFotosRegistros.map((f) => [f.id, f]));   // [26/09/2026] MUDADO -- todas (inclui fotos de patrimônio, p/ achar mapaX da foto anexada)
+
+    const cascadeCheck = (key, row, realId) => {
+      if (key === 'patrimonios' && vincularFlags.patrimonios) {
+        const it = resumo.find((x) => x.id === realId);
+        if (!it) return;
+        if (it.ambienteId) selMapas.add(it.ambienteId); // H: patrimônio vinculado a uma posição no mapa -> marca o mapa
+        if (it.fotoAnexadaId) selFotosItens.add(it.id); // H: patrimônio vinculado a uma foto -> marca a foto (chave = id do próprio patrimônio, ver `listas.imagens`)
+        fotosAmbienteDoItem(it.id).forEach((fid) => selFotosAmbiente.add(fid)); // [25/09/2026] H: fotos de ambiente em que ele está marcado (orb)
+      } else if (key === 'imagens' && vincularFlags.imagens) {
+        if (row?.id?.startsWith('item:')) {
+          // "foto de patrimônio": realId é o id do PATRIMÔNIO dono da foto.
+          const it = resumo.find((x) => x.id === realId);
+          if (!it) return;
+          selPatrimonios.add(it.id); // I: marcar a foto marca também o patrimônio vinculado a ela
+          const foto = it.fotoAnexadaId ? photoById.get(it.fotoAnexadaId) : null;
+          if (foto && typeof foto.mapaX === 'number' && foto.ambienteId) selMapas.add(foto.ambienteId); // I: foto associada a um objeto Câmera -> marca o mapa
+        } else if (row?.id?.startsWith('amb:')) {
+          // "foto de ambiente": realId é o id da PRÓPRIA foto.
+          const foto = photoById.get(realId);
+          if (!foto) return;
+          (foto.orbs || []).forEach((orb) => { if (orb.itemId) selPatrimonios.add(orb.itemId); }); // I: patrimônios marcados (orbs) nela -> marca eles
+          if (typeof foto.mapaX === 'number' && foto.ambienteId) selMapas.add(foto.ambienteId); // I: associada a um objeto Câmera -> marca o mapa
+        }
+      } else if (key === 'mapas' && vincularFlags.mapas) {
+        const mapId = realId;
+        resumo.forEach((it) => {
+          if (it.ambienteId !== mapId) return;
+          selPatrimonios.add(it.id); // J: todos os patrimônios daquele mapa
+          if (it.fotoAnexadaId) selFotosItens.add(it.id); // J: ...e a foto de cada um deles
+        });
+        ambientePhotos.forEach((f) => { if (f.ambienteId === mapId) selFotosAmbiente.add(f.id); }); // J: todas as fotos de ambiente daquele mapa
+      }
+    };
+
+    const filtros = { patrimonios: '', imagens: '', mapas: '' };
     const renderLista = (key, filtro) => {
       const L = listas[key];
       const q = (filtro || '').trim().toLowerCase();
@@ -2353,7 +2660,13 @@ const SettingsView = {
           const row = rows.find((r) => r.id === e.target.dataset.id);
           const set = row?.set || L.sel;
           const realId = row?.realId ?? e.target.dataset.id;
-          if (e.target.checked) set.add(realId); else set.delete(realId);
+          if (e.target.checked) {
+            set.add(realId);
+            cascadeCheck(key, row, realId); // Parts H/I/J -- só ao MARCAR, nunca ao desmarcar
+            Object.keys(listas).forEach((k) => renderLista(k, filtros[k])); // reflete a cascata nas outras listas já abertas
+          } else {
+            set.delete(realId);
+          }
           atualizarContagens();
         };
       });
@@ -2361,7 +2674,10 @@ const SettingsView = {
     Object.keys(listas).forEach((key) => renderLista(key, ''));
 
     modal.querySelectorAll('.exp-picker-filter').forEach((input) => {
-      input.oninput = Utils.debounce((e) => renderLista(e.target.dataset.list, e.target.value), 150);
+      input.oninput = Utils.debounce((e) => { filtros[e.target.dataset.list] = e.target.value; renderLista(e.target.dataset.list, e.target.value); }, 150);
+    });
+    modal.querySelectorAll('.exp-vincular').forEach((chk) => {
+      chk.onchange = (e) => { vincularFlags[e.target.dataset.key] = e.target.checked; };
     });
     // Pedido do usuário (27/08/2026): "Marcar visíveis" virou "Marcar todos"
     // porque tem que marcar TODOS os patrimônios cadastrados (não só as
@@ -2467,9 +2783,29 @@ const SettingsView = {
       subpastasWrap.style.opacity = podeSubpastas ? '' : '.5';
       if (!podeSubpastas) subpastasChk.checked = false;
     };
-    modal.querySelectorAll('.exp-cat').forEach((chk) => { chk.onchange = atualizarUI; });
-    modal.querySelectorAll('input[name="exp-formato"]').forEach((r) => { r.onchange = atualizarUI; });
+    // [25/09/2026] NOVO -- restaura as opções guardadas em estadoExp (ver comentário grande no topo desta
+    // função) e passa a guardar cada mudança nelas, para sobreviverem a fechar/reabrir esta janela.
+    modal.querySelectorAll('.exp-cat').forEach((chk) => { chk.checked = estadoExp.cats[chk.dataset.key] !== false; });
+    modal.querySelectorAll('.exp-vincular').forEach((chk) => { chk.checked = vincularFlags[chk.dataset.key] !== false; });
+    { const r = modal.querySelector(`input[name="exp-formato"][value="${estadoExp.formato}"]`); if (r) r.checked = true; }
+    subpastasChk.checked = !!estadoExp.subpastas;
+    const ordemSel = modal.querySelector('#exp-ordem');
+    ordemSel.value = estadoExp.ordem || 'criadoOriginalmenteEm';
+    ordemSel.onchange = () => {
+      estadoExp.ordem = ordemSel.value;
+      Object.keys(listas).forEach((k) => renderLista(k, filtros[k]));
+    };
+    const guardarOpcoes = () => {
+      modal.querySelectorAll('.exp-cat').forEach((chk) => { estadoExp.cats[chk.dataset.key] = chk.checked; });
+      estadoExp.formato = modal.querySelector('input[name="exp-formato"]:checked')?.value || 'junto';
+      estadoExp.subpastas = subpastasChk.checked;
+    };
+    modal.querySelectorAll('.exp-cat').forEach((chk) => { chk.onchange = () => { atualizarUI(); guardarOpcoes(); }; });
+    modal.querySelectorAll('input[name="exp-formato"]').forEach((r) => { r.onchange = () => { atualizarUI(); guardarOpcoes(); }; });
+    subpastasChk.addEventListener('change', guardarOpcoes);
     atualizarUI();
+    Object.keys(listas).forEach((k) => renderLista(k, filtros[k]));
+    atualizarContagens();
 
     modal.querySelector('#exp-confirm').onclick = async (ev) => {
       const btn = ev.currentTarget;
@@ -2522,7 +2858,8 @@ const SettingsView = {
         // selecionados nas listas acima) ----------
         let patrimonios = null;
         if (cats.includes('patrimonios')) {
-          const brutos = (await Promise.all([...selPatrimonios].map((id) => DB.getItem(id)))).filter(Boolean);
+          // [25/09/2026] MUDADO -- na ordem escolhida em 'Ordenar' (ver ordenarResumo).
+          const brutos = (await Promise.all(ordenarResumo(resumo).filter((it) => selPatrimonios.has(it.id)).map((it) => DB.getItem(it.id)))).filter(Boolean);
           // Pedido do usuário (27/08/2026): "ainda está com imagens [...]
           // idênticas entre 'avatarDataUrl' e 'thumbDataUrl'. [...] devem
           // ser eliminados. Deve haver apenas uma imagem representativa em
@@ -2545,7 +2882,7 @@ const SettingsView = {
         let imagens = null;
         if (cats.includes('imagens')) {
           const fotosDeItens = (await Promise.all(
-            [...selFotosItens].map(async (itemId) => {
+            ordenarResumo(itensComFotoVinculada).filter((it) => selFotosItens.has(it.id)).map((x) => x.id).map(async (itemId) => {   // [25/09/2026] MUDADO -- na ordem de 'Ordenar'
               const it = (patrimonios?.itensCompletos || []).find((x) => x.id === itemId) || await DB.getItem(itemId);
               if (!it?.fotoAnexadaId) return null;
               const foto = await DB.getAmbientePhoto(it.fotoAnexadaId);
@@ -2553,11 +2890,18 @@ const SettingsView = {
               return { itemId: it.id, patrimonio: it.patrimonio, descricao: it.descricao, nome: foto.nome, dataUrl: foto.dataUrl, thumbDataUrl: foto.thumbDataUrl };
             }),
           )).filter(Boolean);
-          const fotosDeAmbiente = (await Promise.all([...selFotosAmbiente].map((id) => DB.getAmbientePhoto(id)))).filter(Boolean);
+          // [26/09/2026] MUDADO -- além das fotos de ambiente marcadas, leva o REGISTRO de cada foto de patrimônio
+          // marcada (tipo 'patrimonio'), pois é por fotosDeAmbiente que o importador recria a foto e mantém o
+          // vínculo item.fotoAnexadaId (fotosDeItens é só uma cópia legível). Sem ids repetidos.
+          const idsRegistrosFotos = new Set(selFotosAmbiente);
+          itensComFotoVinculada.forEach((it) => { if (selFotosItens.has(it.id) && it.fotoAnexadaId) idsRegistrosFotos.add(it.fotoAnexadaId); });
+          const fotosDeAmbiente = (await Promise.all([...idsRegistrosFotos].map((id) => DB.getAmbientePhoto(id)))).filter(Boolean);
           imagens = { fotosDeItens, fotosDeAmbiente };
         }
         let mapasExport = null;
         if (cats.includes('mapas')) mapasExport = (await Promise.all([...selMapas].map((id) => DB.getMap(id)))).filter(Boolean);
+        // [26/09/2026] NOVO -- pedido verbatim: "Ao exportar o mapa, a informações do personagem devem ser guardadas junto com o mapa (posição, apontamento de câmera)." -- ver js/personagem-mapa.js.
+        if (mapasExport) { try { mapasExport = (await window.PersonagemMapa?.anexarAosMapas?.(mapasExport)) || mapasExport; } catch (e) { /* melhor esforço */ } }
 
         if (formato === 'junto') {
           let dump = { versao: 1, exportadoEm };
@@ -2570,7 +2914,7 @@ const SettingsView = {
           if (cats.includes('patrimonios') && selPatrimonios.size === resumo.length) {
             const [types, sectors, settingsAll] = await Promise.all([DB.getAllTypes(), DB.getAllSectors(), DB.getAllSettings()]);
             dump = { ...dump, types, sectors, settings: settingsAll };
-            if (!dump.maps) dump.maps = await DB.getAllMaps();
+            if (!dump.maps) { dump.maps = await DB.getAllMaps(); try { dump.maps = (await window.PersonagemMapa?.anexarAosMapas?.(dump.maps)) || dump.maps; } catch (e) { /* melhor esforço */ } }   // [26/09/2026] personagem junto
           }
           Utils.downloadJSON(dump, `catalogacao-backup-${stamp}.json`);
           totalGerado++;

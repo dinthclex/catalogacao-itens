@@ -48,7 +48,7 @@ window.MapDynamicCards.mountPlanta = function () {
                  fazem sentido numa barra de FERRAMENTAS (ver
                  _currentToolInfo, que já os excluía do indicador por este
                  mesmo motivo) — movidos pro cabeçalho, cluster de botões
-                 de #tbm-history/#map-cores/#map-layers/#map-grupos, ver
+                 de #tbm-history/#map-cores/#map-layers/#map-scripts, ver
                  _mountTopbarMapa. -->
           </div>
         </div>
@@ -341,7 +341,13 @@ window.MapDynamicCards.mountTopbarMapa = function (layersIcon) {
               <button class="icon-btn sm" id="tbm-history" title="Histórico: lista de ações — desfazer/refazer ou pular direto pra um ponto dela">🕘</button>
               <button class="icon-btn sm" id="map-cores" title="Cores: contorno/preenchimento do(s) item(ns) selecionado(s) na grade, pelo seletor de cor padrão do navegador">${this._coresBtnIconSvg()}</button>
               <button class="icon-btn sm" id="map-layers" title="Camadas: organize paredes/câmeras/objetos/textos em grupos, com visibilidade e bloqueio próprios (itens do catálogo ficam de fora, sempre visíveis)">${layersIcon}</button>
-              <button class="icon-btn sm" id="map-grupos" title="Grupos: ative/desative a renderização ou destaque visualmente todo objeto de uma mesma 'classe' de uma vez (igual ao atributo 'class' do HTML) — inclui também uma opção pra ocultar todas as paredes/piso de uma vez e um toggle por andar">🏷️</button>
+              <!-- [26/09/2026] NOVO — pedido verbatim: "Módulo de Automação e
+                   Scripts [...] painel (Lista de Scripts)." 'Scripts' é
+                   um motor IMPERATIVO (rotinas que você aperta play/desfazer,
+                   com Tween.js de verdade por baixo — mover, girar,
+                   escalonar, animar, piscar), seleciona objetos por
+                   classe/tipo/seletor. -->
+              <button class="icon-btn sm" id="map-scripts" title="Scripts: crie rotinas (Executar/Desexecutar) que selecionam objetos por classe/tipo e os movem, giram, escalam, animam ou piscam">🎬</button>
               <!-- [14/09/2026 UTC] "🧊 Novo Cubo 3D"/"🔍 Buscar" mudaram pra
                    cá (cabeçalho) — pedido verbatim: "Como não são uma
                    ferramenta/modo de verdade, retire... de 'Ferramentas' e

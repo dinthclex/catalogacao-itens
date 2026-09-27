@@ -419,7 +419,7 @@ const StorageStatus = {
       return {
         patrimonios: items.length,
         fotosDeItens: comFoto,
-        fotosDeAmbiente: fotos.length,
+        fotosDeAmbiente: fotos.filter((f) => f.tipo !== 'patrimonio').length,   // [26/09/2026] CORRIGIDO -- não conta foto de patrimônio como de ambiente
         mapas: maps.length,
       };
     } catch (e) { return { patrimonios: 0, fotosDeItens: 0, fotosDeAmbiente: 0, mapas: 0 }; }

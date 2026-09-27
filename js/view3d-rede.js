@@ -33,9 +33,6 @@
   const esc = (t) => (raiz.Utils && raiz.Utils.escapeHtml) ? raiz.Utils.escapeHtml(String(t == null ? '' : t)) : String(t == null ? '' : t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const toast = (msg, opt) => { try { raiz.Utils.toast(msg, opt || { duration: 2200 }); } catch (e) { /* sem toast */ } };
   const ehCampoTexto = (e) => { const t = e && e.target; return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); };
-  // [22/09/2026] NOVO -- opções de densidade dos raios do motor avançado ("mostrar raios" -- ver
-  // `avancadoDensidadeRaios` em wifi-signal.js). Fração dos raios primários que ganham linha desenhada;
-  // sempre inclui o valor atual (mesmo que não bata com nenhuma opção padrão) pra nunca "sumir" a seleção.
   // [28/09/2026] NOVO -- pedido verbatim: "Faça uma separação visual do que é da 'Varredura normal', do que
   // é da 'Varredura avançada' e do que é sobre o 2D." Rótulo de seção reaproveitado nos 2 painéis (principal
   // + janelinha) — maiúsculas pequenas + traço acima, mesmo padrão visual dos outros divisores já existentes.
@@ -44,13 +41,6 @@
   // (1px, mesma cor da borda do painel) passava despercebida -- agora é uma faixa com fundo tintado +
   // borda de cor de destaque (azul, mesma do resto da UI), bem mais visível como divisor de seção.
   const SEC_HDR = (emoji, texto) => '<div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.9;color:#9db8e8;margin-top:14px;padding:6px 8px;border-top:2px solid #4f8cff;border-radius:0 0 4px 4px;background:rgba(79,140,255,.10)">' + emoji + ' ' + texto + '</div>';
-  const DENSIDADES_RAIOS = [1, 0.5, 0.25, 0.1, 0.05, 0.02, 0.01];
-  const DENSIDADES_RAIOS_OPTS = (atual) => {
-    const vals = DENSIDADES_RAIOS.slice();
-    if (atual > 0 && !vals.some((v) => Math.abs(v - atual) < 1e-6)) vals.push(atual);
-    vals.sort((a, b) => b - a);
-    return vals.map((v) => '<option value="' + v + '"' + (Math.abs(v - atual) < 1e-6 ? ' selected' : '') + '>' + Math.round(v * 100) + '%</option>').join('');
-  };
 
   const M = {
 
@@ -107,52 +97,84 @@
      *  ficam aparecendo [...] Cada parte do raio pode ser ativada individualmente." 2 fileiras de 5 botões
      *  (pontos/raios, ver `_wfFileiraNiveisHtml`), 1 por nível de `WS.NIVEIS` (0=fraco/vermelho ..
      *  4=excelente/verde), cada bolinha colorida na cor real daquele nível -- mesma paleta da malha de calor. */
-    _wfNiveisHtml(ap) {
-      const pontos = ap.mostrarPontosNiveis, raios = ap.mostrarRaiosNiveis, modoColisao = ap.pontosRaycasterModo === 'colisao';
+    /** [23/09/2026] EXTRAÍDO de `_wfNiveisHtml` -- pedido verbatim: "posicione o 'Modo dos pontos/raios/
+     *  malhas' para cima de 'superfície da malha (por nível)', [...] como agora trata dos três (pontos,
+     *  raios e malhas), então fica mais coerente que fique em cima dos três." Selecionado à parte pra poder
+     *  ser colocado ANTES de `_wfMalhaNiveisHtml` (malha) na montagem do painel, em vez de ficar preso
+     *  DEPOIS dela (junto de `_wfNiveisHtml`, pontos/raios) como antes. */
+    _wfModoNiveisHtml(ap) {
+      const modoColisao = ap.pontosRaycasterModo === 'colisao';
       // [22/09/2026] NOVO -- pedido verbatim: "deve haver dois modos para os pontos do raycaster (por
       // nível). O jeito atual (até o limite de atenuação para aquele nível) e o outro jeito (apenas onde,
       // dentro daquele nível, houve batida em alguma superfície com raycaster) [...] os raios [...] devem
-      // seguir estes pontos." `<select>` compartilhado pelos dois (pontos E raios, já que os raios sempre
-      // seguem os pontos -- ver wifi-signal.js).
-      return '<div style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="font-size:11px;opacity:.7">Modo dos pontos/raios</span><select data-wf-pontos-modo="1" style="' + INP + '" title="Alcance: ponto na borda de alcance do nível, exista ou não parede ali (comportamento de sempre). Colisão real: ponto só onde o raycaster realmente bateu numa superfície dentro da faixa daquele nível.">'
-        + '<option value="alcance"' + (modoColisao ? '' : ' selected') + '>Alcance (borda do nível)</option>'
+      // seguir estes pontos." `<select>` compartilhado pelos três (pontos, raios E a malha -- ver
+      // wifi-signal.js).
+      // [23/09/2026] AMPLIADO -- pedido verbatim: este modo passa a controlar TAMBÉM a superfície de malha
+      // (por nível), não só pontos/raios -- ver comentário grande em `AccessPoint.pontosRaycasterModo`
+      // (wifi-signal.js). Texto do rótulo/tooltip atualizado pra deixar isso claro.
+      return '<div style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="font-size:11px;opacity:.7">Modo dos pontos/raios/malha</span><select data-wf-pontos-modo="1" style="' + INP + '" title="Alcance (borda de nível): pontos, raios E a superfície de malha vão até a borda de alcance do nível, exista ou não parede ali (comportamento de sempre). Colisão real: pontos, raios E a superfície de malha só aparecem onde o raycaster realmente bateu numa superfície dentro da faixa daquele nível.">'
+        + '<option value="alcance"' + (modoColisao ? '' : ' selected') + '>Alcance (borda de nível)</option>'
         + '<option value="colisao"' + (modoColisao ? ' selected' : '') + '>Colisão real (só onde bateu)</option>'
-        + '</select></div>'
-        + '<div style="font-size:11px;opacity:.7;margin-top:4px" title="Mostra/esconde os pontos 3D onde os raios da varredura normal bateram, separados por nível de sinal.">pontos do raycaster (por nível)</div>' + this._wfFileiraNiveisHtml(pontos, 'wf-nivpt')
-        + '<div style="font-size:11px;opacity:.7;margin-top:3px" title="Mostra/esconde as linhas 3D dos raios da varredura normal, separadas por nível de sinal.">raios do raycaster (por nível)</div>' + this._wfFileiraNiveisHtml(raios, 'wf-nivray');
+        + '</select></div>';
     },
-    /** Liga os botões de `_wfNiveisHtml` a `ap.setMostrarPontosNivel`/`setMostrarRaiosNivel` + o `<select>` de
-     *  modo a `ap.pontosRaycasterModo`. `render`/`renderAgora` (mesmo parâmetro de `_wfCorteWire`) refaz o
-     *  HTML pra os botões/pontos refletirem o novo modo imediatamente após a troca. */
-    _wfNiveisWire(root, ap, render) {
-      this._wfFileiraNiveisWire(root, 'wf-nivpt', (k, v) => ap.setMostrarPontosNivel(k, v));
-      this._wfFileiraNiveisWire(root, 'wf-nivray', (k, v) => ap.setMostrarRaiosNivel(k, v));
+    /** Liga o `<select>` de `_wfModoNiveisHtml` a `ap.pontosRaycasterModo`. `render`/`renderAgora` (mesmo
+     *  parâmetro de `_wfCorteWire`) refaz o HTML pra malha/pontos/raios refletirem o novo modo imediatamente
+     *  após a troca. */
+    _wfModoNiveisWire(root, ap, render) {
       const modo = root.querySelector('[data-wf-pontos-modo]');
       if (modo) modo.onchange = (e) => { ap.pontosRaycasterModo = e.target.value; if (typeof render === 'function') render(); };
     },
-    /** [22/09/2026] NOVO -- pedido verbatim: "coloque os botões de níveis para os pontos e para os raios,
-     *  assim como na varredura normal. Retire os checkbox 'mostrar pontos' e 'mostrar raios', pois os botões
-     *  de níveis já vão executar esta função." Mesmíssimo padrão visual/técnico de `_wfNiveisHtml`/
-     *  `_wfNiveisWire` acima, só que ligado aos toggles POR NÍVEL do motor avançado
-     *  (`avancadoMostrarPontosNiveis`/`avancadoMostrarRaiosNiveis`, ver wifi-signal.js) -- substitui os antigos
-     *  checkboxes únicos `avancadoMostrarPontos`/`avancadoMostrarRaios` (e a "grade quadriculada", removida
-     *  inteira, código incluso). */
-    _wfNiveisAvancadaHtml(ap) {
-      const pontos = ap.avancadoMostrarPontosNiveis, raios = ap.avancadoMostrarRaiosNiveis;
-      return '<div style="font-size:11px;opacity:.7;margin-top:4px" title="Mostra/esconde os pontos 3D onde os raios do motor avançado bateram, separados por nível de sinal.">pontos do motor avançado (por nível)</div>' + this._wfFileiraNiveisHtml(pontos, 'wfa-nivpt')
-        + '<div style="font-size:11px;opacity:.7;margin-top:3px" title="Mostra/esconde as linhas 3D dos raios do motor avançado, separadas por nível de sinal.">raios do motor avançado (por nível)</div>' + this._wfFileiraNiveisHtml(raios, 'wfa-nivray');
+    /** [23/09/2026] NOVO -- pedido verbatim: "Faça um seletor com duas opções: 'por nível' e 'raio
+     *  completo'. [...] será possível controlar se [...] o raio apareceram só na parte do nível
+     *  correspondente ativado no botão ou o raio completo será desenhado partindo do AP até a extremidade
+     *  mais externa daquele nível." Só afeta os RAIOS (ver `AccessPoint.raiosExtensao`/
+     *  `_construirPontosRaios`, wifi-signal.js) -- pontos e malha já representam a extensão inteira por
+     *  natureza (um único ponto na extremidade / a própria casca), então não têm o que "fatiar". */
+    _wfRaiosExtensaoHtml(ap) {
+      const completo = ap.raiosExtensao === 'completo';
+      // [23/09/2026] AMPLIADO -- pedido verbatim: "'colisão real' e 'raio completo' [...] a forma [...]
+      // deve ser feita [...] igual à superfície do motor avançado." Combinado com 'Colisão real', este
+      // seletor agora também muda a MALHA (não só os raios) -- ver `AccessPoint._construirMalha`/
+      // `gerarCascasReal`/`optimizeSignalMesh` (wifi-signal.js).
+      return '<div style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="font-size:11px;opacity:.7">Extensão dos raios/malha</span><select data-wf-raios-extensao="1" style="' + INP + '" title="Por nível: cada raio vai só da borda interna até a borda externa daquele nível (fatiado, comportamento de sempre); com Colisão real, a malha fica recortada só onde bateu (usando a borda do nível). Completo: cada raio vai da origem do AP até a mesma extremidade externa daquele nível; com Colisão real, a malha vira contínua (nunca fura), seguindo a primeira colisão real em toda a extensão do raio -- igual à malha do motor avançado.">'
+        + '<option value="porNivel"' + (completo ? '' : ' selected') + '>Por nível (fatiado)</option>'
+        + '<option value="completo"' + (completo ? ' selected' : '') + '>Completo (do AP até a borda)</option>'
+        + '</select></div>';
     },
-    _wfNiveisAvancadaWire(root, ap) {
-      this._wfFileiraNiveisWire(root, 'wfa-nivpt', (k, v) => ap.setAvancadoMostrarPontosNivel(k, v));
-      this._wfFileiraNiveisWire(root, 'wfa-nivray', (k, v) => ap.setAvancadoMostrarRaiosNivel(k, v));
+    /** Liga o `<select>` de `_wfRaiosExtensaoHtml` a `ap.raiosExtensao`. */
+    _wfRaiosExtensaoWire(root, ap, render) {
+      const sel = root.querySelector('[data-wf-raios-extensao]');
+      if (sel) sel.onchange = (e) => { ap.raiosExtensao = e.target.value; if (typeof render === 'function') render(); };
     },
+    /** [25/09/2026] NOVO -- pedido verbatim: "Faça os 'raios do raycaster' ir trocando a cor conforme os
+     *  níveis da malha de cor dos 5 níveis que tem [...] deve ser possível escolher quais partes do raio
+     *  ficam aparecendo [...] Cada parte do raio pode ser ativada individualmente." 2 fileiras de 5 botões
+     *  (pontos/raios, ver `_wfFileiraNiveisHtml`), 1 por nível de `WS.NIVEIS` (0=fraco/vermelho ..
+     *  4=excelente/verde), cada bolinha colorida na cor real daquele nível -- mesma paleta da malha de calor.
+     *  [23/09/2026] MUDADO -- o `<select>` de modo (Alcance/Colisão) saiu daqui, ver `_wfModoNiveisHtml`. */
+    /** [24/09/2026] MUDADO -- pedido verbatim: "troque de lugar os 'pontos do raycaster' e 'raios do
+     *  raycaster'. [...] para 'raios do raycaster' tire o ' (por nível)'." Raios agora vêm ANTES de pontos;
+     *  "pontos do raycaster" mantém o sufixo (só raios/malha perderam). */
+    _wfNiveisHtml(ap) {
+      const pontos = ap.mostrarPontosNiveis, raios = ap.mostrarRaiosNiveis;
+      return '<div style="font-size:11px;opacity:.7;margin-top:4px" title="Mostra/esconde as linhas 3D dos raios da varredura normal, separadas por nível de sinal.">raios do raycaster</div>' + this._wfFileiraNiveisHtml(raios, 'wf-nivray')
+        + '<div style="font-size:11px;opacity:.7;margin-top:3px" title="Mostra/esconde os pontos 3D onde os raios da varredura normal bateram, separados por nível de sinal.">pontos do raycaster (por nível)</div>' + this._wfFileiraNiveisHtml(pontos, 'wf-nivpt');
+    },
+    /** Liga os botões de `_wfNiveisHtml` a `ap.setMostrarPontosNivel`/`setMostrarRaiosNivel`. O `<select>` de
+     *  modo agora é ligado à parte, ver `_wfModoNiveisWire`. */
+    _wfNiveisWire(root, ap) {
+      this._wfFileiraNiveisWire(root, 'wf-nivpt', (k, v) => ap.setMostrarPontosNivel(k, v));
+      this._wfFileiraNiveisWire(root, 'wf-nivray', (k, v) => ap.setMostrarRaiosNivel(k, v));
+    },
+    // [23/09/2026] REMOVIDO -- pedido verbatim: "Remova todos os botões e métodos implementados para a
+    // varredura avançada." (`_wfNiveisAvancadaHtml`/`_wfNiveisAvancadaWire` removidos.)
     /** [26/09/2026] NOVO -- pedido verbatim: "Deve ser possível habilitar as formas 3D produzidas
      *  independentemente também [...] mostrá-las individualmente. E também só habilitar a superfície mais
      *  externa [...] Deve ser possível selecionar se vai ser sólido ou wireframe." Mesmo padrão visual de
      *  `_wfNiveisHtml` (1 fileira de 5 botões, ver `_wfFileiraNiveisHtml`) + 1 checkbox extra "wireframe". */
     _wfMalhaNiveisHtml(ap) {
       const niveis = ap.mostrarMalhaNiveis;
-      return '<div style="font-size:11px;opacity:.7;margin-top:4px" title="Ativa/desativa a superfície 3D de cada nível de sinal individualmente (nível 0/\'fraco\' = casca mais externa, os demais ficam por dentro dela).">superfície da malha (por nível — nível 0/"fraco" = superfície mais externa)</div>' + this._wfFileiraNiveisHtml(niveis, 'wf-nivmalha')
+      return '<div style="font-size:11px;opacity:.7;margin-top:4px" title="Ativa/desativa a superfície 3D de cada nível de sinal individualmente (nível 0/\'fraco\' = casca mais externa, os demais ficam por dentro dela).">superfície da malha (nível 0/"fraco" = superfície mais externa)</div>' + this._wfFileiraNiveisHtml(niveis, 'wf-nivmalha')
         + '<label style="font-size:11px;display:block;margin-top:3px" title="Desenha as superfícies acima em linhas (wireframe) em vez de preenchidas (sólido)."><input type="checkbox" data-wf-malha-wireframe="1"' + (ap.malhaWireframe ? ' checked' : '') + '> wireframe (em vez de sólido)</label>';
     },
     /** Liga os controles de `_wfMalhaNiveisHtml`, mesmo padrão de `_wfNiveisWire`. */
@@ -160,21 +182,8 @@
       this._wfFileiraNiveisWire(root, 'wf-nivmalha', (k, v) => ap.setMostrarMalhaNivel(k, v));
       const wf = root.querySelector('[data-wf-malha-wireframe]'); if (wf) wf.onchange = (e) => { ap.malhaWireframe = e.target.checked; };
     },
-    /** [29/09/2026] NOVO -- pedido verbatim: "Na varredura avançada, deve ser possível ver a forma 3D gerada
-     *  com o mapa de calor do sinal (superfície mais externa (como na varredura normal) e forma. Ambas por
-     *  nível, os 5 níveis)." Mesmíssimo padrão visual/técnico de `_wfMalhaNiveisHtml` (fileira de 5 botões +
-     *  checkbox de wireframe), só que ligado aos toggles PRÓPRIOS do motor avançado
-     *  (`avancadoMostrarMalhaNiveis`/`avancadoMalhaWireframe`, ver wifi-signal.js) -- a malha do motor
-     *  avançado é um `THREE.Mesh` À PARTE (`ap.malhaAvancada`), convive com a nuvem de pontos/grade dele. */
-    _wfMalhaNiveisAvancadaHtml(ap) {
-      const niveis = ap.avancadoMostrarMalhaNiveis;
-      return '<div style="font-size:12px;opacity:.7;margin-top:6px" title="Forma 3D (casca) do motor avançado, por nível -- mesma técnica da varredura normal (nível 0/\'fraco\' = superfície mais externa), calculada sem reflexão/refração.">superfície 3D do motor avançado (por nível)</div>' + this._wfFileiraNiveisHtml(niveis, 'wfa-nivmalha')
-        + '<label style="font-size:12px;display:block;margin-top:3px" title="Desenha a superfície acima em linhas (wireframe) em vez de preenchida (sólido)."><input type="checkbox" data-wfa-malha-wireframe="1"' + (ap.avancadoMalhaWireframe ? ' checked' : '') + '> wireframe (em vez de sólido)</label>';
-    },
-    _wfMalhaNiveisAvancadaWire(root, ap) {
-      this._wfFileiraNiveisWire(root, 'wfa-nivmalha', (k, v) => ap.setAvancadoMostrarMalhaNivel(k, v));
-      const wf = root.querySelector('[data-wfa-malha-wireframe]'); if (wf) wf.onchange = (e) => { ap.avancadoMalhaWireframe = e.target.checked; };
-    },
+    // [23/09/2026] REMOVIDO -- pedido verbatim: "Remova todos os botões e métodos implementados para a
+    // varredura avançada." (`_wfMalhaNiveisAvancadaHtml`/`_wfMalhaNiveisAvancadaWire` removidos.)
     /** [29/09/2026] NOVO -- pedido verbatim: "Faça a opção de 'Vista em Corte' para a varredura normal [...]
      *  uma superfície paralela ao chão que se pode controlar a altura Y [...] controlar a opacidade [...]
      *  Uma barra de 0 a 100% [...] Um campo de entrada numérico [...] alterando um, altera o outro [...] até
@@ -261,6 +270,150 @@
     },
 
     // ======================================================================
+    // 0a) VARREDURA AVANÇADA + "CONFIGURAÇÕES DO ACCESS POINT" (janela do AP E janelinha, espelhadas)
+    // ======================================================================
+    /** [24/09/2026] NOVO -- pedido verbatim: "As duas varreduras devem coexistir [...] Os controles que tem na
+     *  varredura normal devem ter também na varredura avançada ('superfície', 'pontos', 'raios' cada um com os
+     *  seus 5 níveis). [...] Os controles devem aparecer na janela do AP, a varredura avançada pode ser
+     *  cancelável a qualquer tempo [...] Coloque também na janelinha do AP as mesmas opções com espelhamento."
+     *  HTML da seção "Varredura avançada", usado IGUAL pela janela do AP e pela janelinha (`av` =
+     *  `WifiSignal.paraAvancado(obj, engine)`, um `AccessPointAvancado`, ver js/wifi-signal-avancado.js).
+     *  Reaproveita os mesmos construtores de HTML da varredura normal (`_wfModoNiveisHtml` etc.) -- todos
+     *  recebem o objeto AP como parâmetro, então aqui recebem a instância avançada, que tem estado próprio. */
+    _wfAvancadaHtml(av, ap) {
+      const res = av.ultimoResultado, st = res && res.avancada ? res.stats : null, emite = av.emiteSinal;
+      const troca = (h) => h.replace(/varredura normal/g, 'varredura avançada');
+      const chk = (k, rot, tip, on) => '<label style="font-size:12px;display:block;margin-top:3px" title="' + tip + '"><input type="checkbox" data-wfa="' + k + '"' + (on ? ' checked' : '') + '> ' + rot + '</label>';
+      return SEC_HDR('🛰️', 'Varredura avançada')
+        + '<div data-wf-avc="1">'
+        + '<div style="font-size:11px;opacity:.7;margin-top:4px">Usa a mesma Faixa, Potência, Densidade, Limiar e Modo de malha da varredura normal. Com reflexão e refração desligadas, o resultado é idêntico ao da varredura normal.</div>'
+        // [24/09/2026] MUDADO -- pedido verbatim: "só está sendo possível controlar o número de reflexões.
+        // Deve ser possível controlar o número de refrações. Coloque a opção de controle do número em baixo
+        // de cada opção correspondente ('reflexão' e 'refração')." Cada campo numérico agora fica logo
+        // abaixo (indentado) do seu próprio checkbox, em vez de 1 campo solto (só reflexões) depois dos dois.
+        + chk('reflexao', 'reflexão', 'Ativa os raios REFLETIDOS: ao bater numa superfície, além de atravessá-la (penetração, sempre ativa), o raio também "quica" de volta ao ambiente (V − 2·(V·N)·N), com a perda de reflexão do material daquela superfície. Pode ser ligada/desligada a qualquer momento DEPOIS da varredura, sem refazer o raycast -- só refiltra o resultado já calculado.', av.reflexao)
+        + '<div style="display:flex;align-items:center;gap:6px;margin:2px 0 0 20px"><span style="font-size:11px;opacity:.7">Máx. de reflexões por raio</span><input data-wfa="maxBounces" type="number" min="0" max="6" step="1" value="' + av.maxBounces + '" style="' + INP + ';width:56px" title="Quantas vezes seguidas UM MESMO raio pode ricochetear numa superfície antes de parar (0-6; padrão 6). Não conta penetrações/refrações, só reflexões. Limite de segurança contra loop infinito -- o raio já para sozinho antes disso se a potência cair abaixo do Limiar (dBm). Vale a partir da próxima varredura avançada."></div>'
+        + chk('refracao', 'refração', 'Ativa a REFRAÇÃO: o raio que atravessa uma parede/objeto (penetração, sempre ativa) dobra pela lei de Snell ao entrar e ao sair (deslocamento lateral), em vez de seguir reto -- além da perda de penetração normal. Pode ser ligada/desligada a qualquer momento DEPOIS da varredura, sem refazer o raycast -- só refiltra o resultado já calculado.', av.refracao)
+        + '<div style="display:flex;align-items:center;gap:6px;margin:2px 0 0 20px"><span style="font-size:11px;opacity:.7">Máx. de refrações por raio</span><input data-wfa="maxTravessias" type="number" min="0" max="8" step="1" value="' + av.maxTravessias + '" style="' + INP + ';width:56px" title="Quantas paredes/objetos seguidos UM MESMO raio pode atravessar antes de parar (0-8; padrão 4). Não conta reflexões, só travessias/refrações. Limite de segurança contra loop infinito -- o raio já para sozinho antes disso se a potência cair abaixo do Limiar (dBm). Vale a partir da próxima varredura avançada."></div>'
+        + '<div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap"><button type="button" data-wfa-scan="1" title="Relança os raios da varredura avançada (reflexão + refração) com a Faixa/Potência/Densidade/Modo de malha configurados acima. Roda em lotes por quadro, sem travar a tela." style="' + BTN + (emite ? '' : ';opacity:.5') + '"' + (av.scanning ? ' disabled' : '') + '>🔄 Refazer Varredura Avançada</button>'
+        + (av.scanning ? '<button type="button" data-wfa-cancel="1" style="' + BTN + '" title="Interrompe a varredura avançada em andamento.">Cancelar</button>' : '') + '</div>'
+        + '<div class="wf-bar' + (av.scanning ? '' : ' wf-fim') + '" data-wfa-bar="1"><div class="wf-fill" data-wfa-fill="1" style="width:' + av.scanProgress + '%"></div></div>'
+        + '<div data-wfa-txt="1" style="font-size:11px;opacity:.8;min-height:14px">' + (av.scanning ? 'Varrendo… ' + av.scanProgress + '%' : '') + '</div>'
+        + troca(this._wfModoNiveisHtml(av))
+        + troca(this._wfRaiosExtensaoHtml(av))
+        + troca(this._wfMalhaNiveisHtml(av))
+        + troca(this._wfNiveisHtml(av))
+        + (res && res.avancada ? '<div style="font-size:11px;margin-top:4px;opacity:.85">última varredura avançada: ' + res.raios + ' raios em ' + res.tempoMs + ' ms · ↩ reflexões: <b>' + (st ? st.reflexoes : 0).toLocaleString('pt-BR') + '</b> · ↪ refrações: <b>' + (st ? st.refracoes : 0).toLocaleString('pt-BR') + '</b> · alcance ' + res.alcanceM.toFixed(1).replace('.', ',') + ' m</div>'
+          + '<div style="font-size:11px;opacity:.7;margin-top:2px">🔺 Malha: ' + res.pontosMalha.toLocaleString('pt-BR') + ' pontos / ' + res.trianglesMalha.toLocaleString('pt-BR') + ' triângulos</div>' : '')
+        + '</div>';
+    },
+    /** Liga os controles de `_wfAvancadaHtml`. `render` refaz o HTML da janela (e, por espelho, da outra);
+     *  `sync` só repinta a OUTRA janela (usado pelos botões por nível, que já se repintam sozinhos). */
+    _wfAvancadaWire(root, av, render, salvar, sync) {
+      const sub = root.querySelector('[data-wf-avc]'); if (!sub) return;
+      const q = (sel) => sub.querySelector(sel);
+      const refl = q('[data-wfa="reflexao"]'); if (refl) refl.onchange = (e) => { av.reflexao = e.target.checked; salvar(); render(); };
+      const refr = q('[data-wfa="refracao"]'); if (refr) refr.onchange = (e) => { av.refracao = e.target.checked; salvar(); render(); };
+      const mb = q('[data-wfa="maxBounces"]'); if (mb) mb.onchange = (e) => { av.maxBounces = e.target.value; salvar(); render(); };
+      const mt = q('[data-wfa="maxTravessias"]'); if (mt) mt.onchange = (e) => { av.maxTravessias = e.target.value; salvar(); render(); };
+      const sc = q('[data-wfa-scan]');
+      if (sc) sc.onclick = () => { const r = av.startScan({ densidade: av.densidade, meshMode: av.meshMode }); if (!r.ok) toast(r.erro, { type: 'warn', duration: 3000 }); render(); };
+      const ca = q('[data-wfa-cancel]'); if (ca) ca.onclick = () => { av.cancelScan(); render(); };
+      this._wfModoNiveisWire(sub, av, () => { salvar(); render(); });
+      this._wfRaiosExtensaoWire(sub, av, () => { salvar(); render(); });
+      this._wfFileiraNiveisWire(sub, 'wf-nivpt', (k, v) => { av.setMostrarPontosNivel(k, v); salvar(); sync(); });
+      this._wfFileiraNiveisWire(sub, 'wf-nivray', (k, v) => { av.setMostrarRaiosNivel(k, v); salvar(); sync(); });
+      this._wfFileiraNiveisWire(sub, 'wf-nivmalha', (k, v) => { av.setMostrarMalhaNivel(k, v); salvar(); sync(); });
+      const wf = q('[data-wf-malha-wireframe]'); if (wf) wf.onchange = (e) => { av.malhaWireframe = e.target.checked; salvar(); sync(); };
+    },
+    /** Atualização LEVE (sem refazer HTML) da barra/texto de progresso da varredura avançada dentro de `root`. */
+    _wfAvancadaBarra(root, av) {
+      const sub = root && root.querySelector && root.querySelector('[data-wf-avc]'); if (!sub) return;
+      const bar = sub.querySelector('[data-wfa-bar]'), fill = sub.querySelector('[data-wfa-fill]'), txt = sub.querySelector('[data-wfa-txt]');
+      if (!fill) return;
+      fill.style.width = av.scanProgress + '%';
+      if (txt) txt.textContent = av.scanning ? 'Varrendo… ' + av.scanProgress + '%' : '';
+      if (bar) bar.classList.toggle('wf-fim', !av.scanning);
+    },
+    /** [24/09/2026] NOVO -- pedido verbatim: "faça uma seção (no mesmo estilo que os título de 'varredura
+     *  normal' e 'vista em corte') de 'configurações do Access Point'. Já pegue as configurações que têm nas
+     *  'configurações 3D', na seção '📡 Access Point' e coloque junto." As 3 opções globais (guardadas em
+     *  `MapConfig`) vieram de lá; a 1ª/2ª são novas e por varredura (guardadas no próprio AP). */
+    // [24/09/2026] NOVO -- pedido verbatim: "Faça um botão de documentação do AP explicando as
+    // funcionalidades com renderizações também e coloque como um botão. Ao clicar neste botão, abre-se
+    // uma janela com as informações da documentação. Deve estar presente nas 'configurações 3D' e na
+    // janela do AP. Não precisa colocar na janelinha do AP." Parâmetro `mini` (default false) permite
+    // reaproveitar este MESMO HTML (compartilhado verbatim entre a janela completa e a janelinha) sem
+    // duplicar todo o método: quando `mini === true` (chamada de `_wfMiniHtml`), o botão simplesmente
+    // não é incluído. Implementação replica o padrão já usado por "🔌 Infraestrutura de rede"
+    // (mc-rede-docs-btn / window.RedeDocs.abrir, ver mapconfig.js e js/rede-docs.js).
+    _wfConfigApHtml(ap, av, mini) {
+      const cfg = (window.MapConfig && window.MapConfig._cache) || {};
+      const chk = (k, rot, tip, on) => '<label style="font-size:12px;display:block;margin-top:4px" title="' + tip + '"><input type="checkbox" data-wfc="' + k + '"' + (on ? ' checked' : '') + '> ' + rot + '</label>';
+      // [24/09/2026] MUDADO -- pedido verbatim: "deve ficar claro que se clica em uma a outra fica
+      // desabilitada. Acredito que os checkbox não é a melhor opção de UI para isso." Duas opções mutuamente
+      // exclusivas descritas com checkbox INDEPENDENTES escondiam essa relação -- agora são um par de
+      // `<input type="radio">` (mesmo `name`, único por AP via `ap.obj.id` -- evita 1 AP "desmarcar" o rádio
+      // de outro AP se as duas janelinhas estiverem abertas ao mesmo tempo), que já mostra visualmente
+      // "escolha 1 das 2" e o navegador cuida da exclusão sozinho.
+      const nomeRadio = 'wfc-entrar-' + ap.obj.id;
+      const radio = (k, rot, tip, on) => '<label style="font-size:12px;display:block;margin-top:4px" title="' + tip + '"><input type="radio" name="' + nomeRadio + '" data-wfc="' + k + '"' + (on ? ' checked' : '') + '> ' + rot + '</label>';
+      return SEC_HDR('⚙️', 'Configurações do Access Point')
+        + '<div data-wf-cfgap="1">'
+        + chk('manterNormal', 'Manter a varredura normal anterior visível ao fazer uma nova', 'Desligado (padrão): ao iniciar uma nova varredura normal, a anterior some assim que a nova começa. Ligado: a varredura normal ANTERIOR continua na tela (se estiver habilitada para aparecer) até a nova terminar de rodar e só então a substitui -- útil para comparar/acompanhar sem a tela ficar vazia durante a varredura.', ap.manterAnterior)
+        + chk('manterAvancada', 'Manter a varredura avançada anterior visível ao fazer uma nova', 'Desligado (padrão): ao iniciar uma nova varredura avançada, a anterior some assim que a nova começa. Ligado: a varredura avançada ANTERIOR continua na tela (se estiver habilitada para aparecer) até a nova terminar de rodar e só então a substitui -- útil para comparar/acompanhar sem a tela ficar vazia durante a varredura.', av.manterAnterior)
+        // [24/09/2026] NOVO -- pedido verbatim: "Coloque um traço horizontal para separar as duas opções [...]
+        // das outras 3 que servem para as duas varreduras nos três lugares." Mesmo traço nos 3 lugares (aqui,
+        // na janelinha -- reaproveita este mesmo HTML -- e em Configurações 3D → 📡 Access Point, mapconfig.js).
+        + '<div style="border-top:1px solid #3a4250;margin:10px 0"></div>'
+        + chk('desligarAoSair', 'Desligar o mapa de calor ao sair do "Ver em 3D"', 'Desligado (padrão): o mapa de calor de cada Access Point (normal E avançado) volta a aparecer sozinho ao reentrar no "Ver em 3D", se a varredura já tiver sido feita e "mostrar mapa" estiver marcado. Ligado: ao FECHAR o "Ver em 3D", o mapa de calor de TODO Access Point é desligado (a checkbox "mostrar mapa" de cada AP aparece desmarcada na próxima vez, refletindo o real). Vale para as duas varreduras.', !!cfg.apDesligarMapaAoSairDoVer3D)
+        + '<div style="font-size:11px;opacity:.7;margin-top:6px">Ao reentrar no "Ver em 3D", escolha um dos dois (marcar um desmarca o outro):</div>'
+        + radio('refazerAoEntrar', 'Refazer Varredura de Sinal ao entrar no "Ver em 3D"', 'Todo Access Point com mapa ativo refaz o raycast do ZERO (normal E avançado, se já tiverem sido feitos) toda vez que o "Ver em 3D" é reaberto -- mais lento, mas garante que o mapa reflita qualquer mudança na cena (paredes/objetos movidos) desde a última varredura. Desabilitada por padrão (ver opção abaixo). Vale para as duas varreduras.', !!cfg.apRefazerVarreduraAoEntrarNoVer3D)
+        + radio('manterAoEntrar', 'Manter a Varredura de Sinal Anterior', 'Ao reentrar no "Ver em 3D", reaproveita a varredura (normal E avançada) já calculada da vez anterior, sem refazer o raycast -- reabre na hora, mas não reflete mudanças na cena feitas desde então. Habilitada por padrão. Vale para as duas varreduras.', !cfg.apRefazerVarreduraAoEntrarNoVer3D)
+        + '<div style="font-size:11px;opacity:.6;margin-top:3px">As 3 opções abaixo do traço valem para TODOS os Access Points e para as duas varreduras (normal e avançada) -- também em Configurações 3D → 📡 Access Point.</div>'
+        + (mini ? '' : '<button type="button" class="btn sm secondary" id="wf-ap-docs-btn" style="margin-top:10px">📖 Documentação do Access Point</button>')
+        + '</div>';
+    },
+    _wfConfigApWire(root, ap, av, render, salvar) {
+      const sub = root.querySelector('[data-wf-cfgap]'); if (!sub) return;
+      const MC = window.MapConfig;
+      const on = (k, fn) => { const el = sub.querySelector('[data-wfc="' + k + '"]'); if (el) el.onchange = fn; };
+      on('manterNormal', (e) => { ap.manterAnterior = e.target.checked; salvar(); render(); });
+      on('manterAvancada', (e) => { av.manterAnterior = e.target.checked; salvar(); render(); });
+      on('desligarAoSair', async (e) => { if (MC) await MC.set({ apDesligarMapaAoSairDoVer3D: e.target.checked }); render(); });
+      on('refazerAoEntrar', async (e) => { if (MC) await MC.set({ apRefazerVarreduraAoEntrarNoVer3D: e.target.checked }); render(); });
+      on('manterAoEntrar', async (e) => { if (MC) await MC.set({ apRefazerVarreduraAoEntrarNoVer3D: !e.target.checked }); render(); });
+      // [24/09/2026] NOVO -- botão de documentação do AP (só existe quando `mini` é falso, ver
+      // `_wfConfigApHtml`) -- mesmo padrão de wiring de `mc-rede-docs-btn` (mapconfig.js).
+      const docsBtn = sub.querySelector('#wf-ap-docs-btn');
+      if (docsBtn) docsBtn.onclick = () => { if (window.ApDocs) window.ApDocs.abrir(); else toast('Guia do Access Point indisponível (módulo não carregado).', { type: 'danger' }); };
+    },
+
+    /** [24/09/2026] NOVO -- pedido verbatim: "Faça com que todas as opções que aparecem na janela do AP [...]
+     *  aparecerem nas 'configurações 3D'." Chamado por `MapConfig` quando uma das 2 caixas globais "Manter a
+     *  varredura X anterior visível" (seção "📡 Access Point" de "Configurações 3D") muda -- aplica o valor
+     *  em TODO Access Point do mapa atualmente aberto no "Ver em 3D" (se houver um), pra ter o mesmo efeito
+     *  prático de "vale pra todos" das outras 3 opções da seção, mesmo `manterAnterior` sendo salvo por-AP
+     *  (`obj.rede.ap.manterAnterior`/`obj.rede.apAvancado.manterAnterior`, continua ajustável individualmente
+     *  na janela de cada AP depois disso). Sem "Ver em 3D" aberto, só o padrão gravado em `MapConfig` vale
+     *  (usado ao inicializar um AP que nunca teve o valor definido -- ver wifi-signal.js/wifi-signal-avancado.js).
+     *  @param {'normal'|'avancada'} tipo
+     *  @param {boolean} v
+     */
+    _wfAplicarManterAnteriorGlobal(tipo, v) {
+      const WS = raiz.WifiSignal;
+      if (!WS || !this._map || !Array.isArray(this._map.objects) || !this._engine) return;
+      this._map.objects.forEach((o) => {
+        if (!WS.ehAP(o)) return;
+        if (tipo === 'avancada') WS.paraAvancado(o, this._engine).manterAnterior = v;
+        else WS.para(o, this._engine).manterAnterior = v;
+      });
+      // repinta a janela do AP/janelinha, se alguma estiver aberta (mesmo padrão de `_wfConfigApWire`).
+      const jp = this._wfJanelaPrincipal; if (jp && typeof jp.render === 'function') { try { jp.render(); } catch (e) { /* ignore */ } }
+      if (this._wfMiniEls) Object.keys(this._wfMiniEls).forEach((id) => { if (id === '_box') return; const m = this._wfMiniEls[id]; if (m && typeof m.renderAgora === 'function') { try { m.renderAgora(); } catch (e) { /* ignore */ } } });
+    },
+
+    // ======================================================================
     // 0b) "JANELINHA" SIMPLISTA DO AP -- pedido verbatim: "deve ter uma opção para habilitar uma
     //     janelinha simplista do AP (mesmo fechando a janela do AP, a janelinha deve ficar ativa [...]
     //     Nesta janelinha, deve ser possível trocar a fixa, A potência, a Densidade de varredura, o Modo
@@ -305,6 +458,7 @@
         + '<span>Faixa</span><select data-wfm="frequencia" style="' + INP + '" title="Faixa de frequência do rádio — muda o alcance físico e a potência padrão.">' + opts(WS.FAIXAS, ap.signalFrequency) + '</select>'
         + '<span>Potência (W)</span><input data-wfm="potencia" type="number" min="0.01" max="2" step="0.001" value="' + ap.powerWatts + '" style="' + INP + '" title="Potência de transmissão, em watts.">'
         + '<span>Densidade da varredura</span><select data-wfm="densidade" style="' + INP + '" title="Quantos raios são lançados pra medir o sinal. Mais denso = mais fiel, porém mais lento.">' + opts(WS.DENSIDADES, ap.densidade) + '</select>'
+        + '<span>Limiar (dBm)</span><input data-wfm="rssiThreshold" type="number" min="-80" max="20" step="1" value="' + ap.rssiThreshold + '" style="' + INP + '" title="Abaixo deste dBm o sinal deixa de existir -- corta o raio ali, mesmo antes da borda física do nível mais fraco. Mesmo valor usado pela varredura avançada.">'
         + '<span>Modo de malha</span><select data-wfm="meshMode" style="' + INP + '" title="Malha real: 1 vértice por raio. Malha simplificada: funde regiões planas — recomendado.">' + opts(WS.MODOS_MALHA, ap.meshMode) + '</select>'
         + '</div>'
         + '<div style="display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap"><button type="button" data-wfm="scan" style="' + BTN + (emite ? '' : ';opacity:.5') + '"' + (ap.scanning ? ' disabled' : '') + '>🔄 Refazer Varredura de Sinal</button>'
@@ -314,28 +468,18 @@
         // `ap.mostrar`/`mostrar2D` continuam existindo (ainda usados internamente -- ver `_v3dSairDesligarMapasAP`/
         // "Vista em Corte" a 0%/"Desligar o mapa de calor ao sair do Ver em 3D" em Configurações 3D), só o
         // controle manual (checkbox) na janela do AP foi removido.
+        + this._wfModoNiveisHtml(ap)
+        + this._wfRaiosExtensaoHtml(ap)
         + this._wfMalhaNiveisHtml(ap)
         + this._wfNiveisHtml(ap)
         // [29/09/2026] NOVO -- espelha a "Vista em Corte" da janela principal (ver `_wfCorteHtml`).
         + this._wfCorteHtml(ap)
-        + SEC_HDR('🛰️', 'Varredura avançada')
-        // [29/09/2026] MUDADO -- espelha a mesma mudança da janela principal do AP (checkbox antes do texto,
-        // sem "habilitada", número colado à direita -- ver comentário grande em `render()`/`_openRedeMenu`).
-        + '<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 6px;align-items:center">'
-        + '<label style="font-size:11px;display:flex;align-items:center;gap:5px"><input type="checkbox" data-wfm="enableReflection"' + (ap.enableReflection ? ' checked' : '') + '> 🛰️ Reflexão</label><input data-wfm="maxReflections" type="number" min="0" max="5" step="1" value="' + ap.maxReflections + '" style="' + INP + '"' + (ap.enableReflection ? '' : ' disabled') + '>'
-        + '<label style="font-size:11px;display:flex;align-items:center;gap:5px"><input type="checkbox" data-wfm="enableRefraction"' + (ap.enableRefraction ? ' checked' : '') + '> 🛰️ Refração</label><input data-wfm="maxRefractions" type="number" min="0" max="3" step="1" value="' + ap.maxRefractions + '" style="' + INP + '"' + (ap.enableRefraction ? '' : ' disabled') + '>'
-        + '</div>'
-        // [29/09/2026] NOVO -- espelha a superfície 3D por nível do motor avançado (ver `_wfMalhaNiveisAvancadaHtml`).
-        + this._wfMalhaNiveisAvancadaHtml(ap)
-        // [22/09/2026] MUDADO -- pedido verbatim: "coloque os botões de níveis para os pontos e para os
-        // raios, assim como na varredura normal. Retire os checkbox 'mostrar pontos' e 'mostrar raios'."
-        // Antigos checkboxes únicos ("mostrar pontos"/"grade quadriculada"/"mostrar raios") substituídos
-        // pelos botões de nível de `_wfNiveisAvancadaHtml` (mesmo padrão da varredura normal).
-        + this._wfNiveisAvancadaHtml(ap)
-        + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px"><span style="font-size:11px;opacity:.7">Densidade dos raios</span><select data-wfm="avancadoDensidadeRaios" style="' + INP + '">' + DENSIDADES_RAIOS_OPTS(ap.avancadoDensidadeRaios) + '</select></div>'
-        + '<div style="display:flex;gap:6px;align-items:center;margin-top:5px;flex-wrap:wrap"><button type="button" data-wfm="scanav" style="' + BTN + (emite ? '' : ';opacity:.5') + '"' + (ap.motorAvancado.scanning ? ' disabled' : '') + '>🛰️ Varredura avançada (reflexão/refração)</button>'
-        + (ap.motorAvancado.scanning ? '<button type="button" data-wfm="cancelav" style="' + BTN + '">Cancelar</button>' : '') + '</div>'
-        + '<div class="wf-bar' + (ap.motorAvancado.scanning ? '' : ' wf-fim') + '" data-wfm-barav="1"><div class="wf-fill" style="width:' + (ap.motorAvancado.progress || 0) + '%"></div></div>';
+        // [24/09/2026] NOVO -- espelha a Varredura avançada e as Configurações do AP da janela principal.
+        + this._wfAvancadaHtml(WS.paraAvancado(obj, this._engine), ap)
+        + this._wfConfigApHtml(ap, WS.paraAvancado(obj, this._engine), true);
+      // [23/09/2026] REMOVIDO -- pedido verbatim: "Remova todos os botões e métodos implementados para a
+      // varredura avançada." (seção inteira "Varredura avançada" -- reflexão/refração, superfície/pontos/
+      // raios do motor avançado, botão de varredura avançada e sua barra de progresso -- removida.)
       return h;
     },
     /** Liga todos os controles da janelinha (`el` = elemento raiz dessa 1 janela). `renderAgora` refaz o
@@ -346,7 +490,7 @@
       if (q('[data-wfm="fechar"]')) q('[data-wfm="fechar"]').onclick = () => { ap.miniJanela = false; try { raiz.App && raiz.App.salvarMapaAtual && raiz.App.salvarMapaAtual(); } catch (e) { /* noop */ } this._wfMiniAtualizarTodas(); };
       el.querySelectorAll('[data-wfm]').forEach((c) => {
         const k = c.getAttribute('data-wfm');
-        if (['fechar', 'scan', 'cancel', 'scanav', 'cancelav'].includes(k)) return;
+        if (['fechar', 'scan', 'cancel'].includes(k)) return;
         const ev = (c.tagName === 'SELECT' || c.type === 'checkbox') ? 'onchange' : 'oninput';
         c[ev] = (e) => {
           const v = c.type === 'checkbox' ? e.target.checked : e.target.value;
@@ -354,21 +498,22 @@
           else if (k === 'potencia') ap.powerWatts = v;
           else if (k === 'densidade') ap.densidade = v;
           else if (k === 'meshMode') ap.meshMode = v;
-          else if (k === 'enableReflection') { ap.enableReflection = v; renderAgora(); return; }
-          else if (k === 'enableRefraction') { ap.enableRefraction = v; renderAgora(); return; }
-          else if (k === 'maxReflections') ap.maxReflections = v;
-          else if (k === 'maxRefractions') ap.maxRefractions = v;
-          else if (k === 'avancadoDensidadeRaios') ap.avancadoDensidadeRaios = v;
+          else if (k === 'rssiThreshold') ap.rssiThreshold = v;
         };
       });
-      this._wfNiveisWire(el, ap, renderAgora);
+      this._wfModoNiveisWire(el, ap, renderAgora);
+      this._wfRaiosExtensaoWire(el, ap, renderAgora);
+      this._wfNiveisWire(el, ap);
       this._wfMalhaNiveisWire(el, ap);
-      // [29/09/2026] NOVO -- superfície 3D por nível do motor avançado + "Vista em Corte" (espelham a janela
-      // principal, ver `_wfMalhaNiveisAvancadaWire`/`_wfCorteWire` acima).
-      this._wfMalhaNiveisAvancadaWire(el, ap);
-      // [22/09/2026] NOVO -- botões de nível dos pontos/raios do motor avançado (ver `_wfNiveisAvancadaHtml`).
-      this._wfNiveisAvancadaWire(el, ap);
       this._wfCorteWire(el, ap, renderAgora);
+      // [24/09/2026] NOVO -- Varredura avançada + Configurações do AP (espelho da janela principal).
+      {
+        const av = raiz.WifiSignal.paraAvancado(obj, this._engine);
+        const salvarMini = () => { try { raiz.DB && raiz.DB.saveMap && raiz.DB.saveMap(this._map); } catch (e) { /* noop */ } };
+        const syncPrincipal = () => { const jp = this._wfJanelaPrincipal; if (jp && jp.objId === obj.id && typeof jp.render === 'function' && !this._wfSyncBusy) { this._wfSyncBusy = true; try { jp.render(); } finally { this._wfSyncBusy = false; } } };
+        this._wfAvancadaWire(el, av, renderAgora, salvarMini, syncPrincipal);
+        this._wfConfigApWire(el, ap, av, renderAgora, salvarMini);
+      }
       // [26/09/2026] CORRIGIDO -- pedido verbatim: "iniciei uma varredura e [...] cliquei no botão
       // 'cancelar', porém não funcionava [...] na janela do AP, ao clicar em cancelar [...] cancela
       // imediatamente" -- o motivo real não era o `onclick` em si (idêntico ao do painel principal), e sim
@@ -376,8 +521,6 @@
       // `_wfMiniAtualizarTodas`), que destruía o botão antes do clique terminar de disparar.
       if (q('[data-wfm="scan"]')) q('[data-wfm="scan"]').onclick = () => { ap.startScan({ densidade: ap.densidade, meshMode: ap.meshMode }); renderAgora(); };
       if (q('[data-wfm="cancel"]')) q('[data-wfm="cancel"]').onclick = () => { ap.cancelScan(); renderAgora(); };
-      if (q('[data-wfm="scanav"]')) q('[data-wfm="scanav"]').onclick = () => { ap.startScanAvancado(); renderAgora(); };
-      if (q('[data-wfm="cancelav"]')) q('[data-wfm="cancelav"]').onclick = () => { ap.cancelScanAvancado(); renderAgora(); };
     },
     /** Atualização LEVE (sem refazer HTML) das 2 barras de progresso -- chamada todo quadro enquanto uma
      *  varredura está em andamento (ver `_wfMiniAtualizarTodas`), pra "a barrinha enchendo aparecer na
@@ -385,8 +528,6 @@
     _wfMiniAtualizarBarra(el, ap) {
       const barra = el.querySelector('[data-wfm-bar]');
       if (barra) { barra.classList.toggle('wf-fim', !ap.scanning); const f = barra.querySelector('.wf-fill'); if (f) f.style.width = ap.scanProgress + '%'; }
-      const barraAv = el.querySelector('[data-wfm-barav]');
-      if (barraAv) { barraAv.classList.toggle('wf-fim', !ap.motorAvancado.scanning); const f = barraAv.querySelector('.wf-fill'); if (f) f.style.width = (ap.motorAvancado.progress || 0) + '%'; }
     },
     /** Pedido verbatim: "Deve ser possível mover a janelinha simplista do AP." Arrasta pela área marcada
      *  `[data-wfm-cabecalho]` (tudo do cabeçalho, exceto o botão ✕) -- delegado em `el` (nunca é substituído,
@@ -460,6 +601,17 @@
         if (cab) cab.remove();
         corpo.innerHTML = tmp.innerHTML;
         this._wfMiniWireEl(el, obj, ap, renderAgora);
+        // [23/09/2026] NOVO -- pedido verbatim: "Os botões da janela do AP devem ser um espelho dos
+        // botões da janelinha do AP e vice versa. Ao alterar um o outro equivalente, na outra janela,
+        // deve ser alterado imediatamente." `this._wfSyncBusy` evita loop infinito (janela principal
+        // também re-sincroniza a janelinha ao renderizar, ver `_openRedeMenu`).
+        if (!this._wfSyncBusy) {
+          const jp = this._wfJanelaPrincipal;
+          if (jp && jp.objId === obj.id && typeof jp.render === 'function') {
+            this._wfSyncBusy = true;
+            try { jp.render(); } finally { this._wfSyncBusy = false; }
+          }
+        }
       };
       renderAgora();
       this._wfMiniHabilitarArrastar(el);
@@ -473,9 +625,9 @@
      *  quadro (60x/s), destruindo o foco/clique de qualquer campo/botão no meio da interação (inclusive o
      *  "Cancelar"). Agora: o HTML inteiro só é refeito (a) no 1º quadro em que a janelinha aparece, (b)
      *  quando o comando de fechar/mexer nela mesma chama `renderAgora()` diretamente, e (c) numa TRANSIÇÃO
-     *  de `scanning`/`motorAvancado.scanning` (começou ou terminou uma varredura, pra atualizar botões
-     *  scan/cancelar) -- durante a varredura em si, só a barra de progresso é atualizada (leve, sem tocar
-     *  no resto do DOM, ver `_wfMiniAtualizarBarra`). */
+     *  de `scanning` (começou ou terminou uma varredura, pra atualizar botões scan/cancelar) -- durante a
+     *  varredura em si, só a barra de progresso é atualizada (leve, sem tocar no resto do DOM, ver
+     *  `_wfMiniAtualizarBarra`). */
     _wfMiniAtualizarTodas(dt) {
       const WS = raiz.WifiSignal; if (!WS || !this._map) return;
       if (!this._wfMiniEls) this._wfMiniEls = {};
@@ -488,14 +640,16 @@
         vivos.add(o.id);
         if (!janelas[o.id]) {
           janelas[o.id] = this._wfMiniCriar(o, ap);
-          janelas[o.id]._scanPrev = ap.scanning; janelas[o.id]._scanAvPrev = ap.motorAvancado.scanning;
+          janelas[o.id]._scanPrev = ap.scanning; janelas[o.id]._scanPrevAv = WS.paraAvancado(o, this._engine).scanning;
           return;
         }
         const j = janelas[o.id];
-        const mudouEstado = (j._scanPrev !== ap.scanning) || (j._scanAvPrev !== ap.motorAvancado.scanning);
-        j._scanPrev = ap.scanning; j._scanAvPrev = ap.motorAvancado.scanning;
+        const av = WS.paraAvancado(o, this._engine);
+        const mudouEstado = j._scanPrev !== ap.scanning || j._scanPrevAv !== av.scanning;
+        j._scanPrev = ap.scanning; j._scanPrevAv = av.scanning;
         if (mudouEstado) { j.renderAgora(); return; }
-        if (ap.scanning || ap.motorAvancado.scanning) this._wfMiniAtualizarBarra(j.el, ap);
+        if (ap.scanning) this._wfMiniAtualizarBarra(j.el, ap);
+        if (av.scanning) this._wfAvancadaBarra(j.el, av);
       });
       Object.keys(janelas).forEach((id) => {
         if (id === '_box') return;
@@ -714,6 +868,7 @@
         if (!WS.ehAP(o)) return;
         const ap = WS.para(o, this._engine);
         if (ap.mostrar !== false) ap.mostrar = false;
+        const av = WS.paraAvancado(o, this._engine); if (av.mostrar !== false) av.mostrar = false;   // [24/09/2026] varredura avançada também
       });
     },
 
@@ -780,16 +935,27 @@
             ap.raiosRaycastPorNivel.forEach((l) => { if (l) eng._group.add(l); });
           }
         });
+        // [24/09/2026] NOVO -- mesma restauração para a varredura AVANÇADA (só se ela já tinha sido feita: nunca dispara uma sozinha).
+        this._map.objects.forEach((o) => {
+          if (!WS.ehAP(o)) return;
+          const av = WS.paraAvancado(o, eng);
+          if (av.mostrar === false || !av.ultimoResultado || av.scanning || !av.emiteSinal) return;
+          if (av.malha && av.malha.parent === eng._group) return;
+          if (refazer) { av.startScan({ densidade: av.densidade, meshMode: av.meshMode }); return; }
+          if (av.malha) eng._group.add(av.malha);
+          av.cloudRaycastPorNivel.forEach((p) => { if (p) eng._group.add(p); });
+          av.raiosRaycastPorNivel.forEach((l) => { if (l) eng._group.add(l); });
+        });
       }
       this._map.objects.forEach((o) => {
         if (!WS.ehAP(o)) return;
-        const ap = WS.para(o, eng);
-        ap.atualizarBarraProgresso();
-        // [29/09/2026] NOVO -- pedido verbatim: "ao clicar em 'Varredura avançada' deve aparecer uma
-        // barrinha enchendo também [...] Se um botão for clicado e a barrinha do outro estiver lá ainda,
-        // elas devem coexistir." Mesmo padrão da chamada acima, só que pro motor avançado (Sprite SEPARADO,
-        // ver `atualizarBarraProgressoAvancado`/wifi-signal.js -- por isso as duas convivem sem conflito).
-        ap.atualizarBarraProgressoAvancado();
+        const ap = WS.para(o, eng), av = WS.paraAvancado(o, eng);
+        // [24/09/2026] MUDADO -- pedido verbatim: "As barrinhas [...] devem aparecer na mesma caixa próximo
+        // do AP. Uma caixa maior que dize o nome do AP, uma caixa mais interna com o título da varredura
+        // normal e a sua barrinha e uma outra caixa interna [...] com o título da varredura avançada."
+        // 1 chamada só desenha a caixa inteira (nome do AP + 1 caixa interna por varredura em andamento).
+        const r = RE.garantirRede(o), rotulo = r.labelID || RE.especificar(o.tipo).rotulo;
+        ap.atualizarBarraProgressoCombinada(av, rotulo);
       });
     },
 
@@ -1838,7 +2004,7 @@
       // bringToFront` em mapview.js, ex.: linhas 22449-22454/24749-24752). `Utils.releaseFront` no fechar
       // devolve o elemento pro seu z-index-base normal (mesmo padrão de `_hideOrRemovePanel`/
       // `_closeLayersPanelImpl` em mapview.js).
-      const fechar = () => { if (ehAp) { const a0 = raiz.WifiSignal.para(obj, this._engine); a0.onProgress = null; a0.onDone = null; } raiz.Utils.releaseFront(el); el.remove(); window.removeEventListener('keydown', onKey, true); document.removeEventListener('mousedown', onFora, true); if (this._menuFecharRede === fechar) this._menuFecharRede = null; };
+      const fechar = () => { if (ehAp) { const a0 = raiz.WifiSignal.para(obj, this._engine); a0.onProgress = null; a0.onDone = null; const a1 = raiz.WifiSignal.paraAvancado(obj, this._engine); a1.onProgress = null; a1.onDone = null; } raiz.Utils.releaseFront(el); el.remove(); window.removeEventListener('keydown', onKey, true); document.removeEventListener('mousedown', onFora, true); if (this._menuFecharRede === fechar) this._menuFecharRede = null; if (ehAp && this._wfJanelaPrincipal && this._wfJanelaPrincipal.objId === obj.id) this._wfJanelaPrincipal = null; };
       btnX.onclick = () => fechar();
       const salvar = () => { DB.saveMap(this._map); };
       const reconstruir = () => { DB.saveMap(this._map); if (this._engine) this._engine.rebuildObjectIncremental(obj); };
@@ -1905,7 +2071,7 @@
         // [21/09/2026 UTC] NOVO -- painel do Access Point: faixa, potência, densidade da varredura, botão
         // "Refazer Varredura de Sinal" e barra de progresso animada (`scanProgress` 0-100, some ao chegar em 100%).
         if (ehAp) {
-          const WS = raiz.WifiSignal, ap = WS.para(obj, this._engine), emite = ap.emiteSinal, res = ap.ultimoResultado, resAv = ap.ultimoResultadoAvancado;
+          const WS = raiz.WifiSignal, ap = WS.para(obj, this._engine), emite = ap.emiteSinal, res = ap.ultimoResultado, av = WS.paraAvancado(obj, this._engine);
           const opts = (mapa, atual) => Object.keys(mapa).map((k) => '<option value="' + k + '"' + (atual === k ? ' selected' : '') + '>' + esc(mapa[k].rotulo) + '</option>').join('');
           const apTabBtn = (id, label) => '<button type="button" data-aptab-btn="' + id + '" style="flex:1;padding:6px 4px;border:none;border-bottom:2px solid ' + (apTabAtiva === id ? '#4f8cff' : 'transparent') + ';background:transparent;color:' + (apTabAtiva === id ? '#e8ecf2' : '#9aa3ad') + ';cursor:pointer;font:inherit;font-size:12px">' + label + '</button>';
           // [23/09/2026] NOVO -- pedido verbatim: em modo 'normal' as 3 seções aparecem TODAS ao mesmo
@@ -1956,6 +2122,7 @@
             // Wi-Fi) pra 2 W -- bem acima de qualquer faixa comercial, só pra não travar valores customizados.
             + '<span>Potência (W)</span><div style="display:flex;gap:6px;align-items:center"><input data-wf="potencia" type="number" min="0.01" max="2" step="0.001" value="' + ap.powerWatts + '" style="' + INP + ';flex:1" title="Potência de transmissão do rádio, em watts. Quanto maior, mais longe o sinal chega antes de cair abaixo do nível mais fraco."><span data-wf-dbm="1" style="font-size:11px;opacity:.7;white-space:nowrap">≈ ' + ap.powerDbm.toFixed(1).replace('.', ',') + ' dBm</span></div>'
             + '<span>Densidade da varredura</span><select data-wf="densidade" style="' + INP + '" title="Quantos raios são lançados pra medir o sinal. Mais denso = malha mais fiel aos obstáculos, porém mais lento.">' + opts(WS.DENSIDADES, ap.densidade) + '</select>'
+            + '<span>Limiar (dBm)</span><input data-wf="rssiThreshold" type="number" min="-80" max="20" step="1" value="' + ap.rssiThreshold + '" style="' + INP + '" title="Abaixo deste dBm o sinal deixa de existir -- corta o raio ali, mesmo antes da borda física do nível mais fraco. Vale pras duas varreduras (normal e avançada).">'
             // [22/09/2026] NOVO -- seletor de `meshMode` (ver `MODOS_MALHA`/`optimizeSignalMesh` em
             // wifi-signal.js): permite aumentar a densidade da varredura sem inflar a malha renderizada.
             + '<span>Modo de malha</span><select data-wf="meshMode" style="' + INP + '" title="Malha real: 1 vértice por raio (sem otimização). Malha simplificada: mesma precisão de varredura, mas funde regiões planas em poucos polígonos e só refina onde há curvatura/obstáculos — recomendado.">' + opts(WS.MODOS_MALHA, ap.meshMode) + '</select></div>'
@@ -1963,6 +2130,8 @@
             + '<div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap"><button type="button" data-wf-scan="1" title="Relança os raios da varredura normal com a Faixa/Potência/Densidade/Modo de malha configurados acima." style="' + BTN + (emite ? '' : ';opacity:.5') + '"' + (ap.scanning ? ' disabled' : '') + '>🔄 Refazer Varredura de Sinal</button>'
             + (ap.scanning ? '<button type="button" data-wf-cancel="1" style="' + BTN + '" title="Interrompe a varredura normal em andamento.">Cancelar</button>' : '') + '</div>'
             // [22/09/2026] REMOVIDO -- pedido verbatim: "Retire o botão 'mostrar mapa' da varredura normal."
+            + this._wfModoNiveisHtml(ap)
+            + this._wfRaiosExtensaoHtml(ap)
             + this._wfMalhaNiveisHtml(ap)
             // [24/09/2026] NOVO, [25/09/2026] AMPLIADO -- pedido verbatim: "além do controle de 'mostrar
             // mapa', deve ter um outro controle de exibir os pontos da última batida do raycaster [...] e
@@ -1984,59 +2153,11 @@
             // [29/09/2026] NOVO -- pedido verbatim: "Faça a opção de 'Vista em Corte' para a varredura
             // normal." Ver comentário grande de `_wfCorteHtml`/`WS.AccessPoint#atualizarCorte` (wifi-signal.js).
             + this._wfCorteHtml(ap)
-            // [22/09/2026] NOVO -- painel do motor AVANÇADO (`WS.SignalPropagationEngine`, opt-in, coexiste
-            // com a varredura de malha acima): reflexão/refração multi-salto, resultado em nuvem de pontos
-            // (`THREE.Points`), só disponível com `this._engine` vivo (precisa da cena 3D pra lançar raios).
-            + (this._engine ? (SEC_HDR('🛰️', 'Varredura avançada')
-              // [29/09/2026] MUDADO -- pedido verbatim: "coloque o checkbox antes do '🛰️ Reflexão' e remova
-              // o texto 'habilitada' [...] o mesmo pra Refração [...] Para os dois, o campo de número deve
-              // vir logo à direita." Antes: `<span>🛰️ Reflexão</span><label><input checkbox> habilitada</label>`
-              // (2 células de grid separadas, texto do nível redundante). Agora: 1 única célula
-              // checkbox+rótulo (`<label>` com o input NA FRENTE do texto "🛰️ Reflexão"), e o campo numérico
-              // continua na célula ao lado (2ª coluna do grid), like antes -- só que agora é a PRIMEIRA coisa
-              // à direita do checkbox+rótulo, não de um `<span>` textual solto.
-              + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:4px">'
-              + '<label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer" title="Raio que bate numa superfície pode ricochetear (mudando de direção) em vez de parar ali."><input type="checkbox" data-wfa="enableReflection"' + (ap.enableReflection ? ' checked' : '') + '> 🛰️ Reflexão</label><input data-wfa="maxReflections" type="number" min="0" max="5" step="1" value="' + ap.maxReflections + '" style="' + INP + '" title="Quantos ricochetes seguidos um mesmo raio pode dar antes de parar."' + (ap.enableReflection ? '' : ' disabled') + '>'
-              + '<label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer" title="Raio que bate numa superfície pode continuar reto do outro lado (com perda de sinal pela espessura/material), como sinal atravessando paredes."><input type="checkbox" data-wfa="enableRefraction"' + (ap.enableRefraction ? ' checked' : '') + '> 🛰️ Refração</label><input data-wfa="maxRefractions" type="number" min="0" max="3" step="1" value="' + ap.maxRefractions + '" style="' + INP + '" title="Quantas superfícies seguidas um mesmo raio pode atravessar antes de parar."' + (ap.enableRefraction ? '' : ' disabled') + '>'
-              + '<span>Limiar (dBm)</span><input data-wfa="rssiThreshold" type="number" min="-80" max="20" step="1" value="' + ap.rssiThreshold + '" style="' + INP + '" title="Abaixo deste dBm nem o ponto/raio é desenhado, e a varredura para de ricochetear ali — mesmo comportamento do fim de alcance da varredura normal.">'
-              + '</div>'
-              // [29/09/2026] NOVO -- pedido verbatim: "Na varredura avançada, deve ser possível ver a forma
-              // 3D gerada com o mapa de calor do sinal (superfície mais externa (como na varredura normal)
-              // e forma. Ambas por nível, os 5 níveis)." Ver comentário grande de `_wfMalhaNiveisAvancadaHtml`
-              // acima -- malha calculada SEM reflexão/refração (mesma física da varredura normal, só que com
-              // a Faixa/Potência/Densidade do motor avançado), reconstruída a cada "Varredura avançada".
-              + this._wfMalhaNiveisAvancadaHtml(ap)
-              // [22/09/2026] MUDADO -- pedido verbatim: "coloque os botões de níveis para os pontos e para os
-              // raios, assim como na varredura normal. Retire os checkbox 'mostrar pontos' e 'mostrar raios',
-              // pois os botões de níveis já vão executar esta função." Substitui os antigos checkboxes únicos
-              // ("mostrar pontos"/"grade quadriculada"/"mostrar raios") pelos botões de nível de
-              // `_wfNiveisAvancadaHtml` (mesmo padrão visual da varredura normal, `_wfNiveisHtml`).
-              + this._wfNiveisAvancadaHtml(ap)
-              + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px"><span style="font-size:12px;opacity:.7">Densidade dos raios</span><select data-wfa="avancadoDensidadeRaios" style="' + INP + '" title="Fração dos raios lançados que ganham uma linha desenhada na cena. Só vale a partir da próxima varredura avançada.">' + DENSIDADES_RAIOS_OPTS(ap.avancadoDensidadeRaios) + '</select></div>'
-              // [22/09/2026] NOVO -- pedido verbatim: "configuração própria (com 'usar mesmas configurações')"
-              // pro motor avançado: Faixa/Potência/Densidade PRÓPRIAS, ou espelhando o motor original (padrão).
-              + '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #3a4250">'
-              + '<label style="font-size:12px" title="Quando marcado, a varredura avançada usa a mesma Faixa/Potência/Densidade configuradas na Varredura normal acima, em vez de valores próprios."><input type="checkbox" data-wfa="avancadoUsarMesmoConfig"' + (ap.avancadoUsarMesmoConfig ? ' checked' : '') + '> usar as mesmas configurações do motor original (Faixa/Potência/Densidade)</label>'
-              + (ap.avancadoUsarMesmoConfig ? '' : ('<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:4px">'
-                + '<span>Faixa (motor avançado)</span><select data-wfa="avancadoFrequencia" style="' + INP + '" title="Faixa de frequência usada só pela varredura avançada.">' + opts(WS.FAIXAS, ap.avancadoFrequencia) + '</select>'
-                + '<span>Potência (W, motor avançado)</span><input data-wfa="avancadoPotenciaW" type="number" min="0.01" max="2" step="0.001" value="' + ap.avancadoPotenciaW + '" style="' + INP + '" title="Potência de transmissão usada só pela varredura avançada.">'
-                + '<span>Densidade (motor avançado)</span><select data-wfa="avancadoDensidade" style="' + INP + '" title="Densidade de raios usada só pela varredura avançada.">' + opts(WS.DENSIDADES, ap.avancadoDensidade) + '</select>'
-                + '</div>'))
-              + '</div>'
-              + '<div style="font-size:11px;opacity:.6;margin-top:3px">Motor alternativo (Ray Launching multi-bounce): simula ricochete em paredes/vidros/metal e atravessamento com perda por material, gerando uma nuvem de pontos 3D à parte da malha acima. Mais realista, porém mais lento com densidade alta + reflexão/refração juntas.</div>'
-              + '<div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap"><button type="button" data-wfa-scan="1" title="Lança o motor de reflexão/refração multi-salto com as configurações acima, gerando uma nuvem de pontos 3D à parte da malha da varredura normal." style="' + BTN + (emite ? '' : ';opacity:.5') + '"' + (ap.motorAvancado.scanning ? ' disabled' : '') + '>🛰️ Varredura avançada (reflexão/refração)</button>'
-              + (ap.motorAvancado.scanning ? '<button type="button" data-wfa-cancel="1" style="' + BTN + '" title="Interrompe a varredura avançada em andamento.">Cancelar</button>' : '')
-              + (ap.cloudAvancado ? '<button type="button" data-wfa-clear="1" style="' + BTN + '" title="Remove a nuvem de pontos da última varredura avançada.">🗑️ Limpar nuvem</button>' : '') + '</div>'
-              + '<div class="wf-bar' + (ap.motorAvancado.scanning ? '' : ' wf-fim') + '" data-wfa-bar="1"><div class="wf-fill" data-wfa-fill="1" style="width:' + (ap.motorAvancado.progress || 0) + '%"></div></div>'
-              + '<div data-wfa-txt="1" style="font-size:11px;opacity:.8;min-height:14px">' + (ap.motorAvancado.scanning ? 'Varrendo (avançado)… ' + (ap.motorAvancado.progress || 0) + '%' : '') + '</div>'
-              // [28/09/2026] NOVO -- pedido verbatim: "Na varredura avançada, coloque as mesmas informações
-              // quanto a varredura avançada feita." Mesmo formato de 2 linhas do motor original (legenda +
-              // 'última varredura: raios/tempo/alcance' e '🔺 Malha: pontos/triângulos'), usando
-              // `ultimoResultadoAvancado` (ver wifi-signal.js) -- aqui não há malha fechada (é nuvem de
-              // pontos), então a 2ª linha mostra raios totais/primários em vez de triângulos.
-              + '<div style="font-size:11px;margin-top:2px"><span class="wf-leg" style="background:#22c55e;margin-left:0"></span>excelente<span class="wf-leg" style="background:#facc15"></span>médio<span class="wf-leg" style="background:#ef4444"></span>fraco/sem sinal'
-              + (resAv ? ' · última varredura avançada: ' + resAv.raiosTotais.toLocaleString('pt-BR') + ' raios em ' + resAv.tempoMs + ' ms · alcance ' + resAv.alcanceM.toFixed(1).replace('.', ',') + ' m' : '') + '</div>'
-              + (resAv ? '<div style="font-size:11px;opacity:.7;margin-top:2px">🛰️ Nuvem: ' + resAv.n.toLocaleString('pt-BR') + ' pontos de colisão (' + resAv.raiosPrimarios.toLocaleString('pt-BR') + ' raios primários)</div>' : '')) : '')
+            // [24/09/2026] NOVO -- Varredura avançada (reflexão/refração) e Configurações do Access Point (ver `_wfAvancadaHtml`/`_wfConfigApHtml`).
+            + this._wfAvancadaHtml(av, ap)
+            + this._wfConfigApHtml(ap, av)
+            // [23/09/2026] REMOVIDO -- pedido verbatim: "Remova todos os botões e métodos implementados
+            // para a varredura avançada." (seção inteira "Varredura avançada" removida.)
             // [21/09/2026 UTC] NOVO -- projeção do mapa de calor sobre o mapa 2D (Planta Baixa): método
             // ('fatiamento' = Opção A, corte vetorial da própria malha 3D, padrão; 'textura' = Opção B,
             // bitmap renderizado por câmera ortográfica) e opacidade (0–100%, equivalente ao pedido
@@ -2177,7 +2298,7 @@
         // mapa 2D (Planta Baixa), sem nenhuma engine 3D viva (ver `abrirPainelEquipamento`/botão "⚙️
         // Configurações" no mapa 2D); sem engine, só o estado (`ligado`, config do AP) é sincronizado, a
         // malha 3D em si (se existir) é atualizada na próxima vez que "Ver em 3D" for aberto.
-        const apSync = () => { if (!ehAp) return; raiz.WifiSignal.para(obj, this._engine).atualizarVisibilidade(); if (this._engine) this._engine.rebuildObjectIncremental(obj); };
+        const apSync = () => { if (!ehAp) return; raiz.WifiSignal.para(obj, this._engine).atualizarVisibilidade(); raiz.WifiSignal.paraAvancado(obj, this._engine).atualizarVisibilidade(); if (this._engine) this._engine.rebuildObjectIncremental(obj); };
         if (q('[data-rp]')) q('[data-rp]').onclick = () => { r.ligado = !r.ligado; salvar(); apSync(); render(); };
         if (ehAp) {
           const ap = raiz.WifiSignal.para(obj, this._engine);
@@ -2197,6 +2318,11 @@
             // Densidade/Faixa/Potência acima -- não altera uma malha já construída sem refazer o raycast.
             else if (k === 'meshMode') ap.meshMode = e.target.value;
             else if (k === 'numDispositivos') ap.numDispositivos = e.target.value;
+            // [23/09/2026] NOVO -- pedido verbatim: "Se o 'Limiar (dBm)' pode ser usado na varredura normal,
+            // então, coloque no escopo este controle, junto com os controles de Faixa e de Potência." Mesmo
+            // `ap.rssiThreshold` usado pela varredura avançada (ver `data-wfa="rssiThreshold"` acima) -- agora
+            // também influencia a varredura NORMAL (`distanciasDoRaio`, ver wifi-signal.js).
+            else if (k === 'rssiThreshold') ap.rssiThreshold = e.target.value;
             else ap.densidade = e.target.value;
             salvar(); render();
           }; });
@@ -2219,48 +2345,24 @@
             render();
           };
           if (q('[data-wf-cancel]')) q('[data-wf-cancel]').onclick = () => { ap.cancelScan(); render(); };
-          this._wfNiveisWire(corpo, ap, render);
+          this._wfModoNiveisWire(corpo, ap, render);
+          this._wfRaiosExtensaoWire(corpo, ap, render);
+          this._wfNiveisWire(corpo, ap);
           this._wfMalhaNiveisWire(corpo, ap);
           // [29/09/2026] NOVO -- "Vista em Corte" (varredura normal) -- ver `_wfCorteHtml`/`_wfCorteWire` acima.
           this._wfCorteWire(corpo, ap, render);
-          if (q('[data-wf-mini]')) q('[data-wf-mini]').onchange = (e) => { ap.miniJanela = e.target.checked; salvar(); this._wfMiniAtualizarTodas(); };
-          // [22/09/2026] NOVO -- wiring do painel do motor AVANÇADO (reflexão/refração, `ap.motorAvancado`/
-          // `startScanAvancado`). Checkboxes/números tomam efeito só na PRÓXIMA "Varredura avançada", mesmo
-          // padrão de Densidade/Faixa/Potência/Modo de malha acima (não refaz o raycast sozinho).
-          if (this._engine) {
-            ap.onProgressAvancado = (p) => {
-              const bar = corpo.querySelector('[data-wfa-bar]'), fill = corpo.querySelector('[data-wfa-fill]'), txt = corpo.querySelector('[data-wfa-txt]');
-              if (!fill) return;
-              fill.style.width = p + '%'; if (txt) txt.textContent = p < 100 ? 'Varrendo (avançado)… ' + p + '%' : '';
-              if (bar) bar.classList.toggle('wf-fim', p >= 100);
-            };
-            ap.onDoneAvancado = () => { render(); };
-            corpo.querySelectorAll('[data-wfa]').forEach((c) => { c.onchange = (e) => {
-              const k = c.getAttribute('data-wfa'), v = c.type === 'checkbox' ? c.checked : e.target.value;
-              if (k === 'enableReflection') ap.enableReflection = v;
-              else if (k === 'maxReflections') ap.maxReflections = v;
-              else if (k === 'enableRefraction') ap.enableRefraction = v;
-              else if (k === 'maxRefractions') ap.maxRefractions = v;
-              else if (k === 'rssiThreshold') ap.rssiThreshold = v;
-              else if (k === 'avancadoDensidadeRaios') ap.avancadoDensidadeRaios = v;
-              else if (k === 'avancadoUsarMesmoConfig') ap.avancadoUsarMesmoConfig = v;
-              else if (k === 'avancadoFrequencia') ap.avancadoFrequencia = v;
-              else if (k === 'avancadoPotenciaW') ap.avancadoPotenciaW = v;
-              else if (k === 'avancadoDensidade') ap.avancadoDensidade = v;
-              salvar(); render();
-            }; });
-            if (q('[data-wfa-scan]')) q('[data-wfa-scan]').onclick = () => {
-              const res = ap.startScanAvancado();
-              if (!res.ok) toast(res.erro, { type: 'warn', duration: 3000 });
-              render();
-            };
-            if (q('[data-wfa-cancel]')) q('[data-wfa-cancel]').onclick = () => { ap.cancelScanAvancado(); render(); };
-            if (q('[data-wfa-clear]')) q('[data-wfa-clear]').onclick = () => { ap.clearAvancado(); render(); };
-            // [29/09/2026] NOVO -- superfície 3D do motor avançado, por nível (ver `_wfMalhaNiveisAvancadaHtml` acima).
-            this._wfMalhaNiveisAvancadaWire(corpo, ap);
-            // [22/09/2026] NOVO -- botões de nível dos pontos/raios do motor avançado (ver `_wfNiveisAvancadaHtml`).
-            this._wfNiveisAvancadaWire(corpo, ap);
+          // [24/09/2026] NOVO -- Varredura avançada + Configurações do AP. `sync` repinta a janelinha (espelho); `render` já a repinta sozinho.
+          {
+            const av = raiz.WifiSignal.paraAvancado(obj, this._engine);
+            av.onProgress = () => this._wfAvancadaBarra(corpo, av);
+            av.onDone = () => render();
+            const syncMini = () => { const m = this._wfMiniEls && this._wfMiniEls[obj.id]; if (m && typeof m.renderAgora === 'function' && !this._wfSyncBusy) { this._wfSyncBusy = true; try { m.renderAgora(); } finally { this._wfSyncBusy = false; } } };
+            this._wfAvancadaWire(corpo, av, render, salvar, syncMini);
+            this._wfConfigApWire(corpo, ap, av, render, salvar);
           }
+          if (q('[data-wf-mini]')) q('[data-wf-mini]').onchange = (e) => { ap.miniJanela = e.target.checked; salvar(); this._wfMiniAtualizarTodas(); };
+          // [23/09/2026] REMOVIDO -- pedido verbatim: "Remova todos os botões e métodos implementados para
+          // a varredura avançada." (wiring do painel do motor avançado removido inteiro.)
         }
         if (q('[data-rh]')) q('[data-rh]').onchange = (e) => { r.hostname = e.target.value.trim(); salvar(); };
         corpo.querySelectorAll('[data-cc]').forEach((s2) => { s2.onchange = (e) => { r[s2.getAttribute('data-cc')] = e.target.value; reconstruir(); render(); }; });
@@ -2311,12 +2413,21 @@
         if (q('[data-pg]')) q('[data-pg]').onclick = () => { fechar(); this._redePegar(obj); };
         if (q('[data-rret]')) q('[data-rret]').onclick = () => { RE.retirarDoRack(this._map, obj); salvar(); if (this._engine) this._engine.rebuildObjectIncremental(obj); fechar(); };
         if (q('[data-rf]')) q('[data-rf]').onclick = () => { fechar(); const pk = this._engine.pickables && this._engine.pickables.find((p) => p.ref === obj && p.type === 'object'); if (pk) this._tryPick(pk); };
+        // [23/09/2026] NOVO -- espelho janela principal -> janelinha (ver comentário grande em `_wfMiniCriar`).
+        if (ehAp && !this._wfSyncBusy) {
+          const m = this._wfMiniEls && this._wfMiniEls[obj.id];
+          if (m && typeof m.renderAgora === 'function') {
+            this._wfSyncBusy = true;
+            try { m.renderAgora(); } finally { this._wfSyncBusy = false; }
+          }
+        }
       };
       const onKey = (e) => { if (e.code === 'Escape') { e.preventDefault(); e.stopPropagation(); fechar(); } };
       // [28/09/2026] MUDADO -- pedido verbatim: "Ao clicar na AP e abrir a sua janela, ela deve permanecer
       // aberta, mesmo clicando fora dela. Só deve fechar ao clicar no seu botão de 'fechar'." Só pro AP
       // (`ehAp`) -- os demais equipamentos continuam fechando ao clicar fora, comportamento inalterado.
       const onFora = (e) => { if (ehAp) return; if (!el.contains(e.target)) fechar(); };
+      if (ehAp) this._wfJanelaPrincipal = { objId: obj.id, render };
       container.appendChild(el); render(); this._menuFecharRede = fechar;
       raiz.Utils.bringToFront(el);
       el.addEventListener('pointerdown', () => raiz.Utils.bringToFront(el), true);

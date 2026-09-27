@@ -38,7 +38,12 @@
      IDENTICO a antes, nenhum atraso a mais). -->
 <script>(function(){
   try {
-    if (localStorage.getItem('catalogo_layoutMode') === 'classic') {
+    // [24/09/2026] MUDADO -- pedido verbatim: "O padrao de fabrica do app
+    // o 'layout classico'. Atualmente, esta o 'Workspace'." `null` (nunca
+    // gravado ainda -- instalacao nova) agora tambem conta como 'classic',
+    // pois este passou a ser o padrao de fabrica.
+    var _layoutPrefBoot = localStorage.getItem('catalogo_layoutMode');
+    if (_layoutPrefBoot === 'classic' || _layoutPrefBoot === null) {
       document.documentElement.classList.add('catalogo-boot-classic');
     }
   } catch (e) { /* localStorage indisponivel (ex.: modo privado) -- segue sem o class, comportamento igual a antes */ }
@@ -294,6 +299,23 @@
      gravado. Carregado cedo (sem depender de nada) — só registra
      `window.AudioFX`, nada roda sozinho até algum código chamar
      `AudioFX.tocarSomMotor(true)`. -->
+<!-- [26/09/2026] NOVO — motor de tween/interpolação (window.TWEEN), pedido
+     verbatim: "A Tween.js deve funcionar localmente e continuar funcionando
+     em 'file:///', além de por servidor." Chegamos a vendorizar a Tween.js
+     de terceiros de verdade (`lib/tween.umd.js`), mas ela tinha uma
+     pegadinha de versão (2º argumento obrigatório pro `TWEEN.update()`
+     global funcionar — ver comentário grande no topo de
+     js/lib/tweenengine.js) que exigia um "shim" por cima só pra restaurar o
+     comportamento simples esperado. Decisão: ficar só com o motor PRÓPRIO
+     deste projeto (`js/lib/tweenengine.js`) — MESMA sintaxe da Tween.js
+     (`TWEEN.Tween`, `.to()`, `.easing()`, `TWEEN.Easing.*`,
+     `TWEEN.update()` etc.), sem a pegadinha, e sem NENHUMA dependência de
+     rede (nem pra vendorizar, nem em tempo de execução). Carregado como
+     <script> clássico (igual a TODOS os outros deste projeto — nunca
+     `type="module"`, que dependeria de import/fetch e quebraria em
+     file://), bem no início, antes de qualquer script que possa querer
+     usar `TWEEN`. -->
+<script src="js/lib/tweenengine.js"></script>
 <script src="js/audio.js"></script>
 <!-- NOVO (13/09/2026) — RELÓGIO DE TEMPO REAL DO MUNDO (`window.RelogioMundo`),
      peça de infraestrutura que faltava, documentada como limitação em
@@ -415,6 +437,17 @@
      ScriptComponent agora guarda sua "folha de código" (`code`) direto,
      sempre editável, nunca uma classe opaca por trás. -->
 <script src="js/components.js"></script>
+<!-- [26/09/2026] NOVO — Módulo de Automação e Scripts GLOBAIS
+     (`window.AutomationManager`), pedido verbatim: "criar um Módulo de
+     Automação e Scripts extremamente robusto e intuitivo [...] painel
+     (Lista de Scripts) [...] Executar, Desexecutar (Desfazer), Editar,
+     Renomear e Excluir." Ver comentário grande no topo de js/automation.js
+     pra arquitetura completa (motor de seleção, rollback, ações nativas).
+     Carregado DEPOIS de js/mapping.js (usa `Mapping.grupoRegraMatches`/
+     `addGrupoRegra`/`removeGrupoRegra`), js/sceneobjects.js (usa
+     `SceneObjects.all`) e js/lib/tweenengine.js (usa `TWEEN` — já carregado
+     bem no início, ver topo deste arquivo) — todos já carregados aqui. -->
+<script src="js/automation.js"></script>
 <!-- NOVO (12/09/2026), pedido verbatim: "esta padronização é para que ao
      criar novos objetos, eles possam seguir os mesmos modelos [...] deve
      ter uma folha de histórico: 'Histórico deste objeto'." —
@@ -513,14 +546,16 @@
 <script src="js/rack-modular.js"></script>
 <script src="js/rack-cable-routing.js"></script>
 <script src="js/wifi-signal.js"></script>
+<!-- [23/09/2026 UTC] NOVO -- RadioWaveRayTracer (window.RadioWaveRayTracer): motor SEPARADO de traçado de raios com reflexão + refração, extensão do motor do AP. Ainda NÃO ligado à interface (ver comentário no topo de js/radio-wave-raytracer.js). -->
+<script src="js/radio-wave-raytracer.js"></script>
+<!-- [24/09/2026 UTC] NOVO -- Varredura AVANÇADA do AP (window.WifiSignal.AccessPointAvancado/paraAvancado): estende wifi-signal.js usando o RadioWaveRayTracer acima; ver comentário grande em js/wifi-signal-avancado.js. -->
+<script src="js/wifi-signal-avancado.js"></script>
 <script src="js/rede-passiva.js"></script>
 <script src="js/rede-equip.js"></script>
 <!-- [19/09/2026 UTC] NOVO (RODADA 171) -- classes de lógica (sem Three.js) pros novos objetos No-break/UPS, Storage (NAS/SAN/Disk Shelf) e Unidades de Disco (HD/SSD): StorageDevice.insertDrive/removeDrive, UPSDevice.calculateLoad. Ver comentário completo no topo de js/rede-storage-energia.js. -->
 <script src="js/rede-storage-energia.js"></script>
 <!-- [19/09/2026 UTC] NOVO (RODADA 178) -- PatchCord dinâmico (sem Three.js na lógica, testável em Node): classe PatchCord (estados idle/ghost/connected), Plug_A/Plug_B com exitVector de ancoragem, curva de Bézier cúbica com barriga de gravidade e restrição anti-clipping contra a porta do rack (constrainCableCurvature). AINDA NÃO conectado a nenhuma tela do app (arquitetura pronta, integração com o cabeamento existente é trabalho futuro) -- ver comentário completo no topo de js/patch-cord.js. -->
 <script src="js/patch-cord.js"></script>
-<!-- [23/09/2026 UTC] NOVO -- `RealisticCableBend` (window.RealisticCableBend): algoritmo isolado de curvatura física de cabos (raio de curvatura mínimo + "barriga" elástica em dobras fechadas, ver comentário grande no topo de js/realistic-cable-bend.js). Consumido por `Engine3D._curvaDeRotaCabo` (js/engine3d-rede-mesh.js) para as curvas de cabo desenhadas no modo 'Lógica' (tecla L) -- ver comentário grande lá. -->
-<script src="js/realistic-cable-bend.js"></script>
 <!-- [13/09/2026] NOVO — geradores de sala reutilizáveis (Sala de
      Monitoramento/Câmeras por andar/Copa/Banheiro), ver comentário grande
      no topo de js/geradores-salas.js. Só registra `window.GeradoresSalas`
@@ -773,6 +808,8 @@
 <script src="js/view3d.js"></script>
 <script src="js/view3d-rede.js"></script>
 <script src="js/rede-docs.js"></script>
+<script src="js/ap-docs.js"></script>
+<script src="js/scripts-docs.js"></script>
 <!-- NOVO (08/09/2026), pedido verbatim: "Será o 'Info'." — módulo novo
      (window.InfoBar) que mostra título + botões 👁️/⚙️ dentro de uma divisão
      do Workspace, reaproveitando os mesmos handlers do cabeçalho global (ver
@@ -805,6 +842,8 @@
 <script src="js/serverbundles/receive-php-bundle.js"></script>
 <script src="js/serverbundles/receive-node-bundle.js"></script>
 <script src="js/settings.js"></script>
+<!-- [26/09/2026] NOVO -- personagem (posição/apontamento de câmera) guardado junto com cada mapa (exportar/importar/trocar de mapa). -->
+<script src="js/personagem-mapa.js"></script>
 <script src="js/unify.js"></script>
 <!-- NOVO (09/09/2026), pedido verbatim: "Coloque o antigo método de
      apresentação das coisas sem o BSP splitter screen / dockable, use a

@@ -150,8 +150,20 @@ const History = {
   /** Ajusta a configuração "sempre mostrar" (chamado pela tela de Configurações). */
   async setAlwaysShow(on) {
     this._alwaysShow = !!on;
+    this._ensureWidget();
+    this._updateWidget();   // [26/09/2026] MUDADO -- aplica ANTES de gravar no banco (ativação imediata)
     await DB.setSetting('historySempreVisivel', this._alwaysShow);
-    this._updateWidget();
+  },
+
+  /** [26/09/2026] NOVO -- pedido verbatim: "o botão 'Sempre mostrar os botões ↶/↷ na tela' (em '↶ Desfazer/Refazer')
+   *  devem ter a sua ativação imediata e ficar mais a frente de tudo [...] acaba ficando atrás da tela das
+   *  'configurações do app'." -- o widget (z-index 940 / faixa do WindowManager) ficava ATRÁS da tela cheia de
+   *  Configurações (970). Enquanto ela está aberta, a classe .na-frente-de-tudo o coloca acima de tudo (ver css). */
+  trazerParaFrente(on) {
+    this._ensureWidget();
+    if (!this._widgetEl) return;
+    if (on && this._widgetEl.parentElement !== document.body) document.body.appendChild(this._widgetEl);
+    this._widgetEl.classList.toggle('na-frente-de-tudo', !!on);
   },
 
   onChange(fn) { this._listeners.push(fn); },

@@ -111,7 +111,17 @@
 
   const D_MIN = 0.30;          // m -- distância mínima de referência (evita I → ∞ colado no AP)
   const D_MAX_ABS = 60;        // m -- teto absoluto de alcance (proteção)
-  const IGNORAR_PERTO = 0.03;  // m -- ignora interseções coladas na origem (a própria placa/parede de montagem)
+  // [25/09/2026] MUDADO -- decisão verbatim do usuário: "Sobre o Access Point (IGNORAR_PERTO = 0.03), deve
+  // ignorar a caixa 3D do AP, sim. Está informação deve ficar em algum lugar, também na documentação do AP."
+  // A ÚNICA coisa que o raio deve ignorar ao sair do AP é a CAIXA 3D DO PRÓPRIO AP -- e isso já é garantido por
+  // identidade, não por distância: AccessPoint._alvos() (logo abaixo neste arquivo, usado pelos DOIS motores) nunca
+  // inclui as malhas do próprio AP (pick.id === obj.id) na lista de alvos do raycaster. O antigo raio fixo de
+  // 3 cm ignorava também superfícies REAIS coladas no AP (ex.: uma viga ou laje a menos de 3 cm dele), o que
+  // fazia sumirem reflexões/perdas nessas superfícies ("poucos raios refletidos" com o AP encostado numa viga).
+  // Agora vale só uma tolerância numérica de 1 mm (contra a auto-interseção exatamente na origem), igual a
+  // EPS_HIT dos raios-filhos do motor avançado (radio-wave-raytracer.js). O mesmo vale pro mapa 2D analítico
+  // (paredes/portas/janelas/pilares/escadas em segmentos, onde o AP nem é um obstáculo). Documentado também em js/ap-docs.js (seção "O que o raio ignora").
+  const IGNORAR_PERTO = 1e-3;  // m -- tolerância numérica na origem; a caixa 3D do AP já fica de fora por identidade (ver _alvos)
   const ORCAMENTO_MS = 5;      // ms de raycast por quadro (mantém ~60 FPS)
   const FADE_MS = 700;         // duração do fade-in da malha
   const DIRETIVIDADE = 1.2;    // expoente do cardioide
@@ -150,11 +160,16 @@
    * segmentos entre barreiras; se a intensidade JÁ está abaixo do limiar ao começar o segmento, o cruzamento foi
    * a própria barreira (a face da parede); senão resolvemos d = √(P0·rem / limiar) e vemos se cai dentro do segmento.
    */
-  function distanciasDoRaio(P0, barreiras, saida) {
+  function distanciasDoRaio(P0, barreiras, saida, limiarExtraI) {
     const n = NIVEIS.length, nb = barreiras.length;
     saida = saida || new Float32Array(n);
+    // [23/09/2026] NOVO -- pedido verbatim: "Se o 'Limiar (dBm)' pode ser usado na varredura normal, então,
+    // coloque no escopo este controle." `limiarExtraI` (opcional, já convertido de dBm pra intensidade por
+    // `intensidadeDeDbm`, ver `_passo`) é o `rssiThreshold` do AP -- quando mais RESTRITIVO que o limiar
+    // físico de um nível (`NIVEIS[k].limiar`), corta o raio ali também (nunca o contrário: um limiar mais
+    // FRACO que o do nível 'fraco' não estende nada além do alcance físico já definido pelos 5 níveis).
     for (let k = 0; k < n; k++) {
-      const lim = NIVEIS[k].limiar;
+      const lim = Math.max(NIVEIS[k].limiar, limiarExtraI || 0);
       // Se nem na distância de referência o sinal atinge o limiar, o nível fica "colado" no AP.
       if (P0 / (D_MIN * D_MIN) < lim) { saida[k] = D_MIN; continue; }
       let rem = 1, ini = D_MIN, res = D_MAX_ABS;
@@ -578,100 +593,16 @@
   }
 
   // ==========================================================================
-  // 2.5) MOTOR AVANÇADO (Ray Launching multi-bounce, dBm/FSPL) -- reflexão + refração
+  // 2.5) [23/09/2026] REMOVIDO -- pedido verbatim: "Remova todos os botões e métodos implementados para a
+  // varredura avançada." (`MATERIAIS_RF`/`materialTypeDoPick`/`perdaPorDistancia`/`FAIXAS_MHZ`/`ganhoAntenaDb`
+  // só existiam pro motor de reflexão/refração, removidos junto.)
   // ==========================================================================
-  // [22/09/2026] NOVO -- pedido verbatim (Engenheiro de Software Sênior, RF/Three.js): motor ALTERNATIVO de
-  // propagação, em dBm, com reflexão E refração multi-salto (`SignalPropagationEngine`, mais abaixo, seção
-  // 4.5). O motor ORIGINAL (seções 1/2 acima -- `ATENUACAO`/`distanciasDoRaio`, usado por `AccessPoint.
-  // startScan`) continua sendo o padrão: já testado, mais barato (1 raio reto por amostra) e monta a MALHA
-  // fechada (cascas) que o resto do app (corte 2D, mostrar/ocultar, etc.) depende. Este motor novo é
-  // OPT-IN ("🛰️ Varredura avançada") e gera uma NUVEM DE PONTOS (`THREE.Points`) à parte -- ver
-  // `AccessPoint.startScanAvancado`.
-
-  /**
-   * Coeficientes de RF por material (dB -- unidades LOGARÍTMICAS, ao contrário de `ATENUACAO` acima, que é
-   * uma fração LINEAR do sinal restante). `perdaRefracaoDb` = perda por inserção ao ATRAVESSAR o material
-   * (subtraída do dBm quando `enableRefraction`); `perdaReflexaoDb` = perda ao REFLETIR nele (subtraída do
-   * dBm quando `enableReflection` -- quanto mais especular/metálico o material, menor essa perda).
-   */
-  const MATERIAIS_RF = Object.freeze({
-    // Alta reflexão, altíssima atenuação de refração (concreto denso -- pilar/viga estrutural).
-    concreto_viga:    Object.freeze({ rotulo: 'Concreto (pilar/viga)', perdaReflexaoDb: 4,  perdaRefracaoDb: 18 }),
-    // Média reflexão, média atenuação de refração (alvenaria comum).
-    alvenaria_parede: Object.freeze({ rotulo: 'Alvenaria (parede)',   perdaReflexaoDb: 6,  perdaRefracaoDb: 10 }),
-    // Baixa reflexão, baixa atenuação de refração (vidro comum de janela).
-    vidro_janela:     Object.freeze({ rotulo: 'Vidro (janela)',        perdaReflexaoDb: 10, perdaRefracaoDb: 3  }),
-    // Baixa reflexão, atenuação de refração média-baixa (madeira maciça/porta).
-    madeira_porta:    Object.freeze({ rotulo: 'Madeira (porta)',       perdaReflexaoDb: 9,  perdaRefracaoDb: 5  }),
-    // Reflexão praticamente TOTAL/especular (metal), refração ZERO (o sinal não atravessa metal -- é opaco a RF).
-    metal_objeto:     Object.freeze({ rotulo: 'Metal (objeto)',        perdaReflexaoDb: 0.5, perdaRefracaoDb: Infinity }),
-  });
-
-  /**
-   * [22/09/2026] NOVO -- mapeia um alvo de raycast pro `materialType` de `MATERIAIS_RF`. Prioridade: (1) o
-   * pedido verbatim do usuário -- "cada Mesh na cena terá uma propriedade personalizada `mesh.userData.
-   * materialType`" -- se o mesh que a colisão atingiu já tiver isso setado, USA DIRETO (permite calibrar
-   * objeto-a-objeto sem tocar neste arquivo); (2) senão, deriva do MESMO `pick`/`ref.tipo` que
-   * `atenuacaoDoPick` já usa (paredes/portas/janelas/pilares/vigas/objetos do app), pra este motor herdar
-   * automaticamente todos os obstáculos que o mapa já modela, sem precisar que o usuário marque cada um.
-   * @param {object} pick   `hit.object.userData.pick` (ver `AccessPoint._alvos`/`_passo`).
-   * @param {object} [mesh] `hit.object` -- de onde lemos `userData.materialType`, se presente.
-   */
-  function materialTypeDoPick(pick, mesh) {
-    const custom = mesh && mesh.userData && mesh.userData.materialType;
-    if (custom && MATERIAIS_RF[custom]) return custom;
-    if (!pick) return 'alvenaria_parede';
-    const ref = pick.ref || {};
-    switch (pick.type) {
-      case 'wall': return 'alvenaria_parede';
-      case 'tijolo': return 'alvenaria_parede';
-      case 'porta': return 'madeira_porta';
-      case 'janela': return 'vidro_janela';
-      case 'object': {
-        const t = ref.tipo;
-        if (t === 'pilar' || t === 'viga' || t === 'escada') return 'concreto_viga';
-        if (t === 'metal' || t === 'no-break' || t === 'rack') return 'metal_objeto';   // gabinetes/racks metálicos
-        if (t === 'divisoria' || t === 'parede-drywall') return 'madeira_porta';        // drywall: perto de madeira em atenuação
-        return 'alvenaria_parede';
-      }
-      default: return 'alvenaria_parede';
-    }
-  }
-
-  /**
-   * [26/09/2026] CORRIGIDO -- pedido verbatim: "na Varredura avançada, ela deve considerar a atenuação por
-   * distância (lei do inverso do quadrado) [...] do mesmo jeito que a varredura normal considera. Percebi
-   * que, mesmo uma parede distante, o vértice gerado ainda estava verde, quando já deveria estar vermelho,
-   * por causa da atenuação da distância." Causa raiz: a versão anterior usava FSPL (Free-Space Path Loss)
-   * com a constante física REAL de RF (`20·log10(fMHz) − 27,55`) -- fisicamente "correta" pro espaço livre,
-   * mas folgada demais pro tamanho de um edifício: com 28 dBm de potência, o nível "excelente" só cruzava
-   * pra "fraco" a ~4,5 KM de distância (sem nenhum obstáculo), ou seja, na prática NUNCA decaía dentro do
-   * mapa -- daí o vértice distante continuar verde. O motor ORIGINAL (`distanciasDoRaio`/`potenciaBase`
-   * acima) já implementa a MESMA lei do inverso do quadrado (I(d) = P0/d², sem nenhuma constante de RF real),
-   * só que calibrada em unidades PRÓPRIAS (não dBm) com um P0/limiares pequenos o bastante pra decair dentro
-   * de poucos metros (ex.: 630 mW/2,4 GHz cai a "fraco" a ~5,6 m em campo aberto). Pra este motor bater
-   * EXATAMENTE com essa mesma curva ("do mesmo jeito que a varredura normal considera"), a perda por
-   * distância agora é a MESMA lei pura do inverso do quadrado (`20·log10(d)`, sem a constante de RF real) --
-   * a calibração de potência/frequência já entra via `potenciaBase` (mesma função do motor original, ver
-   * `_dbmInicialPorTheta` mais abaixo) e os limiares de nível (`DBM_POR_NIVEL`) agora são DERIVADOS
-   * diretamente de `NIVEIS[k].limiar` (mesmos limiares do motor original), não mais de exemplos de dBm real.
-   * @param {number} dMetros  distância do SEGMENTO (origem→colisão, ou colisão→colisão -- não é acumulada
-   *                          a partir da origem, ao contrário do motor original: cada salto é seu próprio
-   *                          espaço livre, fisicamente mais correto pra caminhos refletidos/refratados).
-   */
-  function perdaPorDistancia(dMetros) {
-    const d = Math.max(D_MIN, dMetros);
-    return 20 * Math.log10(d);   // lei do inverso do quadrado em dB -- 20log10(d) ⇔ I ∝ 1/d², sem constante de RF real
-  }
-  /** dBm-equivalente (escala logarítmica) de uma intensidade `potenciaBase(...)` -- ver comentário grande
-   *  de `perdaPorDistancia` acima: é o que faz este motor bater com o motor original nível-a-nível. */
+  /** dBm-equivalente (escala logarítmica) de uma intensidade normalizada (mesma escala de `NIVEIS[k].limiar`). */
   function dbmDeIntensidade(I) { return I > 0 ? 10 * Math.log10(I) : -Infinity; }
-
-  /** Frequência de cada faixa em MHz, pro cálculo de `fspl` (a `FAIXAS` original usa um `fator` empírico, não MHz). */
-  const FAIXAS_MHZ = Object.freeze({ '2.4GHz': 2400, '5GHz': 5000, '6GHz': 6000 });
-
-  /** Ganho de antena em dB (mesmo cardioide de `ganhoAntena`, só que em escala logarítmica: 10·log10(ganho)). */
-  function ganhoAntenaDb(theta) { return 10 * Math.log10(Math.max(1e-6, ganhoAntena(theta))); }
+  /** [23/09/2026] NOVO -- inverso de `dbmDeIntensidade`: converte um dBm-equivalente (escala do 'Limiar (dBm)'/
+   *  `rssiThreshold`) de volta pra intensidade normalizada, na mesma escala de `NIVEIS[k].limiar` -- é o que
+   *  permite a varredura normal respeitar o 'Limiar (dBm)' (ver `distanciasDoRaio`/`_passo`). */
+  function intensidadeDeDbm(dbm) { return Number.isFinite(dbm) ? Math.pow(10, dbm / 10) : 0; }
 
   // ==========================================================================
   // 3) SHADERS DO MAPA VOLUMÉTRICO
@@ -682,7 +613,7 @@
   // `THREE.ShaderMaterial` CUSTOM respeitar `material.clippingPlanes` (a "Vista em Corte"). O three.js só injeta
   // esses trechos automaticamente em materiais PRONTOS (MeshStandardMaterial etc.); um shader escrito à mão, como
   // este, é ignorado pelo clipping a menos que a gente inclua os chunks manualmente (e marque `clipping: true`
-  // no material, feito em `_construirMalha`/`_construirMalhaAvancada`).
+  // no material, feito em `_construirMalha`).
   const VERT = '#include <clipping_planes_pars_vertex>\n'
     + 'attribute vec4 cor; varying vec4 vCor; varying float vRasante;\n'
     + 'void main(){ vCor = cor; vec4 mv = modelViewMatrix * vec4(position,1.0);\n'
@@ -722,32 +653,137 @@
   /** [22/09/2026] NOVO -- 'malha_real': gera as cascas SEM nenhuma otimização (1 vértice de malha por raio
    *  disparado -- proporção 1:1, comportamento ORIGINAL do motor). Opera direto sobre `Float32Array`/
    *  `Uint32Array` pré-alocados do tamanho exato (sem nenhuma alocação de objeto por vértice). */
-  function gerarCascasReal(g, t) {
-    const { nT, nP, nNiv, vPorCasca, dirs, rayDe, o, niveis } = g;
-    const tPorCasca = 2 * nT * nP;
-    const pos = new Float32Array(nNiv * vPorCasca * 3), cor = new Float32Array(nNiv * vPorCasca * 4);
-    const nor = new Float32Array(pos.length), idx = new Uint32Array(nNiv * tPorCasca * 3);
+  /** [23/09/2026] NOVO, [23/09/2026] o motor avançado (único outro chamador) foi removido -- monta o
+   *  `THREE.Mesh` multi-material (1 por nível) a partir de `gerado` (saída de `gerarCascasReal`/
+   *  `optimizeSignalMesh`) pra `_construirMalha`. */
+  function montarMeshDeCascas(THREE, gerado, nNiv, mostrarNiveis, wireframe, nome) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(gerado.pos, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(gerado.nor, 3));
+    geo.setAttribute('cor', new THREE.BufferAttribute(gerado.cor, 4));
+    geo.setIndex(new THREE.BufferAttribute(gerado.idx, 1));
+    geo.computeBoundingSphere();
+    const trisOffsets = new Uint32Array(nNiv + 1);
+    for (let k = 0; k < nNiv; k++) trisOffsets[k + 1] = trisOffsets[k] + gerado.trisPorCasca[k];
+    const uniformsCompartilhado = { uFade: { value: 0 } };
+    const materiais = [];
     for (let k = 0; k < nNiv; k++) {
-      const base = k * vPorCasca, N = niveis[k];
+      geo.addGroup(trisOffsets[k] * 3, (trisOffsets[k + 1] - trisOffsets[k]) * 3, k);
+      const matNivel = new THREE.ShaderMaterial({
+        uniforms: uniformsCompartilhado, vertexShader: VERT, fragmentShader: FRAG,
+        transparent: true, depthWrite: false, side: THREE.DoubleSide, wireframe: !!wireframe,
+        clipping: true, // [22/09/2026] necessário p/ os `#include <clipping_planes_*>` do VERT/FRAG funcionarem
+      });
+      matNivel.visible = mostrarNiveis[k] !== false;
+      materiais.push(matNivel);
+    }
+    const m = new THREE.Mesh(geo, materiais);
+    m.name = nome; m.renderOrder = 8; m.frustumCulled = false;
+    m.raycast = function () {};                    // o mapa de sinal nunca intercepta cliques nem raycasts
+    m.userData.wifi = true;
+    return { mesh: m, trisOffsets };
+  }
+
+  function gerarCascasReal(g, t) {
+    const { nT, nP, nNiv, vPorCasca, dirs, rayDe, o, niveis, distEfetivo, visivelArr, malhaCompleta } = g;
+    // [23/09/2026] AMPLIADO -- pedido verbatim: "o 'Por nível' [...] só a parte das formas 3D que estão
+    // 'dentro do nível' [...] entre a casca externa e a casca 'interna' [...] do nível correspondente [...]
+    // se for 'excelente', como não tem casca mais interna, acaba sendo no ponto do próprio AP." Antes, as
+    // "paredes" laterais iam sempre até o AP (`apexIdx`), certo só pra 'completo' (onde a busca de colisão
+    // já é `[0, borda]`, então a fatia É do AP até a borda). Pra 'por nível' (fatiado), a fatia é
+    // `[borda do nível mais forte anterior, borda deste nível]` -- então agora cada casca ganha um ANEL
+    // INTERNO inteiro (não mais 1 único vértice), na distância `distIn` de CADA raio (a borda do nível mais
+    // forte anterior; 0 -- o AP -- só pro nível mais interno, 'excelente', que não tem mais nada "dentro").
+    // Com 'completo', `distIn` é sempre 0 pra todo raio (mesmo efeito de antes, só que expresso como um
+    // anel todo colapsado no AP em vez de 1 vértice só -- resultado idêntico). A malha vira, então, um
+    // "gomo" fechado: casca externa (borda deste nível) + casca interna (borda anterior/AP) + paredes
+    // ligando as duas nas arestas onde a colisão começa/termina -- só quando 'Colisão real' está ativo
+    // (`visivelArr`/`vA`); em 'Alcance' continua só a casca externa de sempre.
+    const vPorCascaTotal = vPorCasca * 2;                        // anel externo + anel interno, por nível
+    const tPorCascaMax = 12 * nT * nP;                           // casca externa(2) + interna(2) + paredes (até 4 arestas × 2 tris)
+    const pos = new Float32Array(nNiv * vPorCascaTotal * 3), cor = new Float32Array(nNiv * vPorCascaTotal * 4);
+    const nor = new Float32Array(pos.length), idx = new Uint32Array(nNiv * tPorCascaMax * 3);
+    const trisPorCasca = new Uint32Array(nNiv);
+    let ni = 0;
+    for (let k = 0; k < nNiv; k++) {
+      const base = k * vPorCascaTotal, N = niveis[k], dEk = distEfetivo && distEfetivo[k], vA = visivelArr && visivelArr[k];
       for (let v = 0; v < vPorCasca; v++) {
-        const dist = t.dist[k][rayDe[v]], p = (base + v) * 3, c = (base + v) * 4;
-        pos[p] = o.x + dirs[v * 3] * dist; pos[p + 1] = o.y + dirs[v * 3 + 1] * dist; pos[p + 2] = o.z + dirs[v * 3 + 2] * dist;
+        // [23/09/2026] CORRIGIDO de novo -- pedido verbatim: "quando estiver marcado 'Colisão real', o
+        // desenho deve parar onde houve a colisão." A POSIÇÃO do vértice EXTERNO volta a usar a distância
+        // EFETIVA (`distEfetivo`/`dEk`: a colisão real, se achou nesse raio; a borda analítica, senão) --
+        // em vez da borda de sempre (`t.dist`) pra TODOS os vértices. Onde há colisão de verdade, a
+        // superfície para exatamente ali; onde não há (mas o quad ainda é desenhado por causa de um vizinho
+        // colidido, ver `quadVisivel`), continua caindo na borda como aproximação razoável. Em 'Alcance'
+        // (`distEfetivo` nulo) nada muda -- sempre a borda de sempre.
+        const i = rayDe[v], distOut = dEk ? dEk[i] : t.dist[k][i], p = (base + v) * 3, c = (base + v) * 4;
+        pos[p] = o.x + dirs[v * 3] * distOut; pos[p + 1] = o.y + dirs[v * 3 + 1] * distOut; pos[p + 2] = o.z + dirs[v * 3 + 2] * distOut;
         nor[p] = dirs[v * 3]; nor[p + 1] = dirs[v * 3 + 1]; nor[p + 2] = dirs[v * 3 + 2];   // normal ≈ direção radial (bom p/ o efeito rasante)
         cor[c] = N.cor[0]; cor[c + 1] = N.cor[1]; cor[c + 2] = N.cor[2]; cor[c + 3] = N.alfa;
+        // anel INTERNO (vértice v + vPorCasca desta casca): borda do nível mais forte anterior ('por nível')
+        // ou o próprio AP ('completo'/nível mais interno) -- mesma distância usada pra montar `visivelArr`
+        // em `_construirMalha` (`dIn`). Escrito sempre (barato), só REFERENCIADO nos índices quando `vA`.
+        const distIn = malhaCompleta ? 0 : (k < nNiv - 1 ? t.dist[k + 1][i] : 0);
+        const pIn = (base + vPorCasca + v) * 3, cIn = (base + vPorCasca + v) * 4;
+        pos[pIn] = o.x + dirs[v * 3] * distIn; pos[pIn + 1] = o.y + dirs[v * 3 + 1] * distIn; pos[pIn + 2] = o.z + dirs[v * 3 + 2] * distIn;
+        nor[pIn] = -dirs[v * 3]; nor[pIn + 1] = -dirs[v * 3 + 1]; nor[pIn + 2] = -dirs[v * 3 + 2];   // voltada pra dentro
+        cor[cIn] = N.cor[0]; cor[cIn + 1] = N.cor[1]; cor[cIn + 2] = N.cor[2]; cor[cIn + 3] = N.alfa;
       }
-      let q = k * tPorCasca * 3;
+      // [23/09/2026] CORRIGIDO -- pedido verbatim: "a malha gerada na varredura normal deve ficar igual à
+      // malha gerada na varredura avançada." Um quad colidido isolado, com vizinhos sem colisão, nunca
+      // formava NENHUMA face (nem uma sequer tocando ele) com o antigo "E lógico" dos 4 cantos -- agora basta
+      // 1 canto visível (OU lógico) pra desenhar o quad inteiro, fechando esses pontos.
+      // [23/09/2026] CORRIGIDO de novo -- pedido verbatim: "apareceu uma forma atrás do AP, sendo que não
+      // havia objeto para colidir ali. É só onde houve colisão, 'no ar' não deve aparecer formas." A
+      // tentativa anterior tratava os POLOS (`ti===0`/`ti+1===nT` -- a ponta frontal/traseira do cardioide,
+      // um único ponto) como SEMPRE visíveis, incondicionalmente -- criava uma forma "fantasma" bem ali
+      // mesmo sem NENHUMA colisão real por perto (exatamente o caso relatado, "atrás do AP"). Removido: os
+      // polos agora só contam como visíveis quando o próprio raio deles teve colisão real, como qualquer
+      // outro raio.
+      // [23/09/2026] CORRIGIDO de novo -- pedido verbatim: "ainda está aparecendo algumas faces ligadas a
+      // pontos no ar (sem colisão com um objeto)." O "1 de 4" (OU lógico) da correção anterior desenhava o
+      // quad inteiro mesmo com só 1 canto colidido -- os outros 3 caíam na borda analítica (posição "no
+      // ar", sem nenhuma colisão ali), exatamente o defeito relatado. Volta ao "E lógico": só desenha o
+      // quad quando os 4 cantos tiveram colisão real -- um ponto colidido isolado (vizinhos sem colisão)
+      // fica sem face nenhuma (preferível a inventar face tocando o ar).
+      const quadVisivel = (ti, pj) => {
+        if (!vA) return true;
+        const va2 = ti * nP + pj, vb2 = ti * nP + (pj + 1) % nP, vc2 = (ti + 1) * nP + pj, vd2 = (ti + 1) * nP + (pj + 1) % nP;
+        return !!(vA[rayDe[va2]] && vA[rayDe[vb2]] && vA[rayDe[vc2]] && vA[rayDe[vd2]]);
+      };
+      const niAntes = ni;
       for (let ti = 0; ti < nT; ti++) for (let pj = 0; pj < nP; pj++) {
-        const a = base + ti * nP + pj, b = base + ti * nP + (pj + 1) % nP, c2 = base + (ti + 1) * nP + pj, e = base + (ti + 1) * nP + (pj + 1) % nP;
-        idx[q++] = a; idx[q++] = c2; idx[q++] = b;
-        idx[q++] = b; idx[q++] = c2; idx[q++] = e;
+        const va = ti * nP + pj, vb = ti * nP + (pj + 1) % nP, vc = (ti + 1) * nP + pj, vd = (ti + 1) * nP + (pj + 1) % nP;
+        // [23/09/2026] CORRIGIDO -- o corte por `visivelArr` (só desenha onde houve colisão real) volta a
+        // se aplicar SEMPRE que 'Colisão real' estiver ativo (`vA` presente), com ou sem 'completo' -- a
+        // única coisa que 'completo' muda é a FAIXA de busca da colisão (ver `_construirMalha`, `dIn`), não
+        // se o corte é aplicado.
+        if (!quadVisivel(ti, pj)) continue;
+        const a = base + va, b = base + vb, c2 = base + vc, e = base + vd;
+        idx[ni++] = a; idx[ni++] = c2; idx[ni++] = b;
+        idx[ni++] = b; idx[ni++] = c2; idx[ni++] = e;
+        if (!vA) continue;   // sem 'Colisão real' não há recorte nenhum -- nunca precisa de casca interna/parede
+        // casca INTERNA (mirror da externa, mesmos índices +vPorCasca) -- fecha o "fundo" do gomo.
+        const aIn = a + vPorCasca, bIn = b + vPorCasca, cIn = c2 + vPorCasca, eIn = e + vPorCasca;
+        idx[ni++] = aIn; idx[ni++] = bIn; idx[ni++] = cIn;
+        idx[ni++] = bIn; idx[ni++] = eIn; idx[ni++] = cIn;
+        // 4 arestas deste quad -- emite 1 "parede" (2 triângulos, externo→interno) sempre que o quad vizinho
+        // do outro lado dela NÃO existir (borda do polo, `ti===0`/`ti===nT-1`) ou não for visível. `side:
+        // THREE.DoubleSide` no material (ver `_construirMalha`) deixa a ordem dos vértices não importar.
+        if (ti === 0 || !quadVisivel(ti - 1, pj)) { idx[ni++] = a; idx[ni++] = b; idx[ni++] = bIn; idx[ni++] = a; idx[ni++] = bIn; idx[ni++] = aIn; }
+        if (ti === nT - 1 || !quadVisivel(ti + 1, pj)) { idx[ni++] = c2; idx[ni++] = e; idx[ni++] = eIn; idx[ni++] = c2; idx[ni++] = eIn; idx[ni++] = cIn; }
+        if (!quadVisivel(ti, (pj - 1 + nP) % nP)) { idx[ni++] = a; idx[ni++] = c2; idx[ni++] = cIn; idx[ni++] = a; idx[ni++] = cIn; idx[ni++] = aIn; }
+        if (!quadVisivel(ti, (pj + 1) % nP)) { idx[ni++] = b; idx[ni++] = e; idx[ni++] = eIn; idx[ni++] = b; idx[ni++] = eIn; idx[ni++] = bIn; }
       }
+      trisPorCasca[k] = (ni - niAntes) / 3;
     }
-    // [22/09/2026] NOVO -- `trisPorCasca`: quantos triângulos cada nível/casca ocupa no buffer de índices
-    // (aqui sempre o MESMO `tPorCasca`, já que este modo não varia a resolução por casca) -- usado por
-    // `_construirMalha` pra montar `this._grade.trisOffsets`, que `projectHeatmapTo2D` (fatiamento 3D→2D)
-    // precisa pra saber ONDE cada casca começa/termina no índice (essencial no modo simplificado, onde cada
-    // casca tem uma contagem DIFERENTE de triângulos -- ver `optimizeSignalMesh`).
-    return { pos, nor, cor, idx, nVerts: nNiv * vPorCasca, nTris: nNiv * tPorCasca, trisPorCasca: new Uint32Array(nNiv).fill(tPorCasca) };
+    // [22/09/2026] NOVO, [23/09/2026] MUDADO -- `trisPorCasca`: quantos triângulos cada nível/casca ocupa
+    // no buffer de índices -- usado por `_construirMalha` pra montar `this._grade.trisOffsets`, que
+    // `projectHeatmapTo2D` (fatiamento 3D→2D) precisa pra saber ONDE cada casca começa/termina no índice.
+    // [23/09/2026] Antes sempre o MESMO `tPorCasca` (este modo não variava a resolução por casca) -- agora
+    // pode variar TAMBÉM aqui no modo 'colisão real' (`visivelArr`, acima -- alguns quads não são emitidos),
+    // por isso o buffer de índices é alocado no tamanho MÁXIMO (`tPorCascaMax`) e devolvido via `subarray`
+    // (só até `ni`, o que foi realmente escrito) -- mesmo padrão já usado por `optimizeSignalMesh`.
+    return { pos, nor, cor, idx: idx.subarray(0, ni), nVerts: nNiv * vPorCascaTotal, nTris: ni / 3, trisPorCasca };
   }
 
   /**
@@ -765,7 +801,7 @@
    * de reduzir 90%+ dos polígonos nas regiões planas do cardioide/paredes.
    */
   function optimizeSignalMesh(g, t) {
-    const { nT, nP, nNiv, dirs, rayDe, o, niveis } = g;
+    const { nT, nP, nNiv, dirs, rayDe, o, niveis, distEfetivo, visivelArr, malhaCompleta } = g;
     // Tolerância de "achatamento": um bloco vira 1 único quad quando o raio amostrado no CENTRO do bloco
     // bate com o raio INTERPOLADO (bilinear) dos 4 cantos dentro desta margem -- é a "mesma superfície
     // plana" (mesmo vetor normal, dentro do ruído numérico do raycast) pedida no enunciado.
@@ -783,12 +819,23 @@
     // blocos vizinhos compartilham uma aresta (essencial: sem isto a malha ficaria com furos/trincas visuais
     // entre um bloco grande "plano" e um bloco pequeno "refinado" ao lado).
     const cacheChave = new Map();
-    function raioDe(k, ti, pj) { const v = ti * nP + (pj % nP); return t.dist[k][rayDe[v]]; }
+    // [23/09/2026] NOVO -- pedido verbatim: "'Modo dos pontos/raios' [...] deve atuar também [...] em
+    // 'superfície de malha (por nível)'." `distEfetivo`/`visivelArr` (montados em `_construirMalha`, MESMA
+    // lógica de `_construirPontosRaios`) trazem, no modo 'colisão real', a distância da colisão de verdade
+    // (em vez da borda analítica) e se houve colisão na faixa daquele nível -- `raioDe` passa a devolver a
+    // distância EFETIVA (some com `distEfetivo`, senão cai em `t.dist` de sempre, modo 'alcance'), e
+    // `temColisao` diz se aquele canto (ti,pj) do nível `k` teve colisão real (sempre `true` no modo
+    // 'alcance', já que `visivelArr` é `null` ali).
+    // [23/09/2026] CORRIGIDO -- devolve sempre a borda analítica do nível (igual 'Alcance', com ou sem
+    // 'completo') -- a posição/forma nunca muda com 'Colisão real', só a MÁSCARA (`temColisao` abaixo)
+    // recorta pra mostrar só onde houve colisão real.
+    function raioDe(k, ti, pj) { const v = ti * nP + (pj % nP), i = rayDe[v]; return t.dist[k][i]; }
+    function temColisao(k, ti, pj) { const va = visivelArr && visivelArr[k]; return !va || !!va[rayDe[ti * nP + (pj % nP)]]; }
     function emitVertice(k, N, ti, pj) {
       const chave = ti * (nP + 1) + pj;
       let vi = cacheChave.get(chave);
       if (vi !== undefined) return vi;
-      const v = ti * nP + (pj % nP), dist = t.dist[k][rayDe[v]];
+      const v = ti * nP + (pj % nP), dist = raioDe(k, ti, pj);
       const dx = dirs[v * 3], dy = dirs[v * 3 + 1], dz = dirs[v * 3 + 2];
       const p = nv * 3, c = nv * 4;
       pos[p] = o.x + dx * dist; pos[p + 1] = o.y + dy * dist; pos[p + 2] = o.z + dz * dist;
@@ -804,6 +851,24 @@
     }
     function processarBloco(k, N, ti0, pj0, ti1, pj1) {
       const largT = ti1 - ti0, largP = pj1 - pj0;
+      // [23/09/2026] CORRIGIDO -- o corte por `temColisao` volta a se aplicar SEMPRE que 'Colisão real'
+      // estiver ativo, com ou sem 'completo' -- 'completo' só muda a FAIXA de busca da colisão (ver
+      // `_construirMalha`), não se o corte é aplicado.
+      if (visivelArr) {
+        const v00 = temColisao(k, ti0, pj0), v01 = temColisao(k, ti0, pj1), v10 = temColisao(k, ti1, pj0), v11 = temColisao(k, ti1, pj1);
+        if (!(v00 && v01 && v10 && v11)) {
+          if (largT <= 1 && largP <= 1) return;   // folha sem colisão real nos 4 cantos -- nada a desenhar aqui
+          // visibilidade mista dentro do bloco -- nunca funde num quad grande (senão "vazaria" área sem
+          // colisão real junto com a que colidiu) -- sempre refina até achar exatamente onde a colisão
+          // começa/termina, até a resolução máxima da grade se preciso.
+          const tiM2 = ti0 + Math.max(1, largT >> 1), pjM2 = pj0 + Math.max(1, largP >> 1);
+          processarBloco(k, N, ti0, pj0, tiM2, pjM2);
+          processarBloco(k, N, ti0, pjM2, tiM2, pj1);
+          processarBloco(k, N, tiM2, pj0, ti1, pjM2);
+          processarBloco(k, N, tiM2, pjM2, ti1, pj1);
+          return;
+        }
+      }
       if (largT <= 1 && largP <= 1) { emitirQuad(k, N, ti0, pj0, ti1, pj1); return; }   // folha: resolução máxima da grade
       const r00 = raioDe(k, ti0, pj0), r01 = raioDe(k, ti0, pj1), r10 = raioDe(k, ti1, pj0), r11 = raioDe(k, ti1, pj1);
       const rMed = (r00 + r01 + r10 + r11) / 4;
@@ -870,41 +935,14 @@
       // "excelente"/mais forte/mais perto do AP → index 0 = "fraco"/mais fraco/mais longe).
       this.cloudRaycastPorNivel = [null, null, null, null, null];   // THREE.Points[5], 1 por nível de NIVEIS
       this.raiosRaycastPorNivel = [null, null, null, null, null];  // THREE.LineSegments[5], 1 por nível de NIVEIS
-      // ---- motor avançado (reflexão/refração -- `SignalPropagationEngine`, seção 4.5) ------------------------
-      this._motorAvancado = null;     // SignalPropagationEngine (lazy, ver getter `motorAvancado`)
-      // [22/09/2026] MUDADO -- pedido verbatim: "coloque os botões de níveis para os pontos e para os raios,
-      // assim como na varredura normal. Retire os checkbox 'mostrar pontos' e 'mostrar raios'." Antes eram
-      // `cloudAvancado`/`raiosAvancado`, UM `THREE.Points`/`THREE.LineSegments` cada (tudo-ou-nada). Agora, 5
-      // de cada (1 por nível de `NIVEIS`, mesmo padrão de `cloudRaycastPorNivel`/`raiosRaycastPorNivel` acima)
-      // -- ver `_construirPontosAvancado`/`_reconstruirRaiosAvancado`.
-      this.cloudAvancadoPorNivel = [null, null, null, null, null];
-      this.raiosAvancadoPorNivel = [null, null, null, null, null];
-      // [22/09/2026] REMOVIDO -- pedido verbatim: "Remova o checkbox 'grade quadriculada'. Remova o seu
-      // código também." (era `this.gradeAvancada`, ver `_montarGrade`, removido inteiro.)
-      this.ultimoResultadoAvancado = null;   // { n, tempoMs, raiosPrimarios, raiosTotais, alcanceM } — ver startScanAvancado
-      // [29/09/2026] NOVO -- pedido verbatim: "Na varredura avançada, deve ser possível ver a forma 3D
-      // gerada com o mapa de calor do sinal (superfície mais externa (como na varredura normal) e forma.
-      // Ambas por nível, os 5 níveis)." Malha de CASCAS do motor avançado (mesma técnica/shader de
-      // `this.malha`, ver `_construirMalha`/`SignalPropagationEngine._construirMalhaAvancada`), calculada
-      // SEM reflexão/refração (só a lei do inverso do quadrado + barreiras reais, exatamente como o motor
-      // original -- ver comentário grande de `perdaPorDistancia`), só que com a Faixa/Potência/Densidade do
-      // motor AVANÇADO (`avancado*Efetiva`). É um objeto 3D À PARTE da nuvem de pontos (`cloudAvancado`) --
-      // os dois convivem, cada um com seu próprio toggle.
-      this.malhaAvancada = null;      // THREE.Mesh (5 materiais, 1 por nível, mesmo padrão de `this.malha`)
-      this._gradeAvancadaMalha = null;   // { nT, nP, vPorCasca, trisOffsets } -- equivalente a `this._grade`, mas da malha avançada
-      this.pontosMalhaAvancada = 0; this.trianglesMalhaAvancada = 0;
-      this._fadeRafAvancado = 0;
+      // [23/09/2026] REMOVIDO -- pedido verbatim: "Remova todos os botões e métodos implementados para a
+      // varredura avançada." (motor de reflexão/refração `SignalPropagationEngine` e todo o estado
+      // `avancado*`/`*Avancado`/`*Avancada` removidos inteiros -- só resta a varredura normal.)
       // [29/09/2026] NOVO -- pedido verbatim: "Faça a opção de 'Vista em Corte' para a varredura normal [...]
       // uma superfície paralela ao chão [...] controlar a altura Y [...] controlar a opacidade [...] barra
       // de 0 a 100%." Estado do plano de corte + o `THREE.Mesh` do plano visual (criado sob demanda, ver
       // `atualizarCorte`/`_corteSuperficie`).
       this._corteSuperficie = null;   // THREE.Mesh do plano translúcido (visual, só aparece com `corteAtivo`)
-    }
-
-    /** Instância (lazy, 1 por AP) do motor avançado de Ray Launching multi-bounce. */
-    get motorAvancado() {
-      if (!this._motorAvancado) this._motorAvancado = new SignalPropagationEngine(this.engine, this);
-      return this._motorAvancado;
     }
 
     // ---- estado persistente (obj.rede.ap) -------------------------------------------------------------------
@@ -919,16 +957,17 @@
       // de RF irradiada) -- um AP real jamais IRRADIA 12 W de RF (o limite regulatório em 2,4 GHz já é ~1 W);
       // usar aquele valor aqui inflava o alcance calculado de forma nada realista. Agora usa a potência de RF
       // (EIRP) típica de mercado por FAIXA (`FAIXAS[...].potenciaPadraoW`).
-      if (!(r.ap.potenciaW > 0)) r.ap.potenciaW = FAIXAS[r.ap.frequencia].potenciaPadraoW;
+      // [23/09/2026] MUDADO -- pedido verbatim: valor padrão de 'Potência (W)' passa a ser 2 W fixo
+      // (antes vinha de `FAIXAS[...].potenciaPadraoW`, ~0,1-0,63W conforme a faixa) -- reaplicado só
+      // quando ainda não há valor salvo (`> 0` falso), igual a antes; mudar a Faixa depois continua
+      // livre pra reaplicar o padrão típico daquela faixa (ver setter `signalFrequency`), sem relação
+      // com este valor inicial.
+      if (!(r.ap.potenciaW > 0)) r.ap.potenciaW = 2;
       if (!DENSIDADES[r.ap.densidade]) r.ap.densidade = 'normal';
       // [22/09/2026] NOVO -- ver comentário grande em `MODOS_MALHA` acima. Padrão recomendado: simplificada.
-      if (!MODOS_MALHA[r.ap.meshMode]) r.ap.meshMode = 'malha_simplificada';
-      // [22/09/2026] NOVO -- padrões do motor avançado: desligado por padrão (é opt-in, mais caro que o
-      // motor original) mas com valores de exemplo já plausíveis pra quando o usuário ligar.
-      if (typeof r.ap.enableReflection !== 'boolean') r.ap.enableReflection = false;
-      if (!(r.ap.maxReflections >= 0)) r.ap.maxReflections = 2;
-      if (typeof r.ap.enableRefraction !== 'boolean') r.ap.enableRefraction = false;
-      if (!(r.ap.maxRefractions >= 0)) r.ap.maxRefractions = 1;
+      // [23/09/2026] MUDADO -- pedido verbatim: 'Modo de malha' passa a ter como padrão 'Malha real
+      // (1 vértice por raio, sem otimização)' (antes 'malha_simplificada').
+      if (!MODOS_MALHA[r.ap.meshMode]) r.ap.meshMode = 'malha_real';
       // [27/09/2026] MUDADO -- pedido verbatim: default era -90 dBm (escala de dBm REAL, de antes da
       // recalibração de `perdaPorDistancia`/`dbmDeIntensidade` pra bater com o motor original -- ver
       // comentário grande de `DBM_MINIMO_VISIVEL`). Agora o padrão É esse limite físico do motor original
@@ -959,9 +998,7 @@
       if (!(r.ap.opacidade2D >= 0) || r.ap.opacidade2D > 1) r.ap.opacidade2D = 1;
       // [24/09/2026] NOVO, [25/09/2026] AMPLIADO -- pedido verbatim: controles de exibir "os pontos da
       // última batida do raycaster" e "os raios do raycaster" (motor original) -- 1 flag POR NÍVEL (5, ver
-      // `NIVEIS`), todos desligados por padrão (mesmo espírito de depuração visual do motor avançado, ver
-      // `avancadoMostrarPontosNiveis`/`avancadoMostrarRaiosNiveis` (motor avançado), mas aqui o padrão é OFF
-      // porque o mapa de calor já mostra o resultado; estes são um extra pra quem quer enxergar a amostragem
+      // `NIVEIS`), todos desligados por padrão -- estes são um extra pra quem quer enxergar a amostragem
       // "crua" por trás dele). Array de 5 booleanos, índice = índice em `NIVEIS` (0 = fraco/vermelho .. 4 = excelente/verde).
       if (!Array.isArray(r.ap.mostrarPontosNiveis) || r.ap.mostrarPontosNiveis.length !== 5) r.ap.mostrarPontosNiveis = [false, false, false, false, false];
       if (!Array.isArray(r.ap.mostrarRaiosNiveis) || r.ap.mostrarRaiosNiveis.length !== 5) r.ap.mostrarRaiosNiveis = [false, false, false, false, false];
@@ -974,6 +1011,8 @@
       // superfície DENTRO da faixa de distância daquele nível (senão, nem gera ponto/raio pra aquele nível
       // naquele raio -- ver `_construirPontosRaios`).
       if (r.ap.pontosRaycasterModo !== 'alcance' && r.ap.pontosRaycasterModo !== 'colisao') r.ap.pontosRaycasterModo = 'alcance';
+      // [23/09/2026] NOVO -- pedido verbatim: "Faça um seletor com duas opções: 'por nível' e 'raio completo'. [...] será possível controlar se [...] o raio apareceram só na parte do nível correspondente ativado no botão ou o raio completo será desenhado partindo do AP até a extremidade mais externa daquele nível." 'porNivel' (padrão, comportamento de sempre) = segmento fatiado, só dentro da faixa [borda-interna, borda-externa] daquele nível; 'completo' = segmento inteiro, sempre a partir da origem do AP até a mesma extremidade (ver `_construirPontosRaios`).
+      if (r.ap.raiosExtensao !== 'porNivel' && r.ap.raiosExtensao !== 'completo') r.ap.raiosExtensao = 'porNivel';
       // [26/09/2026] NOVO -- pedido verbatim: "Deve ser possível habilitar as formas 3D produzidas
       // independentemente também [...] mostrá-las individualmente. E também só habilitar a superfície mais
       // externa." Mesmo padrão de `mostrarPontosNiveis`/`mostrarRaiosNiveis` acima (1 booleano por nível de
@@ -993,36 +1032,15 @@
       // habilitada)." Persistido (sobrevive a fechar/reabrir a janela de propriedades E a sair/entrar no
       // "Ver em 3D") -- ver `view3d-rede.js` `_wfMiniAtualizarTodas`/`_wfMiniHtml`.
       if (typeof r.ap.miniJanela !== 'boolean') r.ap.miniJanela = false;
-      // [22/09/2026] NOVO -- pedido verbatim: "configuração própria (Faixa/Potência/Densidade) pro motor
-      // avançado, com opção 'usar as mesmas configurações' do motor original." Ganha seu PRÓPRIO Faixa/
-      // Potência/Densidade (guardados à parte, `r.ap.avancado`), com `usarMesmoConfig: true` por padrão
-      // (compatibilidade: continua espelhando o motor original até o usuário desmarcar a opção). Note que
-      // "Modo de malha" (`meshMode`) não existe pro motor avançado (ele gera nuvem de pontos, não malha) --
-      // por isso não entra aqui, só Faixa/Potência/Densidade mesmo, que são os únicos parâmetros que ele usa.
-      if (!r.ap.avancado || typeof r.ap.avancado !== 'object') r.ap.avancado = {};
-      if (typeof r.ap.avancado.usarMesmoConfig !== 'boolean') r.ap.avancado.usarMesmoConfig = true;
-      if (!FAIXAS[r.ap.avancado.frequencia]) r.ap.avancado.frequencia = r.ap.frequencia;
-      if (!(r.ap.avancado.potenciaW > 0)) r.ap.avancado.potenciaW = FAIXAS[r.ap.avancado.frequencia].potenciaPadraoW;
-      if (!DENSIDADES[r.ap.avancado.densidade]) r.ap.avancado.densidade = r.ap.densidade;
-      // [22/09/2026] MUDADO -- pedido verbatim: "coloque os botões de níveis para os pontos e para os raios,
-      // assim como na varredura normal. Retire os checkbox 'mostrar pontos' e 'mostrar raios', pois os botões
-      // de níveis já vão executar esta função." Substitui os 2 booleanos únicos (`avancadoMostrarPontos`/
-      // `avancadoMostrarRaios`) por 2 arrays de 5 (1 por nível de `NIVEIS`, MESMO padrão/default de
-      // `mostrarPontosNiveis`/`mostrarRaiosNiveis` do motor original -- todos OFF por padrão).
-      if (!Array.isArray(r.ap.avancadoMostrarPontosNiveis) || r.ap.avancadoMostrarPontosNiveis.length !== 5) r.ap.avancadoMostrarPontosNiveis = [false, false, false, false, false];
-      if (!Array.isArray(r.ap.avancadoMostrarRaiosNiveis) || r.ap.avancadoMostrarRaiosNiveis.length !== 5) r.ap.avancadoMostrarRaiosNiveis = [false, false, false, false, false];
-      // [22/09/2026] REMOVIDO -- pedido verbatim: "Remova o checkbox 'grade quadriculada'. Remova o seu
-      // código também." (era `avancadoGradeQuadriculada`.)
-      // [22/09/2026] NOVO -- visualização dos raios individuais do motor avançado (linha origem→fim-de-alcance,
-      // colorida pelo nível de sinal no ponto final) e a densidade (fração de 0..1 dos raios primários que
-      // realmente ganham uma linha desenhada -- amostragem por índice, ver `raioPasso` em `startScanAvancado`).
-      if (!(r.ap.avancadoDensidadeRaios > 0)) r.ap.avancadoDensidadeRaios = 0.1;
-      // [29/09/2026] NOVO -- pedido verbatim: "Na varredura avançada, deve ser possível ver a forma 3D
-      // gerada com o mapa de calor do sinal [...] Ambas por nível, os 5 níveis." Mesmo padrão de
-      // `mostrarMalhaNiveis`/`malhaWireframe` (motor original) acima, só que num campo À PARTE
-      // (`avancadoMostrarMalhaNiveis`/`avancadoMalhaWireframe`) pra não misturar o estado dos dois motores.
-      if (!Array.isArray(r.ap.avancadoMostrarMalhaNiveis) || r.ap.avancadoMostrarMalhaNiveis.length !== 5) r.ap.avancadoMostrarMalhaNiveis = [true, true, true, true, true];
-      if (typeof r.ap.avancadoMalhaWireframe !== 'boolean') r.ap.avancadoMalhaWireframe = false;
+      // [24/09/2026] NOVO -- ver `manterAnterior` (getter abaixo). Padrão: comportamento de sempre (nova
+      // varredura apaga a anterior) -- lido de `MapConfig.apManterVarreduraNormalAnteriorPadrao` (seção
+      // "Configurações 3D" → "📡 Access Point"), `false` se o MapConfig ainda não carregou.
+      if (typeof r.ap.manterAnterior !== 'boolean') {
+        const mc = raiz.MapConfig && raiz.MapConfig._cache;
+        r.ap.manterAnterior = !!(mc && mc.apManterVarreduraNormalAnteriorPadrao);
+      }
+      // [23/09/2026] REMOVIDO -- pedido verbatim: "Remova todos os botões e métodos implementados para a
+      // varredura avançada." (config/estado `avancado*` removidos inteiros.)
       // [29/09/2026] NOVO -- pedido verbatim: "Faça a opção de 'Vista em Corte' para a varredura normal [...]
       // controlar a altura Y [...] controlar a opacidade [...] barra de 0 a 100%." `corteAltura01` é a
       // posição RELATIVA (0..1) do plano dentro da extensão vertical das cascas (0 = base, 1 = topo -- ver
@@ -1077,65 +1095,12 @@
     /** [22/09/2026] NOVO -- 'malha_real' (1:1 raio→vértice) ou 'malha_simplificada' (padrão, ver `MODOS_MALHA`). */
     get meshMode() { return this._cfg().meshMode; }
     set meshMode(v) { if (MODOS_MALHA[v]) this._cfg().meshMode = v; }
-    // ---- config do motor avançado (reflexão/refração -- `SignalPropagationEngine`, seção 4.5) ----------------
-    /** [22/09/2026] NOVO. Reflexão (`ray.direction.reflect(normal)`) habilitada/quantos saltos (0–5). */
-    get enableReflection() { return this._cfg().enableReflection; }
-    set enableReflection(v) { this._cfg().enableReflection = !!v; }
-    get maxReflections() { return this._cfg().maxReflections; }
-    set maxReflections(v) { this._cfg().maxReflections = Math.max(0, Math.min(5, Math.round(Number(v) || 0))); }
-    /** Refração (continua reto após a colisão, com perda de inserção do material) habilitada/quantos saltos (0–3). */
-    get enableRefraction() { return this._cfg().enableRefraction; }
-    set enableRefraction(v) { this._cfg().enableRefraction = !!v; }
-    get maxRefractions() { return this._cfg().maxRefractions; }
-    set maxRefractions(v) { this._cfg().maxRefractions = Math.max(0, Math.min(3, Math.round(Number(v) || 0))); }
     /** Limiar de corte (dBm-equivalente -- mesma escala calibrada de `DBM_POR_NIVEL`/`perdaPorDistancia`,
-     *  não dBm real de RF) -- abaixo disso o ponto/raio nem chega a ser desenhado, e o raio para (sem mais
-     *  saltos de reflexão/refração). Padrão = `DBM_MINIMO_VISIVEL` (mesmo limite do nível 'fraco' do motor
-     *  original -- ver comentário grande de `DBM_MINIMO_VISIVEL`). [27/09/2026] MUDADO -- faixa de clamp
-     *  ampliada pra caber a nova escala (antes -120..-40 dBm real; a escala nova fica perto de 0, podendo
-     *  até ser positiva bem perto da antena).
+     *  não dBm real de RF) -- abaixo disso o ponto/raio nem chega a ser desenhado. Padrão = `DBM_MINIMO_VISIVEL`
+     *  (mesmo limite do nível 'fraco' -- ver comentário grande de `DBM_MINIMO_VISIVEL`).
      */
     get rssiThreshold() { return this._cfg().rssiThreshold; }
     set rssiThreshold(v) { v = Number(v); if (Number.isFinite(v)) this._cfg().rssiThreshold = Math.max(-80, Math.min(20, v)); }
-    // ---- config PRÓPRIA do motor avançado (Faixa/Potência/Densidade -- ver comentário grande em `_cfg()`) ----
-    get avancadoUsarMesmoConfig() { return this._cfg().avancado.usarMesmoConfig; }
-    set avancadoUsarMesmoConfig(v) { this._cfg().avancado.usarMesmoConfig = !!v; }
-    get avancadoFrequencia() { return this._cfg().avancado.frequencia; }
-    set avancadoFrequencia(v) { if (FAIXAS[v]) { const a = this._cfg().avancado; a.frequencia = v; a.potenciaW = FAIXAS[v].potenciaPadraoW; } }
-    get avancadoPotenciaW() { return this._cfg().avancado.potenciaW; }
-    set avancadoPotenciaW(v) { v = Number(v); if (v > 0) this._cfg().avancado.potenciaW = Math.min(v, 2); }
-    get avancadoDensidade() { return this._cfg().avancado.densidade; }
-    set avancadoDensidade(v) { if (DENSIDADES[v]) this._cfg().avancado.densidade = v; }
-    /** [22/09/2026] MUDADO -- pedido verbatim: "coloque os botões de níveis para os pontos e para os raios,
-     *  assim como na varredura normal. Retire os checkbox 'mostrar pontos' e 'mostrar raios'." Mesmo padrão
-     *  de `mostrarPontosNiveis`/`setMostrarPontosNivel` do motor original, agora 1 flag POR NÍVEL em vez de um
-     *  único "tudo ou nada" -- ver `_construirPontosAvancado`/`aplicarVisibilidadeAvancado`. */
-    get avancadoMostrarPontosNiveis() { return this._cfg().avancadoMostrarPontosNiveis; }
-    setAvancadoMostrarPontosNivel(k, v) {
-      v = !!v; const arr = this._cfg().avancadoMostrarPontosNiveis;
-      arr[k] = v; if (this.cloudAvancadoPorNivel[k]) this.cloudAvancadoPorNivel[k].visible = v;
-    }
-    /** [22/09/2026] MUDADO -- mesma mudança acima, pro lado dos raios. A densidade de amostragem
-     *  (`avancadoDensidadeRaios`, 0..1 -- fração dos raios primários lançados que realmente viram uma linha
-     *  desenhada; 1 = todos, 0.1 = 1 a cada 10) continua só afetando a PRÓXIMA varredura (`raioPasso` no
-     *  momento de disparar `startScanAvancado`), e `_reconstruirRaiosAvancado` continua reusando os dados já
-     *  calculados (sem raycast novo) ao mudar densidade. */
-    get avancadoMostrarRaiosNiveis() { return this._cfg().avancadoMostrarRaiosNiveis; }
-    setAvancadoMostrarRaiosNivel(k, v) {
-      v = !!v; const arr = this._cfg().avancadoMostrarRaiosNiveis;
-      arr[k] = v; if (this.raiosAvancadoPorNivel[k]) this.raiosAvancadoPorNivel[k].visible = v;
-    }
-    get avancadoDensidadeRaios() { return this._cfg().avancadoDensidadeRaios; }
-    set avancadoDensidadeRaios(v) {
-      v = Number(v); if (!(v > 0)) return;
-      this._cfg().avancadoDensidadeRaios = Math.max(0.01, Math.min(1, v));
-      this._reconstruirRaiosAvancado();   // instantâneo -- reusa os dados já calculados, sem novo raycast
-    }
-    /** Valores REALMENTE usados pelo motor avançado na próxima varredura: os próprios, ou os do motor
-     *  original (`signalFrequency`/`powerWatts`/`densidade`) quando `avancadoUsarMesmoConfig` está ligado. */
-    get avancadoFrequenciaEfetiva() { return this.avancadoUsarMesmoConfig ? this.signalFrequency : this.avancadoFrequencia; }
-    get avancadoPotenciaWEfetiva() { return this.avancadoUsarMesmoConfig ? this.powerWatts : this.avancadoPotenciaW; }
-    get avancadoDensidadeEfetiva() { return this.avancadoUsarMesmoConfig ? this.densidade : this.avancadoDensidade; }
     /** Método de projeção do mapa 2D: 'fatiamento' (padrão, Opção A) ou 'textura' (Opção B). */
     get metodo2D() { return this._cfg().metodo2D; }
     set metodo2D(v) { if (METODOS2D[v]) this._cfg().metodo2D = v; }
@@ -1168,6 +1133,8 @@
       const out = [];
       for (let i = 0; i < lista.length; i++) {
         const m = lista[i], p = m && m.userData && m.userData.pick;
+        // [25/09/2026] a caixa 3D do PRÓPRIO AP (todas as malhas com pick.id === obj.id) nunca é alvo -- é isto que
+        // faz o raio "ignorar a caixa 3D do AP" (decisão do usuário, ver comentário grande de IGNORAR_PERTO).
         if (!p || p.id === this.obj.id) continue;
         if (atenuacaoDoPick(p) > 0) out.push(m);
       }
@@ -1189,7 +1156,11 @@
       const pose = this._pose();
       if (!pose) return { ok: false, erro: 'AP ainda não está na cena 3D.' };
       this.cancelScan();
-      this.clear();
+      // [24/09/2026] NOVO -- pedido verbatim: "Deve ter a opção de habilitar ou não [...] se, ao fazer uma nova
+      // varredura, fica sendo exibida a varredura anterior (caso esteja habilitada para aparecer) ou não."
+      // Com `manterAnterior` ligado a malha/pontos/raios antigos ficam na cena durante a varredura e só são
+      // trocados pelos novos ao concluir (ver `_concluir`).
+      if (!this.manterAnterior) this.clear();
       if (opc.densidade) this.densidade = opc.densidade;
       if (opc.meshMode) this.meshMode = opc.meshMode;
       const passo = DENSIDADES[this.densidade].passo;
@@ -1204,7 +1175,7 @@
         raycaster: new THREE.Raycaster(),
         dir: new THREE.Vector3(), tmp: [],
         dist: NIVEIS.map(() => new Float32Array(total)),
-        P: this.powerWatts, faixa: this.signalFrequency, meshMode: this.meshMode,
+        P: this.powerWatts, faixa: this.signalFrequency, meshMode: this.meshMode, rssiThreshold: this.rssiThreshold,
         orcamento: Math.max(1, opc.orcamentoMs || ORCAMENTO_MS),
         saida: new Float32Array(NIVEIS.length),
         barreirasPorRaio: new Array(total).fill(null),   // ver `_passo`/`_cfg` (comentário grande, modo 'colisao')
@@ -1265,7 +1236,7 @@
           // finge um teto que não está desenhado.
           barreiras.sort((a, b) => a.d - b.d);
         }
-        distanciasDoRaio(P0, barreiras, t.saida);
+        distanciasDoRaio(P0, barreiras, t.saida, intensidadeDeDbm(t.rssiThreshold));
         for (let k = 0; k < NIVEIS.length; k++) t.dist[k][t.i] = t.saida[k];
         // [22/09/2026] NOVO -- guarda as distâncias de TODAS as colisões reais deste raio (não só as que de
         // fato atenuam -- basta ter batido em algo com `atenuacaoDoPick > 0`, mesmo critério de `barreiras`
@@ -1288,6 +1259,7 @@
     /** Fim da varredura: monta a malha, faz o fade-in e notifica. */
     _concluir(t) {
       this._raf = 0; this._tarefa = null; this.scanning = false;
+      if (this.manterAnterior) this.clear();   // [24/09/2026] troca a varredura antiga (mantida na tela) pela nova
       // [22/09/2026] NOVO -- guarda a tarefa concluída (dist/pose/barreirasPorRaio) pra `pontosRaycasterModo`
       // poder reconstruir os pontos/raios do raycaster instantaneamente ao trocar de modo, sem refazer a
       // varredura (ver setter em `_cfg()`/comentário grande lá).
@@ -1315,7 +1287,16 @@
      * `optimizeSignalMesh` (nova esteira de simplificação adaptativa). O restante (material/mesh/inserção na
      * cena) é o mesmo para os 2 modos -- só o CONTEÚDO da geometria muda.
      */
-    _construirMalha(t) {
+    /**
+     * @param {object} t
+     * @param {boolean} [instantaneo] [24/09/2026] NOVO -- pedido verbatim: "ao ativar os botões de
+     *   'superfície da malha' e, depois, ativar e desativar as opções de 'reflexão' e de 'refração' a malha
+     *   pisca (desaparece e reaparece). Faça com que a troca seja imediata sem essa transição." A malha nova
+     *   sempre nasce com `uFade=0` e `_fadeIn()` anima 0→1 -- ótimo pra uma varredura terminando agora, mas
+     *   perceptível como "pisca" ao só REFILTRAR um resultado já visível (`AccessPointAvancado._refiltrar`,
+     *   troca de reflexão/refração). Com `instantaneo=true`, pula a animação: `uFade` vai direto pra 1.
+     */
+    _construirMalha(t, instantaneo) {
       const THREE = this.engine.THREE, nT = t.nT, nP = t.nP, nNiv = NIVEIS.length;
       const vPorCasca = (nT + 1) * nP;
       // direções unitárias de cada vértice da grade (reutilizadas por todas as cascas E pelos 2 modos de malha)
@@ -1324,7 +1305,50 @@
         const r = ti === 0 ? 0 : ti === nT ? 1 : 2 + (ti - 1) * nP + pj, v = ti * nP + pj;
         this._direcao(t, r, d); dirs[v * 3] = d.x; dirs[v * 3 + 1] = d.y; dirs[v * 3 + 2] = d.z; rayDe[v] = r;
       }
-      const grade = { THREE, nT, nP, nNiv, vPorCasca, dirs, rayDe, o: t.pose.origem, niveis: NIVEIS };
+      // [23/09/2026] NOVO -- pedido verbatim: "'Modo dos pontos/raios' [...] deve atuar também [...] em
+      // 'superfície de malha (por nível)' [...] poderá mostrar a forma 3D (por nível), apenas onde houve
+      // colisão, quando 'Colisão real' estiver selecionado." Só no modo 'colisao' (`pontosRaycasterModo`):
+      // pra cada nível `k`/raio primário `i`, procura a PRIMEIRA barreira real (`t.barreirasPorRaio[i]`)
+      // dentro da faixa `[dIn, dOut]` daquele nível -- MESMA lógica/mesma faixa de `_construirPontosRaios`
+      // (ver comentário grande lá). `distEfetivo[k][i]` = distância a usar pro vértice daquele raio/nível
+      // (a colisão real, se achou; a borda analítica `dOut`, senão -- só usada se `visivelArr` disser que é
+      // visível); `visivelArr[k][i]` = 1 se achou colisão real na faixa, 0 senão. No modo 'alcance' (de
+      // sempre) os dois ficam `null` -- `gerarCascasReal`/`optimizeSignalMesh` caem no `t.dist` de sempre.
+      // [23/09/2026] NOVO -- pedido verbatim: "ao fazer uma varredura e em 'superfície 3D do motor avançado
+      // (por nível)', deixar apenas o 'excelente' ativado, uma forma é desenhada. Está forma é que deve ser
+      // feita [...] na varredura normal quando se seleciona 'colisão real' e 'raio completo'." A malha do
+      // motor AVANÇADO nunca "fura": todo vértice sempre tem uma distância (a de uma colisão real ao longo
+      // do raio, ou a borda física quando não houve nenhuma), dando uma superfície sempre CONTÍNUA. Isso só
+      // faz sentido combinado com 'raio completo' (procurar a colisão em toda a extensão [0, borda], não só
+      // na fatia [dIn, borda] daquele nível) -- com 'por nível' a malha continua recortada (só aparece onde
+      // colidiu, dentro da fatia), como já era.
+      const raioCompleto = this.raiosExtensao === 'completo';
+      let distEfetivo = null, visivelArr = null;
+      if (this.pontosRaycasterModo === 'colisao') {
+        distEfetivo = []; visivelArr = [];
+        for (let k = 0; k < nNiv; k++) {
+          const dE = new Float32Array(t.total), vA = new Uint8Array(t.total);
+          for (let i = 0; i < t.total; i++) {
+            const dOut = t.dist[k][i];
+            // [23/09/2026] CORRIGIDO -- pedido verbatim: "os raios verdes estão indo até o limite do nível
+            // fraco mais distante. Não é para ser assim [...] desenhar o raio/malha 'completo' significa
+            // partir do AP e ir até o limite do SEU PRÓPRIO nível [...] Esta 'borda' é do próprio nível, não
+            // a borda mais externa de todas do cardioide." A tentativa anterior removia o teto `dOut` da
+            // busca (usava `bs[0]` em TODA a extensão do raio, sem limite) -- isso deixava um nível mais
+            // forte "vazar" até a colisão real de um nível mais fraco (mais distante), errado. Volta a
+            // limitar a busca ao teto `dOut` DESTE nível -- só a base (`dIn`) muda: 0 em 'completo' (busca a
+            // colisão em toda a faixa [0, borda deste nível]), ou a borda do nível mais forte anterior em
+            // 'por nível' (fatiado, comportamento de sempre).
+            const dIn = raioCompleto ? 0 : (k < nNiv - 1 ? t.dist[k + 1][i] : 0);
+            const bs = t.barreirasPorRaio && t.barreirasPorRaio[i];
+            let achou = -1;
+            if (bs) { for (let b = 0; b < bs.length; b++) { if (bs[b] >= dIn - 1e-6 && bs[b] <= dOut + 1e-6) { achou = bs[b]; break; } } }
+            if (achou < 0) { dE[i] = dOut; vA[i] = 0; } else { dE[i] = achou; vA[i] = 1; }
+          }
+          distEfetivo.push(dE); visivelArr.push(vA);
+        }
+      }
+      const grade = { THREE, nT, nP, nNiv, vPorCasca, dirs, rayDe, o: t.pose.origem, niveis: NIVEIS, distEfetivo, visivelArr, malhaCompleta: raioCompleto };
       // "pontos brutos": a nuvem de amostragem densa de verdade (raios × níveis) -- SEMPRE na densidade
       // configurada pelo usuário, independente do meshMode (a física/precisão nunca é reduzida).
       this.pontosBrutos = t.total * nNiv;
@@ -1348,25 +1372,9 @@
       // `malhaWireframe` (ver getters/setters abaixo) guardam o estado; a mais EXTERNA é o nível 0 ('fraco'
       // -- ver `NIVEIS`), então "só habilitar a superfície mais externa" é só ligar o nível 0 e desligar os
       // outros 4, do mesmo jeito que os pontos/raios por nível já funcionam.
-      const trisOffsets = new Uint32Array(nNiv + 1);
-      for (let k = 0; k < nNiv; k++) trisOffsets[k + 1] = trisOffsets[k] + gerado.trisPorCasca[k];
-      const uniformsCompartilhado = { uFade: { value: 0 } };
-      const mostrarNiveis = this.mostrarMalhaNiveis, wireframe = this.malhaWireframe;
-      const materiais = [];
-      for (let k = 0; k < nNiv; k++) {
-        geo.addGroup(trisOffsets[k] * 3, (trisOffsets[k + 1] - trisOffsets[k]) * 3, k);
-        const matNivel = new THREE.ShaderMaterial({
-          uniforms: uniformsCompartilhado, vertexShader: VERT, fragmentShader: FRAG,
-          transparent: true, depthWrite: false, side: THREE.DoubleSide, wireframe: !!wireframe,
-          clipping: true, // [22/09/2026] necessário p/ os `#include <clipping_planes_*>` do VERT/FRAG funcionarem
-        });
-        matNivel.visible = mostrarNiveis[k] !== false;
-        materiais.push(matNivel);
-      }
-      const m = new THREE.Mesh(geo, materiais);
-      m.name = 'wifi-mapa:' + this.obj.id; m.renderOrder = 8; m.frustumCulled = false;
-      m.raycast = function () {};                    // o mapa de sinal nunca intercepta cliques nem raycasts
-      m.userData.wifi = true;
+      // [23/09/2026] MUDADO -- monta o `THREE.Mesh` multi-material via `montarMeshDeCascas` (compartilhada
+      // (única chamadora desde a remoção do motor avançado).
+      const { mesh: m, trisOffsets } = montarMeshDeCascas(THREE, gerado, nNiv, this.mostrarMalhaNiveis, this.malhaWireframe, 'wifi-mapa:' + this.obj.id);
       this.malha = m;
       if (this.engine._group) this.engine._group.add(m);
       // [21/09/2026] NOVO -- guarda a "forma" da grade (nT/nP/vPorCasca) e incrementa a versão da malha: é
@@ -1390,6 +1398,25 @@
       // varredura, reentrar no "Ver em 3D" etc.) o mapa "reaparecia" mesmo com "mostrar mapa" desmarcado
       // (até o próximo `atualizarVisibilidade()`/toggle manual). Sincroniza aqui, imediatamente.
       this.atualizarVisibilidade();
+      // [23/09/2026] CORRIGIDO -- pedido verbatim: "Ao fazer a varredura normal e alternar entre 'Alcance' e
+      // 'Colisão Real' a forma 3D desaparece e não volta mais." CAUSA RAIZ: cada malha NOVA nasce com o
+      // uniform `uFade` (compartilhado pelos 5 materiais, ver `uniformsCompartilhado` acima) começando em 0
+      // (invisível) -- só `_fadeIn()` (rAF que anima `uFade` 0→1) deixa ela aparecer. `_concluir()` (fim de
+      // uma varredura) sempre chamava `_fadeIn()` DEPOIS de `_construirMalha()`, mas o setter
+      // `pontosRaycasterModo` (troca de 'Alcance'/'Colisão real', ver comentário grande lá) reconstrói a
+      // malha SEM passar por `_concluir()` -- a malha nova ficava presa em `uFade=0` pra sempre (só uma
+      // varredura nova, que passa por `_concluir()`, resolvia). Chamar `_fadeIn()` aqui dentro, sempre que
+      // uma malha nova nasce (não só ao fim de uma varredura), corrige na raiz -- `_concluir()` continua
+      // chamando `_fadeIn()` depois também, mas isso só reinicia o mesmo rAF já em andamento, sem efeito
+      // colateral (`_fadeIn()` cancela o anterior antes de começar um novo).
+      // [24/09/2026] NOVO -- `instantaneo` (ver doc do método) pula a animação -- `uFade` direto em 1, sem
+      // passar por `_fadeIn()`/rAF nenhum, pra um simples refiltro (reflexão/refração) não "piscar".
+      if (instantaneo) {
+        cancelAnimationFrame(this._fadeRaf);
+        (Array.isArray(m.material) ? m.material[0] : m.material).uniforms.uFade.value = 1;
+      } else {
+        this._fadeIn();
+      }
     }
 
     /** [24/09/2026] NOVO, [25/09/2026] AMPLIADO -- pedido verbatim: "um outro controle de exibir os pontos
@@ -1419,15 +1446,20 @@
       // distância final (`dFinal`) do ponto correspondente, só que o outro extremo do segmento continua
       // fatiado (`dIn`), igual ao modo 'alcance'.
       const modoColisao = this.pontosRaycasterModo === 'colisao';
+      // [23/09/2026] NOVO -- ver comentário grande em `_cfg()`/`raiosExtensao`. 'completo': o raio sempre
+      // parte da origem do AP (0), em vez de ficar fatiado só dentro da faixa daquele nível.
+      const raioCompleto = this.raiosExtensao === 'completo';
       for (let k = 0; k < nNiv; k++) {
         const posList = [], lineList = [];
         for (let i = 0; i < n; i++) {
           const dOut = t.dist[k][i];                                    // borda externa deste nível
-          const dIn = k < nNiv - 1 ? t.dist[k + 1][i] : 0;                // borda interna (nível mais forte anterior, ou a origem)
+          const dIn = raioCompleto ? 0 : (k < nNiv - 1 ? t.dist[k + 1][i] : 0);   // borda interna (nível mais forte anterior, ou a origem)
           let dFinal = dOut;
           if (modoColisao) {
             const bs = t.barreirasPorRaio && t.barreirasPorRaio[i];
             let achou = -1;
+            // [23/09/2026] CORRIGIDO -- ver comentário grande em `_construirMalha` (mesma correção): a busca
+            // continua sempre limitada ao teto `dOut` DESTE nível -- só a base `dIn` muda com 'completo'.
             if (bs) { for (let b = 0; b < bs.length; b++) { if (bs[b] >= dIn - 1e-6 && bs[b] <= dOut + 1e-6) { achou = bs[b]; break; } } }
             if (achou < 0) continue;   // nenhuma superfície real nesta faixa -- pula este raio/nível
             dFinal = achou;
@@ -1476,16 +1508,28 @@
       cancelAnimationFrame(this._fadeRaf); this._fadeRaf = requestAnimationFrame(passo);
     }
 
+    /** Libera geometria/material da GPU de UMA malha (`THREE.Mesh` multi-material, ver `_construirMalha`) e
+     *  a remove da cena -- não mexe em `this.malha`/estado nenhum, só descarta o objeto passado. [24/09/2026]
+     *  NOVO -- extraído de `_removerMalha()` pra também ser usado por `AccessPointAvancado._refiltrar()`
+     *  (troca instantânea: constrói a malha NOVA primeiro, só depois descarta a ANTIGA por aqui). */
+    _disposeMalhaObj(m) {
+      if (!m) return;
+      if (m.parent) m.parent.remove(m);
+      m.geometry.dispose();
+      (Array.isArray(m.material) ? m.material : [m.material]).forEach((mt) => mt.dispose());
+    }
     /** Remove a malha antiga (libera geometria/material da GPU) e os caches/recursos da projeção 2D. */
+    /** [23/09/2026] NOVO -- descarte só da malha atual (geometria/materiais + remove da cena), extraído de
+     *  `clear()` pra ser reaproveitado por `pontosRaycasterModo` (trocar de modo agora reconstrói TAMBÉM a
+     *  malha/superfície -- ver comentário grande no setter -- sem apagar `_ultimaTarefa`/pontos/raios/corte,
+     *  ao contrário de `clear()`, que descarta tudo). */
+    _removerMalha() {
+      this._disposeMalhaObj(this.malha);
+      this.malha = null;
+    }
     clear() {
       cancelAnimationFrame(this._fadeRaf);
-      if (this.malha) {
-        if (this.malha.parent) this.malha.parent.remove(this.malha);
-        this.malha.geometry.dispose();
-        // [26/09/2026] MUDADO -- `material` agora é um ARRAY (1 por nível -- ver `_construirMalha`).
-        (Array.isArray(this.malha.material) ? this.malha.material : [this.malha.material]).forEach((mt) => mt.dispose());
-        this.malha = null;
-      }
+      this._removerMalha();
       // [24/09/2026] NOVO, [25/09/2026] AMPLIADO -- descarta junto as 5 nuvens de pontos/conjuntos de raios
       // do raycaster (1 por nível, ver construtor) -- mesmo ciclo de vida da malha (refeitos a cada nova
       // varredura, ver `_concluir`/`_construirPontosRaios`).
@@ -1495,182 +1539,31 @@
       this._removerCorteSuperficie();   // [29/09/2026] NOVO -- "Vista em Corte" some junto com a malha que recorta
       this._ultimaTarefa = null;
     }
+    /** Libera geometria/material da GPU de UM par pontos+raios de um nível e os remove da cena -- não mexe em
+     *  `cloudRaycastPorNivel`/`raiosRaycastPorNivel`, só descarta os objetos passados. [24/09/2026] NOVO --
+     *  extraído de `_descartarPontosRaios()`, mesmo motivo de `_disposeMalhaObj` (troca instantânea). */
+    _disposeParPontosRaios(p, l) {
+      if (p) { if (p.parent) p.parent.remove(p); p.geometry.dispose(); p.material.dispose(); }
+      if (l) { if (l.parent) l.parent.remove(l); l.geometry.dispose(); l.material.dispose(); }
+    }
     /** [22/09/2026] NOVO -- descarte dos 5 pares pontos/raios do raycaster, extraído de `clear()` pra também
      *  ser reaproveitado por `pontosRaycasterModo` (trocar de modo refaz só ISTO, sem mexer na malha/corte). */
     _descartarPontosRaios() {
       for (let k = 0; k < this.cloudRaycastPorNivel.length; k++) {
-        const p = this.cloudRaycastPorNivel[k];
-        if (p) { if (p.parent) p.parent.remove(p); p.geometry.dispose(); p.material.dispose(); this.cloudRaycastPorNivel[k] = null; }
-        const l = this.raiosRaycastPorNivel[k];
-        if (l) { if (l.parent) l.parent.remove(l); l.geometry.dispose(); l.material.dispose(); this.raiosRaycastPorNivel[k] = null; }
+        this._disposeParPontosRaios(this.cloudRaycastPorNivel[k], this.raiosRaycastPorNivel[k]);
+        this.cloudRaycastPorNivel[k] = null; this.raiosRaycastPorNivel[k] = null;
       }
     }
 
-    // ---- varredura AVANÇADA (reflexão/refração -- atalhos que envolvem `SignalPropagationEngine`) ------------
-    /**
-     * [22/09/2026] NOVO -- atalho recomendado pra UI: dispara o motor avançado (`motorAvancado.start`), troca a
-     * nuvem de pontos antiga pela nova quando terminar e mantém `onProgressAvancado`/`onDoneAvancado` (se
-     * definidos) informados — mesmo padrão de callback de `startScan`/`onProgress`/`onDone`, mas em campos
-     * separados pra não colidir com a varredura do motor ORIGINAL (os dois podem rodar em paralelo).
-     */
-    startScanAvancado(opc) {
-      const motor = this.motorAvancado;
-      motor.onProgress = (pct) => { if (typeof this.onProgressAvancado === 'function') { try { this.onProgressAvancado(pct, this); } catch (e) { /* UI fechada */ } } };
-      // [22/09/2026] MUDADO -- pedido verbatim: "coloque os botões de níveis para os pontos e para os raios,
-      // assim como na varredura normal." A nuvem única que o motor montava (`cloud`, via `_montarNuvem`) foi
-      // descartada -- `_construirPontosAvancado` monta 5 nuvens (1 por nível) direto de `pontos.x/y/z/dbm`
-      // (mesmo padrão de `AccessPoint._construirPontosRaios` do motor original). "Grade quadriculada"
-      // removida (`m.grade`/`_montarGrade` não existem mais).
-      motor.onDone = (pontos, cloud, m) => {
-        this.clearAvancado();
-        this._construirPontosAvancado(pontos);
-        this._raiosAvancadoDados = m.raiosDados || null;
-        // [29/09/2026] NOVO -- malha de cascas do motor avançado (ver `SignalPropagationEngine.
-        // _construirMalhaAvancada`) -- objeto 3D À PARTE da nuvem/grade acima, com seu próprio fade-in.
-        if (m.malha3D) {
-          this.malhaAvancada = m.malha3D.mesh;
-          this._gradeAvancadaMalha = m.malha3D.grade;
-          this.pontosMalhaAvancada = m.malha3D.pontosMalha;
-          this.trianglesMalhaAvancada = m.malha3D.trianglesMalha;
-          if (this.engine._group) this.engine._group.add(this.malhaAvancada);
-          this._fadeInAvancado();
-        }
-        // [28/09/2026] NOVO -- monta a geometria de raios já filtrada pela densidade atual, a partir dos
-        // dados brutos acima de cima (ver `_reconstruirRaiosAvancado`) -- não é mais `m.raios` direto.
-        this._reconstruirRaiosAvancado();
-        this.aplicarVisibilidadeAvancado();
-        // [28/09/2026] NOVO -- pedido verbatim: "Na varredura avançada, coloque as mesmas informações
-        // [raios/tempo/alcance + malha] quanto a varredura avançada feita." Espelha `ultimoResultado` do
-        // motor original (ver view3d-rede.js, bloco "última varredura avançada").
-        this.ultimoResultadoAvancado = pontos;
-        if (typeof this.onDoneAvancado === 'function') { try { this.onDoneAvancado(this, pontos); } catch (e) { /* ignore */ } }
-      };
-      return motor.start(opc);
-    }
-    cancelScanAvancado() { if (this._motorAvancado) this._motorAvancado.cancel(); }
-    /** Remove as nuvens/raios avançados por nível (+ malha, se houver) da cena (libera GPU). */
-    clearAvancado() {
-      for (let k = 0; k < this.cloudAvancadoPorNivel.length; k++) {
-        const c = this.cloudAvancadoPorNivel[k];
-        if (c) { if (c.parent) c.parent.remove(c); c.geometry.dispose(); c.material.dispose(); this.cloudAvancadoPorNivel[k] = null; }
-        const r = this.raiosAvancadoPorNivel[k];
-        if (r) { if (r.parent) r.parent.remove(r); r.geometry.dispose(); r.material.dispose(); this.raiosAvancadoPorNivel[k] = null; }
-      }
-      this._raiosAvancadoDados = null;
-      // [29/09/2026] NOVO -- malha de cascas do motor avançado (ver `_construirMalhaAvancada`/`startScanAvancado`).
-      cancelAnimationFrame(this._fadeRafAvancado);
-      const mm = this.malhaAvancada;
-      if (mm) {
-        if (mm.parent) mm.parent.remove(mm);
-        mm.geometry.dispose();
-        (Array.isArray(mm.material) ? mm.material : [mm.material]).forEach((mt) => mt.dispose());
-        this.malhaAvancada = null;
-      }
-      this._gradeAvancadaMalha = null; this.pontosMalhaAvancada = 0; this.trianglesMalhaAvancada = 0;
-    }
-    /** Fade-in suave da malha do motor avançado -- mesmo smoothstep de `_fadeIn` (motor original). */
-    _fadeInAvancado() {
-      const m = this.malhaAvancada; if (!m) return;
-      const t0 = performance.now();
-      const passo = () => {
-        if (!this.malhaAvancada || this.malhaAvancada !== m) return;
-        const k = Math.min(1, (performance.now() - t0) / FADE_MS);
-        (Array.isArray(m.material) ? m.material[0] : m.material).uniforms.uFade.value = k * k * (3 - 2 * k);
-        if (k < 1) this._fadeRafAvancado = requestAnimationFrame(passo);
-      };
-      cancelAnimationFrame(this._fadeRafAvancado); this._fadeRafAvancado = requestAnimationFrame(passo);
-    }
-    /** [22/09/2026] NOVO -- monta as 5 nuvens de pontos (1 por nível de `NIVEIS`) do motor avançado a partir
-     *  de `pontos.x/y/z/dbm` (todos os pontos de colisão já calculados, primários + ricocheteados) -- cada
-     *  ponto entra na nuvem do seu próprio nível (`_nivelPorDbm(dbm)`), MESMO padrão visual de
-     *  `AccessPoint._construirPontosRaios` (motor original), mas sem a subdivisão analítica por-raio (o motor
-     *  avançado só tem o ponto de colisão real de cada raio, não uma distância por nível ao longo do trajeto).
-     *  Substitui a antiga nuvem única (`_montarNuvem`, removida) -- pedido verbatim: "coloque os botões de
-     *  níveis para os pontos [...] assim como na varredura normal". */
-    _construirPontosAvancado(pontos) {
-      if (!this.engine || !this.engine.THREE || !pontos || !pontos.n) return;
-      const THREE = this.engine.THREE, n = pontos.n, nNiv = NIVEIS.length;
-      const porNivel = NIVEIS.map(() => ({ x: [], y: [], z: [] }));
-      for (let i = 0; i < n; i++) {
-        const N = _nivelPorDbm(pontos.dbm[i]), k = NIVEIS.indexOf(N), b = porNivel[k];
-        b.x.push(pontos.x[i]); b.y.push(pontos.y[i]); b.z.push(pontos.z[i]);
-      }
-      const mostrarNiveis = this.avancadoMostrarPontosNiveis;
-      for (let k = 0; k < nNiv; k++) {
-        const b = porNivel[k]; if (!b.x.length) continue;
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(_entrelacarXYZ(Float32Array.from(b.x), Float32Array.from(b.y), Float32Array.from(b.z)), 3));
-        geo.computeBoundingSphere();
-        const corNivel = NIVEIS[k].cor, cor3 = new THREE.Color(corNivel[0], corNivel[1], corNivel[2]);
-        const mat = new THREE.PointsMaterial({ color: cor3, size: 0.05, sizeAttenuation: true, transparent: true, opacity: 0.85, depthWrite: false });
-        const pts = new THREE.Points(geo, mat);
-        pts.name = 'wifi-nuvem-avancada:' + NIVEIS[k].nome + ':' + this.obj.id; pts.renderOrder = 9; pts.frustumCulled = false;
-        pts.raycast = function () {};
-        pts.userData.wifi = true;
-        pts.visible = !!mostrarNiveis[k];
-        this.cloudAvancadoPorNivel[k] = pts;
-        if (this.engine._group) this.engine._group.add(pts);
-      }
-    }
-    /** [28/09/2026] NOVO, [22/09/2026] MUDADO -- pedido verbatim: "Ao variar a Densidade dos raios, deve ser
-     *  imediato, os raios já foram montados (os pontos já foram calculados). O que esta opção deve fazer é
-     *  imprimir 1 a cada 10 (se for 10%)." + "coloque os botões de níveis para os [...] raios." Reconstrói as
-     *  5 GEOMETRIAS de `raiosAvancadoPorNivel` (descarta as antigas, monta novas, já filtradas por densidade
-     *  E bucketadas por nível) a partir de `this._raiosAvancadoDados` (todos os raios já calculados na
-     *  última varredura avançada) -- nunca dispara um raycast novo, então troca de densidade é instantânea.
-     *  Chamada ao terminar a varredura E toda vez que `avancadoDensidadeRaios` muda. */
-    _reconstruirRaiosAvancado() {
-      for (let k = 0; k < this.raiosAvancadoPorNivel.length; k++) {
-        const antigo = this.raiosAvancadoPorNivel[k];
-        if (antigo) { if (antigo.parent) antigo.parent.remove(antigo); antigo.geometry.dispose(); antigo.material.dispose(); this.raiosAvancadoPorNivel[k] = null; }
-      }
-      const dados = this._raiosAvancadoDados;
-      if (!dados || !dados.n || !this.engine || !this.engine.THREE) return;
-      const THREE = this.engine.THREE, nNiv = NIVEIS.length;
-      const passo = Math.max(1, Math.round(1 / Math.max(0.001, this.avancadoDensidadeRaios)));
-      const porNivel = NIVEIS.map(() => ({ pos: [], cor: [] }));
-      for (let i = 0; i < dados.n; i++) {
-        if ((dados.lprim[i] % passo) !== 0) continue;
-        const N = _nivelPorDbm(dados.ldbm[i]), k = NIVEIS.indexOf(N), b = porNivel[k];
-        b.pos.push(dados.lx0[i], dados.ly0[i], dados.lz0[i], dados.lx1[i], dados.ly1[i], dados.lz1[i]);
-        // origem mais apagada (sem intensidade ainda medida ali), fim na cor real do nível -- dá noção de
-        // direção/gradiente do raio sem precisar calcular o nível em CADA ponto intermediário.
-        b.cor.push(N.cor[0] * 0.35, N.cor[1] * 0.35, N.cor[2] * 0.35, N.cor[0], N.cor[1], N.cor[2]);
-      }
-      const mostrarNiveis = this.avancadoMostrarRaiosNiveis;
-      for (let k = 0; k < nNiv; k++) {
-        const b = porNivel[k]; if (!b.pos.length) continue;
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(b.pos), 3));
-        geo.setAttribute('color', new THREE.BufferAttribute(Float32Array.from(b.cor), 3));
-        geo.computeBoundingSphere();
-        const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false });
-        const linhas = new THREE.LineSegments(geo, mat);
-        linhas.name = 'wifi-raios-avancado:' + NIVEIS[k].nome + ':' + this.obj.id; linhas.renderOrder = 9; linhas.frustumCulled = false;
-        linhas.raycast = function () {};
-        linhas.userData.wifi = true;
-        linhas.visible = !!mostrarNiveis[k];
-        this.raiosAvancadoPorNivel[k] = linhas;
-        if (this.engine._group) this.engine._group.add(linhas);
-      }
-    }
-    /** [22/09/2026] MUDADO -- aplica `avancadoMostrarPontosNiveis`/`avancadoMostrarRaiosNiveis` (1 flag por
-     *  nível) ao que já está na cena (chamado ao terminar a varredura E quando o usuário mexe nos botões de
-     *  nível -- ver view3d-rede.js). "Grade quadriculada" removida. */
-    aplicarVisibilidadeAvancado() {
-      const pontosNiveis = this.avancadoMostrarPontosNiveis, raiosNiveis = this.avancadoMostrarRaiosNiveis;
-      for (let k = 0; k < this.cloudAvancadoPorNivel.length; k++) {
-        if (this.cloudAvancadoPorNivel[k]) this.cloudAvancadoPorNivel[k].visible = !!pontosNiveis[k];
-        if (this.raiosAvancadoPorNivel[k]) this.raiosAvancadoPorNivel[k].visible = !!raiosNiveis[k];
-      }
-    }
+    // [23/09/2026] REMOVIDO -- pedido verbatim: "Remova todos os botões e métodos implementados para a
+    // varredura avançada." (startScanAvancado/cancelScanAvancado/clearAvancado/_fadeInAvancado/
+    // _construirPontosAvancado/_reconstruirRaiosAvancado/aplicarVisibilidadeAvancado removidos inteiros.)
 
     /** Mostra/oculta o mapa conforme o AP pode emitir (ligado + cabo). Chamar após ligar/desligar/(des)conectar cabo. */
     atualizarVisibilidade() {
       if (!this.emiteSinal) {
         this.cancelScan();
         if (this.malha) this.malha.visible = false;
-        if (this.malhaAvancada) this.malhaAvancada.visible = false;
         for (let k = 0; k < this.cloudRaycastPorNivel.length; k++) {
           if (this.cloudRaycastPorNivel[k]) this.cloudRaycastPorNivel[k].visible = false;
           if (this.raiosRaycastPorNivel[k]) this.raiosRaycastPorNivel[k].visible = false;
@@ -1683,7 +1576,6 @@
         // ao trocar de contexto 2D/3D). Agora respeita o toggle -- `this.mostrar` já é a fonte única de
         // verdade (ver getter/setter logo abaixo).
         if (this.malha) this.malha.visible = this.mostrar;
-        if (this.malhaAvancada) this.malhaAvancada.visible = true;
         const pontosNiveis = this.mostrarPontosNiveis, raiosNiveis = this.mostrarRaiosNiveis;
         for (let k = 0; k < this.cloudRaycastPorNivel.length; k++) {
           if (this.cloudRaycastPorNivel[k]) this.cloudRaycastPorNivel[k].visible = !!pontosNiveis[k];
@@ -1730,15 +1622,34 @@
       v = !!v; const arr = this._cfg().mostrarRaiosNiveis;
       arr[k] = v; if (this.raiosRaycastPorNivel[k]) this.raiosRaycastPorNivel[k].visible = v;
     }
-    /** [22/09/2026] NOVO -- ver comentário grande em `_cfg()`. Trocar de modo reconstrói os pontos/raios do
-     *  raycaster a partir dos MESMOS dados já calculados pela última varredura (`this._ultimaTarefa`, ver
-     *  `_construirPontosRaios`) -- sem precisar refazer a varredura, instantâneo (mesmo padrão de
-     *  `avancadoDensidadeRaios`). */
+    /** [22/09/2026] NOVO, [23/09/2026] AMPLIADO -- ver comentário grande em `_cfg()`. Trocar de modo
+     *  reconstrói os pontos/raios E, agora, TAMBÉM a malha/superfície (pedido verbatim: "['Modo dos
+     *  pontos/raios'] deve atuar também [...] em 'superfície de malha (por nível)'") -- tudo a partir dos
+     *  MESMOS dados já calculados pela última varredura (`this._ultimaTarefa`), sem precisar refazer a
+     *  varredura, instantâneo. */
     get pontosRaycasterModo() { return this._cfg().pontosRaycasterModo; }
     set pontosRaycasterModo(v) {
       if (v !== 'alcance' && v !== 'colisao') return;
       this._cfg().pontosRaycasterModo = v;
-      if (this._ultimaTarefa) { this._descartarPontosRaios(); this._construirPontosRaios(this._ultimaTarefa); }
+      if (this._ultimaTarefa) {
+        this._descartarPontosRaios(); this._construirPontosRaios(this._ultimaTarefa);
+        this._removerMalha(); this._construirMalha(this._ultimaTarefa);
+      }
+    }
+    /** [23/09/2026] NOVO -- ver comentário grande em `_cfg()`. Só afeta os RAIOS (segmentos) do raycaster --
+     *  os pontos já são um único ponto na extremidade (não têm "parte de dentro" a mostrar/esconder) e a
+     *  malha já representa a extensão completa de cada nível por natureza (é a própria borda/casca, não um
+     *  segmento fatiado). Troca reconstrói só os raios, a partir dos dados já calculados -- instantâneo. */
+    get raiosExtensao() { return this._cfg().raiosExtensao; }
+    set raiosExtensao(v) {
+      if (v !== 'porNivel' && v !== 'completo') return;
+      this._cfg().raiosExtensao = v;
+      if (this._ultimaTarefa) {
+        this._descartarPontosRaios(); this._construirPontosRaios(this._ultimaTarefa);
+        // [23/09/2026] NOVO -- combinado com 'colisão real', este modo agora TAMBÉM muda a forma da malha
+        // (ver comentário grande em `_construirMalha`) -- reconstrói ela também, não só pontos/raios.
+        this._removerMalha(); this._construirMalha(this._ultimaTarefa);
+      }
     }
     /** [26/09/2026] NOVO -- mesmo padrão acima, mas pra CASCA (superfície 3D) de cada nível da malha do
      *  heatmap (ver `_construirMalha` -- 1 material por nível, `material.visible` liga/desliga aquela casca
@@ -1768,22 +1679,10 @@
      *  janela de propriedades fechada e entre entradas em "Ver em 3D". */
     set miniJanela(v) { this._cfg().miniJanela = !!v; }
     get miniJanela() { return this._cfg().miniJanela; }
-
-    // ---- malha 3D do motor AVANÇADO (mesmo padrão de `mostrarMalhaNiveis`/`malhaWireframe` acima) --------------
-    /** [29/09/2026] NOVO -- equivalente a `mostrarMalhaNiveis`, mas pra malha do motor AVANÇADO (`malhaAvancada`). */
-    get avancadoMostrarMalhaNiveis() { return this._cfg().avancadoMostrarMalhaNiveis; }
-    setAvancadoMostrarMalhaNivel(k, v) {
-      v = !!v; const arr = this._cfg().avancadoMostrarMalhaNiveis; arr[k] = v;
-      const mats = this.malhaAvancada && this.malhaAvancada.material;
-      if (Array.isArray(mats) && mats[k]) mats[k].visible = v;
-    }
-    /** [29/09/2026] NOVO -- equivalente a `malhaWireframe`, mas pra malha do motor AVANÇADO. */
-    get avancadoMalhaWireframe() { return this._cfg().avancadoMalhaWireframe; }
-    set avancadoMalhaWireframe(v) {
-      v = !!v; this._cfg().avancadoMalhaWireframe = v;
-      const mats = this.malhaAvancada && this.malhaAvancada.material;
-      if (Array.isArray(mats)) mats.forEach((mt) => { mt.wireframe = v; });
-    }
+    /** [24/09/2026] NOVO -- "Manter a varredura anterior visível enquanto faz uma nova" (por tipo de varredura: a
+     *  normal guarda em `obj.rede.ap.manterAnterior`, a avançada em `obj.rede.apAvancado.manterAnterior`). */
+    get manterAnterior() { return !!this._cfg().manterAnterior; }
+    set manterAnterior(v) { this._cfg().manterAnterior = !!v; }
 
     // ---- "Vista em Corte" (varredura normal) -------------------------------------------------------------------
     /** [29/09/2026] NOVO -- pedido verbatim: "Faça a opção de 'Vista em Corte' para a varredura normal [...]
@@ -1819,14 +1718,46 @@
      *  100% = deu a volta inteira/tudo visível), sempre girando no sentido crescente a partir do ângulo fixo. */
     get corteGiroPercentual01() { return this._cfg().corteGiroPercentual01; }
     set corteGiroPercentual01(v) { v = Number(v); if (Number.isFinite(v)) this._cfg().corteGiroPercentual01 = Math.max(0, Math.min(1, v)); this.atualizarCorte(); }
-    /** Altura Y (mundo) absoluta do plano de corte AGORA (modo 'superficie'), resolvida a partir de
-     *  `corteAltura01` e da extensão vertical real das cascas (bounding box de `this.malha`). `null` sem
-     *  malha nenhuma construída ainda. */
-    get corteAlturaY() {
-      if (!this.malha) return null;
+    /** [23/09/2026] CORRIGIDO -- pedido verbatim: "a 'Altura do corte' deve controlar o deslocamento da
+     *  superfície de corte pela sua normal bem no centro da superfície. Não como está atualmente." CAUSA
+     *  RAIZ: a fórmula antiga (`bb.min.y + corteAltura01*(bb.max.y-bb.min.y)`) deslocava o plano SEMPRE
+     *  pelo eixo Y do MUNDO, usando só a extensão vertical (Y) da bounding box -- correto por acaso quando
+     *  o corte é horizontal (`corteEixoInterno`/`corteEixoExterno` = 0, onde "pela normal" e "por Y" são a
+     *  mesma coisa), mas errado assim que o corte é inclinado: o plano continuava subindo/descendo só em
+     *  Y, nunca ao longo da sua PRÓPRIA normal (já inclinada) -- e a referência de 0%/100% (`bb.min.y`/
+     *  `bb.max.y`) também não tinha nenhuma relação com o CENTRO da malha, só com os extremos verticais
+     *  dela. CORRIGIDO: `_corteSuperficiePonto()` (novo, abaixo) desloca o plano a partir do CENTRO real
+     *  da bounding box (`bb.getCenter`), pela normal JÁ INCLINADA (mesma normal usada pelo recorte de
+     *  verdade), por uma meia-extensão calculada projetando a meia-diagonal da caixa nessa normal (uma
+     *  caixa é centralmente simétrica em torno do próprio centro, então essa meia-extensão vale IGUAL nos
+     *  2 sentidos da normal) -- 0% = extremo "de baixo" da normal, 100% = extremo "de cima", sempre
+     *  passando pelo centro em 50%, qualquer que seja a inclinação. Quando a normal é puramente vertical
+     *  (caso de sempre, inclinação 0/0), o resultado é IDÊNTICO ao de antes (centro ± metade da extensão Y
+     *  = `bb.min.y`/`bb.max.y`) -- corrige só o caso inclinado, sem mudar o comportamento já correto. */
+    _corteSuperficiePonto() {
+      const THREE = this.engine && this.engine.THREE;
+      if (!this.malha || !THREE) return null;
       if (!this.malha.geometry.boundingBox) this.malha.geometry.computeBoundingBox();
       const bb = this.malha.geometry.boundingBox;
-      return bb.min.y + this.corteAltura01 * (bb.max.y - bb.min.y);
+      const centro = bb.getCenter(new THREE.Vector3());
+      const meio = bb.max.clone().sub(centro);   // meia-extensão por eixo (>= 0) -- caixa centralizada em `centro`
+      const interno = this.corteEixoInterno * Math.PI / 180, externo = this.corteEixoExterno * Math.PI / 180;
+      const normal = new THREE.Vector3(0, -1, 0);
+      if (interno) normal.applyAxisAngle(new THREE.Vector3(1, 0, 0), interno);   // eixo interno gira sobre si mesmo
+      if (externo) normal.applyAxisAngle(new THREE.Vector3(0, 1, 0), externo);   // eixo externo reposiciona o conjunto
+      normal.normalize();
+      // meia-extensão da caixa PROJETADA nesta normal (soma das projeções dos 3 semi-eixos -- fórmula
+      // padrão de "extensão de uma AABB numa direção"), simétrica em torno de `centro` por construção.
+      const meioExtensao = Math.abs(normal.x) * meio.x + Math.abs(normal.y) * meio.y + Math.abs(normal.z) * meio.z;
+      const ponto = centro.clone().addScaledVector(normal, meioExtensao * (2 * this.corteAltura01 - 1));
+      return { ponto, normal, centro, meioExtensao, interno, externo };
+    }
+    /** Altura Y (mundo) absoluta do plano de corte AGORA (modo 'superficie') -- só a componente Y do ponto
+     *  de `_corteSuperficiePonto()` (mantido por compatibilidade: usado por `_corteInfo2D`/o mapa 2D, que
+     *  só precisam da altura, ver comentário de `_corteInfo2D`). `null` sem malha nenhuma construída ainda. */
+    get corteAlturaY() {
+      const r = this._corteSuperficiePonto();
+      return r ? r.ponto.y : null;
     }
     /** Aplica (ou remove) o recorte nos 5 materiais de `this.malha` + cria/atualiza/remove o(s) elemento(s)
      *  visual(is) -- despacha pro modo certo (`corteModo`). Chamada pelos setters acima e sempre que uma malha
@@ -1857,18 +1788,17 @@
      *  `corteEixoInterno` é a colatitude (distância angular da vertical) e `corteEixoExterno` é o azimute --
      *  juntos alcançam QUALQUER direção de inclinação possível com só 2 ângulos. */
     _aplicarCorteSuperficie(THREE, mats) {
-      const o = this._pose(); if (!o) return;
-      const y = this.corteAlturaY;
-      const interno = this.corteEixoInterno * Math.PI / 180, externo = this.corteEixoExterno * Math.PI / 180;
-      const normal = new THREE.Vector3(0, -1, 0);
-      if (interno) normal.applyAxisAngle(new THREE.Vector3(1, 0, 0), interno);   // eixo interno gira sobre si mesmo
-      if (externo) normal.applyAxisAngle(new THREE.Vector3(0, 1, 0), externo);   // eixo externo reposiciona o conjunto
-      normal.normalize();
-      const pontoNoPlano = new THREE.Vector3(o.origem.x, y, o.origem.z);
+      // [23/09/2026] CORRIGIDO -- ver comentário grande de `_corteSuperficiePonto()` logo acima: o plano
+      // agora nasce do CENTRO real da malha (não mais de `o.origem` no X/Z + `corteAlturaY` só no Y) e é
+      // deslocado pela sua PRÓPRIA normal (não mais só pelo eixo Y do mundo), então `corteAltura01`
+      // desloca de fato a superfície de corte "pela sua normal, bem no centro da superfície", em
+      // QUALQUER inclinação -- não só quando o corte é horizontal.
+      const r = this._corteSuperficiePonto(); if (!r) return;
+      const { ponto: pontoNoPlano, normal, interno, externo } = r;
       if (!this._plano) this._plano = new THREE.Plane();
       this._plano.setFromNormalAndCoplanarPoint(normal, pontoNoPlano);
       mats.forEach((mt) => { mt.clippingPlanes = [this._plano]; mt.clipIntersection = false; });
-      this._atualizarCorteVisualSuperficie(y, normal, pontoNoPlano, interno, externo);
+      this._atualizarCorteVisualSuperficie(pontoNoPlano.y, normal, pontoNoPlano, interno, externo);
       this._removerCorteVisualGiro();
     }
     /** [22/09/2026] NOVO -- modo 'giro' ("corte de giro"): DOIS `THREE.Plane` verticais (eixo de giro = Y,
@@ -2243,35 +2173,96 @@
      *  reposiciona o Sprite (barato).
      */
     atualizarBarraProgresso() {
+      // [24/09/2026] MUDADO -- pedido verbatim: "Faça as duas barrinhas que aparecem próximas do AP
+      // ficarem na mesma caixa, não em caixas separadas." Chamada direta (sem `av`) desenha só o bloco
+      // desta instância -- mantido por compatibilidade; o caminho normal é `atualizarBarraProgressoCombinada`
+      // (chamada 1x por AP em `View3DRede._atualizarBarrasProgressoAP`, já juntando normal + avançada).
+      this.atualizarBarraProgressoCombinada(null);
+    }
+
+    /**
+     * Barra de progresso combinada (Sprite/canvas único, billboard) -- UMA caixa MAIOR com o nome do AP no
+     * topo e, dentro dela, 1 caixa INTERNA por varredura em andamento (esta instância = normal, `av` = a
+     * `AccessPointAvancado` do MESMO AP), cada caixa interna com o SEU título e a SUA barrinha, uma embaixo
+     * da outra (normal em cima, avançada embaixo). Com só 1 varredura rodando, só a caixa interna dela
+     * aparece; sem nenhuma, a caixa inteira some.
+     * [24/09/2026] MUDADO -- pedido verbatim: "As barrinhas [...] devem aparecer na mesma caixa próximo do
+     * AP. Uma caixa maior que dize o nome do AP, uma caixa mais interna com o título da varredura normal e
+     * a sua barrinha e uma outra caixa interna [...] com o título da varredura avançada e a sua barrinha
+     * [...] o texto do título acaba ficando em cima da barrinha. O texto de título não deve ficar em cima
+     * da barrinha. Cada um deve ter a sua caixa (um embaixo do outro)." Layout reescrito com o título de
+     * cada bloco numa linha própria, acima da barrinha, com espaço garantido entre os dois (nada de texto e
+     * barra dividindo a mesma linha como antes).
+     * @param {AccessPoint|null} [av] a instância AVANÇADA do mesmo AP (`WifiSignal.paraAvancado`), ou `null`
+     *        pra desenhar só o bloco desta instância (compatibilidade com `atualizarBarraProgresso()`).
+     * @param {string} [rotuloAP] nome/rótulo do AP, mostrado no topo da caixa maior (ex.: labelID ou o nome
+     *        padrão do tipo de objeto -- ver `View3DRede._atualizarBarrasProgressoAP`). Sem rótulo, usa "Access Point".
+     */
+    atualizarBarraProgressoCombinada(av, rotuloAP) {
       const pose = this._pose();
-      if (!pose || !this.scanning) { this.removerBarraProgresso(); return; }
-      const THREE = this.engine.THREE, pct = Math.round(this.scanProgress);
-      if (this._progBarPct !== pct || !this._progBarSprite) {
-        const ESC = 2, W = 140 * ESC, H = 34 * ESC;
-        if (!this._progBarCv) { this._progBarCv = document.createElement('canvas'); this._progBarCv.width = W; this._progBarCv.height = H; }
+      const blocos = [];
+      if (pose && this.scanning) blocos.push({ emoji: '📶', rotulo: 'Varredura normal', pct: Math.round(this.scanProgress), cor: '#3ecb6e' });
+      if (pose && av && av !== this && av.scanning) blocos.push({ emoji: '🛰️', rotulo: 'Varredura avançada', pct: Math.round(av.scanProgress), cor: '#4f8cff' });
+      if (!pose || !blocos.length) { this.removerBarraProgresso(); return; }
+      const THREE = this.engine.THREE;
+      const nomeAP = rotuloAP || 'Access Point';
+      const assinatura = nomeAP + '|' + blocos.map((b) => b.pct + ':' + b.rotulo).join('|');
+      if (this._progBarAssinatura !== assinatura || !this._progBarSprite) {
+        const ESC = 2, W = 170 * ESC;
+        const PAD = 7 * ESC, TIT_AP_H = 15 * ESC, GAP_TIT_AP = 8 * ESC;
+        const BLOCO_GAP_TOPO = 5 * ESC, BLOCO_PAD = 5 * ESC, BLOCO_TIT_H = 13 * ESC, GAP_TIT_BARRA = 6 * ESC, BARRA_H = 6 * ESC, BLOCO_PAD_BAIXO = 6 * ESC;
+        const BLOCO_H = BLOCO_PAD + BLOCO_TIT_H + GAP_TIT_BARRA + BARRA_H + BLOCO_PAD_BAIXO;
+        const H = PAD + TIT_AP_H + GAP_TIT_AP + blocos.length * (BLOCO_GAP_TOPO + BLOCO_H) + PAD;
+        if (!this._progBarCv || this._progBarCv.width !== W || this._progBarCv.height !== H) {
+          if (!this._progBarCv) this._progBarCv = document.createElement('canvas');
+          this._progBarCv.width = W; this._progBarCv.height = H;
+        }
         const cv = this._progBarCv, ctx = cv.getContext('2d');
         ctx.clearRect(0, 0, W, H);
-        // moldura arredondada (mesmo estilo visual da etiqueta do AP -- fundo escuro translúcido)
-        const raio = 8 * ESC;
-        ctx.fillStyle = 'rgba(15,20,28,0.85)'; ctx.strokeStyle = 'rgba(74,86,104,0.9)'; ctx.lineWidth = 2 * ESC;
+        // caixa MAIOR (nome do AP) -- mesmo estilo visual de sempre (fundo escuro translúcido)
+        const raioOut = 8 * ESC;
+        ctx.fillStyle = 'rgba(15,20,28,0.9)'; ctx.strokeStyle = 'rgba(74,86,104,0.9)'; ctx.lineWidth = 2 * ESC;
         ctx.beginPath();
-        ctx.moveTo(raio, 0); ctx.arcTo(W, 0, W, H, raio); ctx.arcTo(W, H, 0, H, raio);
-        ctx.arcTo(0, H, 0, 0, raio); ctx.arcTo(0, 0, W, 0, raio); ctx.closePath();
+        ctx.moveTo(raioOut, 0); ctx.arcTo(W, 0, W, H, raioOut); ctx.arcTo(W, H, 0, H, raioOut);
+        ctx.arcTo(0, H, 0, 0, raioOut); ctx.arcTo(0, 0, W, 0, raioOut); ctx.closePath();
         ctx.fill(); ctx.stroke();
-        // trilho + preenchimento (fração = scanProgress)
-        const padX = 8 * ESC, barY = H - 12 * ESC, barH = 6 * ESC, barW = W - padX * 2;
-        ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(padX, barY, barW, barH);
-        ctx.fillStyle = '#3ecb6e'; ctx.fillRect(padX, barY, barW * (pct / 100), barH);
-        // texto: "📡 Varrendo… 42%"
-        ctx.font = (11 * ESC) + 'px system-ui, sans-serif'; ctx.fillStyle = '#e8ecf2'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillText('📡 Varrendo… ' + pct + '%', padX, 10 * ESC);
+        // nome do AP, truncado com "…" se não couber
+        let nome = nomeAP;
+        ctx.font = 'bold ' + (12 * ESC) + 'px system-ui, sans-serif'; ctx.fillStyle = '#e8ecf2'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        const larguraMax = W - PAD * 2;
+        while (nome.length > 1 && ctx.measureText('📡 ' + nome).width > larguraMax) nome = nome.slice(0, -1);
+        if (nome !== nomeAP) nome = nome.replace(/\s+$/, '') + '…';
+        ctx.fillText('📡 ' + nome, PAD, PAD + TIT_AP_H / 2);
+        // traço fino separando o nome do AP dos blocos de varredura
+        ctx.strokeStyle = 'rgba(74,86,104,0.6)'; ctx.lineWidth = 1 * ESC;
+        ctx.beginPath(); ctx.moveTo(PAD, PAD + TIT_AP_H + GAP_TIT_AP / 2); ctx.lineTo(W - PAD, PAD + TIT_AP_H + GAP_TIT_AP / 2); ctx.stroke();
+        // 1 caixa INTERNA por bloco (varredura normal/avançada), cada uma com SEU título numa linha e a
+        // barrinha noutra (nunca sobrepostos) -- normal em cima, avançada logo abaixo.
+        let y = PAD + TIT_AP_H + GAP_TIT_AP;
+        blocos.forEach((b) => {
+          y += BLOCO_GAP_TOPO;
+          const raioIn = 5 * ESC, bx = PAD, bw = W - PAD * 2;
+          ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1 * ESC;
+          ctx.beginPath();
+          ctx.moveTo(bx + raioIn, y); ctx.arcTo(bx + bw, y, bx + bw, y + BLOCO_H, raioIn); ctx.arcTo(bx + bw, y + BLOCO_H, bx, y + BLOCO_H, raioIn);
+          ctx.arcTo(bx, y + BLOCO_H, bx, y, raioIn); ctx.arcTo(bx, y, bx + bw, y, raioIn); ctx.closePath();
+          ctx.fill(); ctx.stroke();
+          // título do bloco (linha própria, acima da barra)
+          ctx.font = (11 * ESC) + 'px system-ui, sans-serif'; ctx.fillStyle = '#e8ecf2'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+          ctx.fillText(b.emoji + ' ' + b.rotulo + ' ' + b.pct + '%', bx + BLOCO_PAD, y + BLOCO_PAD + BLOCO_TIT_H / 2);
+          // barrinha (linha própria, abaixo do título, com folga garantida entre as duas)
+          const barY = y + BLOCO_PAD + BLOCO_TIT_H + GAP_TIT_BARRA, barW = bw - BLOCO_PAD * 2;
+          ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(bx + BLOCO_PAD, barY, barW, BARRA_H);
+          ctx.fillStyle = b.cor; ctx.fillRect(bx + BLOCO_PAD, barY, barW * (b.pct / 100), BARRA_H);
+          y += BLOCO_H;
+        });
         if (!this._progBarSprite) {
           const tex = new THREE.CanvasTexture(cv);
           if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
           this._progBarTex = tex;
           const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
           const spr = new THREE.Sprite(mat);
-          const alturaM = 0.22, largM = alturaM * (W / H);
+          const alturaM = 0.22 * (H / (34 * 2)), largM = alturaM * (W / H);
           spr.scale.set(largM, alturaM, 1);
           spr.renderOrder = 21; spr.userData.wifi = true; spr.raycast = function () {};
           this._progBarSprite = spr;
@@ -2279,15 +2270,15 @@
         } else {
           this._progBarTex.needsUpdate = true;
         }
-        this._progBarPct = pct;
+        this._progBarAssinatura = assinatura; this._progBarAltura = H; this._progBarLargura = W;
       }
       // um pouco ACIMA da etiqueta (que fica em +0.18m -- ver atualizarEtiqueta) pra não sobrepor as duas
-      this._progBarSprite.position.set(pose.origem.x, pose.origem.y + 0.42, pose.origem.z);
+      this._progBarSprite.position.set(pose.origem.x, pose.origem.y + (this._progDy || 0.42), pose.origem.z);
       const cam = this.engine.camera3;
       if (cam) {
         const dist = cam.position.distanceTo(this._progBarSprite.position);
         const k = Math.max(0.15, Math.min(8, dist / 3));
-        const alturaM = 0.22, largM = alturaM * (140 / 34);
+        const H = this._progBarAltura || 68, W = this._progBarLargura || 280, alturaM = 0.22 * (H / 68), largM = alturaM * (W / H);
         this._progBarSprite.scale.set(largM * k, alturaM * k, 1);
       }
     }
@@ -2300,502 +2291,19 @@
       this._progBarSprite = null; this._progBarPct = -1;
     }
 
-    /** [29/09/2026] NOVO -- pedido verbatim: "Assim como ao clicar em 'Refazer Varredura de Sinal' aparece
-     *  uma barrinha enchendo próximo do AP, ao clicar em 'Varredura avançada' deve aparecer uma barrinha
-     *  enchendo também. Se um botão for clicado e a barrinha do outro estiver lá ainda, elas devem
-     *  coexistir." Mesmíssimo padrão/técnica de `atualizarBarraProgresso` acima (Sprite/canvas, chamada 1x
-     *  por quadro por `View3DRede._atualizarBarrasProgressoAP`), só que lendo `motorAvancado.scanning`/
-     *  `.progress` e num Sprite/canvas SEPARADO (`_progBarSpriteAv`) -- por isso as duas convivem sem
-     *  conflito nenhum: cada motor tem seu próprio estado `scanning` e seu próprio Sprite. Fica LOGO ACIMA
-     *  da barra normal (+0.42m + 0.30m) quando as duas estão visíveis ao mesmo tempo, pra não se sobrepor. */
-    atualizarBarraProgressoAvancado() {
-      const pose = this._pose(), motor = this._motorAvancado;
-      if (!pose || !motor || !motor.scanning) { this.removerBarraProgressoAvancado(); return; }
-      const THREE = this.engine.THREE, pct = Math.round(motor.progress);
-      if (this._progBarPctAv !== pct || !this._progBarSpriteAv) {
-        const ESC = 2, W = 140 * ESC, H = 34 * ESC;
-        if (!this._progBarCvAv) { this._progBarCvAv = document.createElement('canvas'); this._progBarCvAv.width = W; this._progBarCvAv.height = H; }
-        const cv = this._progBarCvAv, ctx = cv.getContext('2d');
-        ctx.clearRect(0, 0, W, H);
-        const raio = 8 * ESC;
-        ctx.fillStyle = 'rgba(15,20,28,0.85)'; ctx.strokeStyle = 'rgba(79,140,255,0.9)'; ctx.lineWidth = 2 * ESC;
-        ctx.beginPath();
-        ctx.moveTo(raio, 0); ctx.arcTo(W, 0, W, H, raio); ctx.arcTo(W, H, 0, H, raio);
-        ctx.arcTo(0, H, 0, 0, raio); ctx.arcTo(0, 0, W, 0, raio); ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        const padX = 8 * ESC, barY = H - 12 * ESC, barH = 6 * ESC, barW = W - padX * 2;
-        ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(padX, barY, barW, barH);
-        ctx.fillStyle = '#4f8cff'; ctx.fillRect(padX, barY, barW * (pct / 100), barH);   // azul -- distingue da normal (verde)
-        ctx.font = (11 * ESC) + 'px system-ui, sans-serif'; ctx.fillStyle = '#e8ecf2'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillText('🛰️ Avançada… ' + pct + '%', padX, 10 * ESC);
-        if (!this._progBarSpriteAv) {
-          const tex = new THREE.CanvasTexture(cv);
-          if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
-          this._progBarTexAv = tex;
-          const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
-          const spr = new THREE.Sprite(mat);
-          const alturaM = 0.22, largM = alturaM * (W / H);
-          spr.scale.set(largM, alturaM, 1);
-          spr.renderOrder = 21; spr.userData.wifi = true; spr.raycast = function () {};
-          this._progBarSpriteAv = spr;
-          if (this.engine._group) this.engine._group.add(spr);
-        } else {
-          this._progBarTexAv.needsUpdate = true;
-        }
-        this._progBarPctAv = pct;
-      }
-      // [29/09/2026] NOVO -- desloca pra cima quando a barra NORMAL também está visível (as duas coexistindo,
-      // ver comentário grande acima), senão fica na mesma altura da normal (sozinha, sem ninguém pra colidir).
-      const yBase = pose.origem.y + (this._progBarSprite ? 0.72 : 0.42);
-      this._progBarSpriteAv.position.set(pose.origem.x, yBase, pose.origem.z);
-      const cam = this.engine.camera3;
-      if (cam) {
-        const dist = cam.position.distanceTo(this._progBarSpriteAv.position);
-        const k = Math.max(0.15, Math.min(8, dist / 3));
-        const alturaM = 0.22, largM = alturaM * (140 / 34);
-        this._progBarSpriteAv.scale.set(largM * k, alturaM * k, 1);
-      }
-    }
-    /** Remove a barra de progresso do motor avançado. */
-    removerBarraProgressoAvancado() {
-      const spr = this._progBarSpriteAv; if (!spr) return;
-      if (spr.parent) spr.parent.remove(spr);
-      spr.material.map.dispose(); spr.material.dispose();
-      this._progBarSpriteAv = null; this._progBarPctAv = -1;
-    }
+    // [23/09/2026] REMOVIDO -- pedido verbatim: "Remova todos os botões e métodos implementados para a
+    // varredura avançada." (atualizarBarraProgressoAvancado/removerBarraProgressoAvancado removidos.)
   }
 
   // ==========================================================================
-  // 4.5) SignalPropagationEngine -- Ray Launching MULTI-BOUNCE (reflexão + refração), dBm/FSPL
-  // ==========================================================================
-  /**
-   * [22/09/2026] NOVO -- pedido verbatim (Engenheiro de Software Sênior, RF/Three.js). Motor ALTERNATIVO,
-   * opt-in, de propagação de sinal: dispara raios primários do AP (grade esférica, mesmo `passo` da
-   * `densidade` do AP) e, em cada colisão, pode CONTINUAR (refração: mesma direção, atravessando o
-   * material) e/ou RAMIFICAR (reflexão: `direction.reflect(normal)`), até `maxRefractions`/`maxReflections`
-   * saltos ou até o dBm cair abaixo de `rssiThreshold` (corte imediato, sem gastar mais raio nenhum dali).
-   *
-   * Diferença de arquitetura pro motor original (`AccessPoint.startScan`/`distanciasDoRaio`): aquele
-   * resolve analiticamente, POR RAIO RETO, em que distância a intensidade cruza cada um dos 5 limiares
-   * (produz uma malha FECHADA, "casca dentro de casca"); este motor caminha EVENTO A EVENTO (cada colisão é
-   * um ponto registrado com seu dBm), porque uma árvore de raios ramificada (reflexões) não forma mais uma
-   * superfície fechada só-de-distância -- o resultado natural aqui é uma NUVEM DE PONTOS (`THREE.Points`),
-   * não uma malha de cascas. Os 2 motores COEXISTEM (o usuário liga um, outro, ou os dois).
-   *
-   * Uso (ver `AccessPoint.startScanAvancado`, que é o atalho recomendado):
-   *   const motor = new WifiSignal.SignalPropagationEngine(engine, ap);
-   *   motor.onProgress = (pct) => ...; motor.onDone = (pontos, cloud) => cena.add(cloud);
-   *   motor.start();               // roda em micro-lotes por quadro, como o motor original
-   *   motor.cancel();              // interrompe
-   */
-  class SignalPropagationEngine {
-    /**
-     * @param {object} engine  Engine3D (THREE, mapData, _group, _pickMeshes).
-     * @param {AccessPoint} ap Instância do AP (lê frequência/potência/densidade/config do motor avançado).
-     */
-    constructor(engine, ap) {
-      this.engine = engine; this.ap = ap;
-      this.scanning = false; this.progress = 0;
-      this.onProgress = null; this.onDone = null;
-      this._raf = 0; this._tarefa = null;
-      this.pontos = null;   // { x:Float32Array, y:Float32Array, z:Float32Array, dbm:Float32Array, n } -- após concluir
-      // ---- reuso de objetos (ponto 5 do pedido: "evite alocações excessivas de memória dentro dos loops") ----
-      // Um único `THREE.Raycaster` e um pequeno punhado de `Vector3` de ESCRATCH, reescritos (`.set`/`.copy`) a
-      // cada iteração em vez de recriados -- únicos objetos "quentes" do laço principal (`_processarLote`).
-      this._raycaster = null;         // THREE.Raycaster (criado em `start()`, quando THREE já está garantido)
-      this._vOrigem = null; this._vDir = null; this._vNormal = null; this._vReflete = null;
-    }
+  // [23/09/2026] REMOVIDO -- pedido verbatim: "Remova todos os botões e métodos implementados para a
+  // varredura avançada." (classe SignalPropagationEngine inteira removida -- só resta a varredura normal.)
 
-    /**
-     * Inicia a varredura. Monta a lista de raios PRIMÁRIOS (grade esférica, mesmo `passo` da `densidade` do
-     * AP) como a "fila" inicial de trabalho (`_fila`) e processa em micro-lotes por quadro (mesmo padrão de
-     * orçamento de tempo do motor original -- ver `AccessPoint._passo`/`ORCAMENTO_MS`), pra nunca travar a
-     * UI mesmo com densidade 2° (milhares de raios primários) + reflexão/refração ligadas (cada colisão pode
-     * enfileirar até 2 raios-filhos, então a fila cresce e encolhe ao longo da varredura).
-     */
-    start(opc) {
-      opc = opc || {};
-      const ap = this.ap, pose = ap._pose();
-      if (!pose) return { ok: false, erro: 'AP ainda não está na cena 3D.' };
-      this.cancel();
-      const THREE = this.engine.THREE;
-      this._raycaster = this._raycaster || new THREE.Raycaster();
-      this._vOrigem = this._vOrigem || new THREE.Vector3(); this._vDir = this._vDir || new THREE.Vector3();
-      this._vNormal = this._vNormal || new THREE.Vector3(); this._vReflete = this._vReflete || new THREE.Vector3();
-      if (this.engine._group) this.engine._group.updateMatrixWorld(true);
-      // [22/09/2026] NOVO -- usa a config PRÓPRIA do motor avançado (Faixa/Potência/Densidade), a não ser que
-      // `avancadoUsarMesmoConfig` esteja ligado (padrão), aí espelha o motor original -- ver getters "Efetiva".
-      const passo = DENSIDADES[ap.avancadoDensidadeEfetiva].passo;
-      const nT = Math.max(2, Math.round(180 / passo)), nP = Math.max(4, Math.round(360 / passo));
-      const totalPrimarios = 2 + (nT - 1) * nP;
-      // [26/09/2026] MUDADO -- pedido verbatim: distância deve atenuar "do mesmo jeito que a varredura
-      // normal considera" (ver comentário grande de `perdaPorDistancia` acima). Antes, o dBm inicial de cada
-      // raio vinha de `wattsParaDbm` (potência real em dBm) + `ganhoAntenaDb` (ganho de antena, separado); agora
-      // usa a MESMA `potenciaBase` do motor original (já embute ganho de antena E fator de frequência numa
-      // única intensidade "P0"), convertida pra dBm-equivalente só pra reaproveitar a mesma tubulação
-      // logarítmica (limiar/perdas de material em dB) -- ver `dbmDeIntensidade`.
-      const potenciaW = ap.avancadoPotenciaWEfetiva, faixaEfetiva = ap.avancadoFrequenciaEfetiva;
-      // Fila de trabalho: cada entrada é UM raio a processar (primário ou filho de reflexão/refração). Entradas
-      // são objetos pequenos e de vida curta (o próprio JS já os recicla bem via geração nova do V8) -- o que
-      // de fato evitamos alocar são os `Vector3`/`Raycaster` do LAÇO DE COLISÃO em si (ver acima), que rodam
-      // uma ordem de grandeza mais vezes que entradas de fila são criadas.
-      const fila = [];
-      const d = new THREE.Vector3();
-      for (let i = 0; i < totalPrimarios; i++) {
-        const theta = this._direcaoPrimaria(nT, nP, i, d); d.applyQuaternion(pose.q);
-        fila.push({
-          ox: pose.origem.x, oy: pose.origem.y, oz: pose.origem.z,
-          dx: d.x, dy: d.y, dz: d.z,
-          dbm: dbmDeIntensidade(potenciaBase(potenciaW, faixaEfetiva, theta)),
-          refracoes: 0, reflexoes: 0,
-          primIdx: i,   // índice do raio primário na grade esférica (nT×nP) -- herdado pelos filhos de reflexão/refração, usado pelo filtro de densidade (ver `lprim`/`_reconstruirRaiosAvancado`)
-        });
-      }
-      this._tarefa = {
-        fila, i: 0, totalPrimarios, processados: 0,
-        rssiThreshold: ap.rssiThreshold,
-        enableReflection: ap.enableReflection, maxReflections: ap.maxReflections,
-        enableRefraction: ap.enableRefraction, maxRefractions: ap.maxRefractions,
-        maxAlcance: 0,   // [28/09/2026] NOVO -- maior `distFim` visto (ver _processarLote) -- alimenta `pontos.alcanceM`
-        // [22/09/2026] NOVO -- `nT`/`nP`/`pose` guardados aqui (antes só locais de `start()`) + `alcancePorNivel`
-        // (1 `Float32Array(5)` por raio PRIMÁRIO, começando em 0 -- "nenhum alcance ainda") pra
-        // `_processarLote` poder acumular, PRA CADA primário, o maior alcance (distância em linha reta da
-        // origem do AP) em que QUALQUER ponto da sua família de raios (o primário + todos os filhos de
-        // reflexão/refração que descendem dele) ainda atinge cada nível de sinal -- ver comentário grande
-        // logo abaixo, no ponto onde isso é atualizado. Substitui a 2ª fase antiga (`_iniciarTarefaMalha`/
-        // `_processarLoteMalha`, removida -- fazia um 2º raycasting RETO do zero, ignorando reflexão/
-        // refração) -- `_concluir` monta `t.malha` direto destes dados, sem raycast nenhum a mais.
-        nT, nP, pose,
-        alcancePorNivel: Array.from({ length: totalPrimarios }, () => new Float32Array(NIVEIS.length)),
-        alvos: ap._alvos(),
-        // saída: arrays paralelos de números (crescem por `push` -- convertidos a Float32Array só no final,
-        // ver `_concluir`). É o payload de dados de verdade, não "lixo" de laço -- ok alocar aqui.
-        px: [], py: [], pz: [], pdbm: [],
-        // [27/09/2026] NOVO, [28/09/2026] MUDADO -- pedido verbatim: "Ao variar a Densidade dos raios, deve
-        // ser imediato, os raios já foram montados [...] O que esta opção deve fazer é imprimir 1 a cada 10."
-        // Antes a amostragem por densidade acontecia AQUI (só guardava 1 a cada N raios primários), exigindo
-        // refazer a varredura pra mudar a densidade exibida. Agora TODOS os raios (inclusive filhos de
-        // reflexão/refração) são guardados (`lprim` = índice do primário que originou cada um, herdado pelos
-        // filhos), e o corte "1 a cada N" vira um filtro instantâneo em cima desses dados já prontos (ver
-        // `AccessPoint._reconstruirRaiosAvancado`/`avancadoDensidadeRaios` — nenhum raycast novo é disparado).
-        lx0: [], ly0: [], lz0: [], lx1: [], ly1: [], lz1: [], ldbm: [], lprim: [],
-        orcamento: Math.max(1, opc.orcamentoMs || ORCAMENTO_MS),
-        t0: performance.now(),
-      };
-      this.scanning = true; this._setProgresso(0);
-      this._raf = requestAnimationFrame(() => this._processarLote());
-      return { ok: true, raiosPrimarios: totalPrimarios };
-    }
-
-    cancel() {
-      if (this._raf) cancelAnimationFrame(this._raf);
-      this._raf = 0; this._tarefa = null; this.scanning = false;
-    }
-
-    /** Direção (LOCAL, antes de aplicar o quaternion do AP) do raio primário `idx` de uma grade esférica nT×nP -- mesma
-     *  convenção de `AccessPoint._direcao`, reimplementada aqui pra este motor não depender de uma instância de AP viva
-     *  no meio do laço. Devolve `theta` (ângulo p/ o eixo +Z local, usado no ganho de antena) escrevendo a direção em `out`. */
-    _direcaoPrimaria(nT, nP, idx, out) {
-      let ti, pj;
-      if (idx === 0) { ti = 0; pj = 0; } else if (idx === 1) { ti = nT; pj = 0; } else { const k = idx - 2; ti = 1 + Math.floor(k / nP); pj = k % nP; }
-      const theta = (ti / nT) * Math.PI, phi = (pj / nP) * Math.PI * 2, s = Math.sin(theta);
-      out.set(s * Math.cos(phi), s * Math.sin(phi), Math.cos(theta));
-      return theta;
-    }
-
-    /** UM micro-lote: consome a fila até estourar o orçamento de tempo do quadro. */
-    _processarLote() {
-      const t = this._tarefa; if (!t) return;
-      const limite = performance.now() + t.orcamento;
-      const rc = this._raycaster, vO = this._vOrigem, vD = this._vDir;
-      let n = 0;
-      while (t.fila.length) {
-        const raio = t.fila.pop();
-        vO.set(raio.ox, raio.oy, raio.oz); vD.set(raio.dx, raio.dy, raio.dz);
-        rc.set(vO, vD); rc.near = 0; rc.far = D_MAX_ABS;
-        // [27/09/2026] NOVO -- pedido verbatim: "Em ambas as varreduras deve ser colision perfect [...]
-        // Mesmo batendo na ponta do pilar (mas ainda nele), deve ser considerado." O motor avançado já
-        // usa a MESMA lista de alvos (`t.alvos`/`_alvos()`) e o MESMO `THREE.Raycaster` (geometria real,
-        // triângulo-a-triângulo) que o motor original -- não há proxy simplificado nem diferença entre os
-        // dois aqui, então uma colisão que bate na geometria real do pilar (mesmo na borda) já é detectada
-        // igual nos dois. Se ainda assim um raio bem rente à quina passar sem bater, é o raycasting de UM
-        // ÚNICO raio central por amostra (comportamento normal de qualquer raycaster) -- pedir densidade
-        // mais alta na varredura (mais raios = menos "vão" entre amostras vizinhas) reduz esse efeito.
-        const hits = rc.intersectObjects(t.alvos, false);   // já ordenado por distância
-        let hit = null;
-        for (let h = 0; h < hits.length; h++) { if (hits[h].distance >= IGNORAR_PERTO) { hit = hits[h]; break; } }
-        // [27/09/2026] MUDADO -- pedido verbatim: "os raios devem ser desenhados até o 'Limiar (dBm)' [...]
-        // Deve ser possível ver os raios também." + corrige a incoerência com a varredura normal (ver
-        // comentário grande de `DBM_MINIMO_VISIVEL`): o fim VISÍVEL do segmento (ponto/linha) agora é
-        // SEMPRE o que vier primeiro entre a colisão real (`hit`) e a distância analítica onde o dBm cruza
-        // `t.rssiThreshold` em campo aberto (`dLimiar`, mesma physics de `perdaPorDistancia`/inverso do
-        // quadrado) -- inclusive quando o raio NUNCA bate em nada (antes, esse caso simplesmente sumia sem
-        // desenhar nada; agora desenha até `dLimiar`, exatamente como a varredura normal já fazia).
-        const dLimiar = raio.dbm > t.rssiThreshold ? Math.pow(10, (raio.dbm - t.rssiThreshold) / 20) : 0;
-        const distFim = hit ? Math.min(hit.distance, dLimiar) : Math.min(dLimiar, D_MAX_ABS);
-        const bateuAntesDoLimiar = hit && hit.distance <= dLimiar;
-        if (distFim > IGNORAR_PERTO) {
-          const dbmNoFim = raio.dbm - perdaPorDistancia(distFim);
-          const px = vO.x + vD.x * distFim, py = vO.y + vD.y * distFim, pz = vO.z + vD.z * distFim;
-          // [28/09/2026] NOVO -- "alcance" exibido no resumo (ver `ultimoResultadoAvancado`/view3d-rede.js):
-          // só conta raios PRIMÁRIOS (sem ricochete), mesmo critério de `alcanceM` do motor original (maior
-          // distância em linha reta a partir do AP) -- um raio refletido pode ir mais longe no espaço, mas
-          // isso não é "alcance direto", é o percurso todo somado.
-          if (raio.reflexoes === 0 && raio.refracoes === 0 && distFim > t.maxAlcance) t.maxAlcance = distFim;
-          // 2) registra o ponto de impacto/fim + intensidade (alimenta a nuvem/heatmap -- ver `_construirPontosAvancado`).
-          t.px.push(px); t.py.push(py); t.pz.push(pz); t.pdbm.push(dbmNoFim);
-          // [27/09/2026] NOVO, [28/09/2026] MUDADO -- pedido verbatim: "Deve ser possível ver os raios
-          // também [...] a densidade [...] deve ser imediato, os raios já foram montados." Guarda o segmento
-          // de TODO raio (não só uma amostra), com `primIdx` do primário que o originou (filhos de
-          // reflexão/refração herdam o `primIdx` do pai, ver `t.fila.push` abaixo) -- o filtro "1 a cada N"
-          // vira um corte instantâneo em cima desses dados já prontos (ver `_reconstruirRaiosAvancado`),
-          // nunca mais precisa refazer o raycast pra mudar a densidade exibida.
-          if (raio.primIdx != null) {
-            t.lx0.push(vO.x); t.ly0.push(vO.y); t.lz0.push(vO.z);
-            t.lx1.push(px); t.ly1.push(py); t.lz1.push(pz); t.ldbm.push(dbmNoFim); t.lprim.push(raio.primIdx);
-            // [22/09/2026] NOVO -- pedido verbatim: "A varredura avançada não deve só alimentar a nuvem de
-            // pontos/linhas de raio, mas deve também alimentar o construtor da malha de cascas. A forma 3D
-            // da malha deve ser definida de acordo com as refrações e reflexões feitas pelos raios." Pra CADA
-            // nível de sinal cujo limiar este ponto ainda atinge (`dbmNoFim >= LIMIAR_DBM_NIVEL[k]`), guarda
-            // o MAIOR alcance (distância em linha reta da ORIGEM do AP até este ponto -- não o comprimento do
-            // percurso ricocheteado, que pode ser bem maior) já visto para o primário `raio.primIdx` --
-            // `_concluir` usa isso direto como `dist[k][primIdx]` da malha de cascas (ver `_iniciarTarefaMalha`,
-            // removida, e o novo bloco em `_concluir`), no MESMO formato que o motor original já usa
-            // (`distanciasDoRaio`/`gerarCascasReal`). Como um filho de reflexão/refração pode "abrir caminho"
-            // por trás de um obstáculo que bloquearia o raio primário reto, isso faz a própria SUPERFÍCIE da
-            // malha se estender (ou encolher) exatamente onde a reflexão/refração muda o alcance real do
-            // sinal naquela direção -- é isto que faz a forma 3D refletir reflexão/refração de verdade, em vez
-            // de só os pontos/linhas soltos por cima dela.
-            const distOrigem = Math.hypot(px - t.pose.origem.x, py - t.pose.origem.y, pz - t.pose.origem.z);
-            const arr = t.alcancePorNivel[raio.primIdx];
-            for (let k = 0; k < NIVEIS.length; k++) {
-              if (dbmNoFim >= LIMIAR_DBM_NIVEL[k] && distOrigem > arr[k]) arr[k] = distOrigem;
-            }
-          }
-        }
-        // 3) corte rígido: abaixo do limiar, o raio MORRE aqui -- nem refração nem reflexão são lançadas
-        //    (ponto 1 do pedido -- "break imediato pra otimizar performance"), e só ricocheteia se REALMENTE
-        //    bateu em algo antes do limiar (senão `hit` é nulo ou está além de `dLimiar` -- nada pra refletir).
-        if (hit && bateuAntesDoLimiar) {
-          const dbmNaColisao = raio.dbm - perdaPorDistancia(hit.distance);
-          if (dbmNaColisao >= t.rssiThreshold) {
-            const pick = hit.object.userData && hit.object.userData.pick;
-            const matKey = materialTypeDoPick(pick, hit.object), mat = MATERIAIS_RF[matKey];
-            // offset pequeno na direção do raio, pra o próximo raycast não colidir de novo com a MESMA face
-            // (clássica "self-intersection" de raycasting em superfícies).
-            const offX = vD.x * 0.01, offY = vD.y * 0.01, offZ = vD.z * 0.01;
-            if (t.enableRefraction && raio.refracoes < t.maxRefractions && Number.isFinite(mat.perdaRefracaoDb)) {
-              t.fila.push({
-                ox: hit.point.x + offX, oy: hit.point.y + offY, oz: hit.point.z + offZ,
-                dx: vD.x, dy: vD.y, dz: vD.z,                       // refração: continua na MESMA direção (ponto 3 do pedido)
-                dbm: dbmNaColisao - mat.perdaRefracaoDb,
-                refracoes: raio.refracoes + 1, reflexoes: raio.reflexoes,
-                primIdx: raio.primIdx,
-              });
-            }
-            if (t.enableReflection && raio.reflexoes < t.maxReflections && hit.face) {
-              // normal em espaço de MUNDO (o `hit.face.normal` vem em espaço LOCAL do mesh) -- reusa `_vNormal`.
-              this._vNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld).normalize();
-              this._vReflete.copy(vD).reflect(this._vNormal);       // ponto 3 do pedido: `direction.reflect(normal)`
-              t.fila.push({
-                ox: hit.point.x + offX, oy: hit.point.y + offY, oz: hit.point.z + offZ,
-                dx: this._vReflete.x, dy: this._vReflete.y, dz: this._vReflete.z,
-                dbm: dbmNaColisao - mat.perdaReflexaoDb,
-                refracoes: raio.refracoes, reflexoes: raio.reflexoes + 1,
-                primIdx: raio.primIdx,
-              });
-            }
-          }
-        }
-        t.processados++; n++;
-        if ((n & 63) === 0 && performance.now() >= limite) break;   // checa o relógio a cada 64 raios (barato)
-      }
-      // progresso: como a fila pode CRESCER (novos raios-filhos), usamos `processados` vs. uma estimativa —
-      // primários + já processados é sempre uma cota-parte razoável enquanto a fila não estabiliza.
-      // [29/09/2026] MUDADO -- esta é só a 1ª de 2 fases agora (ver `_processarLoteMalha` abaixo, que monta
-      // a MALHA de cascas -- pedido verbatim: "deve ser possível ver a forma 3D [...] por nível"); pesa 0-60%
-      // aqui pra sobrar 60-99% pra 2ª fase, sem o progresso "voltar" ao trocar de fase.
-      const estimativa = Math.max(t.totalPrimarios, t.processados + t.fila.length);
-      this._setProgresso(Math.min(99, Math.floor((t.processados / estimativa) * 99)));
-      if (t.fila.length) { this._raf = requestAnimationFrame(() => this._processarLote()); return; }
-      this._montarMalhaDeAlcance(t);
-      this._concluir(t);
-    }
-
-    /**
-     * [22/09/2026] MUDADO -- pedido verbatim: "A varredura avançada não deve só alimentar a nuvem de pontos/
-     * linhas de raio, mas deve também alimentar o construtor da malha de cascas. A forma 3D da malha deve ser
-     * definida de acordo com as refrações e reflexões feitas pelos raios." ANTES disto (rodada 29/09), a
-     * malha de cascas vinha de uma 2ª FASE inteira separada (`_iniciarTarefaMalha`/`_processarLoteMalha`,
-     * removidas) que fazia um 2º raycasting DO ZERO com raios RETOS, IGNORANDO reflexão/refração de propósito
-     * ("sem considerar a reflexão e a refração") -- exatamente o que o pedido agora inverte. Removida a 2ª
-     * fase inteira (bônus de performance: já não há um 2º raycast completo a fazer), esta função monta
-     * `t.malha.dist[k][i]` DIRETO de `t.alcancePorNivel` (acumulado por `_processarLote`, ver comentário
-     * grande lá) -- pro primário `i`, `dist[k][i]` é o maior alcance (linha reta a partir do AP) em que
-     * QUALQUER raio da família daquele primário (ele mesmo + todos os filhos de reflexão/refração) ainda
-     * atinge o nível `k`. Formato 100% compatível com `_construirMalhaAvancada`/`gerarCascasReal`/
-     * `optimizeSignalMesh` (o MESMO consumido pelo motor original), então nenhuma mudança foi necessária lá.
-     */
-    _montarMalhaDeAlcance(t) {
-      // `dist[k]` precisa ser 1 Float32Array POR NÍVEL (formato de `_construirMalhaAvancada`), não 1 array por
-      // primário (formato de `t.alcancePorNivel`, mais conveniente de acumular durante o raycast) -- transpõe.
-      const total = t.alcancePorNivel.length, dist = NIVEIS.map(() => new Float32Array(total));
-      for (let i = 0; i < total; i++) { const a = t.alcancePorNivel[i]; for (let k = 0; k < NIVEIS.length; k++) dist[k][i] = a[k]; }
-      t.malha = { pose: t.pose, nT: t.nT, nP: t.nP, dist, meshMode: this.ap.meshMode };
-    }
-    /** Direção (mundo) do raio `idx` da grade da malha avançada -- mesma convenção/matemática de
-     *  `AccessPoint._direcao`, reimplementada via `_direcaoPrimaria` (LOCAL) + quaternion do AP. Ainda usada
-     *  por `_construirMalhaAvancada` (monta as direções dos vértices da malha a partir do MESMO índice `i`
-     *  usado como `primIdx`/`dist[k][i]` acima). */
-    _direcaoMalha(tm, idx, out) {
-      const theta = this._direcaoPrimaria(tm.nT, tm.nP, idx, out);
-      out.applyQuaternion(tm.pose.q);
-      return theta;
-    }
-
-    _setProgresso(p) {
-      this.progress = p;
-      if (typeof this.onProgress === 'function') { try { this.onProgress(p, this); } catch (e) { /* UI fechada */ } }
-    }
-
-    _concluir(t) {
-      this._raf = 0; this._tarefa = null; this.scanning = false;
-      this.pontos = {
-        x: Float32Array.from(t.px), y: Float32Array.from(t.py), z: Float32Array.from(t.pz), dbm: Float32Array.from(t.pdbm),
-        n: t.px.length, tempoMs: Math.round(performance.now() - t.t0), raiosPrimarios: t.totalPrimarios, raiosTotais: t.processados,
-        alcanceM: t.maxAlcance,   // [28/09/2026] NOVO -- ver comentário grande em `_processarLote`
-      };
-      // [22/09/2026] MUDADO, removido em 22/09/2026 (2ª passada) -- pedido verbatim: "coloque os botões de
-      // níveis para os pontos e para os raios [...] Remova o checkbox 'grade quadriculada'. Remova o seu
-      // código também." A nuvem única (`this.cloud`, via `_montarNuvem`) e a "grade quadriculada"
-      // (`this.grade`, via `_montarGrade`) foram substituídas por `AccessPoint._construirPontosAvancado`
-      // (5 nuvens, 1 por nível) -- ver `startScanAvancado`.
-      // [27/09/2026] NOVO, [28/09/2026] MUDADO -- pedido verbatim: "Deve ser possível ver os raios também"
-      // -- dados BRUTOS de TODOS os segmentos de raio (colisão real ou `dLimiar`/"Limiar (dBm)"), pra
-      // `AccessPoint._reconstruirRaiosAvancado` montar a geometria filtrada pela densidade escolhida sem
-      // precisar refazer o raycast (ver comentário grande em `t.lx0` acima).
-      this.raiosDados = this._coletarDadosRaios(t);
-      // [29/09/2026] NOVO -- pedido verbatim: "Na varredura avançada, deve ser possível ver a forma 3D
-      // gerada com o mapa de calor do sinal (superfície mais externa (como na varredura normal) e forma.
-      // Ambas por nível, os 5 níveis)." `t.malha` foi montado por `_iniciarTarefaMalha`/`_processarLoteMalha`
-      // (2ª fase acima, mesma física/grade do motor original, sem reflexão/refração) -- aqui vira de fato a
-      // malha de cascas (`THREE.Mesh`, 5 materiais).
-      this.malha3D = t.malha ? this._construirMalhaAvancada(t.malha) : null;
-      this._setProgresso(100);
-      if (typeof this.onDone === 'function') { try { this.onDone(this.pontos, null, this); } catch (e) { /* ignore */ } }
-    }
-
-    /** [29/09/2026] NOVO -- monta a malha de cascas (5 níveis) do motor AVANÇADO a partir de `tm` (mesmo
-     *  formato de `AccessPoint._tarefa`: `dist[k][i]`/`nT`/`nP`/`pose`/`meshMode`) -- reaproveita literalmente
-     *  as MESMAS funções puras/shader do motor original (`gerarCascasReal`/`optimizeSignalMesh`/`VERT`/`FRAG`),
-     *  só que lendo os toggles PRÓPRIOS do motor avançado (`ap.avancadoMostrarMalhaNiveis`/`avancadoMalhaWireframe`)
-     *  -- ver comentário grande de `_construirMalha` (AccessPoint) pra a técnica completa. Devolve
-     *  `{m, grade, pontosMalha, trianglesMalha}` pra `AccessPoint.startScanAvancado` guardar em campos À PARTE
-     *  (`malhaAvancada`/`_gradeAvancadaMalha`/...), sem tocar em nada do motor original. */
-    _construirMalhaAvancada(tm) {
-      const ap = this.ap, THREE = this.engine.THREE, nT = tm.nT, nP = tm.nP, nNiv = NIVEIS.length;
-      const vPorCasca = (nT + 1) * nP;
-      const dirs = new Float32Array(vPorCasca * 3), rayDe = new Uint32Array(vPorCasca), d = new THREE.Vector3();
-      for (let ti = 0; ti <= nT; ti++) for (let pj = 0; pj < nP; pj++) {
-        const r = ti === 0 ? 0 : ti === nT ? 1 : 2 + (ti - 1) * nP + pj, v = ti * nP + pj;
-        this._direcaoMalha(tm, r, d); dirs[v * 3] = d.x; dirs[v * 3 + 1] = d.y; dirs[v * 3 + 2] = d.z; rayDe[v] = r;
-      }
-      const grade = { THREE, nT, nP, nNiv, vPorCasca, dirs, rayDe, o: tm.pose.origem, niveis: NIVEIS };
-      const gerado = tm.meshMode === 'malha_real' ? gerarCascasReal(grade, tm) : optimizeSignalMesh(grade, tm);
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(gerado.pos, 3));
-      geo.setAttribute('normal', new THREE.BufferAttribute(gerado.nor, 3));
-      geo.setAttribute('cor', new THREE.BufferAttribute(gerado.cor, 4));
-      geo.setIndex(new THREE.BufferAttribute(gerado.idx, 1));
-      geo.computeBoundingSphere();
-      const trisOffsets = new Uint32Array(nNiv + 1);
-      for (let k = 0; k < nNiv; k++) trisOffsets[k + 1] = trisOffsets[k] + gerado.trisPorCasca[k];
-      const uniformsCompartilhado = { uFade: { value: 0 } };
-      const mostrarNiveis = ap.avancadoMostrarMalhaNiveis, wireframe = ap.avancadoMalhaWireframe;
-      const materiais = [];
-      for (let k = 0; k < nNiv; k++) {
-        geo.addGroup(trisOffsets[k] * 3, (trisOffsets[k + 1] - trisOffsets[k]) * 3, k);
-        const matNivel = new THREE.ShaderMaterial({
-          uniforms: uniformsCompartilhado, vertexShader: VERT, fragmentShader: FRAG,
-          transparent: true, depthWrite: false, side: THREE.DoubleSide, wireframe: !!wireframe,
-          clipping: true, // [22/09/2026] mesmo motivo do `_construirMalha` -- ver comentário lá
-        });
-        matNivel.visible = mostrarNiveis[k] !== false;
-        materiais.push(matNivel);
-      }
-      const m = new THREE.Mesh(geo, materiais);
-      m.name = 'wifi-mapa-avancado:' + ap.obj.id; m.renderOrder = 8; m.frustumCulled = false;
-      m.raycast = function () {}; m.userData.wifi = true;
-      // fade-in (mesmo smoothstep do motor original, ver `AccessPoint._fadeIn`) -- feito aqui direto (sem
-      // depender de rAF externo) porque este objeto some assim que `_concluir` retorna se ninguém guardar a
-      // referência; `AccessPoint.startScanAvancado` (onDone) guarda `m.mesh` em `this.malhaAvancada` e chama
-      // `_fadeInAvancado()` (novo, mesmo padrão) logo em seguida.
-      return { mesh: m, grade: { nT, nP, vPorCasca, trisOffsets }, pontosMalha: gerado.nVerts, trianglesMalha: gerado.nTris };
-    }
-
-
-    /** [27/09/2026] NOVO, [28/09/2026] MUDADO -- pedido verbatim: "Deve ser possível ver os raios também
-     *  [...] Ao variar a Densidade dos raios, deve ser imediato, os raios já foram montados." Só empacota os
-     *  dados BRUTOS (todo raio, sem filtro de densidade) em typed arrays -- quem monta a geometria 3D
-     *  filtrada é `AccessPoint._reconstruirRaiosAvancado` (em cima destes mesmos dados, sem raycast novo). */
-    _coletarDadosRaios(t) {
-      const n = t.lx0.length;
-      if (!n) return null;
-      return {
-        lx0: Float32Array.from(t.lx0), ly0: Float32Array.from(t.ly0), lz0: Float32Array.from(t.lz0),
-        lx1: Float32Array.from(t.lx1), ly1: Float32Array.from(t.ly1), lz1: Float32Array.from(t.lz1),
-        ldbm: Float32Array.from(t.ldbm), lprim: Int32Array.from(t.lprim), n,
-      };
-    }
-
-  }
-
-  /** [22/09/2026] NOVO -- 5 níveis de sinal ⇔ faixas de dBm (calibradas nos exemplos do pedido: verde
-   *  −30..−60, amarelo −61..−75, vermelho −76..−85 -- aqui abertas em 5 degraus pra reaproveitar as 5 cores
-   *  de `NIVEIS` tal qual, em vez de inventar uma escala nova). Abaixo de −90 dBm nem chega a virar ponto
-   *  (ver `rssiThreshold`/corte em `_processarLote`) -- não precisa de nível "nulo" aqui. */
-  // [26/09/2026] MUDADO -- antes eram exemplos de dBm REAL (-50/-60/-75/-85); agora DERIVADOS diretamente
-  // dos MESMOS limiares de intensidade que `NIVEIS`/o motor original usam (`dbmDeIntensidade`, ver comentário
-  // grande de `perdaPorDistancia` acima) -- garante que os dois motores mudem de nível exatamente na mesma
-  // distância, em campo aberto, pra qualquer potência/frequência configurada.
-  const DBM_POR_NIVEL = Object.freeze([
-    dbmDeIntensidade(NIVEIS[4].limiar), dbmDeIntensidade(NIVEIS[3].limiar), dbmDeIntensidade(NIVEIS[2].limiar), dbmDeIntensidade(NIVEIS[1].limiar), -Infinity,
-  ]);   // [excelente, bom, médio, baixo, fraco]
-  // [22/09/2026] NOVO -- pedido verbatim: "A varredura avançada não deve só alimentar a nuvem de pontos/
-  // linhas de raio, mas deve também alimentar o construtor da malha de cascas. A forma 3D da malha deve ser
-  // definida de acordo com as refrações e reflexões feitas pelos raios." MESMOS limiares de `DBM_POR_NIVEL`
-  // acima, só que indexados igual a `NIVEIS`/`dist[k]`/`saida[k]` de `distanciasDoRaio` (k=0 'fraco' → k=4
-  // 'excelente', ordem DIRETA, não invertida) -- usado por `SignalPropagationEngine._processarLote` pra
-  // acumular `t.alcancePorNivel[primIdx][k]`, ver comentário grande lá.
-  const LIMIAR_DBM_NIVEL = Object.freeze([
-    -Infinity, dbmDeIntensidade(NIVEIS[1].limiar), dbmDeIntensidade(NIVEIS[2].limiar), dbmDeIntensidade(NIVEIS[3].limiar), dbmDeIntensidade(NIVEIS[4].limiar),
-  ]);   // [fraco, baixo, médio, bom, excelente]
-  // [27/09/2026] NOVO -- pedido verbatim: "Há uma incoerência, pois na Varredura normal o sinal pior acaba
-  // em um ponto, mesmo sem obstáculos. E na Varredura avançada, com as mesmas configurações o sinal
-  // continua. Deveria acabar também por causa da atenuação." Causa raiz: o motor avançado registrava o
-  // ponto/vértice de QUALQUER colisão, não importa quão fraco o dBm ali (só o corte de `rssiThreshold`
-  // existia pra decidir se o raio CONTINUA ricocheteando -- o comentário de `_montarNuvem` já dizia "pula
-  // pontos abaixo de rssiThreshold de vez", mas o código não fazia isso de verdade). O motor ORIGINAL
-  // (`distanciasDoRaio`) tem um limite físico natural: além de `alcanceMax` (onde a intensidade cai abaixo
-  // do limiar do nível 'fraco', o mais fraco de todos), a casca simplesmente não existe -- fim de linha. Pra
-  // bater EXATAMENTE com isso ("verifique se as equações [...] estão de acordo"), `DBM_MINIMO_VISIVEL` é
-  // esse mesmo limite (limiar do nível 'fraco', convertido pra dBm-equivalente) -- vira o valor PADRÃO do
-  // "Limiar (dBm)" do motor avançado (ver `_cfg`/`rssiThreshold` abaixo), e agora o ponto/segmento REALMENTE
-  // não é registrado quando o dBm ali já caiu abaixo do limiar configurado (ver `_processarLote`).
+  // [23/09/2026] SIMPLIFICADO -- pedido verbatim: "Remova todos os botões e métodos implementados para a
+  // varredura avançada." `DBM_POR_NIVEL`/`LIMIAR_DBM_NIVEL`/`_nivelPorDbm`/`_entrelacarXYZ` só eram usados
+  // pelo motor avançado (removido); `DBM_MINIMO_VISIVEL` continua -- é o valor PADRÃO de `rssiThreshold`
+  // ("Limiar (dBm)"), usado pela varredura normal.
   const DBM_MINIMO_VISIVEL = dbmDeIntensidade(NIVEIS[0].limiar);
-  function _nivelPorDbm(dbm) {
-    if (dbm >= DBM_POR_NIVEL[0]) return NIVEIS[4];   // excelente (verde)
-    if (dbm >= DBM_POR_NIVEL[1]) return NIVEIS[3];   // bom (verde-limão)
-    if (dbm >= DBM_POR_NIVEL[2]) return NIVEIS[2];   // médio (amarelo)
-    if (dbm >= DBM_POR_NIVEL[3]) return NIVEIS[1];   // baixo (laranja)
-    return NIVEIS[0];                                 // fraco (vermelho)
-  }
-  /** Entrelaça 3 `Float32Array` paralelos (x/y/z) num único buffer `[x0,y0,z0, x1,y1,z1, ...]` pro `THREE.BufferAttribute` de posição. */
-  function _entrelacarXYZ(x, y, z) {
-    const out = new Float32Array(x.length * 3);
-    for (let i = 0; i < x.length; i++) { const p = i * 3; out[p] = x[i]; out[p + 1] = y[i]; out[p + 2] = z[i]; }
-    return out;
-  }
 
   // ==========================================================================
   // 5) API PÚBLICA
@@ -2808,7 +2316,7 @@
     return ap;
   }
   /** Esquece (e limpa a malha de) um AP removido do mapa. */
-  function remover(id) { const ap = instancias.get(id); if (ap) { ap.cancelScan(); ap.clear(); ap.cancelScanAvancado(); ap.clearAvancado(); ap.removerEtiqueta(); ap.removerBarraProgresso(); ap.removerBarraProgressoAvancado(); instancias.delete(id); } }
+  function remover(id) { const ap = instancias.get(id); if (ap) { ap.cancelScan(); ap.clear(); ap.removerEtiqueta(); ap.removerBarraProgresso(); instancias.delete(id); } }
   function ehAP(obj) { return !!(obj && raiz.RedeEquip && raiz.RedeEquip.ehAP(obj.tipo)); }
   /** [21/09/2026] NOVO -- devolve a instância JÁ EXISTENTE (sem criar) de um AP, ou `null`. Diferente de
    *  `para(obj, engine)` (que exige um `engine` e cria se preciso), isto é o que o mapa 2D usa pra saber se
@@ -2826,7 +2334,5 @@
   raiz.WifiSignal = { AccessPoint, para, remover, ehAP, instanciaExistente, ganhoAntena, potenciaBase, alcanceMax, distanciasDoRaio,
     atenuacaoDoPick, interseccaoSegmento, calcularCorte2D, wattsParaDbm, ATENUACAO, FAIXAS, DENSIDADES, NIVEIS, METODOS2D, CSS,
     // [22/09/2026] NOVO -- otimização de malha (ver seção "3.5" acima, logo antes da classe AccessPoint).
-    MODOS_MALHA, optimizeSignalMesh, gerarCascasReal,
-    // [22/09/2026] NOVO -- motor avançado de Ray Launching multi-bounce (reflexão/refração, dBm/FSPL, seção 4.5).
-    SignalPropagationEngine, MATERIAIS_RF, materialTypeDoPick, perdaPorDistancia, dbmDeIntensidade, FAIXAS_MHZ, ganhoAntenaDb };
+    MODOS_MALHA, optimizeSignalMesh, gerarCascasReal, dbmDeIntensidade };
 })(typeof window !== 'undefined' ? window : globalThis);

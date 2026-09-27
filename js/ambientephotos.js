@@ -276,6 +276,15 @@ const AmbientePhotos = {
   // _attachStripDragScroll) — usado só pra o clique que o navegador dispara
   // ao soltar o botão não ser interpretado como "selecionar esta foto".
   _stripJustDragged: false,
+  // [25/09/2026] NOVO -- pedido verbatim: "as fotos de patrimônio [...] um
+  // botão ativa que elas aparecem em outra linha." -- lista das fotos
+  // `tipo: 'patrimonio'` deste ambiente (ver db.js
+  // getPatrimonioPhotosByAmbiente) e se a fileira delas está revelada no
+  // momento; ambos resetados em open() (mesmo padrão de this._photos) --
+  // escondida por padrão a cada abertura da tela, como pedido ("por padrão,
+  // é as que aparecem de cara" só pras fotos de ambiente).
+  _photosPatrimonio: [],
+  _patrimonioStripVisible: false,
   // Última foto selecionada — de propósito fora de open()/close() (que
   // resetam _current) para sobreviver a um fechar/reabrir da tela de Fotos:
   // sem isto, toda reabertura voltava sempre pra 1ª foto (a mais antiga),
@@ -450,10 +459,35 @@ const AmbientePhotos = {
       <canvas id="ambphotos-canvas" style="position:absolute; inset:0; width:100%; height:100%; touch-action:none; display:block"></canvas>
       <div class="camera-topbar ambphotos-topbar">
         <div class="ambphotos-topbar-row">
-          <button class="icon-btn ambphotos-btn-close" id="ambphotos-close" title="${this._returnToLabel ? `Voltar para ${Utils.escapeHtml(this._returnToLabel)}` : 'Fechar e voltar para o mapa'}">${this._returnToLabel ? `← Voltar para ${Utils.escapeHtml(this._returnToLabel)}` : '✕ Fechar'}</button>
+          <!-- [26/09/2026] NOVO -- pedido verbatim: "em vez de aparecer o
+               botão normal '✕ Fechar', o botão de retorno a tela que estava
+               antes é que deve aparecer naquele lugar." Antes, quando aberto
+               fromOrganizar, o botão normal "✕ Fechar" continuava aqui e um
+               2º botão flutuante "↩️ Organizar" (#ambphotos-voltar-organizar,
+               abaixo) aparecia em outro canto — confuso/duplicado. Agora,
+               _voltarParaOrganizar tem prioridade sobre _returnToLabel
+               e troca o PRÓPRIO botão desta posição para "↩️ Organizar"
+               (mesmo destino/handler do botão flutuante, que passa a ficar
+               sempre escondido — ver onclick mais abaixo). -->
+          <button class="icon-btn ambphotos-btn-close" id="ambphotos-close" title="${this._voltarParaOrganizar ? `Voltar para 'Mapa' → 'Organizar', de onde você veio` : this._returnToLabel ? `Voltar para ${Utils.escapeHtml(this._returnToLabel)}` : 'Fechar e voltar para o mapa'}">${this._voltarParaOrganizar ? '↩️ Organizar' : this._returnToLabel ? `← Voltar para ${Utils.escapeHtml(this._returnToLabel)}` : '✕ Fechar'}</button>
           <div class="ambphotos-topbar-center">
             ${this._pickPhoto ? '<button class="icon-btn ambphotos-btn-pick" id="ambphotos-pick" title="Anexar a foto que está aberta e voltar">✔ Usar esta foto</button>' : ''}
             <button class="icon-btn" id="ambphotos-add" title="Tirar/adicionar uma foto deste ambiente (no celular, use o modo panorama da câmera para fotos mais amplas)">📷 Adicionar foto</button>
+            <!-- [25/09/2026] NOVO -- pedido verbatim: "Fica, então, 'fotos
+                 do ambiente' (por padrão, é as que aparecem de cara) e as
+                 'fotos de patrimônio' (um botão ativa que elas aparecem em
+                 outra linha)." -- botão só existe/aparece quando há pelo
+                 menos 1 foto de patrimônio (tipo: 'patrimonio', ver
+                 db.js getPatrimonioPhotosByAmbiente) neste ambiente; some
+                 por completo caso contrário (ver _renderPatrimonioToggle),
+                 já que não faz sentido oferecer o botão pra revelar uma
+                 fileira vazia. Alterna a fileira #ambphotos-strip-patrimonio
+                 abaixo -- MESMO espírito de toggle de "📏"/"✏️" do menu
+                 lateral (classe 'active'/'hidden'), só que aqui a fileira
+                 nasce ESCONDIDA por padrão (o pedido é que "fotos do
+                 ambiente" sejam "as que aparecem de cara").
+            -->
+            <button type="button" class="icon-btn hidden" id="ambphotos-patrimonio-toggle" title="Mostrar/esconder as fotos anexadas a patrimônios (tiradas pelo 'Anexar foto' da ficha do item)">📎 Fotos de patrimônio</button>
             <button type="button" class="ambphotos-caption hidden" id="ambphotos-caption" title="Toque para dar um nome a esta foto">
               <span id="ambphotos-caption-text">Sem nome</span>
               <span class="ic">✏️</span>
@@ -482,8 +516,19 @@ const AmbientePhotos = {
           <button class="icon-btn" id="ambphotos-view3d" disabled title="Ver no mapa 3D">👁️3D</button>
         </div>
       </div>
-      <button class="icon-btn ambphotos-btn-voltar-organizar ${this._voltarParaOrganizar ? '' : 'hidden'}" id="ambphotos-voltar-organizar" title="Voltar para 'Mapa' → 'Organizar', de onde você veio">↩️ Organizar</button>
+      <!-- [26/09/2026] NOVO -- este botão flutuante ficou redundante: o botão
+           "↩️ Organizar" agora aparece no lugar do "✕ Fechar" normal (ver
+           comentário grande acima, em #ambphotos-close) — mantido só como
+           registro/onclick (nunca mais visível, sempre 'hidden') pra não
+           precisar reescrever quem já depende do id existir no DOM. -->
+      <button class="icon-btn ambphotos-btn-voltar-organizar hidden" id="ambphotos-voltar-organizar" title="Voltar para 'Mapa' → 'Organizar', de onde você veio">↩️ Organizar</button>
       <div class="ambphotos-strip" id="ambphotos-strip"></div>
+      <!-- [25/09/2026] NOVO -- pedido verbatim: "as fotos de patrimônio [...]
+           um botão ativa que elas aparecem em outra linha." -- fileira
+           SEPARADA (não misturada com #ambphotos-strip acima), escondida
+           por padrão (classe 'hidden'), só revelada pelo botão "📎 Fotos de
+           patrimônio" (ver _togglePatrimonioStrip/_renderPatrimonioStrip). -->
+      <div class="ambphotos-strip ambphotos-strip-patrimonio hidden" id="ambphotos-strip-patrimonio"></div>
       <div class="ambphotos-empty" id="ambphotos-empty">
         <div class="ic">🖼️</div>
         <p>Nenhuma foto deste ambiente ainda.</p>
@@ -609,7 +654,14 @@ const AmbientePhotos = {
     this._canvas = overlay.querySelector('#ambphotos-canvas');
     this._ctx = this._canvas.getContext('2d');
 
-    overlay.querySelector('#ambphotos-close').onclick = () => this.close();
+    // [26/09/2026] NOVO -- quando `_voltarParaOrganizar`, este botão (que
+    // agora exibe "↩️ Organizar" no lugar do "✕ Fechar", ver HTML acima) usa
+    // o MESMO fluxo de volta que o botão flutuante #ambphotos-voltar-
+    // organizar já usava (clique nele, definido logo abaixo).
+    overlay.querySelector('#ambphotos-close').onclick = () => {
+      if (this._voltarParaOrganizar) { overlay.querySelector('#ambphotos-voltar-organizar').onclick(); return; }
+      this.close();
+    };
     const btnPick = overlay.querySelector('#ambphotos-pick');
     if (btnPick) btnPick.onclick = () => {
       if (!this._current) { Utils.toast('Toque numa foto da faixa para escolher qual anexar.', { type: 'warn' }); return; }
@@ -698,6 +750,10 @@ const AmbientePhotos = {
     overlay.querySelector('#ambphotos-download-all').onclick = () => this._downloadAllPhotosZip();
     overlay.querySelector('#ambphotos-strip').addEventListener('click', (e) => this._onStripClick(e));
     this._attachStripDragScroll(overlay.querySelector('#ambphotos-strip'));
+    // [25/09/2026] NOVO -- ver comentário grande no botão/fileira acima.
+    overlay.querySelector('#ambphotos-patrimonio-toggle').onclick = () => this._togglePatrimonioStrip();
+    overlay.querySelector('#ambphotos-strip-patrimonio').addEventListener('click', (e) => this._onPatrimonioStripClick(e));
+    this._attachStripDragScroll(overlay.querySelector('#ambphotos-strip-patrimonio'));
 
     // A faixa de fotos (.ambphotos-strip) fica presa logo abaixo do
     // cabeçalho — mas o cabeçalho pode ocupar 1 ou 2 linhas dependendo da
@@ -764,13 +820,34 @@ const AmbientePhotos = {
     // qualquer registro ainda sem imagem nenhuma (a Câmera continua
     // existindo/editável normalmente no mapa 2D/3D, só não aparece aqui
     // enquanto não tiver foto).
+    // [25/09/2026] NOVO -- reclassifica 1x as fotos de anexo antigas (ver DB.migrarFotosAnexadasDePatrimonio).
+    try { await DB.migrarFotosAnexadasDePatrimonio?.(); } catch (e) { /* melhor esforço */ }
     this._photos = (await DB.getPhotosByAmbiente(map.id)).filter((p) => p.dataUrl || p.thumbDataUrl);
     this._renderStrip();
-    if (this._photos.length) {
+    // [25/09/2026] NOVO -- ver comentário grande no botão/fileira "📎 Fotos
+    // de patrimônio" acima. Nasce escondida (this._patrimonioStripVisible
+    // já é `false` por padrão) a cada abertura desta tela.
+    this._photosPatrimonio = (await DB.getPatrimonioPhotosByAmbiente(map.id)).filter((p) => p.dataUrl || p.thumbDataUrl);
+    this._patrimonioStripVisible = false;
+    this._renderPatrimonioStrip();
+    // [26/09/2026] NOVO -- `startPhotoId` pode ser de uma foto de PATRIMÔNIO
+    // (ex.: duplo clique num card de foto de patrimônio em 'Organizar'), que
+    // não está em `this._photos` (lista só de fotos de ambiente, ver
+    // db.js getPhotosByAmbiente) e sim em `this._photosPatrimonio`. Antes,
+    // isso caía direto no fallback "1ª foto de ambiente" (`this._photos[0]`),
+    // abrindo a foto errada. Agora checa os dois grupos e, se a pedida for
+    // de patrimônio, já abre a fileira "📎 Fotos de patrimônio" pra ela
+    // aparecer selecionada/visível.
+    const pedidaEhPatrimonio = !!(startPhotoId && (this._photosPatrimonio || []).some((p) => p.id === startPhotoId));
+    if (pedidaEhPatrimonio) this._patrimonioStripVisible = true;
+    if (this._photos.length || pedidaEhPatrimonio) {
       // Prioridade: uma foto explicitamente pedida (ex: atalho vindo de uma
-      // câmera do mapa) > a última selecionada neste ambiente > a 1ª da lista.
+      // câmera do mapa, ou uma foto de patrimônio) > a última selecionada
+      // neste ambiente > a 1ª da lista (de ambiente).
       const querida = startPhotoId || this._lastSelectedPhotoId;
-      const alvo = (querida && this._photos.some((p) => p.id === querida)) ? querida : this._photos[0].id;
+      const alvo = pedidaEhPatrimonio
+        ? startPhotoId
+        : (querida && this._photos.some((p) => p.id === querida)) ? querida : (this._photos[0]?.id ?? startPhotoId);
       // `focusNorm` só se aplica quando a foto ALVO é de fato a que foi
       // pedida por `startPhotoId` (não faz sentido aproximar numa posição
       // que pertence a OUTRA foto, caso `startPhotoId` não exista mais e o
@@ -1512,6 +1589,61 @@ const AmbientePhotos = {
     if (thumb) await this._selectPhoto(thumb.dataset.id);
   },
 
+  // [25/09/2026] NOVO -- pedido verbatim: "as fotos de patrimônio [...] um
+  // botão ativa que elas aparecem em outra linha." -- fileira/botão
+  // separados de _renderStrip/_onStripClick acima (que continuam só sobre
+  // "fotos do ambiente", ver db.js getPhotosByAmbiente, intocado). Miniatura
+  // igual à de _renderStrip (mesmo CSS .ambphoto-thumb), só numa fileira
+  // própria (.ambphotos-strip-patrimonio) que nasce escondida.
+  _renderPatrimonioToggle() {
+    const btn = this._overlayEl?.querySelector('#ambphotos-patrimonio-toggle');
+    if (!btn) return;
+    const n = this._photosPatrimonio?.length || 0;
+    btn.classList.toggle('hidden', n === 0);
+    btn.textContent = `📎 Fotos de patrimônio (${n})`;
+    btn.classList.toggle('active', !!this._patrimonioStripVisible);
+    if (n === 0 && this._patrimonioStripVisible) this._patrimonioStripVisible = false; // nada pra mostrar (ex.: última foto de patrimônio excluída) -- não deixa o botão "ligado" apontando pra uma fileira vazia
+  },
+
+  _renderPatrimonioStrip() {
+    const strip = this._overlayEl?.querySelector('#ambphotos-strip-patrimonio');
+    if (!strip) return;
+    strip.innerHTML = (this._photosPatrimonio || []).map((p) => {
+      const src = p.thumbDataUrl || p.dataUrl || '';
+      return `
+      <div class="ambphoto-thumb ${p.id === this._current?.id ? 'active' : ''}" data-id="${p.id}" title="${Utils.escapeHtml(p.nome || 'Foto de patrimônio')}">
+        ${src ? `<img src="${src}" alt="${Utils.escapeHtml(p.nome || 'Foto de patrimônio')}">` : `<div class="ambphoto-thumb-placeholder" aria-label="Sem foto">📷</div>`}
+        <button type="button" class="ambphoto-thumb-del" data-id="${p.id}" title="Excluir esta foto de patrimônio">✕</button>
+      </div>
+    `;
+    }).join('');
+    strip.classList.toggle('hidden', !this._patrimonioStripVisible);
+    this._renderPatrimonioToggle();
+    this._syncStripOffset();
+  },
+
+  async _onPatrimonioStripClick(e) {
+    if (this._stripJustDragged) return;
+    const delBtn = e.target.closest('.ambphoto-thumb-del');
+    if (delBtn) {
+      e.stopPropagation();
+      if (!confirm('Excluir esta foto de patrimônio?')) return;
+      await DB.deleteAmbientePhoto(delBtn.dataset.id);
+      this._photosPatrimonio = (this._photosPatrimonio || []).filter((p) => p.id !== delBtn.dataset.id);
+      this._renderPatrimonioStrip();
+      return;
+    }
+    const thumb = e.target.closest('.ambphoto-thumb');
+    if (thumb) await this._selectPhoto(thumb.dataset.id);
+  },
+
+  /** Alterna a fileira "📎 Fotos de patrimônio" — escondida por padrão (ver
+   *  comentário grande no botão, no HTML de open()). */
+  _togglePatrimonioStrip() {
+    this._patrimonioStripVisible = !this._patrimonioStripVisible;
+    this._renderPatrimonioStrip();
+  },
+
   /** Mede a altura real do cabeçalho (que pode ter 1 ou 2 linhas, ver
    *  .ambphotos-topbar-center no CSS) e reposiciona a faixa de fotos logo
    *  abaixo dele, pra ela nunca ficar em cima de nenhum botão do topo. */
@@ -1520,6 +1652,16 @@ const AmbientePhotos = {
     const strip = this._overlayEl?.querySelector('#ambphotos-strip');
     if (!topbar || !strip) return;
     strip.style.top = `${topbar.offsetHeight + 8}px`;
+    // [25/09/2026] NOVO -- a fileira de "Fotos de patrimônio" (quando
+    // revelada) fica logo ABAIXO da fileira de ambiente acima, nunca por
+    // cima/misturada com ela (pedido verbatim: "outra linha") -- mesmo
+    // cálculo de offset, só que somando também a altura real da 1ª fileira
+    // (que muda conforme ela está vazia/escondida ou não, ver _renderStrip).
+    const stripPatrimonio = this._overlayEl?.querySelector('#ambphotos-strip-patrimonio');
+    if (stripPatrimonio) {
+      const stripH = strip.classList.contains('hidden') ? 0 : strip.offsetHeight;
+      stripPatrimonio.style.top = `${topbar.offsetHeight + 8 + stripH + (stripH ? 8 : 0)}px`;
+    }
   },
 
   /** No PC, permite clicar em cima de uma foto da faixa e arrastar pra
@@ -1648,6 +1790,11 @@ const AmbientePhotos = {
     }
     await this._resolveOrbLabels(photo);
     this._renderStrip();
+    // [26/09/2026] NOVO -- também redesenha a fileira de patrimônio (marca a
+    // miniatura ativa e respeita `_patrimonioStripVisible`), senão uma foto
+    // de patrimônio selecionada via `startPhotoId` (ver open()) não aparecia
+    // com destaque nem com a fileira aberta.
+    this._renderPatrimonioStrip();
     this._updateTitle();
     this._updateMapLinkBtn();
     this.render();

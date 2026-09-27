@@ -204,6 +204,23 @@ const Mapping = {
     // defaultShapeForTipo) na primeira vez que o mapa é carregado depois
     // desta versão, sem precisar recriar cada objeto manualmente.
     (map.objects || []).forEach((o) => Mapping.applyDefaultShapeToObject(o));
+    // [27/09/2026] HISTÓRICO — mapas salvos ANTES de `.opacity()`/
+    // `.highlight()` virarem campos DIRETOS (`entity.opacidade`/
+    // `entity.destacado`, ver comentário grande mais abaixo) podiam ter
+    // ficado com uma classe sintética temporária `__auto_...` presa pra
+    // sempre no campo "Classes" de algum objeto (sobra de página
+    // recarregada/fechada com o script ainda "em execução" — o cleanup só
+    // rodava via callback EM MEMÓRIA, no `.stop()`). Limpa isso ao carregar
+    // qualquer mapa antigo — nenhum script cria mais classes `__auto_...`
+    // hoje, então esta linha é só higiene de dados de rodadas anteriores.
+    (map.objects || []).forEach((o) => {
+      if (Array.isArray(o.classes)) o.classes = o.classes.filter((c) => !/^__auto_/.test(c));
+    });
+    // [27/09/2026] REMOVIDO — pedido verbatim: "Remova map.grupoRegras."
+    // Mapas antigos que ainda tenham esse campo salvo (motor de regras
+    // completamente removido, ver comentário grande mais abaixo) o perdem
+    // de vez ao serem carregados — nada nunca mais lê nem escreve nele.
+    delete map.grupoRegras;
     // [18/09/2026 UTC] Racks sem os parametros (rackUs/rackProfundidade) --
     // ex.: criados por script/importacao -- ganham o padrao 12U x 600mm.
     (map.objects || []).forEach((o) => {
@@ -537,18 +554,39 @@ const Mapping = {
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   },
 
-  /** [14/09/2026 UTC] NOVO — GENERALIZAÇÃO de todo o sistema acima (paredes+piso/
-   *  andar/classe, 3 categorias FIXAS) para um motor de REGRAS genérico,
-   *  tipo `querySelector`, configurável pelo usuário — pedido verbatim,
-   *  adiado desde a RODADA 20 ("7, 8 e 9") por ser reformulação de
-   *  arquitetura: "Assim como... querySelector, deve ser possível fazer
-   *  isso nesse sistema de seleção." / "O 'Grupos' deve ser gerenciável.
-   *  Deve poder dar/editar um nome para cada opção... deve ser possível
-   *  definir o que é ativado/desativado ao selecionar uma opção. Sobre
-   *  isso, é como o display:none/block, visibility:hidden/visible ou
-   *  opacity:0/1."
+  /** [27/09/2026] REMOVIDO por completo — pedido verbatim: "Remova
+   *  map.grupoRegras. O motor de regras por baixo (grupoRegras) deve ser
+   *  integrado a 'Scripts'." Existia aqui um motor de REGRAS genérico
+   *  (`map.grupoRegras`, tipo `querySelector`) que alimentava tanto o
+   *  antigo painel '🏷️ Grupos' (UI removida numa rodada anterior) quanto,
+   *  por baixo, os métodos `.opacity()`/`.highlight()` do Scripts (via uma
+   *  classe sintética temporária + uma "regra" registrada aqui). Os dois
+   *  usos desse motor sumiram: o painel já não existe, e `.opacity()`/
+   *  `.highlight()` (js/automation.js) passaram a escrever campos DIRETO
+   *  no objeto (`entity.opacidade`/`entity.destacado`), mesmo padrão que
+   *  `.hide()`/`.show()` já usavam com `entity.visibility` — rollback
+   *  automático de `_rastrear`, sem regra/classe temporária/`map.
+   *  grupoRegras` nenhuma no meio. `MapView` (2D) e `Engine3D` (3D) agora
+   *  leem `entity.opacidade`/`entity.destacado` direto, em vez de chamar
+   *  `getEntityGroupAlpha`/`isEntityGroupHighlighted`. Removidos com o
+   *  motor: `getGrupoRegras`/`_migrarGruposParaRegras`/`addGrupoRegra`/
+   *  `removeGrupoRegra`/`toggleGrupoRegraAtivo`/`parseGrupoSelector`/
+   *  `grupoRegraMatches`/`isEntityGroupHidden`/`isEntityGroupHighlighted`/
+   *  `getEntityGroupAlpha`/`filterByGrupos`. Mapas antigos que ainda tinham
+   *  `map.grupoRegras` salvo o perdem de vez ao ser carregados (`delete
+   *  map.grupoRegras` em `ensureNewFields`, mais acima) — nada nunca mais
+   *  lê nem escreve nele. Os campos legados ainda mais antigos que
+   *  alimentavam a MIGRAÇÃO pra `grupoRegras` (`map.ocultarParedesEPiso`/
+   *  `map.andaresOcultos`/`map.gruposOcultos`/`map.gruposDestacados`)
+   *  ficam como estavam, só ignorados (não lidos por nada) — nunca
+   *  chegaram a ser o dado "principal" de nada, então não há necessidade
+   *  de apagá-los também.
    *
-   *  DADOS — `map.grupoRegras`: array de regras, cada uma
+   *  (Comentário histórico original, mantido como referência da sintaxe
+   *  de seletor — a MESMA sintaxe continua valendo pro `Select()` do
+   *  Scripts, ver comentário grande no topo de js/automation.js.)
+   *
+   *  DADOS (histórico) — `map.grupoRegras`: array de regras, cada uma
    *  `{ id, nome, selector, efeito, ativo, valor }`:
    *    - `nome`: rótulo editável pelo usuário (livre, não precisa bater
    *      com o `selector`).
@@ -576,148 +614,8 @@ const Mapping = {
    *    pra "OU" (OR) — ex.: `parede, piso` (regra "Paredes e Piso" de
    *    sempre, migrada) ou `.classe1, .classe2` (classe1 OU classe2).
    *
-   *  MIGRAÇÃO — mapas salvos ANTES desta rodada não têm `map.grupoRegras`
-   *  ainda; `getGrupoRegras` cria o array na 1ª leitura
-   *  (`_migrarGruposParaRegras`), convertendo fielmente o estado antigo
-   *  (`ocultarParedesEPiso`/`andaresOcultos`/`gruposOcultos`/
-   *  `gruposDestacados`) em regras equivalentes — nenhuma visibilidade
-   *  muda ao abrir um mapa antigo pela 1ª vez depois desta rodada. Os
-   *  campos antigos são MANTIDOS no objeto `map` (não apagados) por
-   *  seguranca/histórico, mas não são mais lidos por nenhuma função daqui
-   *  pra baixo — só `map.grupoRegras` importa a partir de agora. */
-  getGrupoRegras(map) {
-    if (!map) return [];
-    if (!Array.isArray(map.grupoRegras)) this._migrarGruposParaRegras(map);
-    return map.grupoRegras;
-  },
-
-  _migrarGruposParaRegras(map) {
-    const regras = [];
-    regras.push({ id: Utils.uid('regra'), nome: '🧱 Paredes e Piso', selector: 'parede, piso', efeito: 'ocultar', ativo: !!map.ocultarParedesEPiso, valor: 0.35 });
-    const pisos = this.getPisos(map);
-    pisos.forEach((_, i) => {
-      const nome = i === 0 ? '🏢 Térreo' : `🏢 ${i}º andar`;
-      regras.push({ id: Utils.uid('regra'), nome, selector: `andar=${i}`, efeito: 'ocultar', ativo: (map.andaresOcultos || []).includes(i), valor: 0.35 });
-    });
-    const classes = this.getAllClasses(map);
-    const gruposOcultos = map.gruposOcultos || [];
-    const gruposDestacados = map.gruposDestacados || [];
-    classes.forEach((c) => {
-      regras.push({ id: Utils.uid('regra'), nome: `🏷️ ${c}`, selector: `.${c}`, efeito: 'ocultar', ativo: gruposOcultos.includes(c), valor: 0.35 });
-      // Modelo antigo permitia oculto E destacado ao mesmo tempo (2 toggles
-      // independentes por classe) — o novo modelo é 1 efeito por regra, então
-      // uma 2ª regra "irmã" cobre o caso raro de os dois juntos, sem perder
-      // o dado (só cria a 2ª regra quando realmente havia destaque salvo).
-      if (gruposDestacados.includes(c)) {
-        regras.push({ id: Utils.uid('regra'), nome: `✨ ${c} (destaque)`, selector: `.${c}`, efeito: 'destacar', ativo: true, valor: 0.35 });
-      }
-    });
-    map.grupoRegras = regras;
-  },
-
-  addGrupoRegra(map, { nome, selector, efeito } = {}) {
-    const regras = this.getGrupoRegras(map);
-    const r = { id: Utils.uid('regra'), nome: nome || 'Nova regra', selector: selector || '*', efeito: efeito || 'ocultar', ativo: false, valor: 0.35 };
-    regras.push(r);
-    return r;
-  },
-
-  removeGrupoRegra(map, id) {
-    const regras = this.getGrupoRegras(map);
-    const idx = regras.findIndex((r) => r.id === id);
-    if (idx !== -1) regras.splice(idx, 1);
-  },
-
-  toggleGrupoRegraAtivo(map, id) {
-    const r = this.getGrupoRegras(map).find((r) => r.id === id);
-    if (r) r.ativo = !r.ativo;
-  },
-
-  /** Divide o `selector` em grupos "OU" (vírgula) e cada grupo em átomos
-   *  "E" (concatenados sem espaço) — ver spec completa no comentário
-   *  grande acima de `getGrupoRegras`. */
-  parseGrupoSelector(selector) {
-    return String(selector || '')
-      .split(',')
-      .map((g) => g.trim())
-      .filter(Boolean)
-      .map((g) => {
-        const atoms = [];
-        const re = /\.[^\s.#=]+|#[^\s.#=]+|[a-zA-Z_][a-zA-Z0-9_]*=[^\s.#=]+|\*|[a-zA-Z_][a-zA-Z0-9_]*/g;
-        let m;
-        while ((m = re.exec(g))) atoms.push(m[0]);
-        return atoms;
-      })
-      .filter((atoms) => atoms.length);
-  },
-
-  /** Testa se `entity` bate com `selector` (ver spec acima) — `isWall`
-   *  repassado por quem chama (paredes não têm `entity.tipo`/`.classes`
-   *  próprios, então o átomo `parede` depende de quem itera saber que
-   *  está iterando `map.walls`, mesmo padrão que `isEntityGroupHidden` já
-   *  usava antes desta rodada). */
-  grupoRegraMatches(entity, map, selector, { isWall = false } = {}) {
-    if (!entity) return false;
-    const grupos = this.parseGrupoSelector(selector);
-    if (!grupos.length) return false;
-    const classes = this.getObjectClasses(entity);
-    const testAtom = (atom) => {
-      if (atom === '*') return true;
-      if (atom === 'parede') return isWall;
-      if (atom === 'piso') return entity.tipo === 'piso';
-      if (atom[0] === '.') return classes.includes(atom.slice(1));
-      if (atom[0] === '#') return entity.id === atom.slice(1);
-      const eq = atom.indexOf('=');
-      if (eq > 0) {
-        const chave = atom.slice(0, eq), valor = atom.slice(eq + 1);
-        if (chave === 'andar') return String(this.getAndarDaEntidade(entity, map)) === valor;
-        return String(entity[chave] ?? '') === valor;
-      }
-      return false;
-    };
-    return grupos.some((atoms) => atoms.every(testAtom));
-  },
-
-  isEntityGroupHidden(entity, map, { isWall = false } = {}) {
-    const regras = this.getGrupoRegras(map);
-    return regras.some((r) => r.ativo && r.efeito === 'ocultar' && this.grupoRegraMatches(entity, map, r.selector, { isWall }));
-  },
-
-  isEntityGroupHighlighted(entity, map) {
-    const regras = this.getGrupoRegras(map);
-    return regras.some((r) => r.ativo && r.efeito === 'destacar' && this.grupoRegraMatches(entity, map, r.selector, { isWall: false }));
-  },
-
-  /** [14/09/2026 UTC] NOVO — efeito `'opacidade'` das regras (o 3º efeito
-   *  pedido, "é como o... opacity:0/1"): devolve o multiplicador de alfa
-   *  (0-1, `1` = sem efeito nenhum) resultado de TODAS as regras ativas
-   *  do tipo `'opacidade'` que baterem com `entity` — quando mais de uma
-   *  bate, usa a mais restritiva (`Math.min`). Fiação no desenho: ver
-   *  `Map2DRenderer` (mapview.js), multiplicado em cima do
-   *  `_layerOpacity` de sempre nos 2 passes que desenham `map.objects`
-   *  (mesmo escopo de `getObjectClasses` — "classes só em map.objects",
-   *  ver comentário histórico acima). 3D ainda NÃO lê isto nesta rodada
-   *  (ocultar/destacar já funcionam nos dois; opacidade fica só no 2D por
-   *  ora). */
-  getEntityGroupAlpha(entity, map, { isWall = false } = {}) {
-    const regras = this.getGrupoRegras(map);
-    let alpha = 1;
-    regras.forEach((r) => {
-      if (r.ativo && r.efeito === 'opacidade' && this.grupoRegraMatches(entity, map, r.selector, { isWall })) {
-        alpha = Math.min(alpha, Number.isFinite(r.valor) ? r.valor : 0.35);
-      }
-    });
-    return alpha;
-  },
-
-  filterByGrupos(map) {
-    const ocultarPeloGrupo = (isWall) => (entity) => !this.isEntityGroupHidden(entity, map, { isWall });
-    return {
-      ...map,
-      walls: (map.walls || []).filter(ocultarPeloGrupo(true)),
-      objects: (map.objects || []).filter(ocultarPeloGrupo(false)),
-    };
-  },
+   *  (Tudo isso — `map.grupoRegras` e as funções que liam/escreviam nele —
+   *  foi removido; ver comentário grande acima.) */
 
   addLayer(map, nome) {
     if (!map.layers) map.layers = [];
@@ -1262,9 +1160,54 @@ const Mapping = {
     } while (usados.has(nome));
     return nome;
   },
+
+  /** [27/09/2026] NOVO — pedido verbatim: "Certifique-se de que em todo o
+   *  app não é possível definir um mesmo nome para mais de um objeto ao
+   *  mesmo tempo. Atualmente, o app acrescenta o sufixo '.001'... e vai
+   *  aumentando... (se não foi implementada ainda, implemente isso).
+   *  Deste modo, em um script, dá para usar o 'Objeto(<nome_do_objeto>)',
+   *  sem gerar conflito." A geração automática (`_nextObjectName`, acima)
+   *  JÁ garantia isso — mas só na CRIAÇÃO. Renomear um objeto já existente
+   *  (campo "Nome" do painel de propriedades — objeto/porta/janela/texto)
+   *  escrevia o texto digitado DIRETO, sem checar colisão contra o resto
+   *  da cena — dois objetos podiam terminar com o MESMO nome, quebrando
+   *  `Object(nome)`/`SceneObjects.get` (que só devolve UM, o primeiro que
+   *  achar). Este helper é o guard genérico: devolve `nomeDesejado`
+   *  sem mudança se estiver livre (ou for o PRÓPRIO nome atual da
+   *  entidade que está sendo renomeada — `entityAtual`, pra não
+   *  "colidir consigo mesma" e ganhar um sufixo bobo ao só salvar de
+   *  novo sem mudar nada); senão acrescenta ".001", ".002"... (mesmo
+   *  formato/espírito do Blender que `_nextObjectName` já usa) até achar
+   *  um nome livre. Comparação é GLOBAL (`_allSceneNames`, todas as
+   *  coleções nomeáveis) — igual à geração automática. Chamado por todo
+   *  ponto de RENOMEAR do app (ver `mapview.js` `#obj-nome`/`#porta-nome`/
+   *  `#janela-nome`/painel de texto). */
+  ensureUniqueName(map, nomeDesejado, entityAtual) {
+    const desejado = (nomeDesejado || '').trim();
+    if (!desejado) return desejado;
+    if (entityAtual && entityAtual.nome === desejado) return desejado; // renomeando pro próprio nome de sempre — nada a fazer
+    const usados = new Set(this._allSceneNames(map).filter((n) => !entityAtual || n !== entityAtual.nome));
+    if (!usados.has(desejado)) return desejado;
+    let n = 1, nome;
+    do {
+      nome = `${desejado}.${String(n).padStart(3, '0')}`;
+      n++;
+    } while (usados.has(nome));
+    return nome;
+  },
   addObject(map, x, y, tipo, extra = {}) {
     if (!map.objects) map.objects = [];
     const obj = { id: Utils.uid('obj'), x, y, tipo, piso: 0, angulo: 0, criadoEm: DB.nowISO(), nome: this._nextObjectName(map, this._labelForObjectType(tipo)), ...extra };
+    // [27/09/2026] NOVO -- pedido verbatim: "ao inserir um objeto na grade
+    // do mapa 2D, nas propriedades do objeto, no campo 'Classes', deve vir
+    // marcada a classe do objeto. Por exemplo, para o objeto piso, deve
+    // ficar [...] 'piso'." Classe padrão = o próprio `tipo` (ex.: "piso",
+    // "mesa"...) -- só quando `extra` não já trouxe `classes` explícitas
+    // (nunca sobrescreve o que quem chamou já decidiu) e há um `tipo` de
+    // verdade (objetos "em branco", sem tipo ainda escolhido -- ex.: forma
+    // livre via `_openObjectPickerPanel`/desenho -- ficam sem classe
+    // automática, já que não há tipo nenhum pra virar classe).
+    if (!Array.isArray(obj.classes) && tipo) obj.classes = [tipo];
     // Luminária: fica no TETO por padrão (3m do chão) quando quem chamou não
     // já mandou uma elevação própria — a hotbar 3D já manda a elevação
     // calculada pela mira + 3m (ver view3d.js _placeWithBuildTool/

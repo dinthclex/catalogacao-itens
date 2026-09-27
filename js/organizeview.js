@@ -334,7 +334,16 @@ const OrganizeView = {
    *  navegador só escala visualmente os mesmos pixels já carregados),
    *  exatamente o "independente do zoom" pedido — sem precisar de nenhuma
    *  lógica extra de "resolução adaptativa". */
-  _viewMode: 'cards', // 'cards' | 'grid' — ver comentário grande acima
+  // [26/09/2026] MUDADO -- pedido verbatim: "O modo padrão do app deve ser o
+  // 'Grade'." Era 'cards' (o modo mais antigo, Cartões) — agora 'grid'
+  // (Grade) já nasce selecionado na 1ª abertura desta sessão do app.
+  // `_setViewMode` (chamado por `_buildOverlay`, ver comentário grande
+  // acima) continua sincronizando o DOM/zoom com o que estiver aqui, então
+  // trocar só este valor basta — nenhuma outra lógica de inicialização
+  // precisa mudar. Uma vez trocado pelo usuário (botão de alternância),
+  // continua valendo pro resto da sessão (mesmo comportamento de sempre,
+  // só o padrão de fábrica mudou).
+  _viewMode: 'grid', // 'cards' | 'grid' — ver comentário grande acima
   _gridPositions: {}, // {mapId: {x, y}} em px de CONTEÚDO — ver comentário grande acima
   _gridZoom: 1,
   _gridPan: { x: 0, y: 0 },
@@ -1066,7 +1075,27 @@ const OrganizeView = {
   async open(opts = {}) {
     if (this._overlayEl) {
       // Já existe — pode estar ESCONDIDA (ver `_openMapExternally`, fluxo
-      // "ir pro mapa e voltar") — só reexibe, sem reconstruir nada.
+      // "ir pro mapa e voltar", e também `_openFotoAtOrb`/ambientephotos.js
+      // "↩️ Organizar") — só reexibe, sem reconstruir nada.
+      // [26/09/2026] CORRIGIDO -- pedido verbatim: "ao dar dois cliques nas
+      // fotos de patrimônio e depois clicar para voltar, está acontecendo o
+      // fade de transição também [...] mostrando a tela 'Mapa' de forma
+      // intermediária." MESMA causa raiz/mesma correção já aplicada em
+      // `_showReturnButton()` (comentário grande lá, rodada anterior): o
+      // CSS `animation: organizeFadeIn` de `.organize-overlay` reinicia
+      // toda vez que `display` troca de `none` pra um valor visível — só
+      // que aquela correção só cobria o caminho de VOLTA da planta 2D/3D
+      // aberta externamente (`_closeExternalScreen`). Este `open()` é
+      // chamado por OUTRO caminho de volta (o botão "↩️ Organizar" da tela
+      // de fotos, ver ambientephotos.js) que reexibe a MESMA `_overlayEl`
+      // aqui, sem passar por `_showReturnButton()` — sem o `animation:
+      // none` aplicado ANTES do `display`, o fade-in reiniciava aqui
+      // também, deixando a tela 'Mapa' de baixo espiar durante os 0.2s.
+      // Aplicado aqui, na ÚNICA porta de entrada que reexibe o overlay
+      // (todo caminho de volta passa por este `open()`), cobre qualquer
+      // chamador, presente ou futuro, sem precisar repetir a correção em
+      // cada um.
+      this._overlayEl.style.animation = 'none';
       this._overlayEl.style.display = '';
       document.getElementById('organize-return-btn')?.remove();
       if (opts.onClose) this._onCloseCb = opts.onClose;
@@ -1597,8 +1626,30 @@ const OrganizeView = {
       ...maps.filter((m) => !order.includes(m.id))];
     this._maps = [];
     for (const map of ordenados) {
-      const [itens, fotos] = await Promise.all([DB.getItemsByAmbiente(map.id), DB.getPhotosByAmbiente(map.id)]);
-      this._maps.push({ map, itens, fotos, isEmpty: this._isMapEmpty(map, itens) });
+      // [26/09/2026] NOVO -- pedido verbatim: "deve ficar claro [...] quais fotos são de ambiente e quais fotos
+      // são de patrimônio [...] em baixo das vinculações, as fotos de patrimônios." `entry.fotos` (via
+      // DB.getPhotosByAmbiente) SEMPRE excluiu fotos tipo:'patrimonio' de propósito (ver comentário grande em
+      // db.js) -- por isso o selo 🏷️ nunca aparecia: nenhuma foto de patrimônio chegava a esta tela pra
+      // mostrá-lo. `fotosPatrimonio` (via DB.getPatrimonioPhotosByAmbiente, o contrário exato) preenche essa
+      // lista à parte, exibida na sua própria seção (ver _gridCardHtml).
+      const [itens, fotosRaw, fotosPatRaw] = await Promise.all([DB.getItemsByAmbiente(map.id), DB.getPhotosByAmbiente(map.id), DB.getPatrimonioPhotosByAmbiente(map.id)]);
+      // [26/09/2026] NOVO (2ª correção) -- pedido verbatim: "Implemente um jeito melhor de identificar o que é
+      // foto de ambiente e o que é foto de patrimônio [...] às vezes, acaba ficando misturado. Refatore esta
+      // parte do código para garantir que não haja esta mistura." CAUSA da mistura relatada: a separação
+      // acima dependia 100% do campo `f.tipo` já gravado no banco -- uma foto anexada a um item
+      // (`item.fotoAnexadaId`) cujo `tipo` NÃO tenha sido gravado como 'patrimonio' por algum motivo (dado
+      // legado, uma migração que não rodou, uma foto salva por outro caminho) continuava sendo tratada como
+      // foto de ambiente, aparecendo junto na seção errada com o selo errado. Corrigido reclassificando aqui,
+      // pela FONTE DA VERDADE que realmente importa (se algum item aponta pra ela como sua foto anexada),
+      // IGNORANDO o que `f.tipo` diz: qualquer foto entre `fotosRaw` (ambiente) que seja o anexo de algum item
+      // é MOVIDA pra `fotosPatrimonio` — nunca mais pode existir uma foto anexada na lista de ambiente,
+      // estrutural, não depende de nenhum campo gravado corretamente.
+      const anexadaIds = new Set(itens.filter((it) => it.fotoAnexadaId).map((it) => it.fotoAnexadaId));
+      const fotos = fotosRaw.filter((f) => !anexadaIds.has(f.id));
+      const fotosPatMap = new Map(fotosPatRaw.map((f) => [f.id, f]));
+      fotosRaw.filter((f) => anexadaIds.has(f.id)).forEach((f) => fotosPatMap.set(f.id, f));
+      const fotosPatrimonio = [...fotosPatMap.values()];
+      this._maps.push({ map, itens, fotos, fotosPatrimonio, isEmpty: this._isMapEmpty(map, itens) });
     }
     // ITEM A14 (rodada 57/v311) — mesma fonte de verdade que `ambientephotos.js`
     // usa pra marcar orbs duplicados (`DB.getDuplicatePatrimonios()`, um Set
@@ -1955,7 +2006,7 @@ const OrganizeView = {
   // o visual de lápide individual já existente, em vez de trocar o cartão
   // inteiro por uma caixa genérica.
   _mapCardHtml(entry) {
-    const { map, itens, fotos, isEmpty } = entry;
+    const { map, itens, fotos, isEmpty, fotosPatrimonio } = entry;
     const nome = Utils.escapeHtml(this._mapDisplayName(map));
     const vinculadosNoMapa = itens.filter((it) => typeof it.mapaX === 'number');
     const forcePending = !!entry.__pendingDelete;
@@ -1992,7 +2043,7 @@ const OrganizeView = {
             ${this._renderMapVinculacoes(vinculadosNoMapa, map.id, forcePending)}
           </div>
           <div class="organize-map-col organize-map-col-fotos">
-            ${this._renderFotosColumn(fotos, itens, forcePending)}
+            ${this._renderFotosColumn(fotos, itens, forcePending, fotosPatrimonio)}
           </div>
         </div>
       </div>
@@ -2188,8 +2239,14 @@ const OrganizeView = {
   // apagadas de verdade junto com o mapa — diferente dos patrimônios, que só
   // desvinculam — então reaproveitar a mensagem/visual de `f.__pendingDelete`
   // aqui é semanticamente correto, não só visual).
-  _renderFotosColumn(fotos, itens, forcePending) {
-    if (!fotos.length) return `<p class="organize-col-empty">Nenhuma foto vinculada a este mapa.</p>`;
+  _renderFotosColumn(fotos, itens, forcePending, fotosPatrimonio) {
+    // [26/09/2026] NOVO -- ver comentário grande em `_renderFotosColumnPatrimonio` — a seção de fotos de
+    // patrimônio (modo Cartões) some da mensagem "Nenhuma foto..." abaixo (que só falava de `fotos`, a lista de
+    // ambiente) sempre que ela existir, mesmo sem nenhuma foto de AMBIENTE.
+    if (!fotos.length) {
+      return (fotosPatrimonio?.length ? '' : `<p class="organize-col-empty">Nenhuma foto vinculada a este mapa.</p>`)
+        + this._renderFotosColumnPatrimonio(fotosPatrimonio, itens, forcePending);
+    }
     // ATUALIZADO (31/08/2026, item D) — `itemById` deixou de FILTRAR itens
     // com exclusão pendente (o que fazia o chip deles sumir de vez, ver
     // "ITEM B3" antigo removido) — agora inclui TODOS, pra resolver o
@@ -2322,7 +2379,59 @@ const OrganizeView = {
             ${(f.medidas || []).map((m, i) => this._medidaChipHtml(m, f.id, i, false)).join('')}
           </div>` : ''}
         </div>`;
-    }).join('')}</div>`;
+    }).join('')}</div>${this._renderFotosColumnPatrimonio(fotosPatrimonio, itens, forcePending)}`;
+  },
+
+  /** [26/09/2026] NOVO -- pedido verbatim: "Em 'Mapa'->'Organizar', no modo
+   *  'Cartões', as fotos de patrimônio devem aparecer também, assim como no
+   *  modo 'Grade' [...] com 1/4 do tamanho da foto de ambiente." Até esta
+   *  rodada, fotos de patrimônio só apareciam no modo Grade
+   *  (`_renderGridFotosPatrimonio`) — o modo Cartões (`_renderFotosColumn`,
+   *  acima) nunca sequer recebia essa lista (`entry.fotosPatrimonio` não
+   *  era desestruturado em `_mapCardHtml`). Bem mais simples que a versão
+   *  Grade de propósito (mesmo espírito de `_renderGridFotosPatrimonio`):
+   *  uma foto de patrimônio nunca tem orbs/vinculações/medidas próprias, só
+   *  a miniatura + de qual patrimônio é o anexo (via `item.fotoAnexadaId`).
+   *  "1/4 do tamanho da foto de ambiente" implementado com uma FILEIRA
+   *  própria (`flex-wrap`, ao contrário da coluna vertical das fotos de
+   *  ambiente) de itens com `flex-basis` de ~23% (CSS
+   *  `.organize-card-foto-item-patrimonio`, contando a folga dos `gap`) —
+   *  como a miniatura em si (`.organize-foto-thumb-wrap`, MESMA classe
+   *  reaproveitada da foto de ambiente) já é `width:100%` do elemento que a
+   *  contém, encolher o CONTAINER pra 1/4 da largura da coluna já encolhe a
+   *  miniatura pra 1/4 também, sem precisar de nenhum novo cálculo/classe
+   *  de tamanho pra ela — só o `aspect-ratio: 4/3` original é preservado. */
+  _renderFotosColumnPatrimonio(fotosPat, itens, forcePending) {
+    if (!fotosPat?.length) return '';
+    const itemByFotoId = new Map(itens.filter((it) => it.fotoAnexadaId).map((it) => [it.fotoAnexadaId, it]));
+    const itemsHtml = fotosPat.map((f) => {
+      const item = itemByFotoId.get(f.id);
+      const src = f.thumbDataUrl || f.dataUrl || '';
+      const patrLabel = item ? `Patrimônio: ${item.patrimonio || '(sem número)'}` : '(sem patrimônio vinculado)';
+      if (f.__pendingDelete || forcePending) {
+        return `
+        <div class="organize-foto-item organize-card-foto-item-patrimonio organize-pending-delete-foto" data-foto-id="${f.id}">
+          <div class="organize-card-foto-name-patrimonio" title="${Utils.escapeHtml(patrLabel)} — será excluída ao aplicar as alterações">${Utils.escapeHtml(patrLabel)}</div>
+          <div class="organize-foto-thumb-wrap organize-pending-delete-box" title="Será excluída ao aplicar as alterações">
+            ${src ? `<img class="organize-pending-delete-thumb-img" src="${src}" alt="" loading="lazy">` : ''}
+            <div class="organize-pending-delete-icon">🗑️🏷️</div>
+            ${f.__pendingDelete ? this._inlineRevertBtnHtml('delete-foto', f.id) : ''}
+          </div>
+        </div>`;
+      }
+      return `
+        <div class="organize-foto-item organize-card-foto-item-patrimonio" data-foto-id="${f.id}">
+          <div class="organize-card-foto-name-patrimonio" title="${Utils.escapeHtml(patrLabel)}">${Utils.escapeHtml(patrLabel)}</div>
+          <div class="organize-foto-thumb-wrap">
+            ${src ? `<img src="${src}" alt="" loading="lazy" draggable="false">` : '<div class="organize-foto-thumb-placeholder">🏷️</div>'}
+            <span class="organize-foto-badge organize-foto-badge-tipo organize-foto-badge-tipo-patrimonio" title="Foto de patrimônio (anexo de um item)">🏷️</span>
+            <button type="button" class="organize-foto-item-del-btn" data-foto-id="${f.id}" title="Excluir esta foto (pendente até 'Aplicar alterações')">🗑️</button>
+          </div>
+        </div>`;
+    }).join('');
+    return `
+      <h5 class="organize-grid-fotos-title organize-grid-fotos-title-patrimonio organize-card-fotos-title-patrimonio">🏷️ Fotos de patrimônio</h5>
+      <div class="organize-foto-list organize-card-fotos-list-patrimonio">${itemsHtml}</div>`;
   },
 
   // ---------------------------------------------------------------------
@@ -2954,7 +3063,8 @@ const OrganizeView = {
    *  outras exclusões (`_refreshGridCardBody`/`_refreshCardBody`) passa a
    *  bastar sozinho aqui também, e a piscada desaparece. */
   _gridCardHtml(entry) {
-    const { map, itens } = entry;
+    const { map, itens, isEmpty, fotosPatrimonio } = entry;
+    const fotosPat = fotosPatrimonio || [];
     // NOVO (02/09/2026, rodada D, item D5) — `fotos` agora vem de
     // `_sortFotosForDisplay` (ordem PERSONALIZADA, `map.fotoOrder`, ver
     // comentário grande lá) em vez do array natural direto de `entry.fotos`:
@@ -2987,7 +3097,7 @@ const OrganizeView = {
         <div class="organize-grid-card-header">
           <span class="organize-grid-card-draghandle" title="Arraste pra reposicionar este mapa na grade">✥</span>
           <strong class="organize-grid-card-name organize-map-card-name" title="${forcePending ? 'Este mapa tem uma exclusão pendente' : 'Clique pra renomear'}">🗺️ ${nome}</strong>
-          <span class="organize-map-card-counts${(!itens.length && !fotos.length) ? ' organize-counts-zero' : ''}">📦 ${itens.length} · 🖼️ ${fotos.length}</span>
+          <span class="organize-map-card-counts${(!itens.length && !fotos.length && !fotosPat.length) ? ' organize-counts-zero' : ''}">📦 ${itens.length} · 🖼️ ${fotos.length + fotosPat.length}</span>
           ${headerBtnHtml}
         </div>
         <div class="organize-grid-card-body">
@@ -3019,12 +3129,16 @@ const OrganizeView = {
                  linha). Achado testando com Playwright (querySelector de
                  '.organize-grid-section-head' não achava nada dentro do
                  cartão). -->
-            <div class="organize-grid-section-head">
+            <!-- [26/09/2026] CORRIGIDO -- pedido verbatim: "se não tiver mais nenhum patrimônio vinculado ao
+                 mapa, então, os botões ('buscar', 'Modo atual', 'Ordem') não devem ser mostrados também.
+                 Ficando só a mensagem 'Nenhum patrimônio vinculado a este mapa.'." Sem itens, nem os botões
+                 fazem sentido (não há nada pra buscar/ordenar) -- a seção some junto com a mensagem vazia. -->
+            ${itens.length ? `<div class="organize-grid-section-head">
               ${this._colOrbHtml(`map:${map.id}`, itens.length)}
               <input type="text" class="organize-grid-search" data-search-key="map:${map.id}" placeholder="🔎 Buscar patrimônio…" title="Busca por número de patrimônio, dentro deste mapa">
               <button type="button" class="icon-btn sm organize-grid-search-toggle" data-search-key="map:${map.id}" title="${this._gridSearchModeTitle(this._getSearchMode(`map:${map.id}`))}">${this._gridSearchModeIcon(this._getSearchMode(`map:${map.id}`))}</button>
               ${this._sortOrbHtml(map.id)}
-            </div>
+            </div>` : ''}
             <div class="organize-grid-patrimonios" data-cols-key="map:${map.id}" style="--organize-cols:${this._effectiveColCount(`map:${map.id}`, itens.length)}">
               ${this._renderGridPatrimonios(this._sortItensForDisplay(entry), fotos, map.id, forcePending)}
             </div>
@@ -3038,29 +3152,44 @@ const OrganizeView = {
             <div class="organize-map-thumb-wrap organize-grid-map-live-wrap" title="Planta baixa AO VIVO — arraste pra navegar, use a roda do mouse pra zoom, 2 cliques pra abrir a planta completa">
               <canvas class="organize-map-thumb-canvas organize-grid-map-live-canvas" data-map-id="${map.id}" width="220" height="150"></canvas>
               <button type="button" class="organize-grid-map-live-reset-btn" data-map-id="${map.id}" title="Reenquadrar (voltar pro zoom/posição inicial desta planta)">🎯</button>
+              <!-- [26/09/2026] NOVO -- pedido verbatim: "deve haver algum destaque para o mapa [...] informando
+                   que o mapa está vazio (ou seja, nunca foi editado, colocado itens, está zerado)." Modo Grade
+                   não tinha este destaque (só o Cartões, ver _mapCardHtml/.organize-map-thumb-emptyoverlay
+                   acima) -- mesmo overlay/classe reaproveitado aqui. -->
+              ${isEmpty ? '<div class="organize-map-thumb-emptyoverlay">planta vazia</div>' : ''}
             </div>
             <div class="organize-map-thumb-stats">🧱 ${this._drawnCount(map)} · 📌 ${vinculadosNoMapa.length}</div>
             ${this._renderMapObjectsList(map)}
             ${this._renderGridVinculacoesPlanta(vinculadosNoMapa, map.id, forcePending)}
           </div>
           <div class="organize-grid-fotos-col">
-            <!-- Pedido do usuário (02/09/2026): "Na divisão das fotos, deve
-                 ter um 'orb de organização de colunas', assim como tem nas
-                 plaquinhas de metal." Mesmo padrão de
-                 .organize-grid-patrimonios-col acima (orb + container com
-                 data-cols-key/--organize-cols) — chave própria
-                 (fotos:map:ID, nunca colide com a chave das plaquinhas
-                 soltas, map:ID). .organize-grid-fotos deixou de ser
-                 flex-wrap fixo e virou display:grid controlável (ver CSS) —
-                 cada foto continua do seu tamanho natural (max-content/
-                 min-width, sem forçar largura fixa como as plaquinhas, que
-                 não foi pedido aqui). -->
-            <div class="organize-grid-section-head">
-              ${this._colOrbHtml(`fotos:map:${map.id}`, fotos.length)}
-            </div>
-            <div class="organize-grid-fotos" data-cols-key="fotos:map:${map.id}" style="--organize-cols:${this._effectiveColCount(`fotos:map:${map.id}`, fotos.length)};--organize-foto-w:${this._gridFotosCellWidthPx(fotos, itens)}px">
-              ${this._renderGridFotos(fotos, itens, forcePending)}
-            </div>
+            <!-- [26/09/2026] MUDADO -- pedido verbatim: "as fotos de ambiente devem ficar em cima [...] e, em
+                 baixo [...], as fotos de patrimônios. Além do selo, deve ter um título dizendo que é 'Fotos de
+                 ambiente' e 'Fotos de patrimônios'." Antes só existia a seção de fotos de ambiente aqui --
+                 fotos de patrimônio (tipo:'patrimonio', o anexo de um item, ver db.js getPatrimonioPhotos
+                 ByAmbiente) nunca eram buscadas nem mostradas nesta tela. "se não houver nenhuma foto [...]
+                 deve ficar só a mensagem [...] O botão de Colunas deve deixar de ser mostrado" -- cada seção
+                 (e o orb de Colunas dela) só aparece se tiver pelo menos 1 foto DAQUELE tipo; sem NENHUMA foto
+                 dos 2 tipos, fica só a mensagem única de vazio, sem nenhum título/orb. -->
+            ${(fotos.length || fotosPat.length) ? `
+            ${fotos.length ? `
+            <div class="organize-grid-fotos-section">
+              <h5 class="organize-grid-fotos-title">🖼️ Fotos de ambiente</h5>
+              <div class="organize-grid-section-head">
+                ${this._colOrbHtml(`fotos:map:${map.id}`, fotos.length)}
+              </div>
+              <div class="organize-grid-fotos" data-cols-key="fotos:map:${map.id}" style="--organize-cols:${this._effectiveColCount(`fotos:map:${map.id}`, fotos.length)};--organize-foto-w:${this._gridFotosCellWidthPx(fotos, itens)}px">
+                ${this._renderGridFotos(fotos, itens, forcePending)}
+              </div>
+            </div>` : ''}
+            ${fotosPat.length ? `
+            <div class="organize-grid-fotos-section organize-grid-fotos-section-patrimonio">
+              <h5 class="organize-grid-fotos-title organize-grid-fotos-title-patrimonio">🏷️ Fotos de patrimônio</h5>
+              <div class="organize-grid-fotos organize-grid-fotos-patrimonio">
+                ${this._renderGridFotosPatrimonio(fotosPat, itens, forcePending)}
+              </div>
+            </div>` : ''}
+            ` : `<p class="organize-col-empty">Nenhuma foto vinculada a este mapa.</p>`}
           </div>
         </div>
       </div>`;
@@ -3373,8 +3502,16 @@ const OrganizeView = {
           ? this._vincChipHtml(m.itemId, itemById.get(m.itemId), { xNorm: m.orb.xNorm, yNorm: m.orb.yNorm, fotoId: f.id })
           : this._vincChipHtml(m.itemId, itemById.get(m.itemId), { pending: true, title: m.title, undoType: m.type, undoFotoId: f.id }))
         .join('');
+      // [26/09/2026] NOVO -- pedido verbatim: "deve ficar claro dentro da caixa maior que representa o mapa à
+      // direita (onde ficam as fotos) quais fotos são de ambiente e quais fotos são de patrimônio." `f.tipo`
+      // já existia (grava 'patrimonio' quando a foto é o anexo de um item, ver capture.js `_openPhotoLinkModal`
+      // e a nota de rodapé em `_moverFotoAnexadaJunto`) mas nada aqui distinguia visualmente os dois tipos.
+      const ehFotoPatrimonio = f.tipo === 'patrimonio';
+      const tipoBadgeHtml = ehFotoPatrimonio
+        ? `<span class="organize-foto-badge organize-foto-badge-tipo organize-foto-badge-tipo-patrimonio" title="Foto de patrimônio (anexo de um item — não é foto de ambiente)">🏷️</span>`
+        : `<span class="organize-foto-badge organize-foto-badge-tipo organize-foto-badge-tipo-ambiente" title="Foto de ambiente">🖼️</span>`;
       return `
-        <div class="organize-grid-foto-item" data-foto-id="${f.id}">
+        <div class="organize-grid-foto-item${ehFotoPatrimonio ? ' organize-grid-foto-item-patrimonio' : ''}" data-foto-id="${f.id}">
           <div class="organize-foto-name organize-grid-foto-name" title="Clique pra renomear">${Utils.escapeHtml(f.nome || '(sem nome)')}</div>
           <div class="organize-foto-thumb-wrap organize-grid-foto-thumb-wrap">
             <!-- CORRIGIDO (02/09/2026, rodada D), pedido verbatim: "[arrastar
@@ -3392,6 +3529,7 @@ const OrganizeView = {
                  customizado (Pointer Events) continua funcionando igual, já
                  que nunca dependeu do atributo draggable nativo. -->
             ${src ? `<img src="${src}" alt="" loading="lazy" width="96" height="72" draggable="false">` : '<div class="organize-foto-thumb-placeholder">🖼️</div>'}
+            ${tipoBadgeHtml}
             ${orbDots}
             <!-- NOVO (02/09/2026), pedido verbatim (rodada C): "Deve
                  aparecer outro ícone indicando a quantidade de medidas
@@ -3417,6 +3555,45 @@ const OrganizeView = {
           <div class="organize-medidas-list">
             ${medidas.map((m, i) => this._medidaChipHtml(m, f.id, i, false)).join('')}
           </div>` : ''}
+        </div>`;
+    }).join('');
+  },
+
+  /** [26/09/2026] NOVO -- fotos de patrimônio (tipo:'patrimonio', o anexo de um item -- ver
+   *  db.js getPatrimonioPhotosByAmbiente/addAmbientePhoto) na seção "🏷️ Fotos de patrimônio" do modo Grade
+   *  (ver comentário grande em _gridCardHtml). Bem mais simples que `_renderGridFotos` de propósito: uma foto
+   *  de patrimônio nunca tem orbs/vinculações próprias (ela É o anexo de UM item só, não marca vários) nem
+   *  medidas -- só mostra a miniatura, o selo 🏷️ e qual patrimônio ela pertence (via item.fotoAnexadaId). Sem
+   *  arrastar-e-soltar entre mapas aqui de propósito (ela já vai junto quando o ITEM dela é movido, ver
+   *  `_moverFotoAnexadaJunto`/`_moveItemToMap` -- mover a foto separada do item deixaria os dois em mapas
+   *  diferentes, o que não faz sentido pra uma foto que é o anexo de um patrimônio específico). */
+  _renderGridFotosPatrimonio(fotosPat, itens, forcePending) {
+    if (!fotosPat.length) return '';
+    const itemByFotoId = new Map(itens.filter((it) => it.fotoAnexadaId).map((it) => [it.fotoAnexadaId, it]));
+    return fotosPat.map((f) => {
+      const item = itemByFotoId.get(f.id);
+      const src = f.thumbDataUrl || f.dataUrl || '';
+      const patrLabel = item ? `Patrimônio: ${item.patrimonio || '(sem número)'}` : '(sem patrimônio vinculado)';
+      if (f.__pendingDelete || forcePending) {
+        return `
+        <div class="organize-grid-foto-item organize-grid-foto-item-patrimonio organize-pending-delete-foto" data-foto-id="${f.id}">
+          <div class="organize-foto-name organize-grid-foto-name" title="${Utils.escapeHtml(patrLabel)} — será excluída ao aplicar as alterações">${Utils.escapeHtml(patrLabel)}</div>
+          <div class="organize-foto-thumb-wrap organize-grid-foto-thumb-wrap organize-pending-delete-box" title="Será excluída ao aplicar as alterações">
+            ${src ? `<img class="organize-pending-delete-thumb-img" src="${src}" alt="" loading="lazy" width="96" height="72">` : ''}
+            <div class="organize-pending-delete-icon">🗑️🏷️</div>
+            <div class="organize-pending-delete-label">exclusão pendente</div>
+            ${f.__pendingDelete ? this._inlineRevertBtnHtml('delete-foto', f.id) : ''}
+          </div>
+        </div>`;
+      }
+      return `
+        <div class="organize-grid-foto-item organize-grid-foto-item-patrimonio" data-foto-id="${f.id}">
+          <div class="organize-foto-name organize-grid-foto-name" title="${Utils.escapeHtml(patrLabel)}">${Utils.escapeHtml(patrLabel)}</div>
+          <div class="organize-foto-thumb-wrap organize-grid-foto-thumb-wrap">
+            ${src ? `<img src="${src}" alt="" loading="lazy" width="96" height="72" draggable="false">` : '<div class="organize-foto-thumb-placeholder">🏷️</div>'}
+            <span class="organize-foto-badge organize-foto-badge-tipo organize-foto-badge-tipo-patrimonio" title="Foto de patrimônio (anexo de um item)">🏷️</span>
+            <button type="button" class="organize-grid-foto-del-btn" data-foto-id="${f.id}" title="Excluir esta foto (pendente até 'Aplicar alterações')">🗑️</button>
+          </div>
         </div>`;
     }).join('');
   },
@@ -3493,7 +3670,9 @@ const OrganizeView = {
       // ITEM "arrastar e soltar" (02/09/2026) — não arrasta a "lápide" de
       // uma foto já com exclusão pendente (nada a mover, o clique dela já
       // não abre editor de qualquer forma nesse estado).
-      if (card && !fi.classList.contains('organize-pending-delete-foto')) {
+      // [26/09/2026] NOVO -- também não arrasta uma foto de PATRIMÔNIO (ver comentário grande em
+      // `_renderGridFotosPatrimonio`) individualmente pra outro mapa: ela só se move JUNTO do item dela.
+      if (card && !fi.classList.contains('organize-pending-delete-foto') && !fi.classList.contains('organize-grid-foto-item-patrimonio')) {
         this._wireGridDragSource(fi, 'foto', entry, card);
       }
       const nameEl = fi.querySelector('.organize-grid-foto-name');
@@ -3915,7 +4094,54 @@ const OrganizeView = {
     const pointerId = e.pointerId;
     let dragging = false;
     let session = null;
+    // [26/09/2026] CORRIGIDO (2ª tentativa — a 1ª causou uma regressão nova,
+    // ver abaixo) -- pedido verbatim: "Se clicar e logo arrastar em seguida,
+    // o item, às vezes não fica vinculado ao cursor [...] ao voltar com o
+    // cursor para a área do item, ele se auto vincula ao cursor do mouse."
+    // CAUSA RAIZ ORIGINAL: os listeners de `pointermove`/`pointerup`/
+    // `pointercancel` eram ligados só em `el` — sem captura de ponteiro
+    // ainda (só chegava depois do `_DRAG_THRESHOLD`, dentro do `onMove` de
+    // baixo), um arrasto rápido o bastante movia o cursor pra FORA de `el`
+    // antes do próximo `pointermove`, e o navegador passava a entregar os
+    // eventos pro elemento que estivesse embaixo do cursor NAQUELE
+    // instante — não mais `el` — deixando os 3 listeners PRESOS pra sempre
+    // (nunca mais recebiam nada, `cleanup()` nunca rodava). Como `dragging`
+    // continuava `false`, um `pointermove` seguinte que caísse em `el` de
+    // novo (o cursor só voltando a passar por cima, SEM clique) cruzava o
+    // limiar medido a partir do `startX/startY` antigo e criava um arrasto
+    // do NADA — o "se auto vincula ao cursor" relatado.
+    // 1ª TENTATIVA (revertida) — capturar o ponteiro já no `pointerdown`:
+    // resolvia o arrasto perdido, mas quebrou o duplo-clique em qualquer
+    // foto de ambiente (pedido verbatim, rodada seguinte: "dar dois
+    // cliques na foto de ambiente, não está funcionando"). Motivo: com o
+    // ponteiro capturado por `el` durante um clique NORMAL (sem arrasto de
+    // verdade), a spec de Pointer Events manda o navegador usar o alvo da
+    // CAPTURA (não o alvo real sob o cursor) também pros eventos de MOUSE
+    // de compatibilidade sintetizados a partir do `pointerup`
+    // (`mouseup`/`click`/`dblclick`) — e esse alvo já é decidido ANTES de
+    // qualquer listener de `pointerup` rodar, então soltar a captura DENTRO
+    // do handler de `pointerup` (tentado numa correção anterior) chegava
+    // tarde demais. Como o `dblclick` está ligado num DESCENDENTE de `el`
+    // (`thumbWrap`, ver `_wireGridFotosWrap`), e o alvo retargetado passa a
+    // ser o PRÓPRIO `el` (um ancestral dele), o `thumbWrap` nunca mais
+    // entrava na cadeia de propagação do evento — o duplo-clique morria.
+    // CORREÇÃO DE VERDADE (esta rodada): em vez de depender de captura pra
+    // garantir que os 3 eventos cheguem em `el`, liga `pointermove`/
+    // `pointerup`/`pointercancel` no `document` — que SEMPRE recebe esses
+    // eventos por propagação, não importa qual elemento esteja embaixo do
+    // cursor a cada instante, então nunca fica "órfão" mesmo num arrasto
+    // muito rápido — sem precisar capturar nada ainda, então um clique
+    // normal continua 100% intocado (o `dblclick` no `thumbWrap` nunca foi
+    // afetado por isto). `setPointerCapture` continua sendo chamado, mas só
+    // DEPOIS de cruzar o limiar (dentro do `onMove`, como era originalmente
+    // — ali sim é útil/necessário, pro fantasma seguir o cursor mesmo que
+    // ele saia de cima de `el`/do elemento reordenado, ver
+    // `_updateSameMapReorderPreview`). Um `pointerId` diferente do que
+    // iniciou este gesto (ex.: outro dedo numa tela touch) é ignorado em
+    // TODOS os 3 handlers — sem isso, um 2º ponteiro simultâneo poderia
+    // encerrar/mover a sessão deste gesto por engano.
     const onMove = (ev) => {
+      if (ev.pointerId !== pointerId) return;
       if (!dragging) {
         if (Math.abs(ev.clientX - startX) < this._DRAG_THRESHOLD && Math.abs(ev.clientY - startY) < this._DRAG_THRESHOLD) return;
         dragging = true;
@@ -3932,11 +4158,12 @@ const OrganizeView = {
       this._updateDragSession(session, ev);
     };
     const cleanup = () => {
-      el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerup', onUp);
-      el.removeEventListener('pointercancel', onCancel);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onCancel);
     };
     const onUp = (ev) => {
+      if (ev.pointerId !== pointerId) return;
       cleanup();
       if (!dragging || !session) return;
       // Marca pra suprimir o `click` sintético que o navegador dispara logo
@@ -3947,13 +4174,14 @@ const OrganizeView = {
       this._suppressNextGridClick = true;
       this._finishDragSession(session, ev);
     };
-    const onCancel = () => {
+    const onCancel = (ev) => {
+      if (ev.pointerId !== pointerId) return;
       cleanup();
       if (dragging && session) this._returnDragSession(session).then(() => this._destroyGhost(session));
     };
-    el.addEventListener('pointermove', onMove);
-    el.addEventListener('pointerup', onUp);
-    el.addEventListener('pointercancel', onCancel);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onCancel);
   },
 
   /** Constrói o "cartão fantasma" de UM ELEMENTO SÓ (ver comentário grande
@@ -4009,6 +4237,7 @@ const OrganizeView = {
     const { kind, id, entry, card } = session;
     let fotoEl = null;
     let itemEls = [];
+    let fotoPatrimonioEl = null;
     if (kind === 'foto') {
       const foto = entry.fotos.find((f) => f.id === id);
       const linkedIds = foto ? [...new Set((foto.orbs || []).map((o) => o.itemId).filter(Boolean))] : [];
@@ -4023,8 +4252,21 @@ const OrganizeView = {
           .map((iid) => card.querySelector(`.organize-plaquinha[data-item-id="${CSS.escape(iid)}"]`))
           .filter(Boolean);
       }
+      // [26/09/2026] NOVO -- pedido verbatim: "Ao clicar em um item e
+      // arrastar para outro mapa, aparecem os ghosts das posições [...] só
+      // estão aparecendo do patrimônio e da foto de ambiente. Deve
+      // aparecer, também, o da foto de patrimônio." A foto ANEXADA do
+      // próprio item (`item.fotoAnexadaId`, tipo 'patrimonio' — ver
+      // `_moverFotoAnexadaJunto`) é INDEPENDENTE de `fotoComOrb` acima (que
+      // é a foto de AMBIENTE onde o item tem um orb marcado) — sempre vai
+      // junto quando o item se move, então o "grupo" do fantasma tinha que
+      // incluir ela também, e não incluía.
+      const item = entry.itens.find((it) => it.id === id);
+      if (item?.fotoAnexadaId) {
+        fotoPatrimonioEl = card.querySelector(`.organize-grid-foto-item[data-foto-id="${CSS.escape(item.fotoAnexadaId)}"]`);
+      }
     }
-    return { fotoEl, itemEls };
+    return { fotoEl, itemEls, fotoPatrimonioEl };
   },
 
   /** ITEM D3/D4 (rodada D) — expande o fantasma pro "grupo" (foto+irmãos)
@@ -4051,6 +4293,7 @@ const OrganizeView = {
     const bundle = session.bundle || (session.bundle = this._computeDragBundle(session));
     session.bundleExpanded = true;
     bundle.fotoEl?.classList.add('organize-drag-placeholder-src');
+    bundle.fotoPatrimonioEl?.classList.add('organize-drag-placeholder-src');
     bundle.itemEls.forEach((ie) => ie.classList.add('organize-drag-placeholder-src'));
     const patrColOrigem = session.card.querySelector('.organize-grid-patrimonios');
     const colsOrigem = Math.max(1, parseInt(patrColOrigem?.style.getPropertyValue('--organize-cols'), 10) || 1);
@@ -4076,6 +4319,16 @@ const OrganizeView = {
       session.ghostWrap.appendChild(gf);
       session.bundleGhostEls.push(gf);
     }
+    // [26/09/2026] NOVO -- mesmo espírito do bloco acima (foto de ambiente
+    // com orb), agora também pra foto de PATRIMÔNIO anexada ao próprio
+    // item (ver comentário grande em `_computeDragBundle`) — sem isto, o
+    // fantasma "esquecia" essa foto durante o arrasto, mesmo ela indo
+    // junto de verdade ao soltar.
+    if (session.kind === 'item' && bundle.fotoPatrimonioEl) {
+      const gfp = makeGhostEl(bundle.fotoPatrimonioEl);
+      session.ghostWrap.appendChild(gfp);
+      session.bundleGhostEls.push(gfp);
+    }
     if (bundle.itemEls.length) {
       const grid = document.createElement('div');
       grid.className = 'organize-drag-ghost-itemsgrid';
@@ -4097,6 +4350,7 @@ const OrganizeView = {
     if (!session.bundleExpanded) return;
     session.bundleExpanded = false;
     session.bundle?.fotoEl?.classList.remove('organize-drag-placeholder-src');
+    session.bundle?.fotoPatrimonioEl?.classList.remove('organize-drag-placeholder-src');
     session.bundle?.itemEls?.forEach((ie) => ie.classList.remove('organize-drag-placeholder-src'));
     (session.bundleGhostEls || []).forEach((g) => g.remove());
     session.bundleGhostEls = [];
@@ -4122,6 +4376,10 @@ const OrganizeView = {
     if (!target) return;
     const patrCol = target.querySelector('.organize-grid-patrimonios');
     const fotosWrap = target.querySelector('.organize-grid-fotos');
+    // [26/09/2026] NOVO -- container da fileira de fotos de PATRIMÔNIO no
+    // mapa de destino (ver comentário grande em `_computeDragBundle`) —
+    // distinto de `fotosWrap` (fotos de ambiente), mesma ideia de sempre.
+    const fotosPatrimonioWrap = target.querySelector('.organize-grid-fotos-patrimonio');
     // CORRIGIDO (rodada seguinte, 02/09/2026), pedido do usuário verbatim:
     // "o retângulo aparece embaixo de um bloco de foto do outro mapa,
     // porém, ao ser movido, acaba ficando do lado. Primeiro verifique no
@@ -4188,6 +4446,15 @@ const OrganizeView = {
       // foto logo acima.
       if (session.kind === 'item' && session.bundle.fotoEl) {
         addBox(fotosWrap, null, null, true);
+      }
+      // [26/09/2026] NOVO -- caixa de acomodação da foto de patrimônio
+      // anexada ao item (ver comentário grande em `_computeDragBundle`),
+      // na fileira de destino correta (`fotosPatrimonioWrap`, não a de
+      // fotos de ambiente) — mesmo tratamento/mesmo tamanho fixo de
+      // trilho que a foto de ambiente já tinha (`w`/`h` nulos, ver
+      // comentário grande logo acima de `addBox`).
+      if (session.kind === 'item' && session.bundle.fotoPatrimonioEl) {
+        addBox(fotosPatrimonioWrap, null, null, true);
       }
       session.bundle.itemEls.forEach((ie) => {
         const r = ie.getBoundingClientRect();
@@ -4397,6 +4664,30 @@ const OrganizeView = {
     // refresh) toma o lugar delas, sem gerar nenhum vazio no meio.
     if (target) {
       const targetMapId = target.dataset.mapId;
+      // [26/09/2026] CORRIGIDO -- pedido verbatim: "ao tentar mover um patrimônio ou foto de um mapa para o
+      // outro, na janela de confirmação que aparece, mesmo clicando em 'cancelar', a animação da seta é feita
+      // e o patrimônio/foto é movido mesmo assim." CAUSA RAIZ: quando o item tem uma foto de ambiente
+      // marcada/orb, `_moveItemToMap` pergunta (`_confirmMoveLinkedItem`) SÓ DEPOIS que este bloco já tinha
+      // animado o fantasma voando pro destino e mostrado a seta — cancelar ali só evitava a mutação dos
+      // dados, mas a animação (e o placeholder deixado no lugar de origem) já tinham acontecido e nunca eram
+      // desfeitos. Agora a pergunta (quando aplicável) roda AQUI, ANTES de qualquer animação — cancelar volta
+      // o fantasma pro lugar de origem (mesmo caminho de "soltar sem destino", `_returnDragSession`), sem
+      // nenhuma seta nem mudança de dados.
+      let decisaoPrevia = null;
+      if (session.kind === 'item') {
+        const origemPrev = this._maps.find((e) => e.itens.some((it) => it.id === session.id));
+        const itemPrev = origemPrev?.itens.find((it) => it.id === session.id);
+        const fotoComOrbPrev = origemPrev?.fotos.find((f) => (f.orbs || []).some((o) => o.itemId === session.id));
+        if (itemPrev && fotoComOrbPrev) {
+          const destinoPrev = this._maps.find((e) => e.map.id === targetMapId);
+          decisaoPrevia = await this._confirmMoveLinkedItem(itemPrev, fotoComOrbPrev, destinoPrev);
+          if (decisaoPrevia === 'cancel' || !decisaoPrevia) {
+            await this._returnDragSession(session);
+            this._destroyGhost(session);
+            return;
+          }
+        }
+      }
       const destRect = target.getBoundingClientRect();
       await this._flyGhostAway(session, destRect);
       this._destroyGhost(session);
@@ -4406,10 +4697,15 @@ const OrganizeView = {
       // reconstrói o `innerHTML` de origem/destino do zero, o que já
       // remove sozinho as classes de placeholder aplicadas acima (na origem
       // E nos elementos do grupo, se expandido).
+      let ok = true;
       if (session.kind === 'foto') await this._movePhotoToMap(session.id, targetMapId);
-      else await this._moveItemToMap(session.id, targetMapId);
+      else ok = await this._moveItemToMap(session.id, targetMapId, decisaoPrevia);
       this._clearDestAccommodation(session);
-      this._showTransferArrow(session.rect, destRect);
+      // `ok` só pode ser `false` aqui se a pergunta acima (já resolvida) não tiver sido feita por algum motivo
+      // e `_moveItemToMap` perguntar de novo internamente e a pessoa cancelar -- defensivo, não deveria
+      // acontecer no caminho normal (a pergunta já rodou ANTES da animação, com `decisaoPrevia` pulando a
+      // pergunta interna), mas mesmo assim não mostra a seta se por algum motivo nada foi movido de verdade.
+      if (ok !== false) this._showTransferArrow(session.rect, destRect);
       return;
     }
     // Sem cartão de destino: tenta consolidar a reordenação ao vivo (D4/D5)
@@ -4435,6 +4731,7 @@ const OrganizeView = {
     session.el.style.transform = '';
     session.el.style.transition = '';
     session.bundle?.fotoEl?.classList.remove('organize-drag-placeholder-src');
+    session.bundle?.fotoPatrimonioEl?.classList.remove('organize-drag-placeholder-src');
     session.bundle?.itemEls?.forEach((ie) => ie.classList.remove('organize-drag-placeholder-src'));
     this._clearDestAccommodation(session);
   },
@@ -4777,16 +5074,29 @@ const OrganizeView = {
   _wireFotoItems(card, entry) {
     card.querySelectorAll('.organize-foto-item').forEach((fi) => {
       const fotoId = fi.dataset.fotoId;
-      fi.draggable = true;
-      fi.addEventListener('dragstart', (e) => {
-        e.stopPropagation();
-        e.dataTransfer.setData('text/organize-foto-id', fotoId);
-        e.dataTransfer.effectAllowed = 'move';
-      });
+      // [26/09/2026] NOVO -- uma foto de PATRIMÔNIO (`.organize-card-foto-
+      // item-patrimonio`, ver `_renderFotosColumnPatrimonio`) nunca é
+      // arrastada/selecionada individualmente pra mesclagem aqui — mesma
+      // decisão já tomada no modo Grade (`_wireGridFotosWrap` exclui
+      // `.organize-grid-foto-item-patrimonio` do drag): ela é o anexo de UM
+      // item só e sempre vai junto quando o ITEM dela se move (ver
+      // `_moverFotoAnexadaJunto`), então arrastar/selecionar ELA sozinha
+      // não faz sentido (não tem "nome próprio" pra editar, nem
+      // orbs/vinculações/medidas próprias — só a miniatura + delete).
+      const ehPatrimonio = fi.classList.contains('organize-card-foto-item-patrimonio');
+      if (!ehPatrimonio) {
+        fi.draggable = true;
+        fi.addEventListener('dragstart', (e) => {
+          e.stopPropagation();
+          e.dataTransfer.setData('text/organize-foto-id', fotoId);
+          e.dataTransfer.effectAllowed = 'move';
+        });
+      }
       const nameEl = fi.querySelector('.organize-foto-name');
       if (nameEl) nameEl.addEventListener('click', (e) => { e.stopPropagation(); this._wireFotoNameEdit(nameEl, entry, fotoId); });
       const thumbWrap = fi.querySelector('.organize-foto-thumb-wrap');
       thumbWrap?.addEventListener('click', (e) => {
+        if (ehPatrimonio) return; // sem seleção pra mesclagem, ver comentário grande acima
         // CORRIGIDO (31/08/2026) — o botão "↩️" de reverter voltou a viver
         // DENTRO do thumb-wrap (ver `.organize-pending-delete-box` em
         // `_renderFotosColumn`, agora `position:absolute`); sem esta
@@ -4921,7 +5231,13 @@ const OrganizeView = {
     const cs = getComputedStyle(hostEl);
     hostEl.classList.add('organize-inline-host-locked');
     hostEl.style.setProperty('--inline-w', `${rect.width}px`);
-    hostEl.style.setProperty('--inline-h', `${rect.height}px`);
+    // [26/09/2026] CORRIGIDO -- pedido verbatim (reforço, mesmo pedido de antes): "O texto do nome do mapa
+    // ainda fica cortado, faça a altura da caixa de texto do nome maior." A troca anterior pra
+    // `overflow-y: visible` (ver `.organize-inline-host-locked` em style.css) não bastou -- soma-se aqui uma
+    // folga fixa (+6px) na altura MEDIDA do texto original, garantindo espaço de sobra pro `<input>` (elemento
+    // substituído, métricas de fonte do controle nativo do navegador, geralmente um pouco mais alto que o
+    // texto puro que ele substitui) sem depender só do overflow.
+    hostEl.style.setProperty('--inline-h', `${rect.height + 6}px`);
     if (cs.display === 'inline') hostEl.style.display = 'inline-block'; // só isto ainda precisa ser condicional por elemento — ver CSS
     const input = document.createElement('input');
     input.type = 'text';
@@ -4963,6 +5279,7 @@ const OrganizeView = {
       input.addEventListener('blur', async () => {
         if (resolvido) return;
         resolvido = true;
+        document.removeEventListener('pointerdown', onOutsidePointerDown, true);
         const novo = input.value.trim();
         if (novo && novo !== atual) {
           entry.map.nome = novo;
@@ -4970,6 +5287,19 @@ const OrganizeView = {
         }
         restaurar();
       });
+      // [26/09/2026] CORRIGIDO -- pedido verbatim: "ao clicar fora da caixa de texto, ela deve ser desabilitada
+      // para seleção. Atualmente, só clicando em cima de um nome de outro mapa, é que a caixa de edição do
+      // nome do outro mapa é desativada para edição." CAUSA RAIZ: o `pointerdown` do cartão inteiro
+      // (`_wireGridDragSource`, mais acima) chama `e.preventDefault()` pra qualquer clique que não caia num dos
+      // elementos de `EXCLUDE_SEL` — isso inclui a área vazia do próprio cartão, ou qualquer outro cartão/área
+      // fora dele. `preventDefault()` num `pointerdown` cancela o foco/blur nativo que o navegador faria a
+      // seguir, então o `<input>` NUNCA perdia o foco (nunca disparava `blur`) ao clicar fora — só clicar em
+      // OUTRO nome funcionava, porque `.organize-grid-card-name` está em `EXCLUDE_SEL` (sem `preventDefault`),
+      // permitindo o foco nativo mudar pro outro `<input>` (que por sua vez tira o foco deste). Corrigido com um
+      // listener de captura no `document`: qualquer `pointerdown` fora deste `<input>` força o `blur()` manual,
+      // sem depender do comportamento nativo (que pode estar suprimido).
+      const onOutsidePointerDown = (ev) => { if (ev.target !== input) input.blur(); };
+      document.addEventListener('pointerdown', onOutsidePointerDown, true);
     });
   },
 
@@ -5264,7 +5594,7 @@ const OrganizeView = {
    *  qualquer edição em memória, ex.: orbs removidos) antes de gravar. */
   _findFotoById(fotoId) {
     for (const entry of this._maps) {
-      const f = entry.fotos.find((x) => x.id === fotoId);
+      const f = entry.fotos.find((x) => x.id === fotoId) || (entry.fotosPatrimonio || []).find((x) => x.id === fotoId);
       if (f) return f;
     }
     return null;
@@ -5387,8 +5717,8 @@ const OrganizeView = {
     this._renderPendingPanel();
     let total = 0;
     for (const a of acoes) {
-      if (a.type === 'move-item') total += 1 + (a.orphanedFotoIds?.length || 0);
-      else if (a.type === 'move-photo') total += 1 + (a.itemIds?.length || 0);
+      if (a.type === 'move-item') total += 1 + (a.orphanedFotoIds?.length || 0) + (a.movedFotoIds?.length || 0);
+      else if (a.type === 'move-photo') total += 1 + (a.itemIds?.length || 0) + (a.movedFotoIds?.length || 0);
       else if (a.type === 'merge-maps') total += (a.movedFotoIds?.length || 0) + (a.movedItemIds?.length || 0) + (a.discardedIds?.length || 0);
       // ITEM B (exclusões, 31/08/2026) — ver comentário grande acima de
       // `_deletePhoto`/`_deleteMap`/`_deleteItem`/`_unlinkItemFromFoto`.
@@ -5411,12 +5741,27 @@ const OrganizeView = {
             if (foto) { try { await DB.saveAmbientePhoto(foto); } catch (err) { /* 1 foto com erro não deve travar o resto */ } }
             this._bgTaskTick(bgTaskId);
           }
+          // [26/09/2026] NOVO -- foto ANEXADA (fotoAnexadaId) movida junto do item (ver _moverFotoAnexadaJunto)
+          // -- grava o novo `ambienteId` dela (já atualizado em memória) tal como `orphanedFotoIds` acima.
+          for (const fotoId of (a.movedFotoIds || [])) {
+            const foto = this._findFotoById(fotoId);
+            if (foto) { try { await DB.saveAmbientePhoto(foto); } catch (err) { /* idem */ } }
+            this._bgTaskTick(bgTaskId);
+          }
         } else if (a.type === 'move-photo') {
           const foto = this._findFotoById(a.fotoId);
           if (foto) { try { await DB.saveAmbientePhoto(foto); } catch (err) { console.error('Falha ao aplicar move-photo:', err); } }
           this._bgTaskTick(bgTaskId);
           for (const itemId of (a.itemIds || [])) {
             try { await DB.updateItem(itemId, { ambienteId: a.toMapId }); } catch (err) { /* idem */ }
+            this._bgTaskTick(bgTaskId);
+          }
+          // [26/09/2026] NOVO -- fotos de patrimônio anexadas aos itens que
+          // vieram junto (ver comentário grande em `_movePhotoToMap`) —
+          // mesmo tratamento de `movedFotoIds` já usado em 'move-item'.
+          for (const fotoId of (a.movedFotoIds || [])) {
+            const fotoAnexada = this._findFotoById(fotoId);
+            if (fotoAnexada) { try { await DB.saveAmbientePhoto(fotoAnexada); } catch (err) { /* idem */ } }
             this._bgTaskTick(bgTaskId);
           }
         } else if (a.type === 'merge-maps') {
@@ -5469,7 +5814,13 @@ const OrganizeView = {
           try {
             await DB.deleteAmbientePhoto(a.fotoId);
             const entry = this._maps.find((e) => e.map.id === a.mapId);
-            if (entry) { entry.fotos = entry.fotos.filter((f) => f.id !== a.fotoId); this._refreshGridCardBody(entry); this._refreshCardBody(entry); }
+            // [26/09/2026] MUDADO -- também filtra `entry.fotosPatrimonio` (NOVO nesta rodada): uma foto de
+            // patrimônio excluída (ver `_renderGridFotosPatrimonio`) passa por este MESMO caminho de aplicação.
+            if (entry) {
+              entry.fotos = entry.fotos.filter((f) => f.id !== a.fotoId);
+              if (entry.fotosPatrimonio) entry.fotosPatrimonio = entry.fotosPatrimonio.filter((f) => f.id !== a.fotoId);
+              this._refreshGridCardBody(entry); this._refreshCardBody(entry);
+            }
           } catch (err) { console.error('Falha ao aplicar delete-foto:', err); }
           this._bgTaskTick(bgTaskId);
         } else if (a.type === 'delete-map') {
@@ -5479,8 +5830,30 @@ const OrganizeView = {
           // `DB.deleteMap`, js/db.js). Não precisa replicar nada aqui — só
           // tirar o cartão da tela (mesmo motivo do delete-foto acima).
           try {
+            // [26/09/2026] CORRIGIDO -- pedido verbatim: "Mesmo excluindo e aplicando a ação [...], se o mapa
+            // que foi excluído estava selecionado antes, o nome dele ainda fica aparecendo no botão de troca de
+            // mapas em 'Mapa'. O próximo mapa ativo deve ser selecionado automaticamente." CAUSA: `DB.deleteMap`
+            // (js/db.js) nunca olha pra `ambienteAtualId` (o "mapa atual") -- ele só apaga o registro e reparenta
+            // filhos/desvincula itens/fotos, então excluir o mapa ATUAL deixava esse ponteiro apontando pra um
+            // id que não existe mais (o botão "🗺️ {nome} ▾" de MapView lê esse nome de um `DB.getMap` que volta
+            // undefined/o mapa já apagado, mostrando o nome antigo em cache). Corrigido verificando ANTES de
+            // apagar se `a.mapId` é o atual -- se for, escolhe outro mapa restante (ou cria um vazio, se este
+            // era o último) e chama `DB.setCurrentMap` (mesma lógica já usada por mapview.js `_openMapSwitcher
+            // Modal` ao excluir o mapa atual por ali).
+            const eraAtual = (await DB.getSetting('ambienteAtualId', null)) === a.mapId;
             await DB.deleteMap(a.mapId);
             this._maps = this._maps.filter((e) => e.map.id !== a.mapId);
+            if (eraAtual) {
+              const restantes = this._maps.length ? this._maps[0].map : await DB.getOrCreateSingleMap();
+              await DB.setCurrentMap(restantes.id);
+              if (typeof MapView !== 'undefined') {
+                MapView._map = await DB.getMap(restantes.id);
+                const switchBtn = document.getElementById('mapa-entry-switch');
+                if (switchBtn) switchBtn.innerHTML = `🗺️ ${Utils.escapeHtml(MapView._displayName(MapView._map))} <span aria-hidden="true">▾</span>`;
+                const tbmNomeBtn = document.getElementById('tbm-map-nome');
+                if (tbmNomeBtn) tbmNomeBtn.textContent = `🗺️ ${MapView._displayName(MapView._map)}`;
+              }
+            }
             this._listEl?.querySelector(`.organize-map-card[data-map-id="${a.mapId}"]`)?.remove();
             this._overlayEl?.querySelector(`#organize-grid-canvas .organize-grid-card[data-map-id="${a.mapId}"]`)?.remove();
             const countEl = this._overlayEl?.querySelector('#organize-map-count');
@@ -5870,6 +6243,10 @@ const OrganizeView = {
     if (typeof DB === 'undefined') return;
     try { await DB.setCurrentMap(mapId); } catch (err) { /* segue mesmo assim — pior caso, abre o mapa "atual" errado */ }
     this._showReturnButton();
+    // [26/09/2026] NOVO -- marca que a Planta baixa foi aberta a partir do Organizar, pra o botão "← Voltar" do
+    // PRÓPRIO topbar da Planta baixa (não só este botão flutuante) também voltar pro Organizar em vez de ir pra
+    // tela de entrada do Mapa -- pedido verbatim, ver comentário grande em mapview.js #tbm-voltar-planta.
+    if (typeof MapView !== 'undefined') MapView._voltarParaOrganizar = true;
     if (this._overlayEl) this._overlayEl.style.display = 'none';
     if (this._openLinkMode === '3d' && typeof App !== 'undefined' && App.openView3D) {
       App.openView3D(mapId);
@@ -5926,9 +6303,28 @@ const OrganizeView = {
     btn.className = 'organize-return-float';
     btn.textContent = '🗂️ Voltar ao Organizar';
     btn.onclick = async () => {
-      await this._closeExternalScreen();
-      if (this._overlayEl) this._overlayEl.style.display = '';
+      if (typeof MapView !== 'undefined') MapView._voltarParaOrganizar = false;
+      // [26/09/2026] CORRIGIDO -- pedido verbatim: "Ao dar dois cliques no mapa [...] depois, ao clicar em
+      // voltar, acaba aparecendo 1º a tela 'Mapa' e, depois, volta para onde estava em Organizar. [...] sem ter
+      // esse aparecimento intermediário da tela de 'Mapa'." CAUSA RAIZ: `_closeExternalScreen()` (mais abaixo)
+      // limpa `#view` e remonta a tela de ENTRADA do Mapa "por baixo" (documentado lá — pra não deixar `#view`
+      // em branco se a pessoa fechar o Organizar de vez depois) ANTES de o overlay do Organizar voltar a
+      // aparecer -- só que essa remontagem é assíncrona (`await MapView.mount`), então por um instante o
+      // navegador chega a PINTAR a tela de entrada do Mapa sem nada por cima (overlay ainda escondido). Basta
+      // reexibir o overlay do Organizar PRIMEIRO (cobre `#view` imediatamente, nenhum frame em branco) e só
+      // DEPOIS remontar a tela de entrada por baixo dele -- a remontagem passa a acontecer 100% escondida.
+      // [26/09/2026] CORRIGIDO (reforço) -- pedido verbatim: "ainda dá uma piscada na tela 'Mapa' [...] deixe a
+      // tela ativa por baixo com z-index de modo que volte direto." A correção acima (reordenar overlay ANTES
+      // do remonte) não bastou: `.organize-overlay` tem uma animação de fade-in (`organizeFadeIn`, 0.2s,
+      // opacity 0→1, ver style.css) que REINICIA sempre que `display` volta de 'none' pra um valor visível
+      // (comportamento padrão do CSS) -- durante esses 0.2s de opacidade crescente, o fundo do overlay (que é
+      // OPACO só quando opacity:1) fica parcialmente TRANSPARENTE, deixando a tela de Mapa por baixo (sendo
+      // remontada nesse instante) espiar através dela -- a "piscada" relatada. `animation: none` inline
+      // desliga esse fade só nesta reexibição (retorno, não abertura inicial) -- o overlay fica 100% opaco
+      // (z-index 900, `position:fixed`) desde o primeiro frame, cobrindo `#view` por completo o tempo todo.
+      if (this._overlayEl) { this._overlayEl.style.animation = 'none'; this._overlayEl.style.display = ''; }
       btn.remove();
+      await this._closeExternalScreen();
       // "modificações e exclusões" também disparam atualização (pedido do
       // usuário, lista verbatim no cabeçalho do arquivo) — como qualquer
       // coisa pode ter mudado na planta baixa durante a visita (2D/3D),
@@ -6265,13 +6661,19 @@ const OrganizeView = {
           <h3>📷📍 Patrimônio marcado numa foto</h3>
           <p>O patrimônio <strong>${Utils.escapeHtml(item.patrimonio || '(sem número)')}</strong> está marcado (vinculado a um ponto) na foto <strong>${Utils.escapeHtml(foto.nome || '(sem nome)')}</strong> deste mapa.</p>
           <div class="organize-merge-rows">
+            <!-- [26/09/2026] MUDADO -- pedido verbatim: "O padrão da opção é mover tudo que está vinculado
+                 àquele item, não só o item em si" -- o padrão marcado passou de 'item' pra 'photo' (mover
+                 tudo). A foto ANEXADA do patrimônio (fotoAnexadaId, se houver) sempre vai junto de qualquer
+                 forma, mesmo com 'item' marcado (ver comentário grande em _moveItemToMap) -- esta escolha
+                 aqui é só sobre a foto de AMBIENTE em que ele está marcado/orb, que pode ter OUTROS
+                 patrimônios marcados também. -->
             <label class="organize-merge-row">
-              <input type="radio" name="organize-linked-choice" value="item" checked>
-              <span>Mover só este patrimônio — a marcação dele nesta foto é removida (a foto e o resto do que está marcado nela ficam no mapa de origem).</span>
+              <input type="radio" name="organize-linked-choice" value="photo" checked>
+              <span>Mover a foto inteira também — todos os outros patrimônios marcados nela vão junto pra '${Utils.escapeHtml(this._mapDisplayName(destino.map))}'.</span>
             </label>
             <label class="organize-merge-row">
-              <input type="radio" name="organize-linked-choice" value="photo">
-              <span>Mover a foto inteira também — todos os outros patrimônios marcados nela vão junto pra '${Utils.escapeHtml(this._mapDisplayName(destino.map))}'.</span>
+              <input type="radio" name="organize-linked-choice" value="item">
+              <span>Mover só este patrimônio — a marcação dele nesta foto é removida (a foto e o resto do que está marcado nela ficam no mapa de origem).</span>
             </label>
           </div>
           <div class="organize-modal-actions">
@@ -6282,7 +6684,7 @@ const OrganizeView = {
       document.body.appendChild(modal);
       modal.querySelector('#organize-linked-cancel').onclick = () => { modal.remove(); resolve('cancel'); };
       modal.querySelector('#organize-linked-ok').onclick = () => {
-        const v = modal.querySelector('input[name="organize-linked-choice"]:checked')?.value || 'item';
+        const v = modal.querySelector('input[name="organize-linked-choice"]:checked')?.value || 'photo';
         modal.remove();
         resolve(v);
       };
@@ -6303,19 +6705,48 @@ const OrganizeView = {
    *  sempre (staged); "mover a foto" delega inteiramente pra
    *  `_movePhotoToMap` (que já cascata os outros patrimônios marcados nela)
    *  e NÃO empilha uma 2ª ação separada pra este item (a mesma ação de
-   *  mover a foto já cobre ele). */
-  async _moveItemToMap(itemId, targetMapId) {
+   *  mover a foto já cobre ele).
+   *
+   *  [26/09/2026] MUDADO -- pedidos verbatim:
+   *   - "ao tentar mover um patrimônio [...] mesmo clicando em 'cancelar', a animação [...] é feita e o
+   *     patrimônio [...] é movido mesmo assim." -- esta função agora devolve `false` (sem mudar NADA) quando a
+   *     pessoa cancela em `_confirmMoveLinkedItem`, e `true` nos outros casos; `_finishDragSession` (que faz a
+   *     animação) usa esse retorno pra decidir entre "voar pro destino" ou "voltar pro lugar" -- ver comentário
+   *     grande lá. `decisaoPrevia`, quando informado, pula a pergunta de novo (já perguntada ANTES da animação
+   *     começar, pelo mesmo motivo).
+   *   - "as fotos de patrimônio não estão indo junto. Tanto as fotos de ambiente quanto as fotos de patrimônio
+   *     devem ir junto [...] O padrão [...] é mover tudo que está vinculado àquele item." -- a foto ANEXADA
+   *     (`item.fotoAnexadaId`, tipo 'patrimonio', exclusiva deste item) agora SEMPRE vai junto (sem perguntar —
+   *     não há ambiguidade, nada mais está marcado nela), além da foto de AMBIENTE com uma marcação/orb dele
+   *     (que continua perguntando, já que pode ter outros patrimônios marcados — mas o padrão virou "mover a
+   *     foto", ver `_confirmMoveLinkedItem`). */
+  async _moveItemToMap(itemId, targetMapId, decisaoPrevia = null) {
     const origem = this._maps.find((e) => e.itens.some((it) => it.id === itemId));
     const destino = this._maps.find((e) => e.map.id === targetMapId);
-    if (!origem || !destino || origem.map.id === targetMapId) return;
+    if (!origem || !destino || origem.map.id === targetMapId) return true;
     const item = origem.itens.find((it) => it.id === itemId);
-    if (!item) return;
+    if (!item) return true;
     const fotoComOrb = origem.fotos.find((f) => (f.orbs || []).some((o) => o.itemId === itemId));
     if (fotoComOrb) {
-      const decisao = await this._confirmMoveLinkedItem(item, fotoComOrb, destino);
-      if (decisao === 'cancel' || !decisao) return;
-      if (decisao === 'photo') { await this._movePhotoToMap(fotoComOrb.id, targetMapId); return; }
-      // decisao === 'item' — segue abaixo, movendo só o patrimônio.
+      const decisao = decisaoPrevia || await this._confirmMoveLinkedItem(item, fotoComOrb, destino);
+      if (decisao === 'cancel' || !decisao) return false;
+      if (decisao === 'photo') {
+        await this._movePhotoToMap(fotoComOrb.id, targetMapId);
+        // `_movePhotoToMap` já atualizou/persistiu (como ação pendente) a foto de AMBIENTE e o item -- a foto
+        // ANEXADA (diferente dela) precisa da sua PRÓPRIA atualização visual + ação pendente aqui, senão fica
+        // sem gravar nenhuma das duas coisas.
+        const fotosMovidas = this._moverFotoAnexadaJunto(origem, destino, item, targetMapId);
+        if (fotosMovidas.length) {
+          this._refreshGridCardBody(origem);
+          this._refreshGridCardBody(destino);
+          this._refreshCardBody(origem);
+          this._refreshCardBody(destino);
+          const label = `foto de patrimônio ('${item.patrimonio || '(sem número)'}') movida de mapa '${this._mapDisplayName(origem.map)}' para mapa '${this._mapDisplayName(destino.map)}'`;
+          this._pushPendingAction({ type: 'move-photo', fotoId: fotosMovidas[0], toMapId: targetMapId, itemIds: [], label });
+        }
+        return true;
+      }
+      // decisao === 'item' — segue abaixo, movendo só o patrimônio (a foto anexada, se houver, vai mesmo assim).
     }
     this._ensurePendingSnapshot();
     origem.itens = origem.itens.filter((it) => it.id !== itemId);
@@ -6335,6 +6766,7 @@ const OrganizeView = {
       foto.orbs = foto.orbs.filter((o) => o.itemId !== itemId);
       fotosAlteradas.push(foto.id);
     }
+    const fotosMovidas = this._moverFotoAnexadaJunto(origem, destino, item, targetMapId);
     origem.isEmpty = this._isMapEmpty(origem.map, origem.itens);
     destino.isEmpty = this._isMapEmpty(destino.map, destino.itens);
     // ATUALIZADO (02/09/2026, rodada C) — antes só `_refreshCardBody`
@@ -6348,9 +6780,31 @@ const OrganizeView = {
     this._refreshGridCardBody(destino);
     this._refreshCardBody(origem);
     this._refreshCardBody(destino);
-    const label = `patrimônio ('${item.patrimonio || '(sem número)'}') movido de mapa '${this._mapDisplayName(origem.map)}' para mapa '${this._mapDisplayName(destino.map)}'`;
-    this._pushPendingAction({ type: 'move-item', itemId, toMapId: targetMapId, orphanedFotoIds: fotosAlteradas, label });
+    const label = `patrimônio ('${item.patrimonio || '(sem número)'}') movido de mapa '${this._mapDisplayName(origem.map)}' para mapa '${this._mapDisplayName(destino.map)}'${fotosMovidas.length ? ' (com a foto de patrimônio dele)' : ''}`;
+    this._pushPendingAction({ type: 'move-item', itemId, toMapId: targetMapId, orphanedFotoIds: fotosAlteradas, movedFotoIds: fotosMovidas, label });
     Utils.toast('Patrimônio movido (pendente — clique em "Aplicar alterações" pra gravar) ✓', { type: 'ok' });
+    return true;
+  },
+
+  /** Move a foto ANEXADA de patrimônio (`item.fotoAnexadaId`, tipo 'patrimonio') de `origem` pra `destino` JUNTO
+   *  com o item — pedido verbatim (ver comentário grande em `_moveItemToMap`). Devolve `[fotoId]` (pra somar em
+   *  `movedFotoIds` da ação pendente) ou `[]` se não havia foto anexada (ou ela já não estava mais em `origem`,
+   *  ex.: já foi movida por outra ação pendente antes). Exclusiva do item (nunca compartilhada com outro
+   *  patrimônio), então nunca pergunta — sempre vai. */
+  _moverFotoAnexadaJunto(origem, destino, item, targetMapId) {
+    if (!item.fotoAnexadaId) return [];
+    // [26/09/2026] CORRIGIDO -- a foto anexada de um item (item.fotoAnexadaId) é SEMPRE `tipo:'patrimonio'`
+    // (ver capture.js _openPhotoLinkModal/db.js addAmbientePhoto), então vive em `entry.fotosPatrimonio`
+    // (NOVO nesta rodada — ver comentário grande em `open`), nunca em `entry.fotos` (que exclui esse tipo de
+    // propósito). Procura nos dois arrays por segurança (dado antigo/inconsistente), mas o caminho normal é
+    // achar em `fotosPatrimonio`.
+    const origemArr = (origem.fotosPatrimonio || []).some((f) => f.id === item.fotoAnexadaId) ? origem.fotosPatrimonio : origem.fotos;
+    const idx = (origemArr || []).findIndex((f) => f.id === item.fotoAnexadaId);
+    if (idx < 0) return [];
+    const [foto] = origemArr.splice(idx, 1);
+    foto.ambienteId = targetMapId;
+    (destino.fotosPatrimonio || (destino.fotosPatrimonio = [])).push(foto);
+    return [foto.id];
   },
 
   /** "Quanto as fotos, se elas forem arrastadas e soltadas em outro mapa,
@@ -6373,6 +6827,20 @@ const OrganizeView = {
     foto.ambienteId = targetMapId;
     destino.fotos.push(foto);
     const itensMovidos = [];
+    // [26/09/2026] NOVO -- pedido verbatim: "Faça uma varredura mais
+    // minuciosa quanto ao mover um item e seus itens associados de uma
+    // mapa para o outro." CAUSA RAIZ encontrada nesta varredura: quando é a
+    // FOTO de ambiente que é arrastada pra outro mapa (não o item), todo
+    // patrimônio marcado nela (`idsVinculados`, via orb) vai junto — mas a
+    // foto de PATRIMÔNIO anexada a cada um desses itens (`item.
+    // fotoAnexadaId`, ver `_moverFotoAnexadaJunto`) ficava esquecida,
+    // continuando no mapa de ORIGEM (só o item ia, a foto anexada dele
+    // não) — exatamente o "a foto de patrimônio não foi junto" relatado.
+    // `_moveItemToMap` (arrastar o ITEM direto) já cuidava disso em todos
+    // os 3 casos (com/sem pergunta de conflito) — faltava aqui, no caminho
+    // de arrastar a FOTO. Mesmo tratamento: para cada item que vai junto,
+    // também move a foto anexada dele (se houver).
+    const fotosAnexadasMovidas = [];
     for (const id of idsVinculados) {
       const idx = origem.itens.findIndex((it) => it.id === id);
       if (idx < 0) continue; // já não está mais neste mapa (ex.: movido antes por outra ação pendente)
@@ -6380,6 +6848,7 @@ const OrganizeView = {
       it.ambienteId = targetMapId;
       destino.itens.push(it);
       itensMovidos.push(id);
+      fotosAnexadasMovidas.push(...this._moverFotoAnexadaJunto(origem, destino, it, targetMapId));
     }
     origem.isEmpty = this._isMapEmpty(origem.map, origem.itens);
     destino.isEmpty = this._isMapEmpty(destino.map, destino.itens);
@@ -6391,8 +6860,8 @@ const OrganizeView = {
     this._refreshGridCardBody(destino);
     this._refreshCardBody(origem);
     this._refreshCardBody(destino);
-    const label = `foto ('${foto.nome || '(sem nome)'}') movida de mapa '${this._mapDisplayName(origem.map)}' para mapa '${this._mapDisplayName(destino.map)}'${itensMovidos.length ? ` (${itensMovidos.length} patrimônio(s) junto)` : ''}`;
-    this._pushPendingAction({ type: 'move-photo', fotoId, toMapId: targetMapId, itemIds: itensMovidos, label });
+    const label = `foto ('${foto.nome || '(sem nome)'}') movida de mapa '${this._mapDisplayName(origem.map)}' para mapa '${this._mapDisplayName(destino.map)}'${itensMovidos.length ? ` (${itensMovidos.length} patrimônio(s) junto${fotosAnexadasMovidas.length ? `, com ${fotosAnexadasMovidas.length} foto(s) de patrimônio` : ''})` : ''}`;
+    this._pushPendingAction({ type: 'move-photo', fotoId, toMapId: targetMapId, itemIds: itensMovidos, movedFotoIds: fotosAnexadasMovidas, label });
     Utils.toast(`Foto movida (pendente — clique em "Aplicar alterações" pra gravar) ✓${itensMovidos.length ? ` (${itensMovidos.length} patrimônio(s) junto)` : ''}`, { type: 'ok' });
   },
 
@@ -6546,8 +7015,12 @@ const OrganizeView = {
   },
 
   async _deletePhoto(fotoId) {
-    const entry = this._maps.find((e) => e.fotos.some((f) => f.id === fotoId));
-    const foto = entry?.fotos.find((f) => f.id === fotoId);
+    // [26/09/2026] MUDADO -- também busca em `entry.fotosPatrimonio` (NOVO nesta rodada, ver comentário grande
+    // em `open`) -- excluir uma foto de patrimônio (botão 🗑️ em `_renderGridFotosPatrimonio`) chamava esta
+    // MESMA função, mas antes ela só procurava em `entry.fotos` (fotos de ambiente), nunca achando a foto de
+    // patrimônio.
+    const entry = this._maps.find((e) => e.fotos.some((f) => f.id === fotoId) || (e.fotosPatrimonio || []).some((f) => f.id === fotoId));
+    const foto = entry && (entry.fotos.find((f) => f.id === fotoId) || (entry.fotosPatrimonio || []).find((f) => f.id === fotoId));
     if (!foto || !entry) return;
     if (foto.__pendingDelete) return; // já pendente — botão devia estar escondido, mas por garantia
     const ok = await this._confirmDeletePhoto(foto);
@@ -6759,7 +7232,10 @@ const OrganizeView = {
     if (this._isMapFullyEmpty(entry)) {
       const escolha = await Utils.showChoiceModal({
         title: '🗑️🗺️ Remover nome e esqueleto?',
-        message: `O mapa '${nome}' não tem planta baixa desenhada, nem patrimônios, nem fotos vinculadas — só o "nome e esqueleto" dele (o registro em si). Quer removê-lo mesmo assim?\n\nFica pendente até "Aplicar alterações".`,
+        // [26/09/2026] MUDADO -- pedido verbatim: a mensagem deve deixar explícito, entre parênteses, o motivo
+        // de cada afirmação ("planta vazia", "0 patrimônios", "0 fotos") -- este ramo só é alcançado quando
+        // `_isMapFullyEmpty` já confirmou os 3 como verdadeiros, então os números são sempre 0 aqui.
+        message: `O mapa '${nome}' não tem planta baixa desenhada (planta vazia), nem patrimônios (0 patrimônios), nem fotos vinculadas (0 fotos) — só o "nome e esqueleto" dele (o registro em si). Quer removê-lo mesmo assim?\n\nFica pendente até "Aplicar alterações".`,
         choices: [
           { value: 'confirmar', label: '🗑️ Remover nome e esqueleto (pendente)', danger: true },
           { value: 'cancelar', label: 'Cancelar', secondary: true },
@@ -6887,12 +7363,12 @@ const OrganizeView = {
     if (patrCol) {
       const mapColKey = `map:${map.id}`;
       patrCol.innerHTML = `
-        <div class="organize-grid-section-head">
+        ${itens.length ? `<div class="organize-grid-section-head">
           ${this._colOrbHtml(mapColKey, itens.length)}
           <input type="text" class="organize-grid-search" data-search-key="${mapColKey}" placeholder="🔎 Buscar patrimônio…" title="Busca por número de patrimônio, dentro deste mapa">
           <button type="button" class="icon-btn sm organize-grid-search-toggle" data-search-key="${mapColKey}" title="${this._gridSearchModeTitle(this._getSearchMode(mapColKey))}">${this._gridSearchModeIcon(this._getSearchMode(mapColKey))}</button>
           ${this._sortOrbHtml(map.id)}
-        </div>
+        </div>` : ''}
         <div class="organize-grid-patrimonios" data-cols-key="${mapColKey}" style="--organize-cols:${this._effectiveColCount(mapColKey, itens.length)}">
           ${this._renderGridPatrimonios(this._sortItensForDisplay(entry), fotos, map.id, forcePending)}
         </div>`;
@@ -6917,13 +7393,28 @@ const OrganizeView = {
     const fotosCol = oldCard.querySelector('.organize-grid-fotos-col');
     if (fotosCol) {
       const fotosColKey = `fotos:map:${map.id}`;
-      fotosCol.innerHTML = `
-        <div class="organize-grid-section-head">
-          ${this._colOrbHtml(fotosColKey, fotos.length)}
-        </div>
-        <div class="organize-grid-fotos" data-cols-key="${fotosColKey}" style="--organize-cols:${this._effectiveColCount(fotosColKey, fotos.length)};--organize-foto-w:${this._gridFotosCellWidthPx(fotos, itens)}px">
-          ${this._renderGridFotos(fotos, itens, forcePending)}
-        </div>`;
+      const fotosPat = entry.fotosPatrimonio || [];
+      // [26/09/2026] MUDADO -- mesma reestruturação de `_gridCardHtml` (ver comentário grande lá): 2 seções
+      // tituladas (ambiente/patrimônio), mensagem única + sem orb de Colunas quando os 2 tipos estão vazios.
+      fotosCol.innerHTML = (fotos.length || fotosPat.length) ? `
+        ${fotos.length ? `
+        <div class="organize-grid-fotos-section">
+          <h5 class="organize-grid-fotos-title">🖼️ Fotos de ambiente</h5>
+          <div class="organize-grid-section-head">
+            ${this._colOrbHtml(fotosColKey, fotos.length)}
+          </div>
+          <div class="organize-grid-fotos" data-cols-key="${fotosColKey}" style="--organize-cols:${this._effectiveColCount(fotosColKey, fotos.length)};--organize-foto-w:${this._gridFotosCellWidthPx(fotos, itens)}px">
+            ${this._renderGridFotos(fotos, itens, forcePending)}
+          </div>
+        </div>` : ''}
+        ${fotosPat.length ? `
+        <div class="organize-grid-fotos-section organize-grid-fotos-section-patrimonio">
+          <h5 class="organize-grid-fotos-title organize-grid-fotos-title-patrimonio">🏷️ Fotos de patrimônio</h5>
+          <div class="organize-grid-fotos organize-grid-fotos-patrimonio">
+            ${this._renderGridFotosPatrimonio(fotosPat, itens, forcePending)}
+          </div>
+        </div>` : ''}
+      ` : `<p class="organize-col-empty">Nenhuma foto vinculada a este mapa.</p>`;
       this._wireGridFotosWrap(fotosCol, entry, oldCard);
     }
     const vinculadosNoMapa = itens.filter((it) => typeof it.mapaX === 'number');
@@ -6954,6 +7445,12 @@ const OrganizeView = {
       statsEl.insertAdjacentHTML('afterend', this._renderMapObjectsList(map));
       this._wireGridMapaWrap(mapaWrap, map.id);
     }
+    // [26/09/2026] NOVO -- mesma ideia de `_refreshCardBody` (Cartões, ver comentário grande lá) pro overlay
+    // "planta vazia" na miniatura ao vivo do modo Grade, que faltava aqui.
+    const gridThumbWrap = oldCard.querySelector('.organize-map-thumb-wrap');
+    const gridEmptyOverlay = gridThumbWrap?.querySelector('.organize-map-thumb-emptyoverlay');
+    if (entry.isEmpty && !gridEmptyOverlay) gridThumbWrap?.insertAdjacentHTML('beforeend', '<div class="organize-map-thumb-emptyoverlay">planta vazia</div>');
+    else if (!entry.isEmpty && gridEmptyOverlay) gridEmptyOverlay.remove();
   },
 
   // ---------------------------------------------------------------------
@@ -7049,7 +7546,7 @@ const OrganizeView = {
   _refreshCardBody(entry) {
     const card = this._listEl?.querySelector(`.organize-map-card[data-map-id="${entry.map.id}"]`);
     if (!card) return;
-    const { map, itens, fotos } = entry;
+    const { map, itens, fotos, fotosPatrimonio } = entry;
     const forcePending = !!entry.__pendingDelete;
     card.classList.toggle('organize-grid-card-map-pending', forcePending);
     const nomeEl = card.querySelector('.organize-map-card-name');
@@ -7105,7 +7602,7 @@ const OrganizeView = {
     }
     const fotosCol = card.querySelector('.organize-map-col-fotos');
     if (fotosCol) {
-      fotosCol.innerHTML = this._renderFotosColumn(fotos, itens, forcePending);
+      fotosCol.innerHTML = this._renderFotosColumn(fotos, itens, forcePending, fotosPatrimonio);
       this._wireFotoItems(card, entry);
     }
     const vinculadosNoMapa = itens.filter((it) => typeof it.mapaX === 'number');
@@ -7183,6 +7680,10 @@ const OrganizeView = {
     const movedFotoIds = [], movedItemIds = [];
     for (const e of descartadas) {
       for (const foto of e.fotos) { foto.ambienteId = survivorId; survivorEntry.fotos.push(foto); movedFotoIds.push(foto.id); }
+      // [26/09/2026] NOVO -- também move `fotosPatrimonio` (NOVO nesta rodada, ver comentário grande em
+      // `open`) pro sobrevivente -- sem isto, mesclar 2 mapas deixaria as fotos de patrimônio do mapa
+      // descartado "presas" na tela até um `reload()` de verdade buscar tudo de novo do banco.
+      for (const foto of (e.fotosPatrimonio || [])) { foto.ambienteId = survivorId; (survivorEntry.fotosPatrimonio || (survivorEntry.fotosPatrimonio = [])).push(foto); movedFotoIds.push(foto.id); }
       for (const item of e.itens) { item.ambienteId = survivorId; survivorEntry.itens.push(item); movedItemIds.push(item.id); }
     }
     survivorEntry.isEmpty = this._isMapEmpty(survivorEntry.map, survivorEntry.itens);

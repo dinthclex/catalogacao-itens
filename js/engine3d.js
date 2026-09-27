@@ -3446,6 +3446,29 @@ class Engine3D {
       const wHalf = { x: wallThickness / 2, y: segH / 2, z: segLen / 2 };
       mesh.userData.pick = { type: 'wall', ref: w, center: { x: cx, y: pisoY + y0 + segH / 2, z: cz }, rotY: wRotY, half: wHalf, obb: { half: wHalf, rotY: wRotY } };
       this._pickMeshes.push(mesh);
+      // [27/09/2026] `w.opacidade`/`w.destacado` — campos DIRETOS gravados
+      // por `.opacity()`/`.highlight()` do Scripts (antigo motor `map.
+      // grupoRegras`/`Mapping.getEntityGroupAlpha`/`isEntityGroupHighlighted`
+      // removido por completo, ver comentário grande em mapping.js). Mais
+      // simples que a versão de objetos: cada segmento de parede já cria
+      // seu PRÓPRIO material novo (linha `new THREE.MeshLambertMaterial`
+      // acima, nunca compartilhado entre paredes) — não precisa clonar
+      // nada, nem existe pool de `InstancedMesh` pra parede. Sem suporte a
+      // `rebuildObjectIncremental` (esse método só sabe reconstruir
+      // OBJETOS, não paredes) — mudanças em paredes continuam precisando
+      // do próximo `_rebuildScene()` de verdade pra aparecer (não é AO
+      // VIVO ainda), mas ao menos aparecem.
+      if (!wireframe) {
+        if (w.visibility === false) { mesh.visible = false; } else {
+          const alphaParede = w.opacidade ?? 1;
+          const destacadaParede = !!w.destacado;
+          if (alphaParede < 1) { mat.transparent = true; mat.opacity = alphaParede; }
+          if (destacadaParede) {
+            if (mat.emissive) { mat.emissive.setHex(0xffd166); if ('emissiveIntensity' in mat) mat.emissiveIntensity = 0.6; }
+            else if (mat.color) { mat.color.offsetHSL(0, 0, 0.25); }
+          }
+        }
+      }
     };
     (mapData.walls || []).forEach((w) => {
       const h = w.height || wallH;
@@ -4230,6 +4253,14 @@ class Engine3D {
     this._assocDestaqueFeito = false;
     this._buildOneObjectMeshCore(obj, wireframe, colWireframe);
     this._applyObjectExtraTransform(obj, baseYExtra, childrenBefore);
+    // Efeitos `.opacity()`/`.highlight()` dos 'Scripts' (`entity.opacidade`/
+    // `entity.destacado`, campos DIRETOS no objeto — ver comentário grande
+    // de `_applyGrupoOpacidadeDestaque` abaixo) aplicados também no 3D,
+    // igual ao wrapper de cima já faz pra rotX/rotZ/escala: roda DEPOIS de
+    // qualquer builder (genérico ou bespoke), sobre TODOS os nós de topo
+    // que ele acabou de acrescentar, sem precisar adaptar cada builder um
+    // por um.
+    this._applyGrupoOpacidadeDestaque(obj, childrenBefore, wireframe);
     // Destaque de "item associado" (contorno azul, raio, anel dourado, selo): só o caminho genérico o desenhava; os
     // objetos que saem por outros construtores (malha do Modelador, molde editado, .glb, objeto importado...) ficavam
     // sem efeito. Aqui cobre todos eles a partir da caixa delimitadora do que acabou de ser montado.
@@ -4288,6 +4319,91 @@ class Engine3D {
       node.scale.multiply(scaleVec);
       node.quaternion.premultiply(extraQuat);
     });
+  }
+
+  /** Aplica os efeitos `.opacity()`/`.highlight()` dos 'Scripts'
+   *  (`entity.opacidade`/`entity.destacado` — campos DIRETOS no objeto,
+   *  mesmo padrão de `entity.visibility`; antigo motor `map.grupoRegras`/
+   *  `Mapping.getEntityGroupAlpha`/`isEntityGroupHighlighted` removido por
+   *  completo — ver comentário grande em mapping.js) no 3D — MESMO padrão
+   *  do wrapper `_applyObjectExtraTransform` acima: roda
+   *  sobre TODOS os nós de topo que `_buildOneObjectMeshCore` acabou de
+   *  acrescentar (`this._group.children` a partir de `childrenBefore`),
+   *  então funciona pra QUALQUER builder (genérico, Mesa/Cadeira/Rack
+   *  bespoke, `.glb`/`.obj` importado, malha do Modelador), sem precisar
+   *  adaptar um por um.
+   *
+   *  CLONA o material de cada malha ANTES de mudar qualquer coisa —
+   *  vários builders REAPROVEITAM o MESMO objeto de material entre todas
+   *  as instâncias de um tipo (perfil compartilhado, ver
+   *  `OBJECT3D_PROFILES`); mutar direto pintaria TODOS os objetos daquele
+   *  tipo, não só este. Também tira a malha do pool de `InstancedMesh`
+   *  (`userData._instancerEligible`, ver `_buildGenericCatalogMesh`) —
+   *  mesma exclusão que já existia pra objeto com Script-componente ativo
+   *  (`temScriptAtivo`): um InstancedMesh é UMA malha/material só,
+   *  compartilhado por TODAS as instâncias do pool — não dá pra pintar só
+   *  uma sem tirá-la do pool primeiro.
+   *
+   *  Caminho comum (nenhum efeito bate no objeto, ESMAGADORA maioria) sai
+   *  bem no início — zero custo, zero mudança, objeto continua elegível
+   *  pro pool igual sempre foi.
+   *
+   *  [27/09/2026] NOVO — `obj.visibility === false`
+   *  (`SelectionCollection.hide()`/`.show()`) é tratado SEPARADO de
+   *  opacidade/destaque de propósito — pedido verbatim: "As propriedades
+   *  opacity e visibility são duas coisas diferentes, ambas não retiram o
+   *  objeto da cena." Só ajusta `mesh.visible`, SEM clonar material e SEM
+   *  tirar do pool de `InstancedMesh` — a malha continua exatamente onde
+   *  estava (raycastável — bom ou mau, dependendo do caso —, com sua
+   *  matriz/instância intactas), só não é desenhada. Quando o MESMO objeto
+   *  também tem opacidade/destaque, os dois efeitos se somam sem conflito
+   *  (mesh.visible=false já garante que nada é desenhado; opacidade não
+   *  faz diferença visual nesse caso, mas não faz mal aplicar mesmo
+   *  assim). */
+  _applyGrupoOpacidadeDestaque(obj, childrenBefore, wireframe) {
+    if (!window.Mapping || !this.mapData || !this._group) return;
+    const visivel = obj?.visibility !== false;
+    const alpha = wireframe ? 1 : (obj?.opacidade ?? 1);
+    const destacado = !wireframe && !!obj?.destacado;
+    if (visivel && alpha >= 1 && !destacado) return;
+    for (let i = childrenBefore; i < this._group.children.length; i++) {
+      const node = this._group.children[i];
+      if (!node) continue;
+      node.visible = visivel; // nó de topo já basta (visible=false já esconde toda a subárvore) — mais barato que percorrer todo mundo
+      if (typeof node.traverse !== 'function') continue;
+      // `!visivel` PRECISA continuar até o traverse (mesmo sem precisar
+      // clonar material nenhum) só pra tirar do pool de `InstancedMesh` —
+      // senão a instância compartilhada do pool (que não sabe nada sobre
+      // `visibility`, só sobre a malha individual) continuaria desenhando
+      // o objeto por cima, mesmo com `node.visible=false` na malha
+      // individual (ver comentário grande de `rebuildObjectIncremental`
+      // sobre como o pool "congela" a matriz da malha individual).
+      if (!visivel) { node.traverse((child) => { if (child.isMesh) child.userData._instancerEligible = false; }); continue; }
+      if (alpha >= 1 && !destacado) continue;
+      node.traverse((child) => {
+        if (!child.isMesh || !child.material) return;
+        child.userData._instancerEligible = false;
+        const eraArray = Array.isArray(child.material);
+        const mats = (eraArray ? child.material : [child.material]).map((m) => (m && typeof m.clone === 'function' ? m.clone() : m));
+        child.material = eraArray ? mats : mats[0];
+        mats.forEach((m) => {
+          if (!m) return;
+          if (alpha < 1) { m.transparent = true; m.opacity = Math.min(m.opacity ?? 1, alpha); }
+          if (destacado) {
+            // Mesmo amarelo do contorno de destaque 2D (`_drawDestaqueExtraObj`,
+            // mapview.js, `#ffd166`) — via emissive quando o material suporta
+            // (Lambert/Standard/Phong, a maioria); sem emissive cai pra um
+            // clareamento simples da cor via HSL.
+            if (m.emissive && typeof m.emissive.setHex === 'function') {
+              m.emissive.setHex(0xffd166);
+              if ('emissiveIntensity' in m) m.emissiveIntensity = 0.6;
+            } else if (m.color && typeof m.color.offsetHSL === 'function') {
+              m.color.offsetHSL(0, 0, 0.25);
+            }
+          }
+        });
+      });
+    }
   }
 
   /** [16/09/2026 UTC] NOVO — ver comentário grande em `_buildOneObjectMeshCore`
@@ -4888,11 +5004,24 @@ class Engine3D {
     const WINDOW_TYPES3D = window.WINDOW_TYPES || {};
     const colorFromHex = (hex, fallback) => this._colorFromHex3D(hex, fallback);
       if (!mapData) return;
+      // [27/09/2026] NOVO — `childrenBefore` capturado ANTES de qualquer
+      // malha desta porta/janela ser adicionada a `this._group`, pra poder
+      // aplicar visibilidade/opacidade/destaque (Ocultar/Opacidade/
+      // Destacar, `_applyGrupoOpacidadeDestaque`) exatamente como já é
+      // feito pra objetos genéricos em `_buildOneObjectMesh` — sem isso,
+      // `.hide()`/`Select('*').hide()` etc. não tinham efeito nenhum em
+      // portas/janelas no 3D (só no 2D), pois esta função nunca lia
+      // `el.visibility`.
+      const childrenBefore = this._group ? this._group.children.length : 0;
       // Pedido do usuário: "deve haver mais um tipo de janela" — a de correr
       // de 2 folhas tem geometria BEM diferente da caixa única genérica
       // abaixo (armadura + 2 folhas com trilhos, não uma placa só) —
       // delegada inteira pra buildJanelaCorrer2Folhas, acima.
-      if (kind === 'janela' && el.tipo === 'correr_2folhas') { this._buildJanelaCorrer2Folhas(el, mapData); return; }
+      if (kind === 'janela' && el.tipo === 'correr_2folhas') {
+        this._buildJanelaCorrer2Folhas(el, mapData);
+        this._applyGrupoOpacidadeDestaque(el, childrenBefore, wireframe);
+        return;
+      }
       const pos = (typeof Mapping !== 'undefined') ? Mapping.resolveDoorWindowPos(mapData, el) : { x: el.x, y: el.y, angulo: el.angulo || 0 };
       const largura = el.largura || (kind === 'porta' ? 0.8 : 1.2);
       const altura = el.altura || (kind === 'porta' ? 2.1 : 1.2);
@@ -5192,6 +5321,12 @@ class Engine3D {
           rt.manetaMesh = [montarManeta(1), montarManeta(-1)];
         }
       }
+      // [27/09/2026] NOVO — mesmo tratamento de Ocultar/Opacidade/Destacar
+      // já aplicado a objetos genéricos em `_buildOneObjectMesh` (ver
+      // `_applyGrupoOpacidadeDestaque` acima); sem isso, `.hide()`/
+      // `.opacity()`/`.highlight()` (Select/Grupos) não tinham efeito
+      // nenhum sobre portas/janelas no 3D.
+      this._applyGrupoOpacidadeDestaque(el, childrenBefore, wireframe);
   }
 
   /** [13/09/2026] NOVO — marca `mesh` com o deslocamento LOCAL dela em
@@ -6038,6 +6173,23 @@ class Engine3D {
     const wireframe = this.mode === 'wireframe';
     const colWireframe = 0x78c8ff; // MESMA constante de `setScene`/`addObjectIncremental`, ver lá
     const childrenBefore = this._group.children.length;
+    // [27/09/2026] NOVO — pedido verbatim: "Certifique-se de que todos os
+    // objetos são afetados pelos scripts [...] Para não acontecer o que
+    // aconteceu com as portas e janelas não desaparecerem no 3D." Esta
+    // função SEMPRE chamou `_buildOneObjectMesh` de forma incondicional —
+    // certo pra objetos genéricos (`map.objects`), mas ERRADO pra
+    // porta/janela (mesma classe do bug já corrigido em `_buildDoorOrWindowMesh`/
+    // `setScene`): o refresh "ao vivo" de uma porta/janela oculta via
+    // `AutomationManager._flushRefresh3DLive` caía aqui e reconstruía a
+    // malha ERRADA (a de um objeto genérico) em cima da malha de verdade
+    // dela. Agora despacha pro builder certo antes de cair no genérico.
+    const ehPorta = Array.isArray(this.mapData.portas) && this.mapData.portas.includes(obj);
+    const ehJanela = Array.isArray(this.mapData.janelas) && this.mapData.janelas.includes(obj);
+    if (ehPorta || ehJanela) {
+      this._buildDoorOrWindowMesh(obj, ehPorta ? 'porta' : 'janela', this.mapData);
+      this._setupCullMeshes();
+      return true;
+    }
     this._buildOneObjectMesh(obj, wireframe, colWireframe);
     this._applyObjMaterialOverride(obj, childrenBefore);
     if (wireframe) this._addWireframeOcclusion();
@@ -6432,7 +6584,20 @@ class Engine3D {
         const nz = Utils.clamp(camera.z, chunk.minZ, chunk.maxZ);
         const visivel = Math.hypot(camera.x - nx, camera.z - nz) <= rd;
         chunk.items.forEach((m) => {
-          m.visible = (forcado && forcado.has(m)) ? false : visivel;
+          // [27/09/2026] CORRIGIDO — pedido verbatim: "usando o método
+          // 'Ocultar()' [...] não está funcionando no 3D o piso." CAUSA
+          // RAIZ: este método roda TODO QUADRO (culling por distância) e
+          // sobrescrevia `m.visible` incondicionalmente com base só na
+          // distância — `_applyGrupoOpacidadeDestaque`/`rebuildObjectIncremental`
+          // ATÉ chegavam a marcar `node.visible = false` certinho quando
+          // `entity.visibility === false`, mas no quadro seguinte (o
+          // objeto estando dentro da distância de renderização) este
+          // método revertia pra `true` de novo — some por 1 quadro e volta.
+          // Paredes nunca sofriam disso (não entram em `_cullMeshes`, ver
+          // `_setupCullMeshes`). Corrigido tratando `visibility===false`
+          // com a MESMA prioridade absoluta de `_forcedHiddenMeshes`.
+          const escondidoPorVisibility = m.userData?.pick?.ref?.visibility === false;
+          m.visible = (escondidoPorVisibility || (forcado && forcado.has(m))) ? false : visivel;
           // [26/09/2026] NOVO — ver `_syncInstanceVisibility`/comentário
           // grande em `this._instancedPools` (constructor): mantém a
           // instância (se houver) desta malha em sincronia com `m.visible`
@@ -6462,7 +6627,11 @@ class Engine3D {
         // exatamente como já acontecia com paredes (que nunca entram nesta lista —
         // ver comentário de `_setupCullMeshes` — e por isso só dependiam da neblina).
         const visivel = Math.max(0, Math.hypot(c.x - camera.x, c.z - camera.z) - (c.radius || 0)) <= rd;
-        c.mesh.visible = (forcado && forcado.has(c.mesh)) ? false : visivel;
+        // [27/09/2026] CORRIGIDO — mesma causa raiz/comentário grande do
+        // ramo 'chunk' acima ("Ocultar()... não está funcionando no 3D o
+        // piso"): `visibility===false` tem prioridade absoluta, igual `forcado`.
+        const escondidoPorVisibility = c.mesh.userData?.pick?.ref?.visibility === false;
+        c.mesh.visible = (escondidoPorVisibility || (forcado && forcado.has(c.mesh))) ? false : visivel;
         this._syncInstanceVisibility(c.mesh);
       });
     }

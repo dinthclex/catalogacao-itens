@@ -36,8 +36,31 @@ const Perf = {
 
   async setEnabled(v) {
     this.enabled = v;
+    if (!this._hudEl) this._buildHud();   // [26/09/2026] garante o elemento (ativação imediata)
+    if (this._hudEl) this._hudEl.classList.toggle('hidden', !v);   // [26/09/2026] MUDADO -- aplica ANTES de gravar no banco (imediato)
     await DB.setSetting('hudAtivo', v);
-    if (this._hudEl) this._hudEl.classList.toggle('hidden', !v);
+  },
+
+  /** [26/09/2026] NOVO -- pedido verbatim: "Nas configurações do app, o botão 'Mostrar HUD (FPS / CPU~ / RAM)' (em '📊 HUD de performance') e o botão 'Sempre mostrar os botões ↶/↷ na tela' (em '↶ Desfazer/Refazer') devem ter a sua ativação imediata e ficar mais a frente de tudo. Mesmo habilitando e desabilitando, ainda sim, acaba por não aparecer. Acredito que acaba ficando atrás da tela das 'configurações do app'." 
+   *  CAUSA: o HUD costuma estar DENTRO de outro contêiner (.view3d-wrap do 3D, overlay do Organizar etc. -- ver
+   *  setCanvasAnchor/mountIn), que cria seu próprio contexto de empilhamento abaixo da tela cheia de Configurações
+   *  (z-index 970) -- o z-index 99999 dele só vale lá dentro. Enquanto as Configurações estão abertas, o HUD vai
+   *  pro document.body com a classe .na-frente-de-tudo (z-index máximo, ver css); ao fechar, volta pro contêiner
+   *  onde estava. */
+  trazerParaFrente(on) {
+    if (!this._hudEl) this._buildHud();
+    const el = this._hudEl;
+    if (!el) return;
+    if (on) {
+      if (!el.classList.contains('na-frente-de-tudo')) this._paiAntesDaFrente = el.parentElement;
+      if (el.parentElement !== document.body) document.body.appendChild(el);
+      el.classList.add('na-frente-de-tudo');
+    } else {
+      el.classList.remove('na-frente-de-tudo');
+      const pai = this._paiAntesDaFrente;
+      this._paiAntesDaFrente = null;
+      if (pai && pai !== el.parentElement && document.body.contains(pai)) pai.appendChild(el);
+    }
   },
 
   /** Pedido do usuário (rodada anterior): HUD no canto superior direito

@@ -8,6 +8,7 @@ const APP_SHELL = [
   './lib/three.module.js',
   './lib/three.global.js',
   './lib/jszip.min.js',
+  './js/lib/tweenengine.js',   // [26/09/2026] NOVO -- motor de tween/interpolação (window.TWEEN), sintaxe Tween.js, sem dependência de rede
   './lib/codemirror/lib/codemirror.js',
   './lib/codemirror/lib/codemirror.css',
   './lib/codemirror/mode/javascript/javascript.js',
@@ -32,6 +33,7 @@ const APP_SHELL = [
   './js/objecttypes/object-type-registry.js',
   './js/objecttypes/camera.js',
   './js/organizeview.js',
+  './js/automation.js',   // [26/09/2026] NOVO -- Módulo de Automação e Scripts globais (window.AutomationManager)
   './js/ambientephotos.js',
   './js/model3dloader.js',
   './js/glbmeshsource.js',
@@ -45,12 +47,16 @@ const APP_SHELL = [
   './js/rack-modular.js',
   './js/rack-cable-routing.js',
   './js/wifi-signal.js',
+  './js/radio-wave-raytracer.js',
+  './js/wifi-signal-avancado.js',
   './js/rede-passiva.js',
   './js/rede-docs.js',
+  './js/ap-docs.js',   // [25/09/2026] NOVO -- documentação do Access Point (faltava no pré-cache)
+  './js/scripts-docs.js',   // [27/09/2026] NOVO -- documentação do painel Scripts (parser/API)
+  './js/personagem-mapa.js',   // [26/09/2026] NOVO -- personagem guardado junto com cada mapa
   './js/rede-equip.js',
   './js/rede-storage-energia.js',
   './js/patch-cord.js',
-  './js/realistic-cable-bend.js',
   './js/maptxt.js',
   './js/engine3d.js',
   './js/engine3d-rede-mesh.js',
@@ -131,4 +137,4 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
-const CACHE_VERSION = 'catalogo-v698';
+const CACHE_VERSION = 'catalogo-v763';   // [27/09/2026] Documentacao do Scripts: nova secao "Chamar com ou sem argumento" (Select() vs Select('*'), highlight() vs highlight(false), etc.)

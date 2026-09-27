@@ -690,12 +690,14 @@ class Map2DRenderer {
   // próximo); entidades sem andar definível (`getAndarDaEntidade` volta
   // `null` — mapa sem nenhum "Piso" ainda, ou entidade "solta") também
   // sempre ficam visíveis, igual pedido pelo usuário.
-  // [13/09/2026 UTC] `isWall` — repassado a `Mapping.isEntityGroupHidden`
-  // pra saber se `entity` conta pro toggle "🧱 Paredes e Piso" mesmo sem
-  // `tipo:'piso'` (paredes não têm esse campo). Ver painel '🏷️ Grupos'
-  // (`_openGruposPanel`/`_renderGruposPanelBody`, mais abaixo).
+  // [27/09/2026] `isWall` mantido no parâmetro (chamadores continuam
+  // passando) mas sem uso interno hoje — era repassado pro antigo
+  // `Mapping.isEntityGroupHidden` (motor `map.grupoRegras`, removido por
+  // completo: "Remova map.grupoRegras. O motor de regras por baixo deve
+  // ser integrado a 'Scripts'."). `.hide()`/`.show()` do Scripts sempre
+  // usaram só `entity.visibility` (linha abaixo), nunca esse motor.
   _pisoVisible(entity, isWall = false) {
-    if (Mapping.isEntityGroupHidden(entity, this.mapData, { isWall })) return false;
+    if (entity && entity.visibility === false) return false;
     if (this._pisoFiltro == null) return true;
     if (entity && entity.tipo === 'piso') return true;
     const andar = Mapping.getAndarDaEntidade(entity, this.mapData);
@@ -961,12 +963,6 @@ class Map2DRenderer {
     // traço CHEIO (não mais tracejado), mesma cor/espessura, "gira 90° a
     // partir da dobradiça" em coordenadas locais.
     const hingeX = door.abertura === 'esquerda' ? -largura / 2 : largura / 2;
-    ctx.strokeStyle = cor; ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(hingeX, 0);
-    ctx.lineTo(hingeX, -largura);
-    ctx.stroke();
-    ctx.beginPath();
     // Arco de 1/4 de círculo (90°, não 270°) entre a posição FECHADA (o vão,
     // ao longo do eixo da parede — ângulo 0 a partir da dobradiça, do lado
     // da folha) e a posição ABERTA (a reta vertical acima, ângulo -90°) —
@@ -980,7 +976,33 @@ class Map2DRenderer {
     //  - "esquerda" (hingeX=-largura/2): fechada aponta pra +x (ângulo 0),
     //    aberta aponta pra -y (ângulo -π/2) — -90°→0°, sweep de +90°.
     const [startAngle, endAngle] = door.abertura === 'esquerda' ? [-Math.PI / 2, 0] : [Math.PI, Math.PI * 1.5];
+    // Guia de referência (alcance completo do giro, 0°→90°) — TRACEJADO,
+    // sempre no mesmo lugar, indicativo só do sentido de abertura.
+    ctx.strokeStyle = cor; ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
     ctx.arc(hingeX, 0, largura, startAngle, endAngle, false);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // [26/09/2026] NOVO — a folha de VERDADE, na posição atual de abertura
+    // (`d.anguloAbertura`/`d.aberta` — MESMOS campos que `engine3d.js` já
+    // lê pro 3D, com a mesma prioridade). Antes esta linha era sempre
+    // desenhada FIXA na ponta aberta (o mesmo traço do arco acima, 90°) —
+    // um símbolo estático que nunca refletia o estado real da porta, nem
+    // respondia a `.abrirPorta()`/`.fecharPorta()` (js/automation.js): é
+    // essa a causa raiz de "não estava dando pra abrir a porta" no mapa 2D.
+    // Fechada (0°) a folha fica alinhada ao vão, coincidindo com o
+    // retângulo já desenhado acima — visualmente "some" dentro dele, exatamente
+    // o esperado de uma porta fechada; ao abrir, gira de verdade em direção
+    // à posição vertical, em traço CHEIO (mais forte que o guia tracejado).
+    const closedAngle = door.abertura === 'esquerda' ? endAngle : startAngle;
+    const openAngle = door.abertura === 'esquerda' ? startAngle : endAngle;
+    const grausAbertura = door.anguloAbertura != null ? door.anguloAbertura : (door.aberta ? 90 : 0);
+    const leafAngle = closedAngle + (openAngle - closedAngle) * (grausAbertura / 90);
+    ctx.strokeStyle = cor; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(hingeX, 0);
+    ctx.lineTo(hingeX + largura * Math.cos(leafAngle), largura * Math.sin(leafAngle));
     ctx.stroke();
     ctx.rotate(-(pos.angulo || 0) - this.view.rot);
     ctx.translate(-s.x, -s.y);
@@ -1201,6 +1223,57 @@ class Map2DRenderer {
     ctx.fillStyle = cor;
     ctx.fill();
     ctx.strokeStyle = '#0a0d11'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.restore();
+  }
+
+  /** NOVO (26/09/2026) — pedido verbatim: "No mapa 2D, próximo do AP, assim
+   *  como é no 'Ver em 3D', deve aparecer a mesma barrinha enchendo. Mesmo
+   *  alternando entre os modos 'Ver em 3D' e mapa 2D."
+   *
+   *  Espelha a barrinha flutuante de verdade que já existe dentro da cena
+   *  3D (ver `_progBarSprite`/`.wf-bar`/`.wf-fill` em js/wifi-signal.js e
+   *  `View3DRede._atualizarBarrasProgressoAP()` em js/view3d-rede.js) — NÃO é
+   *  um dado paralelo/fingido: lê a MESMA instância `AccessPoint` (módulo
+   *  `WifiSignal`, função `instanciaExistente(id)`, feita exatamente pra
+   *  isso — "o mapa 2D usa pra saber se já existe uma malha 3D varrida...
+   *  SEM precisar de uma engine 3D viva"), então aparece de verdade sempre
+   *  que uma varredura estiver rolando em QUALQUER motor 3D vivo (a tela
+   *  cheia "Ver em 3D" OU a Miniatura 3D do próprio painel 'Ferramentas',
+   *  já que os dois compartilham a mesma instância `WifiSignal` por AP —
+   *  ver `AutomationManager.SelectionCollection.iniciarVarredura()`), o que
+   *  cobre o "mesmo alternando entre os modos" pedido: a barra não some ao
+   *  trocar de tela, só ao a varredura de fato terminar/ser cancelada. */
+  _drawApScanProgressBar2D(ctx, obj, sx, sy) {
+    const ap = window.WifiSignal?.instanciaExistente?.(obj.id);
+    if (!ap || !ap.scanning) return;
+    const progresso = Math.max(0, Math.min(100, ap.scanProgress || 0));
+    const zoomFator = Math.max(0.35, Math.min(1.4, (this.view?.zoom || 40) / 40));
+    const largura = Math.max(34, 46 * zoomFator);
+    const altura = Math.max(5, 7 * zoomFator);
+    const bx = sx - largura / 2;
+    const by = sy - Math.max(22, 30 * zoomFator);
+    ctx.save();
+    // fundo (trilho) — mesmo espírito escuro/translúcido do `.wf-bar` 3D
+    ctx.fillStyle = 'rgba(10,13,17,0.75)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1;
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, largura, altura, altura / 2); ctx.fill(); ctx.stroke(); }
+    else { ctx.fillRect(bx, by, largura, altura); ctx.strokeRect(bx, by, largura, altura); }
+    // preenchimento verde (mesma cor do `.wf-fill` 3D: #2ecc71-ish listrado)
+    const fillW = Math.max(altura, (largura - 2) * (progresso / 100));
+    ctx.fillStyle = '#2ecc71';
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx + 1, by + 1, fillW, altura - 2, (altura - 2) / 2); ctx.fill(); }
+    else { ctx.fillRect(bx + 1, by + 1, fillW, altura - 2); }
+    // rótulo "NN%" acima da barra, só em zoom próximo o suficiente pra caber
+    if (zoomFator > 0.55) {
+      ctx.font = `${Math.max(9, Math.round(10 * zoomFator))}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillStyle = '#e8f8ee';
+      ctx.shadowColor = 'rgba(0,0,0,0.85)';
+      ctx.shadowBlur = 3;
+      ctx.fillText(`📡 ${Math.round(progresso)}%`, sx, by - 2);
+    }
     ctx.restore();
   }
 
@@ -2067,11 +2140,13 @@ class Map2DRenderer {
       if (!this._pisoVisible(obj)) return;
       if (!camadaFundo || obj.layerId !== camadaFundo) return;
       ctx.save();
-      // [14/09/2026 UTC] Efeito 'opacidade' das regras de Grupos (ver
-      // Mapping.getEntityGroupAlpha) multiplicado em cima da opacidade de
-      // camada de sempre — mesmo padrão de objetoTransparencia2DAtivo logo
-      // abaixo, só que configurável por regra em vez de um botão único.
-      ctx.globalAlpha = this._layerOpacity(obj.layerId) * Mapping.getEntityGroupAlpha(obj, this.mapData);
+      // [27/09/2026] `entity.opacidade`/`entity.destacado` — campos DIRETOS
+      // gravados por `.opacity()`/`.highlight()` do Scripts (antigo motor
+      // `map.grupoRegras`/`Mapping.getEntityGroupAlpha` removido por
+      // completo, ver comentário grande em mapping.js) — multiplicado em
+      // cima da opacidade de camada de sempre, mesmo padrão de
+      // objetoTransparencia2DAtivo logo abaixo.
+      ctx.globalAlpha = this._layerOpacity(obj.layerId) * (obj.opacidade ?? 1);
       const s = this.worldToScreen(obj.x, obj.y);
       const selected = obj.id === this.selectedObjectId;
       const badgeAnchor = this._drawFormaShape(ctx, obj, s.x, s.y, selected);
@@ -2081,10 +2156,10 @@ class Map2DRenderer {
         if (this.destaqueExtraRaio2DAtivo) this._drawDestaqueExtraRaioObj(ctx, obj, s.x, s.y);
         if (this.destaqueExtraDourado2DAtivo) this._drawDestaqueExtraObj(ctx, obj, s.x, s.y);
       }
-      // [13/09/2026 UTC] NOVO — destaque visual por "classe" (✨ do painel
-      // '🏷️ Grupos'), independente do destaque de patrimônio associado
-      // acima — reaproveita o mesmo anel dourado (`_drawDestaqueExtraObj`).
-      if (Mapping.isEntityGroupHighlighted(obj, this.mapData)) this._drawDestaqueExtraObj(ctx, obj, s.x, s.y);
+      // [27/09/2026] Destaque visual via `.highlight()` do Scripts
+      // (`entity.destacado`) — reaproveita o mesmo anel dourado
+      // (`_drawDestaqueExtraObj`).
+      if (obj.destacado) this._drawDestaqueExtraObj(ctx, obj, s.x, s.y);
       if (opts.toolSelection?.has(`object:${obj.id}`)) {
         this._drawObjectSelHoverRing(ctx, obj, s.x, s.y, 6, false);
       } else if (this._isHovered(opts, 'object', obj.id)) {
@@ -2165,6 +2240,30 @@ class Map2DRenderer {
             const a = this.worldToScreen(wall.x1, wall.y1);
             const b = this.worldToScreen(wall.x2, wall.y2);
             const lw = Math.max(1, (wall.espessura || 0.12) * this.view.zoom);
+            // [27/09/2026] `wall.opacidade`/`wall.destacado` — campos
+            // DIRETOS gravados por `.opacity()`/`.highlight()` do Scripts
+            // (antigo motor `map.grupoRegras`/`Mapping.getEntityGroupAlpha`
+            // removido por completo, ver comentário grande em mapping.js).
+            // Aplicado por PAREDE (não por camada inteira, senão um
+            // `Select()` que só bate ALGUMAS paredes da mesma camada
+            // afetaria todas por igual).
+            const alphaGrupoParede = wall.opacidade ?? 1;
+            const destacadaGrupoParede = !!wall.destacado;
+            if (destacadaGrupoParede) {
+              // Halo dourado (mesma cor/espírito de _drawDestaqueExtraObj),
+              // por BAIXO do corpo normal da parede — desenhado aqui (e não
+              // só depois) porque este bloco já é por-parede a 100% opaco;
+              // outra chamada mais abaixo, fora do buffer, cuidaria de
+              // sobrepor mas duplicaria trabalho.
+              bctx.save();
+              bctx.shadowColor = '#ffd166';
+              bctx.shadowBlur = 14;
+              bctx.strokeStyle = '#ffd166';
+              bctx.lineWidth = lw + 7;
+              bctx.lineCap = 'square';
+              bctx.beginPath(); bctx.moveTo(a.x, a.y); bctx.lineTo(b.x, b.y); bctx.stroke();
+              bctx.restore();
+            }
             // Cor: customizada (`colorRGB`, editável no painel da parede) sempre
             // vence; sem customização, usa a cor do TIPO (`WALL_TYPES`) — o tipo
             // 'padrao' (o único que existe hoje) usa a mesma cor cinza de sempre,
@@ -2179,7 +2278,13 @@ class Map2DRenderer {
             // em vez de pontos.
             bctx.lineCap = wall.strokeStyle === 'pontilhado' ? 'round' : 'square';
             bctx.setLineDash(this._lineDashFor(wall.strokeStyle, lw));
+            // `alphaGrupoParede` (regra de Opacidade dos Grupos/Scripts) só
+            // reduz o alpha AQUI, na parede específica — quando não há
+            // nenhuma regra ativa pra ela, vale 1 e nada muda (mesma
+            // aparência de sempre, sem regressão pra mapas já salvos).
+            bctx.globalAlpha = alphaGrupoParede;
             bctx.beginPath(); bctx.moveTo(a.x, a.y); bctx.lineTo(b.x, b.y); bctx.stroke();
+            bctx.globalAlpha = 1;
             bctx.setLineDash([]);
           });
         } else {
@@ -2284,9 +2389,9 @@ class Map2DRenderer {
       // — transparência FIXA a mais (0.55), somada por cima da opacidade de
       // camada já existente, não substituindo-a. Imagem de fundo (acima)
       // fica de fora de propósito — só objetos "de verdade".
-      // [14/09/2026 UTC] Efeito 'opacidade' das regras de Grupos multiplicado
-      // junto (ver Mapping.getEntityGroupAlpha/comentário no pass acima).
-      ctx.globalAlpha = this._layerOpacity(obj.layerId) * (this.objetoTransparencia2DAtivo && obj.forma !== 'imagem' ? 0.55 : 1) * Mapping.getEntityGroupAlpha(obj, this.mapData);
+      // [27/09/2026] `entity.opacidade` (Scripts, ver comentário grande no
+      // pass acima) multiplicado junto.
+      ctx.globalAlpha = this._layerOpacity(obj.layerId) * (this.objetoTransparencia2DAtivo && obj.forma !== 'imagem' ? 0.55 : 1) * (obj.opacidade ?? 1);
       const s = this.worldToScreen(obj.x, obj.y);
       const selected = obj.id === this.selectedObjectId;
       const toolSelAtivo = !!opts.toolSelection?.has(`object:${obj.id}`);
@@ -2298,12 +2403,24 @@ class Map2DRenderer {
         if (this.destaqueExtraRaio2DAtivo) this._drawDestaqueExtraRaioObj(ctx, obj, s.x, s.y);
         if (this.destaqueExtraDourado2DAtivo) this._drawDestaqueExtraObj(ctx, obj, s.x, s.y);
       }
-      // [13/09/2026 UTC] NOVO — destaque visual por "classe" (✨ do painel
-      // '🏷️ Grupos'), independente do destaque de patrimônio associado
-      // acima — reaproveita o mesmo anel dourado (`_drawDestaqueExtraObj`).
-      if (Mapping.isEntityGroupHighlighted(obj, this.mapData)) this._drawDestaqueExtraObj(ctx, obj, s.x, s.y);
+      // [27/09/2026] Destaque visual via `.highlight()` do Scripts
+      // (`entity.destacado`), independente do destaque de patrimônio
+      // associado acima — reaproveita o mesmo anel dourado
+      // (`_drawDestaqueExtraObj`).
+      if (obj.destacado) this._drawDestaqueExtraObj(ctx, obj, s.x, s.y);
       if (toolSelAtivo) this._drawObjectSelHoverRing(ctx, obj, s.x, s.y, 6, false);
       else if (hoverAtivo) this._drawObjectSelHoverRing(ctx, obj, s.x, s.y, 6, true);
+      // NOVO (26/09/2026) — pedido verbatim: "No mapa 2D, próximo do AP,
+      // assim como é no 'Ver em 3D', deve aparecer a mesma barrinha
+      // enchendo [...] Mesmo alternando entre os modos." A "barrinha" de
+      // verdade (`AccessPoint.scanProgress`/`.scanning`, ver
+      // js/wifi-signal.js) é lida direto de `WifiSignal.instanciaExistente`
+      // — a MESMA instância que "Ver em 3D" e a Miniatura 3D (ver
+      // `_minimapEngine` acima) usam, então aparece aqui de verdade
+      // enquanto QUALQUER um dos dois estiver com uma varredura rolando
+      // (ex.: disparada por um script `.iniciarVarredura()` — ver
+      // js/automation.js), não é um dado paralelo/fingido.
+      if (obj.tipo === 'access_point') this._drawApScanProgressBar2D(ctx, obj, s.x, s.y);
       ctx.restore();
     });
 
@@ -2411,6 +2528,17 @@ class Map2DRenderer {
     // contorno tracejado pra ficar fácil de achar de novo.
     (this.mapData.textos || []).forEach((t) => {
       if (!this._layerVisible(t.layerId)) return;
+      // [27/09/2026] NOVO — pedido verbatim: "Certifique-se de que todos os
+      // objetos são afetados pelos scripts [...] Para não acontecer o que
+      // aconteceu com as portas e janelas não desaparecerem no 3D."
+      // `SceneObjects`/`Select('*')` já incluem "texto" como coleção
+      // (ver sceneobjects.js) — mas até agora nada no desenho 2D checava
+      // `visibility`/'🚫 Ocultar' do Grupos pra um texto, então `.hide()`/
+      // `Ocultar()` via Scripts (ou o próprio Grupos) não tinham efeito
+      // nenhum sobre textos. Mesmo campo/regra que objetos/paredes/portas/
+      // janelas já respeitam (`_pisoVisible`), sem o filtro de andar (um
+      // texto solto não pertence a nenhum andar de verdade).
+      if (t.visibility === false) return;
       const s = this.worldToScreen(t.x, t.y);
       const tam = t.tamanho || 14;
       const ang = t.angulo || 0;
@@ -4277,14 +4405,18 @@ const MapView = {
 
   /** Clique num botão da janela "Ferramentas": ferramenta normal ou objeto do catálogo acrescentado (`obj:<tipo>`). */
   _ativarBotaoFerramenta(id) {
+    // [27/09/2026] NOVO — `cliqueDoBotao:true`: ver comentário grande em
+    // `_setPTool` (onde é lida) — só um clique de VERDADE neste botão
+    // (nunca o resync silencioso de mount/remount) conta como decisão nova
+    // do usuário sobre a janela de Objetos.
     if (String(id).startsWith('obj:')) {
       if (this._formaDraft) this._finalizeFormaDraft();
-      this._setPTool('objects');
+      this._setPTool('objects', { cliqueDoBotao: true });
       this._objectStampType = String(id).slice(4);
       this._updateToolCtx?.();
       return;
     }
-    this._setPTool(id);
+    this._setPTool(id, { cliqueDoBotao: true });
   },
 
   _ptoolDefExtra(id) {
@@ -4493,7 +4625,17 @@ const MapView = {
       // Mapa" — usado quando esta tela foi aberta por um caminho que NÃO é o
       // padrão 'Mapa'->'Foto' (hoje só App.verMarcacaoEmFoto, que repassa a
       // View de onde veio). `null`/omitido preserva o comportamento padrão.
-      else if (screen === 'foto') await PhotoGrid.mountFotoScreen(this._rootEl, { onClose: opts.returnTo ? () => App.navigate(opts.returnTo) : () => this._showScreen('entry'), startPhotoId: opts.startPhotoId, highlightOrbId: opts.highlightOrbId, returnToLabel: opts.returnTo ? (App.titles[opts.returnTo] || opts.returnTo) : null });
+      // [25/09/2026] MUDADO -- pedido verbatim: "o botao de 'voltar' que
+      // aparece na 'foto' deve fazer com que volte para o que estava antes
+      // de clicar naquele botao. Ou seja, voltar para 'Tabela' com a janela
+      // do patrimonio selecionado ainda ativa. Ela deve continuar ativa,
+      // 'por baixo', nao deve ser refeita." `opts.onReturn` (repassado por
+      // App.verMarcacaoEmFoto) é chamado DEPOIS de voltar pra `returnTo` --
+      // hoje só usado para reexibir a ficha do patrimônio (que fica
+      // escondida com display:none em vez de removida do DOM enquanto a
+      // foto está aberta, ver app.js #di-marcacao-foto), em vez de
+      // reconstruí-la do zero.
+      else if (screen === 'foto') await PhotoGrid.mountFotoScreen(this._rootEl, { onClose: opts.returnTo ? async () => { try { await App.navigate(opts.returnTo); } finally { opts.onReturn?.(); } } : async () => { try { await this._showScreen('entry'); } finally { opts.onReturn?.(); } },   /* [25/09/2026] CORRIGIDO -- a ficha escondida (onReturn) volta SEMPRE, inclusive quando a origem já era o próprio Mapa (sem returnTo), e só depois da tela de origem estar montada */ startPhotoId: opts.startPhotoId, highlightOrbId: opts.highlightOrbId, returnToLabel: opts.returnTo ? (App.titles[opts.returnTo] || opts.returnTo) : null });
       else if (screen === 'caixa') await PhotoGrid.mountCaixaScreen(this._rootEl, { onClose: () => this._showScreen('entry') });
       else await this._mountEntryScreen(this._rootEl);
     } catch (err) {
@@ -4581,7 +4723,7 @@ const MapView = {
    *  DB.getOrCreateSingleMap() ao montar, então não precisa empurrar o
    *  novo mapa manualmente pra cada uma delas). */
   async _openMapSwitcherModal() {
-    const atualId = this._map?.id;
+    let atualId = this._map?.id;
     const modal = document.createElement('div');
     modal.className = 'modal-backdrop';
     modal.innerHTML = `
@@ -4602,9 +4744,25 @@ const MapView = {
       listEl.innerHTML = lista.map((m) => `
         <div class="map-switch-row" style="display:flex; align-items:center; gap:6px; padding:8px 10px; border:1px solid var(--border); border-radius:10px; ${m.id === atualId ? 'border-color:var(--accent)' : ''}">
           <button type="button" class="map-switch-pick" data-id="${m.id}" style="flex:1; text-align:left; background:none; border:none; color:inherit; font:inherit; cursor:pointer; padding:0">${m.id === atualId ? '✅ ' : ''}${Utils.escapeHtml(this._displayName(m))}</button>
+          <!-- [25/09/2026] NOVO -- pedido verbatim: "Ao lado esquerdo de
+               'Renomear' coloque um botão para exportar. Ao clicar nele,
+               vai-se para a janela do 'Exportar backup' com o mapa
+               respectivo marcado, as fotos deste mapa e os patrimônios
+               deste mapa (ou seja, tudo deste mapa)." — reaproveita a MESMA
+               janela/mecanismo já usado pelo botão análogo em Organizar
+               (ver organizeview.js, classe organize-map-export-btn, que já
+               chama SettingsView._openExportModal com onlyMapId). -->
+          <button type="button" class="icon-btn sm map-switch-export" data-id="${m.id}" title="Exportar apenas este mapa (planta, patrimônios e fotos dele)">⬇️🗺️</button>
           <button type="button" class="icon-btn sm map-switch-rename" data-id="${m.id}" title="Renomear este mapa">✏️</button>
           <button type="button" class="icon-btn sm map-switch-del" data-id="${m.id}" title="Excluir este mapa (a planta baixa dele é perdida; itens e fotos NÃO são apagados, só ficam sem mapa até serem posicionados de novo)" ${lista.length <= 1 ? 'disabled' : ''}>🗑️</button>
         </div>`).join('');
+
+      listEl.querySelectorAll('.map-switch-export').forEach((btn) => {
+        btn.onclick = () => {
+          close();
+          window.SettingsView?._openExportModal?.({ onlyMapId: btn.dataset.id });
+        };
+      });
 
       listEl.querySelectorAll('.map-switch-pick').forEach((btn) => {
         btn.onclick = async () => {
@@ -4621,7 +4779,15 @@ const MapView = {
           const m = await DB.getMap(id);
           const novoNome = prompt('Novo nome para este mapa:', this._displayName(m));
           if (novoNome === null || !novoNome.trim()) return;
-          await DB.saveMap({ ...m, nome: novoNome.trim() });
+          // [26/09/2026] CORRIGIDO -- pedido verbatim: "Logo que se clica em 'Renomear este mapa', e, depois, ao
+          // clicar em 'Ok', os outros botões devem funcionar imediatamente. [...] cliquei no botão 'Exportar
+          // apenas este mapa', parece que não funciona por algum tempo [...] só quando a mensagem 'Salvo -
+          // IndexedDB' [...] desaparece, é que o botão passa a funcionar de imediato." CAUSA: `DB.saveMap` sem
+          // `immediate:true` entra na janela de debounce de edição interativa (1s por padrão, ver comentário
+          // grande em db.js) -- o `await` abaixo só resolve quando essa janela flush, e é só DEPOIS dele que
+          // `render()` roda de novo. Renomear aqui é uma ação isolada (não uma rajada de edição em rascunho),
+          // então não precisa (e não deve) esperar o debounce -- `immediate:true` grava na hora.
+          await DB.saveMap({ ...m, nome: novoNome.trim() }, { immediate: true });
           window.OrganizeView?.invalidate?.(); // ver comentário grande em utils.js importMapsWithConflictUI
           if (id === this._map?.id) {
             this._map = await DB.getMap(id);
@@ -4651,11 +4817,25 @@ const MapView = {
           const id = btn.dataset.id;
           const m = await DB.getMap(id);
           if (!confirm(`Excluir o mapa "${this._displayName(m)}"? A planta baixa dele (paredes/objetos) é perdida — itens e fotos vinculados a ele NÃO são apagados, só ficam sem mapa até serem posicionados de novo.`)) return;
+          const eraAtual = id === this._map?.id;
           await DB.deleteMap(id);
           window.OrganizeView?.invalidate?.();
           const restantes = await DB.getAllMaps();
-          render(restantes.length ? restantes : [await DB.getOrCreateSingleMap()]);
-          if (id === this._map?.id) { close(); await this._showScreen('entry'); }
+          const listaFinal = restantes.length ? restantes : [await DB.getOrCreateSingleMap()];
+          // [26/09/2026] CORRIGIDO -- pedido verbatim: "ao excluir um mapa, deve permanecer nesta janela.
+          // Atualmente, a janela é fechada." CAUSA: ao excluir o mapa ATUAL, fechava esta janela e ia direto
+          // pra tela de entrada (`close(); await this._showScreen('entry')`) -- agora só troca o mapa atual
+          // (pro 1º da lista restante, mesma ideia de excluir todos) e atualiza a tela POR BAIXO desta janela
+          // (que continua em `document.body`, independente do container da tela), sem fechar nada; `atualId`
+          // (usado por `render` pra marcar "✅" o mapa atual) é reatribuído pra já refletir a troca.
+          if (eraAtual) {
+            const novoAtual = listaFinal[0];
+            await DB.setCurrentMap(novoAtual.id);
+            this._map = await DB.getMap(novoAtual.id);
+            atualId = novoAtual.id;
+            await this._showScreen('entry');
+          }
+          render(listaFinal);
         };
       });
     };
@@ -4680,8 +4860,15 @@ const MapView = {
       const novo = await DB.addMap({ nome });
       window.OrganizeView?.invalidate?.();
       await DB.setCurrentMap(novo.id);
-      close();
+      this._map = novo;
+      // [26/09/2026] CORRIGIDO -- pedido verbatim: "ao ir no botão para 'Trocar de mapa, criar um novo,
+      // renomear ou excluir', [...] ao excluir um mapa, deve permanecer nesta janela." (mesmo pedido reaplicado
+      // pra criar): antes, criar fechava esta janela e ia direto pra tela de entrada. Agora, igual ao 'excluir',
+      // a tela de entrada é atualizada POR BAIXO desta janela (que continua aberta) e a lista é re-renderizada
+      // já com o novo mapa marcado como atual.
+      atualId = novo.id;
       await this._showScreen('entry');
+      render(await DB.getAllMaps());
     };
   },
 
@@ -5379,6 +5566,35 @@ const MapView = {
       // não ter o tamanho FINAL ainda na chamada síncrona acima -- reforça num requestAnimationFrame.
       requestAnimationFrame(() => { if (this._screen === 'planta' && this._renderer) this._restaurarCamera2DAoEntrar(); });
     }
+    // [27/09/2026] NOVO — pedido verbatim: "No mapa 2D, mesmo deixando a
+    // janela do botão 'Scripts' ativa, ao ir para o 'Ver em 3D' e voltar
+    // para o mapa 2D, ela não fica aparente (mesmo seu botão de ativação
+    // estando como ativo)." Causa raiz: `_unmountPlanta` fecha de propósito
+    // TODOS os outros painéis flutuantes (Camadas, Cores, Debug, etc. — ver
+    // a lista de `_close*()` lá) mas nunca fechava NEM reabria Scripts — o
+    // elemento (`this._scriptsPanelEl`) ficava só uma referência morta (o
+    // `container` de antes já foi destruído por quem trocou de tela), então
+    // o toggle de "active" no topo continuava marcando o botão como ligado,
+    // mesmo sem painel nenhum de verdade na tela nova.
+    // Em vez de só corrigir o "active" (o que faria o botão refletir
+    // 'fechado' — jeito mais simples, mas contraria o pedido de continuar
+    // vendo a janela), REABRE de verdade: se estava aberta antes de sair,
+    // reconstrói no `container` novo (mesma técnica da Miniatura 3D, que já
+    // sobrevive a troca de tela por padrão). `_openScriptsPanel` é
+    // idempotente o bastante pra chamar de novo (recria do zero, com a
+    // MESMA posição lembrada — `_panelPositions` é um campo de instância,
+    // sobrevive à troca de tela sozinho).
+    // [27/09/2026] CORRIGIDO — `_scriptsPanelEl` agora pode existir mas
+    // estar ESCONDIDO (fechamento manual só oculta, ver
+    // `_closeScriptsPanel`/`_toggleScriptsPanel`) — reabrir aqui
+    // incondicionalmente ignoraria que o usuário tinha fechado a janela por
+    // conta própria antes de sair pro "Ver em 3D" (mesmo bug já corrigido
+    // pra 'Scripts' 3D e pra janela de Objetos, agora aqui
+    // também). Só reconstrói se estava DE FATO visível (nunca escondida)
+    // no momento de sair da tela.
+    const scriptsEstavaVisivel = this._scriptsPanelEl && this._scriptsPanelEl.style.display !== 'none';
+    if (this._scriptsPanelEl) this._scriptsPanelEl = null;
+    if (scriptsEstavaVisivel) this._openScriptsPanel();
     this._loop();
   },
 
@@ -5569,7 +5785,10 @@ const MapView = {
     // voltaria, virando um sumiço "de verdade" ao trocar de ambiente/tela.
     if (this._formaDraft) this._finalizeFormaDraft();
     this._closePanel();
-    this._closeObjectPickerPanel();
+    // `peloUsuario:false` — isto é descarte por SAÍDA da Planta baixa (ex.:
+    // indo pro "Ver em 3D"), não um fechamento de verdade; ver comentário
+    // grande em `_closeObjectPickerPanel` (mesma rodada, 27/09/2026).
+    this._closeObjectPickerPanel(false);
     this._closeFormsPickerPanel();
     this._closeDebugWindow(); // NOVO (06/09/2026) — janela de debug (ver _toggleDebugWindow) não pode sobreviver à troca de ambiente/saída do Mapa (o timer de auto-atualização, sobretudo — ver lá)
     this._closeLayersPanel();
@@ -6042,7 +6261,7 @@ const MapView = {
     };
     root.querySelector('#map-cores').onclick = () => this._toggleCoresPanel();
     root.querySelector('#map-layers').onclick = () => this._toggleLayersPanel();
-    root.querySelector('#map-grupos').onclick = () => this._toggleGruposPanel();
+    root.querySelector('#map-scripts').onclick = () => this._toggleScriptsPanel();
     root.querySelector('#tbm-toolsidebar').onclick = () => this._toggleToolsidebar();
     // "Ajuda" (❓) foi pro cabeçalho global (#btn-ajuda-top) — wiring em
     // app.js _wireNav, pedido do usuário (31/08/2026). Ver nota acima.
@@ -6053,7 +6272,21 @@ const MapView = {
     root.querySelector('#map-navtoggle').onclick = () => this._toggleNavMode();
 
     // ---- Linha "Navegação" (botões grandes, tela inicial do Mapa) ----
-    root.querySelector('#tbm-voltar-planta').onclick = () => this._showScreen('entry');
+    // [26/09/2026] CORRIGIDO -- pedido verbatim: "Em 'Mapa'->'Organizar', no modo 'Grade' [...] ao clicar em um
+    // patrimônio vinculado em um mapa [...] o mapa é aberto. Porém, ao clicar no botão de '← Voltar', acaba
+    // voltando para 'Mapa' e não onde estava ('Mapa'->'Organizar' [...]). [...] É como um sistema de pilha de
+    // janelas: [...] volta para a exata tela em que estava antes." CAUSA: este botão sempre ia direto pra tela
+    // de ENTRADA do Mapa, ignorando que a Planta baixa pode ter sido aberta a partir do Organizar
+    // (OrganizeView._openMapExternally, que já deixa um botão flutuante próprio "🗂️ Voltar ao Organizar" — mas
+    // o usuário naturalmente tenta primeiro o "← Voltar" do próprio topbar). Agora, quando é esse o caso (flag
+    // `_voltarParaOrganizar`, setada por OrganizeView ao abrir o mapa de lá), delega pro MESMO fluxo do botão
+    // flutuante em vez de ir pra entrada -- "pilha de janelas": volta pra onde estava (Organizar, no modo/
+    // rolagem em que ficou), não pra Mapa.
+    root.querySelector('#tbm-voltar-planta').onclick = () => {
+      const btnOrganizar = this._voltarParaOrganizar ? document.getElementById('organize-return-btn') : null;
+      if (btnOrganizar) { this._voltarParaOrganizar = false; btnOrganizar.click(); return; }
+      this._showScreen('entry');
+    };
     root.querySelector('#tbm-map-nome').onclick = () => this._openMapSwitcherModal();
     root.querySelector('#tbm-view3d-btn').onclick = () => App.openView3D(this._map?.id);
 
@@ -6194,7 +6427,12 @@ const MapView = {
     root.querySelector('#tbm-history')?.classList.toggle('active', !!(typeof History !== 'undefined' && History._panelEl));
     root.querySelector('#map-cores')?.classList.toggle('active', !!this._coresPanelEl);
     root.querySelector('#map-layers')?.classList.toggle('active', !!this._layersPanelEl);
-    root.querySelector('#map-grupos')?.classList.toggle('active', !!this._gruposPanelEl);
+    // [27/09/2026] CORRIGIDO — `_scriptsPanelEl` agora pode existir mas
+    // estar ESCONDIDO (fechamento manual só oculta, não destrói mais — ver
+    // `_closeScriptsPanel`) — `!!this._scriptsPanelEl` sozinho marcaria o
+    // botão "ativo" mesmo com a janela escondida. Também confere
+    // `display !== 'none'`.
+    root.querySelector('#map-scripts')?.classList.toggle('active', !!this._scriptsPanelEl && this._scriptsPanelEl.style.display !== 'none');
     root.querySelector('#tbm-toolsidebar')?.classList.toggle('active', this._toolsidebarVisible !== false);
 
     // Indicador visual de "tem mais botão pra esse lado" (pedido do
@@ -9023,6 +9261,13 @@ const MapView = {
       const _nowT = performance.now();
       const _dt = this._personagemLastT ? Math.min(0.05, (_nowT - this._personagemLastT) / 1000) : 0;
       this._personagemLastT = _nowT;
+      // [27/09/2026] NOVO -- motor de tween (js/lib/tweenengine.js, window.TWEEN)
+      // nunca era "tocado" (nada no app chamava TWEEN.update(...)) -- ou seja,
+      // Select().animate()/.blink()/.aparecer()/.desaparecer() ficavam
+      // registrados mas NUNCA avançavam de fato, tanto no mapa 2D quanto no
+      // 3D. Chamando aqui, todo quadro do mapa 2D (o "Ver em 3D" tem sua
+      // própria chamada equivalente em view3d.js).
+      if (window.TWEEN && typeof window.TWEEN.update === 'function') window.TWEEN.update(_nowT);
       if (this._navMode) this._updatePersonagem2D(_dt);
       // Tracejado "andando" (marching ants) de uma máscara de seleção (Selecionar/Laço/
       // Elipse/Mover seleção/Mover selecionados) — pedido do usuário, 25/08/2026: "o
@@ -10298,7 +10543,7 @@ const MapView = {
    *  ou desativa (null) — ver campo _ptool acima pro porquê da exclusão mútua
    *  com os modos antigos. Sempre volta `_mode` a 'view' (nenhum modo antigo
    *  concorrente) e limpa qualquer arraste de seleção em andamento. */
-  _setPTool(tool, { skipModeReset = false, keepObjectPicker = false, forceDuringNav = false } = {}) {
+  _setPTool(tool, { skipModeReset = false, keepObjectPicker = false, forceDuringNav = false, cliqueDoBotao = false } = {}) {
     // NOVO (03/09/2026) — `forceDuringNav` permite à bandeja lateral do
     // Modo Navegação ligar/desligar uma ferramenta mesmo com "🧭 Modo
     // Navegação" ligado (ver _toggleReticuloDrawer/_toggleMedida2D/
@@ -10342,6 +10587,12 @@ const MapView = {
       this._medidaVertexCarry = null;
     }
     const _formasEntrandoAgora = tool === 'formas' && this._ptool !== 'formas';
+    // [27/09/2026] NOVO — pedido verbatim: "ao deixar ativa a janela de
+    // Objetos [...] e fechá-la, depois, ir ao 'Ver em 3D' e voltar para o
+    // mapa 2D, a janela de Objetos não lembrar a última decisão, pois
+    // aparece de novo." Ver `_objectPickerFechadoPeloUsuario`/comentário
+    // grande onde o painel é reaberto, mais abaixo nesta função.
+    const _objectsEntrandoAgora = tool === 'objects' && this._ptool !== 'objects';
     this._ptool = tool || null;
     // BUG CORRIGIDO (07/09/2026), pedido verbatim: "No mapa 2D, na janela de
     // ferramentas, a ferramenta 'Formas' não está abrindo a janela para
@@ -10417,8 +10668,40 @@ const MapView = {
     // 'objects', ...)` ao trocar de TIPO dentro do próprio painel (ex.:
     // escolher "Mesa" — ver _openObjectPickerPanel) e não quer nem o flash
     // de fechar/reabrir.
+    // [27/09/2026] CORRIGIDO — ver comentário grande no pedido, acima.
+    // CAUSA RAIZ: `this._ptool` fica em 'objects' o tempo todo mesmo
+    // depois de fechar SÓ o painel (ver `_closeObjectPickerPanel`, que de
+    // propósito não muda `_ptool` — comentário grande lá) — mount/remount
+    // (ex.: voltar do "Ver em 3D") chama `_setPTool(this._ptool, {
+    // skipModeReset:true })` pra "resincronizar" a UI, o que caía bem
+    // aqui e REABRIA o painel incondicionalmente, ignorando que o usuário
+    // tinha fechado ele por conta própria. Agora só abre sozinho quando a
+    // ferramenta está sendo ATIVADA de fato (`_objectsEntrandoAgora` — o
+    // usuário clicou em "Objetos" agora, ou é a 1ª vez que `_ptool` chega
+    // nela) — um mero resync (mesma ferramenta de antes, `_ptool` já era
+    // 'objects') respeita `_objectPickerFechadoPeloUsuario` em vez de
+    // insistir. `_objectPickerFechadoPeloUsuario` zera aqui (entrando de
+    // verdade) e em `_openObjectPickerPanel` (reabriu por qualquer outro
+    // caminho — ex.: clique no indicador do cabeçalho) — só
+    // `_closeObjectPickerPanel` liga.
+    // [27/09/2026] CORRIGIDO — pedido verbatim: "Ao fechá-la, a ferramenta
+    // 'Objetos' continua selecionada. [...] se a janela estiver fechada e
+    // clicar no botão da ferramenta Objetos (mesmo já selecionada), a
+    // janela deve abrir de novo. Se já estiver aberta, clicar no botão não
+    // deve reabri-la, pois já está aberta." `cliqueDoBotao:true` (só
+    // `_ativarBotaoFerramenta` passa isto — um clique de VERDADE no botão
+    // "🧰 Objetos"/atalhos "obj:...", nunca o resync silencioso de
+    // mount/remount) agora conta como decisão nova do usuário, igual
+    // `_objectsEntrandoAgora` — mesmo com a ferramenta JÁ selecionada e o
+    // painel fechado por conta própria antes, um clique novo no botão zera
+    // a flag e reabre. E `!this._objectPickerEl` no `if` de abrir evita
+    // reconstruir o painel do ZERO quando ele já está aberto (2º clique
+    // seguido no botão, com a janela já na tela) — antes disparava
+    // `_openObjectPickerPanel()` de novo sempre, mesmo sem nenhuma
+    // necessidade.
     if (this._ptool === 'objects') {
-      this._openObjectPickerPanel();
+      if (_objectsEntrandoAgora || cliqueDoBotao) this._objectPickerFechadoPeloUsuario = false;
+      if (!this._objectPickerFechadoPeloUsuario && !this._objectPickerEl) this._openObjectPickerPanel();
     } else if (!keepObjectPicker) {
       this._closeObjectPickerPanel();
     }
@@ -18560,12 +18843,24 @@ const MapView = {
       return `<span class="comp-script-error-flag" data-comp-id="${c.id}" title="${Utils.escapeHtml(erro)}">⚠️ Erro</span>`;
     };
 
+    // [27/09/2026] CORRIGIDO — pedido verbatim: "o novo componente de script
+    // criado acabou sendo o 'Script 1', deveria ser o 'Script 2', pois foi
+    // criado depois." Causa raiz: `Components.addComponent` usa `unshift`
+    // (pedido de uma rodada anterior, pra o script novo aparecer no TOPO da
+    // lista) — o array `scriptComps` fica então em ordem da MAIS recente
+    // pra mais ANTIGA (índice 0 = recém-criado). Nomear pela posição no
+    // array (`si + 1`, como antes) numerava ao contrário: o mais novo virava
+    // "Script 1". `scriptComps.length - si` conta na ordem de CRIAÇÃO de
+    // verdade (o mais antigo = 1, crescendo), sem precisar guardar nenhum
+    // campo novo no componente — só corrige a conta.
+    const scriptNumero = (c) => scriptComps.length - scriptComps.indexOf(c);
+
     const scriptBlockHtml = (c) => {
       const fns = window.Components.extractFunctionNames(c.code || '');
       return `
         <div class="map-panel-fieldset comp-block" data-comp-id="${c.id}">
           <div class="map-panel-head" style="padding:0 0 6px; flex-wrap:wrap">
-            <b>🎬 Script</b>
+            <b>🎬 Script <span class="comp-script-nome">${Utils.escapeHtml(`Script ${scriptNumero(c)}`)}</span></b>
             <span class="comp-script-error-flag-slot" data-comp-id="${c.id}">${scriptErrorFlagHtml(c)}</span>
             <label style="display:flex; align-items:center; gap:4px; font-size:12px; margin-left:auto">
               <input type="checkbox" class="comp-enabled-toggle" data-comp-id="${c.id}" ${c.enabled === false ? '' : 'checked'}> ativo
@@ -18589,7 +18884,7 @@ const MapView = {
           <div class="comp-action-row" style="display:flex; gap:4px; align-items:center; margin-top:4px" data-comp-id="${c.id}" data-ev-idx="${idx}" data-action-idx="${ai}">
             <select class="comp-action-target">
               <option value="">— componente —</option>
-              ${scriptComps.map((sc, si) => `<option value="${sc.id}" ${sc.id === action.targetComponentId ? 'selected' : ''}>${Utils.escapeHtml(`Script ${si + 1}`)}</option>`).join('')}
+              ${scriptComps.map((sc) => `<option value="${sc.id}" ${sc.id === action.targetComponentId ? 'selected' : ''}>${Utils.escapeHtml(`Script ${scriptNumero(sc)}`)}</option>`).join('')}
             </select>
             <select class="comp-action-method">
               <option value="">— método —</option>
@@ -18789,7 +19084,32 @@ const MapView = {
   // (`.comp-code-error-banner`, `css/style.css`) mesmo vazio — é isso que
   // evita o "salto de posição" pedido: o espaço já existe no HTML sempre,
   // só o conteúdo/cor aparecem ou somem.
+  /** [27/09/2026] NOVO — atualiza SÓ o texto do banner de erro (sem
+   *  reconstruir a folha inteira, que perderia o cursor a cada tecla) na
+   *  hora que o código muda — chamado por `_renderScriptCodeEditor`
+   *  (Componentes) e pelo editor tela-cheia de Scripts (`_openScriptCodeFullscreen`)
+   *  a cada mudança do CodeMirror/textarea, pra dar feedback instantâneo
+   *  de erro de sintaxe sem esperar o poll de 1s (que continua rodando,
+   *  cobrindo o caso de erro de RUNTIME aparecer/desaparecer sozinho
+   *  enquanto a folha está aberta e o script rodando no "Ver em 3D"). */
+  _updateScriptErrorBannerLive(root, selector, comp) {
+    const banner = root?.querySelector?.(selector);
+    if (banner) banner.textContent = this._scriptErrorBannerText(comp);
+  },
+
   _scriptErrorBannerText(comp) {
+    // [27/09/2026] CORRIGIDO — pedido verbatim: "havia um analisador de
+    // sintaxe [...] Atualmente, não está funcionando." Ver comentário
+    // grande de `Utils.checkJsSyntax` (js/utils.js) pra causa raiz — este
+    // banner só mostrava erro de RUNTIME (`Components.getScriptError`,
+    // só populado enquanto o script roda de verdade no "Ver em 3D"),
+    // nunca erro de SINTAXE detectável na hora, sem executar nada. Agora
+    // checa sintaxe PRIMEIRO (instantâneo, sempre disponível, mesmo sem
+    // nenhum "Ver em 3D" aberto) e só then cai pro erro de runtime
+    // (continua útil pra erros que só aparecem executando, ex.: chamar
+    // método de algo `undefined`).
+    const erroSintaxe = window.Utils.checkJsSyntax(comp?.code || '');
+    if (erroSintaxe) return `⚠️ Erro de sintaxe: ${erroSintaxe}`;
     const erro = window.Components.getScriptError?.(comp);
     return erro ? `⚠️ Erro no componente de script: ${erro}` : '';
   },
@@ -18828,6 +19148,7 @@ const MapView = {
         window.Components.invalidateInstance(comp);
         salvar({ components: entity.components }); // salva sem re-renderizar (evita perder o cursor a cada tecla)
         updateFnsInfo(comp.code);
+        this._updateScriptErrorBannerLive(overlay, '#comp-code-error-banner', comp);
       });
     } else {
       console.warn('[mapview] CodeMirror não carregou (lib/codemirror/) — usando <textarea> simples como fallback.');
@@ -18836,6 +19157,7 @@ const MapView = {
         window.Components.invalidateInstance(comp);
         salvar({ components: entity.components });
         updateFnsInfo(comp.code);
+        this._updateScriptErrorBannerLive(overlay, '#comp-code-error-banner', comp);
       };
     }
     overlay.querySelector('#comp-code-back').onclick = () => {
@@ -19083,6 +19405,12 @@ const MapView = {
       this._wireHistoricoFieldset(panel, 'porta', d, salvar);
       // NOVO (07/09/2026), pedido verbatim: "...'Porta'... devem ter nomes..."
       panel.querySelector('#porta-nome').oninput = (e) => salvar({ nome: e.target.value });
+      // [27/09/2026] NOVO — ver comentário grande de `Mapping.ensureUniqueName` (js/mapping.js).
+      panel.querySelector('#porta-nome').onchange = (e) => {
+        const corrigido = Mapping.ensureUniqueName(this._map, e.target.value, d);
+        if (corrigido !== e.target.value) e.target.value = corrigido;
+        salvar({ nome: corrigido });
+      };
       panel.querySelector('#porta-tipo').onchange = (e) => salvar({ tipo: e.target.value });
       panel.querySelector('#porta-abertura').onchange = (e) => salvar({ abertura: e.target.value });
       panel.querySelector('#porta-largura').oninput = (e) => salvar({ largura: Utils.clamp(parseFloat(e.target.value) || 0.8, 0.4, 3) });
@@ -19222,6 +19550,12 @@ const MapView = {
       this._wireHistoricoFieldset(panel, 'janela', j, salvar);
       // NOVO (07/09/2026), pedido verbatim: "...'Janela'... devem ter nomes..."
       panel.querySelector('#janela-nome').oninput = (e) => salvar({ nome: e.target.value });
+      // [27/09/2026] NOVO — ver comentário grande de `Mapping.ensureUniqueName` (js/mapping.js).
+      panel.querySelector('#janela-nome').onchange = (e) => {
+        const corrigido = Mapping.ensureUniqueName(this._map, e.target.value, j);
+        if (corrigido !== e.target.value) e.target.value = corrigido;
+        salvar({ nome: corrigido });
+      };
       panel.querySelector('#janela-tipo').onchange = (e) => {
         const tipo = e.target.value;
         const patch = { tipo };
@@ -21896,6 +22230,13 @@ const MapView = {
         Mapping.updateText(this._map, t.id, { nome: e.target.value });
         this._saveMap();
       };
+      // [27/09/2026] NOVO — ver comentário grande de `Mapping.ensureUniqueName` (js/mapping.js).
+      panel.querySelector('#txt-nome').onchange = (e) => {
+        const corrigido = Mapping.ensureUniqueName(this._map, e.target.value, t);
+        if (corrigido !== e.target.value) e.target.value = corrigido;
+        Mapping.updateText(this._map, t.id, { nome: corrigido });
+        this._saveMap();
+      };
       const conteudoEl = panel.querySelector('#txt-conteudo');
       conteudoEl.oninput = () => {
         Mapping.updateText(this._map, t.id, { content: conteudoEl.value });
@@ -22374,6 +22715,11 @@ const MapView = {
 
   async _openObjectPickerPanel() {
     this._closeObjectPickerPanel();
+    // `_closeObjectPickerPanel()` (linha acima, só pra descartar uma
+    // instância anterior antes de recriar) acabou de marcar a flag como
+    // "fechado pelo usuário" — mas isto aqui É uma abertura de verdade,
+    // então desfaz na hora (ver comentário grande em `_setPTool`).
+    this._objectPickerFechadoPeloUsuario = false;
     if (!this._container) return;
     // As 7 formas geométricas (Quadrado/Retângulo/Linha fina/Círculo/
     // Triângulo/Pentágono/Hexágono) SUMIRAM deste painel (pedido do
@@ -22613,10 +22959,33 @@ const MapView = {
     // (precisa rodar de novo a cada reordenação/troca de modo).
   },
 
-  _closeObjectPickerPanel() {
+  // [27/09/2026] CORRIGIDO — pedido verbatim: "deixando a janela de
+  // Objetos ABERTA no mapa 2D, indo pro 'Ver em 3D' e voltando, ela some e
+  // não é possível reativar (só trocando de ferramenta e voltando pra
+  // Objetos)." Causa raiz: `unmount()` (chamado ao SAIR da Planta baixa —
+  // ex.: indo pro "Ver em 3D") também chama `_closeObjectPickerPanel()`,
+  // só pra descartar o painel/DOM antigo — mas a versão anterior sempre
+  // marcava `_objectPickerFechadoPeloUsuario = true` aqui dentro, sem
+  // distinguir esse descarte-por-navegação de um fechamento de verdade
+  // (clique no "✕" do próprio painel). Resultado: mesmo saindo com a
+  // janela ABERTA, ao voltar ela ficava com a flag "fechado pelo usuário"
+  // ligada — exatamente como se você tivesse fechado à mão — e por isso
+  // não reabria sozinha (só reabria via `_objectsEntrandoAgora`, trocando
+  // de ferramenta). Agora `_closeObjectPickerPanel` recebe
+  // `peloUsuario=true` por padrão (mantém o comportamento de sempre nos
+  // demais chamadores — clique no "✕", entrar em Modo Navegação, abrir
+  // 'Organizar'...), e SÓ o `unmount()` chama com `peloUsuario=false`
+  // (descarta o DOM, mas não muda a decisão do usuário sobre a janela
+  // estar aberta ou fechada).
+  _closeObjectPickerPanel(peloUsuario = true) {
     Utils.releaseFront(this._objectPickerEl); // [15/09/2026 UTC] "ao fechar, volta pro z-index normal"
     this._objectPickerEl?.remove();
     this._objectPickerEl = null;
+    // [27/09/2026] NOVO — ver comentário grande em `_setPTool` (onde esta
+    // flag é lida) — marca que o usuário fechou o painel POR CONTA
+    // PRÓPRIA, pra um resync de mount (voltar do "Ver em 3D", trocar de
+    // aba do rodapé) não reabrir sozinho.
+    if (peloUsuario) this._objectPickerFechadoPeloUsuario = true;
   },
 
   // ---------- Barra de contexto da ferramenta "Formas" (linha 4 do cabeçalho) ----------
@@ -23628,6 +23997,10 @@ const MapView = {
     ctx.setLineDash([7, 5]);
     ctx.strokeStyle = '#c9a3ff';
     (this._map.tracos2d || []).forEach((t) => {
+      // [27/09/2026] NOVO — mesmo motivo/fix do bloco de textos acima:
+      // traços guia nunca checavam `visibility`/'🚫 Ocultar', então
+      // `.hide()`/Grupos não tinham efeito sobre eles.
+      if (t.visibility === false) return;
       const a = toScreen(t.x1, t.y1), b = toScreen(t.x2, t.y2);
       // NOVO (06/09/2026), pedido verbatim: "Todos selecionáveis." — BUG
       // CORRIGIDO: `_drawMedidasTracos2D` (chamada 1x por quadro, à parte
@@ -23761,7 +24134,12 @@ const MapView = {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(texto, mx, my + 0.5);
     };
-    (this._map.medidas2d || []).forEach((m) => desenharMedida(m.x1, m.y1, m.x2, m.y2, { medida: m }));
+    // [27/09/2026] NOVO — mesmo motivo/fix do bloco de textos/traços acima:
+    // medidas da Trena nunca checavam `visibility`/'🚫 Ocultar'.
+    (this._map.medidas2d || []).forEach((m) => {
+      if (m.visibility === false) return;
+      desenharMedida(m.x1, m.y1, m.x2, m.y2, { medida: m });
+    });
     if (this._medida2dDraft && this._mouseScreen) {
       // ATUALIZADO (04/09/2026), itens 3 e 4 — mesmo motivo do bloco do
       // Traço guia acima: preview passa por _resolveMedidaOuTracoPonto.
@@ -24388,151 +24766,459 @@ const MapView = {
     else this._openLayersPanel();
   },
 
-  /** [13/09/2026 UTC] NOVO — painel '🏷️ Grupos' (botão #map-grupos), pedido
-   *  verbatim: "Monte um sistema para poder agrupar objetos de tal modo
-   *  que depois em uma lista de opções, ao clicar em uma delas, seja
-   *  possível ativar/desativar aquele grupo na tela para ser renderizado.
-   *  E mais, além disso (habilitar/desabilitar a renderização), também,
-   *  apenas destacar visualmente." + "Uma opção para fazer todas as
-   *  paredes sumirem e ficar apenas os objetos que não são parede, nem
-   *  piso." + (resposta à pergunta de esclarecimento sobre "Andar") "criar
-   *  um sistema para poder agrupar ativações e desativações ao selecionar
-   *  uma das opções disponíveis". Reaproveita a base '.map-obj-picker-
-   *  panel' (ver css/style.css) sem as sobrescritas mais elaboradas de
-   *  '.map-layers-panel' — mais simples que '_openLayersPanelImpl'
-   *  (decisão de escopo: sem redimensionamento próprio). */
-  _toggleGruposPanel() {
+  /** [26/09/2026] NOVO — painel '🎬 Scripts' (botão #map-scripts), pedido
+   *  verbatim: "criar um Módulo de Automação e Scripts extremamente
+   *  robusto e intuitivo [...] painel (Lista de Scripts) onde o usuário
+   *  possa gerenciar códigos/rotinas [...] Executar, Desexecutar
+   *  (Desfazer), Editar, Renomear e Excluir." Mesmo padrão visual/mecânico
+   *  do painel '🏷️ Grupos' vizinho (`.map-obj-picker-panel`,
+   *  arrastável/lembra posição) — ver `window.AutomationManager` (novo
+   *  js/automation.js) pra toda a lógica de execução/rollback. */
+  _toggleScriptsPanel() {
     if (this._navMode) { Utils.toast('Desative o "🧭 Modo Navegação" para usar as janelas de edição.', { type: 'warn' }); return; }
-    if (this._gruposPanelEl) this._closeGruposPanel();
-    else this._openGruposPanel();
+    // [27/09/2026] CORRIGIDO — pedido verbatim: "Fechar e abrir a janela
+    // de Scripts não deve reconstruir tudo, deve só deixar de
+    // aparecer/aparecer." Antes, um fechamento manual (este botão de novo,
+    // ou o "✕" da própria janela) REMOVIA o elemento do DOM e zerava
+    // `this._scriptsPanelEl` — reabrir chamava `_openScriptsPanel()` de
+    // novo do ZERO (`await DB.getSetting(...)`, refaz toda a lista de
+    // linhas + listeners). Agora, se a instância já existe (só está
+    // ESCONDIDA de um fechamento manual anterior — ver
+    // `_closeScriptsPanel`, que só esconde), alterna show/hide na MESMA
+    // instância — nada é reconstruído (posição/tamanho arrastados,
+    // scroll, tudo continua exatamente como estava). Só entra no caminho
+    // de construir do ZERO (`_openScriptsPanel`, abaixo) quando não existe
+    // NENHUMA instância ainda — 1ª abertura da tela, ou depois de a tela
+    // toda ter sido desmontada/remontada (ex.: "Ver em 3D" — aí o DOM
+    // antigo já foi destruído de qualquer jeito, reconstruir é inevitável).
+    if (this._scriptsPanelEl) {
+      const estavaEscondida = this._scriptsPanelEl.style.display === 'none';
+      this._scriptsPanelEl.style.display = estavaEscondida ? '' : 'none';
+      this._container?.querySelector('#map-scripts')?.classList.toggle('active', estavaEscondida);
+      // Reaparecendo: a lista pode ter mudado enquanto estava escondida
+      // (script criado/editado/excluído por outro caminho, ex. atalho) —
+      // atualiza só o CONTEÚDO (mesma função incremental de sempre), não a
+      // janela em si.
+      if (estavaEscondida) this._renderScriptsPanelBody(this._scriptsPanelEl);
+      return;
+    }
+    // BUG CORRIGIDO (26/09/2026), reportado verbatim: clicar no botão
+    // '🎬 Scripts' não abria a janela. `_openScriptsPanel` é `async` (espera
+    // `AutomationManager.load()` — 1ª leitura no IndexedDB via `DB.getSetting`)
+    // e era chamada aqui SEM `await`/`.catch(...)` — qualquer rejeição (ex.:
+    // IndexedDB ainda abrindo, `DB` temporariamente indisponível) virava uma
+    // "unhandled promise rejection" muda: nada aparecia na tela e nenhum erro
+    // chegava ao usuário, só ao console do navegador (que a maioria nunca
+    // abre) — exatamente o sintoma relatado. Agora qualquer falha mostra um
+    // toast (igual a qualquer outro erro do app) em vez de falhar em
+    // silêncio, e o painel (já adicionado ao DOM antes do `await` dentro de
+    // `_openScriptsPanel`) é DESCARTADO de vez (`_destruirScriptsPanel` —
+    // não só escondido: um painel que falhou ao carregar não presta pra
+    // reaparecer depois, precisa nascer de novo do zero na próxima tentativa).
+    this._openScriptsPanel().catch((e) => {
+      console.error('[Scripts] Falha ao abrir o painel:', e);
+      Utils.toast?.('Não foi possível abrir os Scripts: ' + (e?.message || e), { type: 'danger' });
+      this._destruirScriptsPanel();
+    });
   },
 
-  _closeGruposPanel() {
-    this._gruposPanelEl?.remove();
-    this._gruposPanelEl = null;
-    this._container?.querySelector('#map-grupos')?.classList.remove('active');
+  // [27/09/2026] CORRIGIDO — fechamento MANUAL (botão "🎬 Scripts" de novo,
+  // ou "✕" da própria janela — ver `#map-scripts-close`, mais abaixo): só
+  // ESCONDE, nunca destrói — ver comentário grande em `_toggleScriptsPanel`.
+  _closeScriptsPanel() {
+    if (this._scriptsPanelEl) this._scriptsPanelEl.style.display = 'none';
+    this._container?.querySelector('#map-scripts')?.classList.remove('active');
   },
 
-  _openGruposPanel() {
+  // [27/09/2026] NOVO — descarte DE VERDADE (remove do DOM, zera a
+  // referência): só usado quando a instância não presta mais pra nada —
+  // falhou ao carregar (catch de `_toggleScriptsPanel`) — nunca por um
+  // fechamento manual comum (isso é `_closeScriptsPanel`, acima).
+  _destruirScriptsPanel() {
+    this._scriptsPanelEl?.remove();
+    this._scriptsPanelEl = null;
+    this._container?.querySelector('#map-scripts')?.classList.remove('active');
+  },
+
+  async _openScriptsPanel() {
     if (!this._map) return;
     const panel = document.createElement('div');
-    panel.className = 'map-obj-picker-panel map-grupos-panel';
-    panel.style.bottom = '370px';
+    panel.className = 'map-obj-picker-panel map-scripts-panel';
+    // [26/09/2026] CORRIGIDO — nunca usar `style.bottom` aqui (ver comentário
+    // grande de `.map-scripts-panel`, css/style.css): só `top`, como todo
+    // outro painel arrastável/redimensionável do app (Camadas/Objetos).
+    panel.style.top = '58px';
     panel.style.right = '12px';
     panel.style.left = 'auto';
+    // Tamanho lembrado entre aberturas (mesmo mecanismo de
+    // `mapa2dObjPickerPanelSize` — ver `_openObjectPickerPanel`/
+    // `onResizeEnd` abaixo); sem nada salvo ainda, usa o padrão 560×520.
+    const savedSize = await DB.getSetting('mapaScriptsPanelSize', null);
+    if (!this._container) return; // painel fechado enquanto esperava o await acima
+    if (savedSize && savedSize.w && savedSize.h) {
+      panel.style.width = savedSize.w + 'px';
+      panel.style.height = savedSize.h + 'px';
+    }
     this._container.appendChild(panel);
-    this._gruposPanelEl = panel;
-    this._container.querySelector('#map-grupos')?.classList.add('active');
-    this._renderGruposPanelBody(panel);
-    this._makePanelDraggable(panel, 'grupos');
-    this._applyRememberedPanelPos(panel, 'grupos');
+    this._scriptsPanelEl = panel;
+    this._container.querySelector('#map-scripts')?.classList.add('active');
+    if (!window.AutomationManager._loaded) await window.AutomationManager.load();
+    if (!this._container || this._scriptsPanelEl !== panel) return; // fechado/trocado enquanto esperava o load acima
+    this._renderScriptsPanelBody(panel);
+    // Pedido verbatim: "Deve ser possível redimensioná-la." — mesma técnica
+    // já usada por Camadas/Objetos (`_makePanelResizable`, 8 alças, mín/máx
+    // sensatos pro conteúdo de um script — nome + preview + 3 botões — não
+    // ficar espremido nem gigante).
+    this._makePanelResizable(panel, {
+      minWidth: 360, minHeight: 260, maxWidth: 900, maxHeight: 900,
+      onResizeEnd: (w, h) => { DB.setSetting('mapaScriptsPanelSize', { w, h }); },
+    });
+    this._makePanelDraggable(panel, 'scripts');
+    this._applyRememberedPanelPos(panel, 'scripts');
     this._bringPanelToFront(panel);
   },
 
-  /** [14/09/2026 UTC] REESCRITO — pedido verbatim (backlog, adiado desde a
-   *  RODADA 20): "O 'Grupos' deve ser gerenciável. Deve poder dar/editar
-   *  um nome para cada opção... deve ser possível definir o que é
-   *  ativado/desativado ao selecionar uma opção... display:none/block,
-   *  visibility:hidden/visible ou opacity:0/1" + "generalizado em regras
-   *  configuráveis (tipo querySelector)." Lista TODAS as regras de
-   *  `Mapping.getGrupoRegras(map)` (ver comentário grande de
-   *  `getGrupoRegras` em mapping.js pra sintaxe do selector/spec completa
-   *  do motor) — cada uma com nome, seletor e efeito EDITÁVEIS ali mesmo
-   *  (campos de texto/select direto na linha, sem modal/popover
-   *  separado), um toggle 👁️ (liga/desliga a regra) e um botão de
-   *  excluir. Substitui por completo as 3 seções fixas de antes (Paredes+
-   *  Piso / Andares / Classes — cada uma com sua própria lógica hard-
-   *  coded) por UMA lista genérica só: migração automática (ver
-   *  `Mapping._migrarGruposParaRegras`) preserva o estado de mapas
-   *  antigos na 1ª leitura, sem perder nada. */
-  _renderGruposPanelBody(panel) {
-    const map = this._map;
-    const regras = Mapping.getGrupoRegras(map);
-    const EFEITOS = [
-      { v: 'ocultar', label: '🚫 Ocultar' },
-      { v: 'opacidade', label: '🌗 Opacidade' },
-      { v: 'destacar', label: '✨ Destacar' },
-    ];
+  /** 1ª linha "de código de verdade" (ignora comentários/linhas em branco)
+   *  — MESMA função (copiada) de `scriptPreviewLine` usada pela folha de
+   *  Componentes (ver `_renderComponentsEditor` acima), pedido verbatim de
+   *  paridade visual: "A edição dos script[s] deve ser como nas
+   *  propriedades do objeto (em '🧩 Componentes [...] Editar
+   *  componentes…')". */
+  _scriptsPreviewLine(code) {
+    const linha = (code || '').split('\n').find((l) => {
+      const t = l.trim();
+      return t && !t.startsWith('//') && !t.startsWith('/*') && !t.startsWith('*');
+    });
+    return linha ? linha.trim() : '(script vazio)';
+  },
 
-    const linhasRegras = regras.length
-      ? regras.map((r) => `
-      <div class="map-grupos-regra${r.ativo ? ' ativa' : ''}" data-id="${Utils.escapeHtml(r.id)}">
+  /** Markup de UMA linha de script — [27/09/2026] REESCRITO — pedido
+   *  verbatim: "Faça a janela do botão 'Scripts' semelhante a janela do
+   *  botão 'Grupos' [...] [botão de ativa/desativa] [nome do script]
+   *  [botão de excluir] / [entrada para seletores] [seleção do método
+   *  assim como em '🧩 Editar componentes…'] / [Ver/editar código]." Mesma
+   *  estrutura de 2 linhas + rodapé do `_grupoRegraRowHtml` — o botão
+   *  único de ativar/desativar (👁️/🚫) substitui os antigos dois botões
+   *  "▶️ Executar"/"↩️ Desexecutar" (outro pedido verbatim: "deve ser como
+   *  na janela do botão 'Grupos', apenas um botão"), ligados aos MESMOS
+   *  `AutomationManager.run()`/`.stop()` de sempre. */
+  _scriptRowHtml(s) {
+    const rodando = window.AutomationManager.isRunning(s.id);
+    // [27/09/2026] MUDADO — pedido verbatim: "Todas as funções declaradas
+    // devem aparecer no seletor (inclusive a Start()), exceto se tiverem
+    // '// @ocultarMetodo' [...] fica tudo padronizado [...] Só não irá
+    // aparecer, se tiver '// @ocultarMetodo' acima da função." Por padrão
+    // TODA função declarada no código aparece no <select> abaixo, SEM
+    // exceção nenhuma de nome (nem mais `Start`, que antes era removida
+    // incondicionalmente); `extractMetodosOcultos` (ver comentário grande
+    // dela, automation.js) filtra só as que o PRÓPRIO script marcou pra
+    // não aparecer (comentário `// @ocultarMetodo` na linha imediatamente
+    // ANTES da função) — útil pros 4 ganchos de ciclo de vida
+    // (AoCriarScript/AoExcluirScript/AoExecutarScript/
+    // AoDesexecutarScript) e pra `Start` (ver
+    // `AutomationManager._startJaRodou`/comentário grande de `run()`), que
+    // já rodam SOZINHOS e normalmente não fazem sentido escolhidos
+    // manualmente aqui também — todos os modelos já vêm com essa linha
+    // acima de cada um deles por padrão (ver `START_STUB`/
+    // `GANCHOS_CICLO_VIDA_BOILERPLATE` em automation.js); o usuário decide
+    // por conta própria se quer remover a linha e deixar aparecer.
+    const ocultos = window.AutomationManager.extractMetodosOcultos(s.codigo || '');
+    const metodos = window.Components.extractFunctionNames(s.codigo || '').filter((m) => !ocultos.has(m));
+    return `
+      <div class="map-grupos-regra map-scripts-regra${rodando ? ' ativa' : ''}" data-id="${Utils.escapeHtml(s.id)}">
         <div class="map-grupos-regra-row1">
-          <button type="button" class="map-grupos-eye${r.ativo ? '' : ' off'}" data-acao="toggle-ativo" title="${r.ativo ? 'Desligar regra' : 'Ligar regra'}">${r.ativo ? '👁️' : '🚫'}</button>
-          <input type="text" class="map-grupos-nome-input" data-acao="nome" value="${Utils.escapeHtml(r.nome)}" title="Nome da regra (livre, só pra você identificar)">
-          <button type="button" class="map-grupos-del" data-acao="excluir" title="Excluir regra">🗑️</button>
+          <button type="button" class="map-grupos-eye${rodando ? '' : ' off'}" data-acao="toggle-ativo" title="${rodando ? 'Desexecutar (desfazer)' : 'Executar'}">${rodando ? '👁️' : '🚫'}</button>
+          <input type="text" class="map-grupos-nome-input" data-acao="renomear" value="${Utils.escapeHtml(s.nome)}" title="Nome do script">
+          <button type="button" class="map-grupos-del" data-acao="excluir" title="Excluir script">🗑️</button>
         </div>
         <div class="map-grupos-regra-row2">
-          <input type="text" class="map-grupos-selector-input" data-acao="selector" value="${Utils.escapeHtml(r.selector)}" title="Seletor (tipo querySelector): .classe · #id · tipo=valor · forma=valor · andar=N · parede · piso · * · vírgula = OU">
-          <select class="map-grupos-efeito-select" data-acao="efeito" title="O que esta regra faz quando ligada">
-            ${EFEITOS.map((e) => `<option value="${e.v}"${e.v === r.efeito ? ' selected' : ''}>${e.label}</option>`).join('')}
+          <input type="text" class="map-grupos-selector-input" data-acao="selector" value="${Utils.escapeHtml(s.selector || '')}" placeholder="(sem seletor externo)" title="Seletor externo — capturado dentro do script via Select() sem argumento. Vazio: o script decide os seletores sozinho (Select('...') explícito). Mesma sintaxe do 'Grupos': .classe · #id · tipo=valor · andar=N · parede/piso SEM ponto (tipo de objeto de verdade) · * · vírgula = OU. 'piso' (sem ponto) ≠ '.piso' (com ponto): o 1º é o TIPO 'piso' de verdade; o 2º é qualquer objeto com a CLASSE 'piso' (mesmo nome, coisas diferentes).">
+          <select class="map-grupos-efeito-select" data-acao="metodo" title="Sempre roda TODO o código de nível superior do script primeiro (— código de nível superior — = o código solto, fora de função nenhuma). Escolher uma função aqui não troca isso — só ACRESCENTA um passo extra: ela roda DEPOIS, uma vez, ao final, ao clicar em 👁️/🚫 pra EXECUTAR. Vazio = só o código de nível superior, sem passo extra. Pra rodar algo ao DESEXECUTAR, declare a função de nome fixo AoDesexecutarScript() dentro do próprio código (roda sozinha, sem precisar escolher aqui).">
+            <option value="">— código de nível superior —</option>
+            ${metodos.map((m) => `<option value="${Utils.escapeHtml(m)}"${m === s.metodo ? ' selected' : ''}>${Utils.escapeHtml(m)}()</option>`).join('')}
           </select>
-          ${r.efeito === 'opacidade' ? `<input type="number" class="map-grupos-valor-input" data-acao="valor" min="0" max="1" step="0.05" value="${Number.isFinite(r.valor) ? r.valor : 0.35}" title="Opacidade (0 = invisível, 1 = normal)">` : ''}
         </div>
-      </div>`).join('')
-      : '<div class="map-grupos-vazio">Nenhuma regra ainda — clique em "➕ Nova regra" abaixo.</div>';
+        <div class="map-grupos-regra-row2">
+          <label style="display:flex; align-items:center; gap:5px; font-size:11px; opacity:.85">
+            <input type="checkbox" data-acao="persistirAoParar"${s.persistirAoParar ? ' checked' : ''}>
+            <span title="Por padrão, '↩️ Desexecutar' (e excluir o script) desfaz TUDO que ele mudou. Marcado, as alterações do script ficam PRA SEMPRE, mesmo desexecutando ou excluindo o script depois — só laços/animações em andamento são parados, os valores não voltam ao que eram antes.">Manter alterações ao desexecutar/excluir (não desfazer)</span>
+          </label>
+        </div>
+        <div class="map-panel-actions" style="margin-top:6px">
+          <button type="button" class="btn secondary sm" data-acao="editar" title="Ver/editar o código">📄 Ver/editar código</button>
+        </div>
+      </div>`;
+  },
+
+  /** Liga os listeners de UMA linha de script — mesmo espírito de
+   *  `_wireGrupoRegraRow` (atualização incremental, nunca reconstrói o
+   *  painel inteiro por causa de um clique numa linha — pedido verbatim:
+   *  "Ao interagir com a janela do botão 'Scripts' toda a janela é
+   *  reconstruída [...] deve continuar estática"). Só "excluir" e "➕ Novo
+   *  script" tocam no DOM fora da própria linha. */
+  _wireScriptRow(panel, linha) {
+    const id = linha.dataset.id;
+    const AM = window.AutomationManager;
+    const atualizaEstadoVisual = () => {
+      const rodando = AM.isRunning(id);
+      const btn = linha.querySelector('[data-acao="toggle-ativo"]');
+      linha.classList.toggle('ativa', rodando);
+      btn.classList.toggle('off', !rodando);
+      btn.textContent = rodando ? '👁️' : '🚫';
+      btn.title = rodando ? 'Desexecutar (desfazer)' : 'Executar';
+    };
+    linha.querySelector('[data-acao="toggle-ativo"]').onclick = () => {
+      if (AM.isRunning(id)) AM.stop(this._map, id); else AM.run(this._map, id);
+      this._saveMap();
+      this._renderer?.render?.();
+      atualizaEstadoVisual();
+    };
+    linha.querySelector('[data-acao="excluir"]').onclick = async () => {
+      if (AM.isRunning(id)) { AM.stop(this._map, id); this._saveMap(); this._renderer?.render?.(); }
+      await AM.remove(id, this._map); // passa o mapa pra disparar AoExcluirScript() e respeitar "manter alterações"
+      this._saveMap();
+      this._renderer?.render?.();
+      linha.remove();
+      if (!AM.list().length) {
+        panel.querySelector('.map-scripts-body')?.insertAdjacentHTML('afterbegin', '<div class="map-scripts-vazio">Nenhum script ainda — escolha um modelo abaixo e clique em "➕ Novo script".</div>');
+      }
+    };
+    const inputNome = linha.querySelector('[data-acao="renomear"]');
+    inputNome.onchange = () => AM.rename(id, inputNome.value);
+    const inputSelector = linha.querySelector('[data-acao="selector"]');
+    inputSelector.onchange = () => AM.updateSelector(id, inputSelector.value);
+    const selectMetodo = linha.querySelector('[data-acao="metodo"]');
+    selectMetodo.onchange = () => AM.updateMetodo(id, selectMetodo.value);
+    const checkPersistir = linha.querySelector('[data-acao="persistirAoParar"]');
+    checkPersistir.onchange = () => AM.updatePersistirAoParar(id, checkPersistir.checked);
+    linha.querySelector('[data-acao="editar"]').onclick = () => this._openScriptCodeFullscreen(id, panel);
+  },
+
+  /** Lista TODOS os scripts globais (`AutomationManager.list()`), cada um
+   *  numa linha no MESMO formato do painel '🏷️ Grupos' (ver comentário
+   *  grande de `_scriptRowHtml` acima). O rodapé ("Modelo:" + "➕ Novo
+   *  script") é o MESMO padrão do rodapé de Componentes ("Modelo:" + "➕
+   *  Adicionar componente Script") — pedido (d): "escolher a partir de um
+   *  modelo" ou "criar em branco" (1º item do `<select>`, ver
+   *  `AutomationManager.SCRIPT_TEMPLATES`, agrupado por categoria). */
+  _renderScriptsPanelBody(panel) {
+    const scripts = window.AutomationManager.list();
+    const linhas = scripts.length
+      ? scripts.map((s) => this._scriptRowHtml(s)).join('')
+      : '<div class="map-scripts-vazio">Nenhum script ainda — escolha um modelo abaixo e clique em "➕ Novo script".</div>';
+
+    const categorias = [];
+    window.AutomationManager.SCRIPT_TEMPLATES.forEach((t) => { if (!categorias.includes(t.categoria)) categorias.push(t.categoria); });
+    const templateOptionsHtml = categorias.map((cat) => {
+      const opts = window.AutomationManager.SCRIPT_TEMPLATES
+        .filter((t) => t.categoria === cat)
+        .map((t) => `<option value="${Utils.escapeHtml(t.id)}">${Utils.escapeHtml(t.label)}</option>`).join('');
+      return cat ? `<optgroup label="${Utils.escapeHtml(cat)}">${opts}</optgroup>` : opts;
+    }).join('');
 
     panel.innerHTML = `
-      <div class="map-panel-head"><b>🏷️ Grupos</b><button type="button" class="icon-btn sm map-panel-close" id="map-grupos-close" title="Fechar">✕</button></div>
-      <div class="map-grupos-body">
-        ${linhasRegras}
-        <button type="button" class="map-grupos-add" id="map-grupos-add">➕ Nova regra</button>
+      <div class="map-panel-clip">
+        <div class="map-panel-head"><b>🎬 Scripts</b><button type="button" class="icon-btn sm map-panel-close" id="map-scripts-close" title="Fechar">✕</button></div>
+        <div class="map-scripts-body">
+          ${linhas}
+          <div class="map-panel-actions" style="flex-wrap:wrap">
+            <label style="display:flex; align-items:center; gap:4px; font-size:12px">
+              <span>Modelo:</span>
+              <select id="map-scripts-template" title="Escolha um modelo pronto (ou &quot;Em branco&quot;) como ponto de partida do código do próximo script criado">${templateOptionsHtml}</select>
+            </label>
+            <button type="button" class="btn sm" id="map-scripts-add" title="Cria um script novo com o modelo escolhido acima">➕ Novo script</button>
+          </div>
+        </div>
       </div>
     `;
 
-    panel.querySelector('#map-grupos-close').onclick = () => this._closeGruposPanel();
+    panel.querySelector('#map-scripts-close').onclick = () => this._closeScriptsPanel();
 
-    const redesenhaEAtualiza = () => {
+    // [27/09/2026] CORRIGIDO — pedido verbatim: "Ao criar um novo script,
+    // não deve reconstruir tudo, apenas colocar o bloco novo." MESMA
+    // mesma técnica de sempre: criar um
+    // script novo agora só monta/liga a LINHA nova (`_scriptRowHtml`/
+    // `_wireScriptRow`) e a insere no DOM (`insertAdjacentHTML`), em vez de
+    // chamar `_renderScriptsPanelBody` de novo (que reconstruía o painel
+    // inteiro, perdendo o scroll e o foco de qualquer campo que estivesse
+    // sendo editado nas OUTRAS linhas). Continua sem abrir a folha de
+    // código sozinho (pedido de uma rodada anterior) — só cria e mostra a
+    // linha na lista.
+    panel.querySelector('#map-scripts-add').onclick = async () => {
+      const sel = panel.querySelector('#map-scripts-template');
+      const tpl = window.AutomationManager.SCRIPT_TEMPLATES.find((t) => t.id === sel?.value) || window.AutomationManager.SCRIPT_TEMPLATES[0];
+      const s = await window.AutomationManager.create({ nome: tpl.id === 'em-branco' ? undefined : tpl.label, codigo: tpl.code, selector: tpl.selectorExemplo, map: this._map }); // `map` dispara AoCriarScript(), se o CÓDIGO DO MODELO escolhido já o declarar
       this._saveMap();
       this._renderer?.render?.();
+      panel.querySelector('.map-scripts-vazio')?.remove();
+      const body = panel.querySelector('.map-scripts-body');
+      body.querySelector('.map-panel-actions').insertAdjacentHTML('beforebegin', this._scriptRowHtml(s));
+      this._wireScriptRow(panel, body.querySelector(`.map-scripts-regra[data-id="${s.id}"]`));
     };
 
-    panel.querySelector('#map-grupos-add').onclick = () => {
-      Mapping.addGrupoRegra(map, {});
-      redesenhaEAtualiza();
-      this._renderGruposPanelBody(panel);
-    };
+    panel.querySelectorAll('.map-scripts-regra').forEach((linha) => this._wireScriptRow(panel, linha));
 
-    panel.querySelectorAll('.map-grupos-regra').forEach((linha) => {
-      const id = linha.dataset.id;
-      linha.querySelector('[data-acao="toggle-ativo"]').onclick = () => {
-        Mapping.toggleGrupoRegraAtivo(map, id);
-        redesenhaEAtualiza();
-        this._renderGruposPanelBody(panel);
-      };
-      linha.querySelector('[data-acao="excluir"]').onclick = () => {
-        Mapping.removeGrupoRegra(map, id);
-        redesenhaEAtualiza();
-        this._renderGruposPanelBody(panel);
-      };
-      const inputNome = linha.querySelector('[data-acao="nome"]');
-      inputNome.onchange = () => {
-        const r = regras.find((x) => x.id === id);
-        if (r) r.nome = inputNome.value.trim() || r.nome;
-        redesenhaEAtualiza();
-      };
-      const inputSelector = linha.querySelector('[data-acao="selector"]');
-      inputSelector.onchange = () => {
-        const r = regras.find((x) => x.id === id);
-        if (r) r.selector = inputSelector.value.trim() || '*';
-        redesenhaEAtualiza();
-      };
-      const selectEfeito = linha.querySelector('[data-acao="efeito"]');
-      selectEfeito.onchange = () => {
-        const r = regras.find((x) => x.id === id);
-        if (r) r.efeito = selectEfeito.value;
-        redesenhaEAtualiza();
-        this._renderGruposPanelBody(panel); // reabre a linha — o campo "valor" só existe com efeito='opacidade'
-      };
-      const inputValor = linha.querySelector('[data-acao="valor"]');
-      if (inputValor) {
-        inputValor.onchange = () => {
-          const r = regras.find((x) => x.id === id);
-          if (r) r.valor = Math.max(0, Math.min(1, parseFloat(inputValor.value) || 0));
-          redesenhaEAtualiza();
-        };
-      }
+    // [27/09/2026] NOVO — reaplica arrastar/redimensionar no elemento novo
+    // (ver comentário grande de `_rewireDragResize`) — só acontece mais no
+    // 1º render/ao reabrir agora (ações de dentro da lista não chamam mais
+    // `panel.innerHTML = ...`).
+    this._rewireDragResize(panel, 'scripts', {
+      minWidth: 360, minHeight: 260, maxWidth: 900, maxHeight: 900,
+      onResizeEnd: (w, h) => { DB.setSetting('mapaScriptsPanelSize', { w, h }); },
     });
+  },
+
+  /** [27/09/2026] REESCRITO — pedido verbatim: "Ao clicar em 'Ver/editar
+   *  código', deve abrir a janela expandida com a script (como estava
+   *  antes), mas com o scroll vertical. Se for aberto só na janela do
+   *  'Scripts', fica pouco espaço horizontal para mostrar o código." A
+   *  rodada anterior tinha corrigido só a FALTA de scroll (envolvendo a
+   *  folha num wrapper `overflow-y:auto` DENTRO do painel pequeno de
+   *  Scripts, 560px de largura) — não resolvia a queixa de verdade
+   *  (espaço HORIZONTAL). Agora reaproveita o MESMO mecanismo de overlay
+   *  tela-cheia que "🧩 Editar componentes…" já usa pra sua própria folha
+   *  de código (`_openComponentsEditorFullscreen`/
+   *  `.map2d-componentpanel-confinado`, inset:0 sobre TODO o Mapa 2D) —
+   *  em vez de reaproveitar só o HTML/CSS da folha (como antes), agora
+   *  reaproveita o overlay inteiro. O painel pequeno da LISTA de scripts
+   *  (`panel`, `.map-scripts-panel`) fica exatamente como estava por
+   *  baixo, sem nenhuma mudança — só fica temporariamente coberto pelo
+   *  overlay enquanto a folha de código está aberta, e reaparece do jeito
+   *  que já estava ao fechar/voltar. */
+  _openScriptCodeFullscreen(id, listaPanel) {
+    const script = window.AutomationManager.get(id);
+    if (!script) return;
+    // Mesmo guard de referência-morta de `_openComponentsEditorFullscreen`
+    // (ver comentário grande lá) — troca de tela (Mapa 2D -> "Ver em 3D" e
+    // volta) sem fechar a folha primeiro deixaria uma referência pra um
+    // elemento já fora do DOM.
+    if (this._scriptCodeOverlay && !this._scriptCodeOverlay.isConnected) this._scriptCodeOverlay = null;
+    if (this._scriptCodeOverlay) this._closeScriptCodeFullscreen(); // troca de script com a folha já aberta: fecha a antiga e abre a nova
+    const overlay = document.createElement('div');
+    overlay.className = 'map2d-componentpanel-confinado';
+    overlay.style.cssText = 'position:absolute; inset:0; z-index:2147483000; background:#0a0d11; overflow-y:auto;';
+    this._container.appendChild(overlay);
+    this._scriptCodeOverlay = overlay;
+    this._scriptCodeOverlayPanel = listaPanel || null; // painel da lista (`.map-scripts-panel`), pra reconstruir ao voltar (ver comentário do método/`_closeScriptCodeFullscreen`)
+    this._renderScriptCodeFullscreenBody(overlay, id);
+  },
+
+  _closeScriptCodeFullscreen() {
+    if (this._scriptCodeErrorPoll) { clearInterval(this._scriptCodeErrorPoll); this._scriptCodeErrorPoll = null; }
+    if (this._scriptCodeOverlay) { this._scriptCodeOverlay.remove(); this._scriptCodeOverlay = null; }
+    // A lista por baixo (`panel`) nunca foi tocada enquanto a folha estava
+    // aberta — MAS pode ter ganhado um script novo nesse meio tempo (quem
+    // clica "➕ Novo script" já abre direto na folha, sem passar pela
+    // lista) — reconstrói pra garantir que a linha nova apareça ao voltar.
+    const panel = this._scriptCodeOverlayPanel;
+    this._scriptCodeOverlayPanel = null;
+    if (panel && panel.isConnected) this._renderScriptsPanelBody(panel);
+  },
+
+  /** Conteúdo de dentro do overlay tela-cheia acima — MESMO padrão visual/
+   *  mecânico (cabeçalho fixo, `.comp-code-textarea`, CodeMirror, linha de
+   *  "funções detectadas"/variáveis do escopo) da folha de Componentes
+   *  (`window.MapDynamicCards.scriptCodeEditor`/`_renderScriptCodeEditor`,
+   *  reaproveitados DIRETO — mesmo pedido de paridade). "⬅️ Voltar"/"✕
+   *  Fechar" salvam e fecham o overlay (ver `_closeScriptCodeFullscreen`). */
+  _renderScriptCodeFullscreenBody(overlay, id) {
+    const script = window.AutomationManager.get(id);
+    if (!script) { this._closeScriptCodeFullscreen(); return; }
+    // Reaproveita `window.MapDynamicCards.scriptCodeEditor` — MESMO HTML da
+    // folha de código de Componentes — passando um `comp`/`entity`
+    // "fingidos" com só os campos que aquele template lê (`entity.nome`,
+    // `comp.id`, `comp.code`) — evita duplicar o HTML/CSS inteiro só pra
+    // trocar os ids dos elementos (ver comentário grande de escopo no topo
+    // de js/automation.js: são dois motores diferentes por baixo, mas a
+    // "folha" visual é a mesma). `_scriptErrorBannerText` real (não mais
+    // um stub `() => ''`) — ver pedido verbatim atendido em
+    // `Utils.checkJsSyntax`/comentário grande de `_scriptErrorBannerText`.
+    const entidadeFingida = { nome: script.nome };
+    const compFingido = { id: `script-${script.id}`, code: script.codigo };
+    overlay.innerHTML = window.MapDynamicCards.scriptCodeEditor.call(this, entidadeFingida, compFingido)
+      // troca os ids fixos do template de Componentes pelos nossos, pra não
+      // colidir com uma folha de Componentes que porventura esteja aberta
+      // ao mesmo tempo (painel de objeto + painel de Scripts juntos).
+      .replace(/id="comp-code-back"/, 'id="map-scripts-back"')
+      .replace(/id="comp-code-error-banner"/, 'id="map-scripts-error-banner"')
+      .replace(/id="comp-code-textarea"/, 'id="map-scripts-textarea"')
+      .replace(/id="comp-code-fns"/, 'id="map-scripts-fns"')
+      .replace('📄 Código do Script —', '🎬 Código do Script —');
+    // [27/09/2026] CORRIGIDO — pedido verbatim: "acaba ficando dois botões
+    // de fechar ('⬅️' e '✕'). Deve ficar só um ('⬅️'), assim como nas
+    // propriedades do objeto, em '🧩 Editar componentes…'." CAUSA RAIZ:
+    // na folha de código de Componentes, o "✕" (`#comp-editor-close`)
+    // pertence ao cabeçalho da LISTA (template `componentsEditor`) — a
+    // sub-view "folha de código" (`scriptCodeEditor`, o MESMO template
+    // reaproveitado aqui) NUNCA teve um "✕" próprio, só o "⬅️ Voltar". A
+    // rodada anterior tinha acrescentado um "✕" aqui por engano (pensando
+    // que faltava um) — removido; "⬅️ Voltar" já fecha o overlay inteiro
+    // (ver `#map-scripts-back` abaixo, que chama `_closeScriptCodeFullscreen`).
+
+    // Linha extra (não existe na folha de Componentes): variáveis/API
+    // específicas do motor de Automação — `Select()`/seletor CSS-like,
+    // ações da coleção, `TWEEN`/`THREE`/`map` injetados em `run()`.
+    overlay.querySelector('.comp-code-textarea')?.insertAdjacentHTML('afterend', `
+      <div class="map2d-toolctx-info">Variáveis já prontas no escopo: <code>Select(seletor)</code> (mesma sintaxe de
+        seletores CSS — <code>.classe</code>, <code>#id</code>, <code>tipo</code>, <code>[attr=valor]</code>,
+        <code>:not(...)</code>, <code>:nth-child()</code>, combinadores <code>&gt; + ~</code> — ver o modelo
+        "Modo Raio-X" pra exemplos), <code>Object(nome)</code> (acha UM objeto pelo Nome dele nas propriedades —
+        igual <code>bpy.data.objects['Nome']</code> do Blender — devolve o objeto direto, pra atribuição de
+        propriedade sem chamar função nenhuma: <code>Object('AP1').visibility = false</code>), <code>TWEEN</code>
+        (sintaxe Tween.js — <code>new TWEEN.Tween(obj).to(...)</code>),
+        <code>THREE</code>, <code>Utils</code>, <code>SceneObjects</code>, <code>Mapping</code>, <code>map</code>.
+        Métodos da coleção: <code>.hide()</code> <code>.opacity(v)</code> <code>.highlight()</code>
+        <code>.move(dx,dy,dz)</code> <code>.moveTo(x,y,z)</code> <code>.rotate(graus)</code> <code>.scale(fator)</code>
+        <code>.set(prop,valor)</code> <code>.animate(props,ms,opts)</code> (aceita <code>"+=N"</code>/<code>"-=N"</code>
+        pra valores relativos) <code>.blink(opts)</code> <code>.each(fn)</code>. Atribuição direta também funciona
+        pra <code>visibility</code>: <code>Select(seletor).visibility = false</code> (equivalente a
+        <code>.set('visibility', false)</code>).</div>`);
+
+    const ta = overlay.querySelector('#map-scripts-textarea');
+    const fnsEl = overlay.querySelector('#map-scripts-fns');
+    if (fnsEl) fnsEl.textContent = ''; // "funções de nível superior" não se aplica aqui (sem Gatilhos de Evento) — some, sem deixar o texto de Componentes enganando
+    let cm = null;
+    const salvar = (codigo) => { window.AutomationManager.updateCode(id, codigo); };
+    if (window.CodeMirror) {
+      cm = window.CodeMirror.fromTextArea(ta, {
+        mode: 'javascript', lineNumbers: true, theme: 'catalogo-dark',
+        indentUnit: 2, tabSize: 2, smartIndent: true, matchBrackets: true, viewportMargin: Infinity,
+      });
+      cm.on('change', () => {
+        cm.save();
+        salvar(ta.value);
+        compFingido.code = ta.value; // pro banner de sintaxe (abaixo) checar o texto ATUAL, não o de quando abriu
+        this._updateScriptErrorBannerLive(overlay, '#map-scripts-error-banner', compFingido);
+      });
+    } else {
+      console.warn('[mapview] CodeMirror não carregou (lib/codemirror/) — usando <textarea> simples como fallback.');
+      ta.oninput = () => {
+        salvar(ta.value);
+        compFingido.code = ta.value;
+        this._updateScriptErrorBannerLive(overlay, '#map-scripts-error-banner', compFingido);
+      };
+    }
+    overlay.querySelector('#map-scripts-back').onclick = () => {
+      if (cm) { salvar(cm.getValue()); cm.toTextArea(); }
+      this._closeScriptCodeFullscreen();
+    };
+
+    // [27/09/2026] NOVO — pedido verbatim: "No 'Scripts' ao ir em 'Ver/
+    // editar código' deve ter um aviso semelhante [ao de Componentes] para
+    // saber se há algo errado no script." Erro de RUNTIME (a única coisa
+    // que faltava — erro de SINTAXE já aparece na hora, ver
+    // `Utils.checkJsSyntax`/`_scriptErrorBannerText`) só é conhecido depois
+    // de `run()` ser chamado pelo menos 1x (ver `AutomationManager.
+    // getLastError`) — poll de 1s (mesmo padrão/intervalo do de
+    // Componentes) cobre o caso de rodar/parar o script enquanto esta
+    // folha está aberta.
+    this._scriptCodeErrorPoll = setInterval(() => {
+      if (!overlay.isConnected) { clearInterval(this._scriptCodeErrorPoll); this._scriptCodeErrorPoll = null; return; }
+      const erroRuntime = window.AutomationManager.getLastError(id);
+      const erroSintaxe = window.Utils.checkJsSyntax(compFingido.code || '');
+      const banner = overlay.querySelector('#map-scripts-error-banner');
+      if (banner) banner.textContent = erroSintaxe ? `⚠️ Erro de sintaxe: ${erroSintaxe}` : (erroRuntime ? `⚠️ Erro no script: ${erroRuntime}` : '');
+    }, 1000);
   },
 
   /** Mostra/oculta a barra lateral de ferramentas (estilo Paint.NET) — botão
@@ -25648,6 +26334,24 @@ const MapView = {
    *  mouse). Cada direção mantém a borda OPOSTA fixa: arrastar pela
    *  esquerda/topo desloca `left`/`top` na mesma medida em que a largura/
    *  altura muda, pra o canto contrário nunca "pular". */
+  /** [27/09/2026] NOVO — reaplica `_makePanelDraggable`/`_makePanelResizable`
+   *  depois que um painel refez `panel.innerHTML` inteiro (troca o
+   *  `.map-panel-head`, apaga as alças de redimensionar — ambos filhos
+   *  DIRETOS do `panel`, então somem junto). Pedido verbatim (achado ao
+   *  investigar): "Deve ser possível continuar movendo a janela do botão
+   *  'Scripts', mesmo quando se clica para ver algum script no botão
+   *  'Ver/editar código'." — `_renderScriptEditorBody`/
+   *  `_renderScriptsPanelBody`/`_renderGruposPanelBody` chamam isto ao
+   *  fim, depois de qualquer `panel.innerHTML = ...`. Seguro de chamar
+   *  toda vez: `_makePanelResizable` já remove as alças antigas antes de
+   *  criar as novas, e `_makePanelDraggable` liga os listeners de arrastar
+   *  no `.map-panel-head` ATUAL (o antigo já saiu do DOM). `resizeOpts`
+   *  omitido pula o redimensionar (só religa o arrastar). */
+  _rewireDragResize(panel, posKey, resizeOpts) {
+    if (resizeOpts) this._makePanelResizable(panel, resizeOpts);
+    this._makePanelDraggable(panel, posKey);
+  },
+
   /** [10/09/2026] NOVO parâmetro `onResizeEnd(w, h)` — pedido do usuário:
    *  "a janela 'Camadas' deve ter as suas dimensões preservadas ao
    *  recarregar a página." Adicionado aqui, no helper GENÉRICO (em vez de

@@ -479,62 +479,22 @@ const CaptureView = {
    */
   async _autoPlacePhoto(photoId) {
     try {
-      const map = await DB.getOrCreateSingleMap();
+      // [26/09/2026] MUDADO -- pedido verbatim: "há uma vinculação automática
+      // a uma posição no mapa. Isto deve ser removido do app. Tanto a
+      // vinculação de um patrimônio ao mapa quanto a vinculação de um
+      // patrimônio a uma posição de uma foto de ambiente deve ser feita
+      // manualmente (por meio dos botões/métodos de vinculação do próprio
+      // app)." Antes, esta função (chamada quando NÃO se escolhe "📍
+      // Vincular a um lugar no mapa") ainda dava à foto uma posição
+      // "reserva" automática (mapaAuto:true, grade/periferia — ver
+      // MapConfig.fotoAutoAtribuirCamera/fotoGrade* acima). Agora a foto
+      // fica SEMPRE sem nenhuma posição no mapa (mapaX/mapaY ausentes) até
+      // alguém vincular manualmente (📍 no mapa, ou orb numa foto) — a
+      // configuração de grade em "configurações 2D" fica sem efeito.
       const photo = await DB.getAmbientePhoto(photoId);
       if (!photo) return;
-      const cfg = (typeof MapConfig !== 'undefined') ? await MapConfig.get() : {};
-      const modo = cfg.fotoAutoAtribuirCamera || 'sim';
-      const todasFotos = await DB.getAllAmbientePhotos();
-      // [15/09/2026 UTC] MUDADO — pedido verbatim: "a opção 'Apenas quando
-      // o mapa estiver vazio' deve trocar sua função para quando houver
-      // apenas câmeras no mapa." Antes, `mapaVazio` checava só se não
-      // havia NENHUMA OUTRA foto posicionada (`outrasPosicionadas`,
-      // abaixo, mantida só para o cálculo de `index`, que continua
-      // contando fotos/Câmeras — não mudou). Agora `mapaSoTemCameras`
-      // checa se o mapa não tem NENHUM objeto/parede/porta/janela/texto —
-      // qualquer quantidade de Câmeras/fotos já posicionadas continua
-      // contando como "só câmeras" (não desativa mais a opção).
-      const outrasPosicionadas = todasFotos.filter((f) => f.id !== photoId && typeof f.mapaX === 'number' && typeof f.mapaY === 'number');
-      const mapaSoTemCameras = !(map.objects?.length || map.walls?.length || map.portas?.length || map.janelas?.length || map.textos?.length);
-
-      if (modo === 'nao' || (modo === 'vazio' && !mapaSoTemCameras)) {
-        // Item B, opções "Não" e "Apenas quando o mapa estiver vazio" (com
-        // o mapa já não-vazio): a foto fica SEM posição — continua
-        // aparecendo em 📦 Caixa, esperando vínculo manual.
-        Utils.toast('Foto guardada na 📦 Caixa, sem posição no mapa (ver "configurações 2D" → "📷 Fotos").', { type: 'ok' });
-        return;
-      }
-
-      const index = todasFotos.filter((f) => f.id !== photoId && f.mapaAuto === true).length;
-      const origem = { x: Number(cfg.fotoGradeOrigemX) || 0, y: Number(cfg.fotoGradeOrigemY) || 0 };
-      // RODADA 54 [15/09/2026 UTC]: agora passa dirPrimaria/quebra (ver
-      // seletor visual em mapconfig.js e Mapping.findGridSlot).
-      // [15/09/2026 UTC] NOVO — pedido verbatim: "Deve ter uma opção para
-      // considerar colisão com quaisquer objetos. Isto evita a câmera ser
-      // colocada dentro de um objeto [...] no 3D ela ficaria ocultada."
-      // Com `fotoGradeEvitarColisao` ligado, testa cada posição candidata
-      // da grade (começando em `index`, avançando 1 por 1) contra TODOS os
-      // objetos já no mapa (`Mapping.pointInObjectFootprint`, já usada por
-      // empilhamento automático — mesma checagem, sem duplicar lógica) —
-      // some tentativas até achar uma posição livre. `MAX_TENTATIVAS`
-      // evita um loop infinito absurdo (mapa lotado de objetos cobrindo
-      // toda a grade); nesse caso extremo, cai de volta pra posição
-      // original (melhor colocar colidindo do que travar/nunca posicionar
-      // a foto).
-      let slotIndex = index;
-      let slot = Mapping.findGridSlot(origem, slotIndex, cfg.fotoGradeDistancia, cfg.fotoGradePorLinha, cfg.fotoGradeDirPrimaria, cfg.fotoGradeQuebra);
-      if (cfg.fotoGradeEvitarColisao) {
-        const MAX_TENTATIVAS = 500;
-        let tentativas = 0;
-        while (tentativas < MAX_TENTATIVAS && (map.objects || []).some((o) => Mapping.pointInObjectFootprint(o, slot.x, slot.y))) {
-          slotIndex += 1;
-          slot = Mapping.findGridSlot(origem, slotIndex, cfg.fotoGradeDistancia, cfg.fotoGradePorLinha, cfg.fotoGradeDirPrimaria, cfg.fotoGradeQuebra);
-          tentativas += 1;
-        }
-      }
-      await DB.saveAmbientePhoto({ ...photo, mapaX: slot.x, mapaY: slot.y, mapaPiso: slot.piso || 0, mapaAuto: true });
       await MapView._refreshMapaIfShowing?.();
-      Utils.toast('Foto guardada na 📦 Caixa — dá para vincular a um lugar depois.', { type: 'ok' });
+      Utils.toast('Foto guardada na 📦 Caixa, sem posição no mapa — vincule manualmente quando quiser.', { type: 'ok' });
     } catch (err) {
       console.error('Falha ao posicionar foto automaticamente:', err);
       Utils.toast('Não foi possível guardar a posição da foto: ' + (err?.message || err), { type: 'danger', duration: 5000 });

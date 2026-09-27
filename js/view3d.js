@@ -327,6 +327,7 @@ const View3D = {
 
   async mount(container, { ambienteId } = {}) {
     this._container = container;
+    try { document.body.classList.add('view3d-aberto'); } catch (e) { /* ignora */ }   // [26/09/2026] NOVO -- ↶/↷ seguem "Sempre mostrar" no 3D (ver css .history-widget)
     // [19/09/2026 UTC] RODADA 191 — instancia (1x só, reaproveitado pela
     // vida inteira da página, mesmo padrão de singleton que `View3D` já
     // usa) a Trena 3D modular (`js/trena3d.js`), com os adaptadores que
@@ -558,24 +559,17 @@ const View3D = {
                só ligando/desligando '_modelarObjetosHabilitado' (a opção
                "🔧 Modelar em 3D" aparecer ou não no menu de um objeto). -->
           <button type="button" class="icon-btn sm" id="v3d-modelar-toggle" title="Alterna entre Modo Navegação (só olhar/andar) e Modo Edição (o menu de um objeto, ao clicar nele, ganha a opção 'Modelar em 3D')">🧭 Modo Navegação</button>
-          <!-- [13/09/2026 UTC] NOVO — pedido verbatim: 'Implemente isso em
-               algum lugar de algum jeito, havendo correspondência entre 2D
-               e 3D.' (sistema de classes/grupos). O botão espelha o '🏷️'
-               do mapa 2D ('#map-grupos', mapview.js) e abre um painel
-               equivalente aqui dentro do 'Ver em 3D', operando sobre o
-               MESMO 'this._map' (ver '_openGruposPanel3D'/
-               '_renderGruposPanelBody3D') — toda mudança chama
-               'this._rebuildScene()' de novo, que já usa
-               'Mapping.filterByGrupos' (ver comentário em '_rebuildScene').
-               O destaque visual ('gruposDestacados', ✨) fica de fora do 3D
-               por enquanto — só o 2D desenha o brilho dourado por cima do
-               objeto (ver 'Map2DRenderer._drawDestaqueExtraObj' em
-               mapview.js); reproduzir esse efeito em cima de uma malha do
-               engine3d.js (troca de material/emissive por objeto, sem poder
-               testar ao vivo no navegador) é um risco maior do que dá pra
-               assumir nesta rodada — limitação conhecida. O toggle de ocultar (👁️/🚫), por
-               andar/classe/paredes+piso, funciona igual ao 2D. -->
-          <button type="button" class="icon-btn sm" id="v3d-grupos" title="Grupos: ative/desative a renderização de todo objeto de uma mesma 'classe' de uma vez (igual ao atributo 'class' do HTML), por andar, ou oculte todas as paredes/piso — mesmo sistema do mapa 2D">🏷️ Grupos</button>
+          <!-- NOVO (26/09/2026), pedido verbatim: "Coloque um botão dos
+               scripts no 'Ver em 3D'." Abre o
+               MESMO painel '🎬 Scripts' do Mapa 2D (mapview.js), reaproveitado
+               aqui de verdade (ver '_ensureScriptsPanelInfraFromMapView'/
+               '_toggleScriptsPanel3D' abaixo) — não é uma cópia paralela: os
+               scripts rodam sobre o MESMO 'this._map', e uma varredura de AP
+               iniciada por um script agora dispara o raytracing 3D de
+               verdade direto na cena que já está aberta aqui (ver
+               'AutomationManager._motor3DVivo'/'.iniciarVarredura()' em
+               js/automation.js). -->
+          <button type="button" class="icon-btn sm" id="v3d-scripts" title="Scripts: execute/desexecute os scripts de automação globais (mesmo painel do Mapa 2D) direto aqui no 'Ver em 3D'">🎬 Scripts</button>
           <button class="icon-btn icon-btn-corner" id="v3d-config" title="Configurações do 3D (raycasting/destaque)">⚙️<span class="icon-btn-corner-badge">3D</span></button>
         </div>
         <div class="hud3d">
@@ -1217,8 +1211,34 @@ const View3D = {
         this._syncModelarToggleUI3D(container);
       };
     }
-    const gruposBtn3D = container.querySelector('#v3d-grupos');
-    if (gruposBtn3D) gruposBtn3D.onclick = () => this._toggleGruposPanel3D(container);
+    const scriptsBtn3D = container.querySelector('#v3d-scripts');
+    if (scriptsBtn3D) scriptsBtn3D.onclick = () => this._toggleScriptsPanel3D(container);
+    // [27/09/2026] CORRIGIDO — pedido verbatim: "Ao deixar a janela do
+    // botão 'Scripts' aberta no 'Ver em 3D', ao sair do 'Ver
+    // em 3D' e voltar, ela desaparece [...] o botão acabava não
+    // indicando o estado atual da janela (ativo/não ativo) [...] tinha
+    // que clicar duas vezes." CAUSA RAIZ: `View3D` é um objeto SINGLETON —
+    // `this._scriptsPanelEl3D` sobrevive a
+    // sair/entrar de novo no "Ver em 3D" (não é resetado nem quando o
+    // `container` antigo é destruído) — a referência antiga fica
+    // "morta" (elemento fora do DOM). Isso quebrava o botão de dois jeitos:
+    // 1) `_toggleScriptsPanel3D` via a referência
+    //    morta como "já aberto" e FECHAVA (removia um elemento já fora
+    //    do DOM, sem efeito visual) no 1º clique — só o 2º clique, com a
+    //    referência agora `null`, de fato abria o painel — exatamente o
+    //    "clicar duas vezes" relatado.
+    // 2) O botão nascia SEM a classe `.active` no `container` novo (HTML
+    //    fresco), então mesmo com a referência "achando" que estava
+    //    aberto, o botão mostrava "inativo" — non-sequitur com o estado
+    //    real (nem aberto de verdade, nem o botão avisando).
+    // CORRIGIDO — mesma técnica que `mapview.js` já usa pro painel 2D
+    // homônimo (`_scriptsPanelEl`, ver comentário grande
+    // lá): se a referência existir (aberto antes, nem que morta), zera e
+    // REABRE de verdade no `container` novo — a janela continua aparente
+    // ao entrar de novo no "Ver em 3D", e o botão ganha `.active` junto
+    // (dentro de `_openScriptsPanel3D`), resolvendo
+    // os dois problemas de uma vez, sem precisar de nenhum clique extra.
+    if (this._scriptsPanelEl3D) { this._scriptsPanelEl3D = null; this._openScriptsPanel3D(container).catch((e) => { console.error(e); this._closeScriptsPanel3D(); }); }
     // "🧊 Novo Cubo" (ver comentário grande junto do botão, acima, no HTML)
     // — mesmo caminho do botão irmão em mapview.js (Mapping.addObject +
     // Modeler3D.ensureCustomMesh + o "combinado" window.__modelerPendingObjectId
@@ -1365,6 +1385,7 @@ const View3D = {
   },
 
   unmount() {
+    try { document.body.classList.remove('view3d-aberto'); } catch (e) { /* ignora */ }   // [26/09/2026] NOVO -- ver mount()
     if (this._stopAutoPose3D) { this._stopAutoPose3D(); this._stopAutoPose3D = null; }
     // [22/09/2026] NOVO -- "Configurações 3D" → seção "📡 Access Point" → "Desligar o mapa de calor ao
     // sair do 'Ver em 3D'" (ver mapconfig.js DEFAULTS.apDesligarMapaAoSairDoVer3D). Roda ANTES de
@@ -1585,9 +1606,40 @@ const View3D = {
    * canto resultante é usado para extrudar as paredes — sem isso, retas que
    * não colidem pixel-a-pixel apareceriam com uma fresta no 3D.
    */
-  async _rebuildScene() {
+  // [27/09/2026] CORRIGIDO — pedido verbatim: "Ao usar o método 'Ocultar()'
+  // tendo no seletor 'parede, piso, pilar, viga', a parede parece ser
+  // ocultada/mostrada só em um quadro posterior. Deveria ser tudo no
+  // mesmo quadro." Causa raiz: o fallback de PAREDE em
+  // `AutomationManager._flushRefresh3DLive` (automation.js — paredes não
+  // têm rebuild incremental próprio) chama este `_rebuildScene()` cheio,
+  // que sempre `await`ava 2 fontes de verdade assíncronas antes de montar
+  // a cena — `DB.getSetting('paredeUniaoDist', ...)` (round-trip de
+  // verdade no IndexedDB) e `Model3DLoader.preloadAll()` — e um `await`
+  // que não resolve na hora (não é uma Promise já resolvida) empurra o
+  // resto da função pra um evento/quadro FUTURO, mesmo que o resultado não
+  // tenha mudado nada desde a última vez. Isso é inofensivo na abertura do
+  // "Ver em 3D" (não tem "quadro atual" nenhum pra perder), mas gera
+  // exatamente o atraso de 1+ quadro relatado quando dispara em resposta a
+  // uma mudança AO VIVO (script rodando com o "Ver em 3D" já aberto).
+  // `liveSync:true` (só usado por esse caminho, ver `_flushRefresh3DLive`)
+  // reaproveita o valor de `paredeUniaoDist` e o preload de modelos já
+  // resolvidos com sucesso na ÚLTIMA reconstrução completa (guardados em
+  // `this._cornerJoinDistCache`/`this._modelsPreloadedOnce`, abaixo) —
+  // sem NENHUM `await` de verdade nesse caminho, a função roda 100%
+  // síncrona (mesmo sendo `async`) até `setScene()`, dentro do MESMO
+  // quadro que despachou a mudança. Uma reconstrução "normal" (abrir a
+  // tela, mudar de andar/camada, sair do Modelador, importar um modelo
+  // novo...) continua com os `await`s de sempre (`liveSync:false`,
+  // padrão) — só o live-refresh de scripts pede a via rápida.
+  async _rebuildScene({ liveSync = false } = {}) {
     if (!this._map || !this._engine) return;
-    const cornerJoinDist = await DB.getSetting('paredeUniaoDist', 0.5);
+    let cornerJoinDist;
+    if (liveSync && typeof this._cornerJoinDistCache === 'number') {
+      cornerJoinDist = this._cornerJoinDistCache;
+    } else {
+      cornerJoinDist = await DB.getSetting('paredeUniaoDist', 0.5);
+      this._cornerJoinDistCache = cornerJoinDist;
+    }
     // Pedido do usuário: "as camadas ativadas e desativadas na janela
     // 'camadas' devem ser aplicadas no 3D também" — filtra ANTES de fechar
     // os cantos (Mapping.analyzeWalls), pra uma parede de camada oculta nem
@@ -1612,15 +1664,13 @@ const View3D = {
     // otimização de desempenho pedida (o engine3d.js nunca constrói pool
     // pros outros andares).
     mapaVisivel = Mapping.filterByPiso(mapaVisivel, this._pisoFiltro3D);
-    // [14/09/2026 UTC] NOVO — sistema de grupos/classes (ver comentário
-    // grande em Mapping.isEntityGroupHidden/filterByGrupos, mapping.js):
-    // mesma ordem/mesmo espírito dos 2 filtros acima ("cópia que só a
-    // montagem da cena vê" — this._map continua com tudo). Cobre tanto
-    // "ocultar objetos com esta classe" quanto a opção fixa "ocultar
-    // paredes e piso" — em ambos os casos lidas de `this._map`, não de
-    // `mapaVisivel` (o estado de grupos é do MAPA, não muda por camada/
-    // andar já terem sido filtrados).
-    mapaVisivel = Mapping.filterByGrupos(mapaVisivel);
+    // [27/09/2026] REMOVIDO — `Mapping.filterByGrupos` (o "🚫 Ocultar"
+    // NATIVO/destrutivo do antigo painel '🏷️ Grupos', que tirava a
+    // entidade da cena de VERDADE, antes de `setScene`) foi removido junto
+    // com todo o motor `map.grupoRegras` (ver comentário grande em
+    // mapping.js) — `.hide()`/`.show()` dos 'Scripts' nunca passaram por
+    // aqui, sempre usaram só `entity.visibility` (checado depois, dentro
+    // de `Engine3D`/`MapView`, sem remover nada das listas do `setScene`).
     const walls = Mapping.analyzeWalls(mapaVisivel, { cornerJoinDist });
     this._analyzedWalls = walls;
     // [13/09/2026] NOVO — pipeline `modeloArquivo` (ver comentário grande em
@@ -1632,7 +1682,10 @@ const View3D = {
     // este `await`, a 1ª renderização depois de abrir "Ver em 3D" sempre
     // cairia no fallback mesmo com o arquivo já importado (preload ainda
     // rodando em paralelo) — só a 2ª reconstrução da cena acertaria.
-    await window.Model3DLoader?.preloadAll?.();
+    if (!liveSync || !this._modelsPreloadedOnce) {
+      await window.Model3DLoader?.preloadAll?.();
+      this._modelsPreloadedOnce = true;
+    }
     // [15/09/2026 UTC] NOVO — MESMO motivo/MESMO espírito do `await` logo
     // acima, agora pra malha `.obj` estática (`assets/modelos/<tipo>.
     // malha.js`, ver js/objmeshsource.js e `ObjectAssets.registerModel`
@@ -1765,79 +1818,110 @@ const View3D = {
     btn.classList.toggle('active', !ligado);
   },
 
-  /** [13/09/2026 UTC] NOVO — abre/fecha o painel '🏷️ Grupos' dentro do 'Ver
-   *  em 3D' (botão '#v3d-grupos', ver comentário grande junto dele no
-   *  template). Reaproveita 'this._map' (a MESMA instância editada no 2D —
-   *  não é uma cópia), então marcar/desmarcar um grupo aqui também reflete
-   *  de volta no 2D quando o usuário voltar pro mapa; a única diferença
-   *  entre as duas telas é a UI de cada uma, o dado ('map.gruposOcultos'/
-   *  'andaresOcultos'/'ocultarParedesEPiso', ver Mapping.js) é único. */
-  _toggleGruposPanel3D(container) {
-    if (this._gruposPanelEl3D) { this._closeGruposPanel3D(); return; }
-    this._openGruposPanel3D(container);
+  /** [26/09/2026] NOVO — pedido verbatim: "Do mesmo jeito que aparece no
+   *  '🏷️ Grupos', no 'Ver em 3D' ([nome] [botão de ativação/desativação]),
+   *  deve ser o botão de scripts ([nome] [botão de executar][botão de
+   *  desexecutar]). A janela deve ser igual, com o título, botão de fechar e
+   *  descritivo de que a edição é no mapa 2D no final da janela." — MESMO
+   *  escopo/visual reduzido do painel '🏷️ Grupos' aqui dentro (ver
+   *  `_renderGruposPanelBody3D` acima, mesmo espírito): lista os scripts
+   *  globais (`window.AutomationManager.list()`) com nome + ▶️ Executar/
+   *  ↩️ Desexecutar, SEM o editor de código completo (renomear/excluir/ver
+   *  código) — isso continua exclusivo do painel "🎬 Scripts" do Mapa 2D
+   *  (mapview.js), igual a como editar nome/seletor/efeito de uma regra de
+   *  Grupos também só existe lá. Roda de VERDADE sobre 'this._map' (o
+   *  mesmo `run()`/`stop()` de sempre — ver js/automation.js) e chama
+   *  `this._rebuildScene()` depois, pra refletir na cena 3D já aberta aqui
+   *  (ligar/desligar/tampa/opacidade/etc. — inclusive disparando a
+   *  varredura de AP de verdade, ver `AutomationManager._motor3DVivo`). */
+  _toggleScriptsPanel3D(container) {
+    if (this._scriptsPanelEl3D) { this._closeScriptsPanel3D(); return; }
+    this._openScriptsPanel3D(container).catch((e) => {
+      console.error('[Scripts 3D] Falha ao abrir o painel:', e);
+      Utils.toast?.('Não foi possível abrir os Scripts: ' + (e?.message || e), { type: 'danger' });
+      this._closeScriptsPanel3D();
+    });
   },
 
-  _closeGruposPanel3D() {
-    this._gruposPanelEl3D?.remove();
-    this._gruposPanelEl3D = null;
-    this._container?.querySelector?.('#v3d-grupos')?.classList.remove('active');
+  _closeScriptsPanel3D() {
+    this._scriptsPanelEl3D?.remove();
+    this._scriptsPanelEl3D = null;
+    this._container?.querySelector?.('#v3d-scripts')?.classList.remove('active');
   },
 
-  _openGruposPanel3D(container) {
+  async _openScriptsPanel3D(container) {
     if (!this._map) return;
+    this._ensureObjectPanelInfraFromMapView(); // [27/09/2026] traz _makePanelDraggable/_applyRememberedPanelPos do MapView
     const panel = document.createElement('div');
     panel.className = 'map-obj-picker-panel map-grupos-panel';
     panel.style.top = '58px';
     panel.style.right = '12px';
     panel.style.left = 'auto';
     (container || this._container).appendChild(panel);
-    this._gruposPanelEl3D = panel;
-    container.querySelector('#v3d-grupos')?.classList.add('active');
-    this._renderGruposPanelBody3D(panel, container);
+    this._scriptsPanelEl3D = panel;
+    container.querySelector('#v3d-scripts')?.classList.add('active');
+    if (!window.AutomationManager._loaded) await window.AutomationManager.load();
+    if (!this._scriptsPanelEl3D || this._scriptsPanelEl3D !== panel) return; // fechado enquanto esperava o load
+    this._renderScriptsPanelBody3D(panel, container);
+    // [27/09/2026] NOVO — pedido verbatim: "No 'Ver em 3D', não está sendo
+    // possível mover as janelas dos botões 'Grupos' e 'Scripts'."
+    this._makePanelDraggable(panel, 'scripts3d');
+    this._applyRememberedPanelPos(panel, 'scripts3d');
   },
 
-  /** [14/09/2026 UTC] REESCRITO — mesmo motor de regras generalizado do
-   *  painel 2D (ver comentário grande de `Mapping.getGrupoRegras` em
-   *  mapping.js e `MapView._renderGruposPanelBody`, mapview.js). Escopo
-   *  DELIBERADAMENTE menor aqui: lista as regras com nome + toggle
-   *  👁️/🚫 (liga/desliga), mas EDITAR nome/seletor/efeito continua
-   *  exclusivo do painel 2D — duplicar o editor completo (3 campos por
-   *  regra, select de efeito, campo de opacidade condicional) nos dois
-   *  lugares, sem navegador pra testar nenhum dos dois, era risco alto
-   *  demais pra esta rodada; o toggle sozinho já resolve "acessível no 2D
-   *  e 3D" pro caso de uso mais comum (ligar/desligar uma regra já
-   *  criada). Sem toggle de ✨ destaque aqui (ver comentário grande junto
-   *  do botão '#v3d-grupos' — destaque visual em 3D ficou fora do escopo
-   *  desta rodada, mesma decisão de antes). */
-  _renderGruposPanelBody3D(panel, container) {
+  _renderScriptsPanelBody3D(panel, container) {
     const map = this._map;
-    const regras = Mapping.getGrupoRegras(map);
-    const salvarERebuild = () => { DB.saveMap(map); this._rebuildScene(); };
+    const AM = window.AutomationManager;
+    const scripts = AM.list();
 
-    const linhasRegras = regras.length
-      ? regras.map((r) => `
-      <div class="map-grupos-row" data-id="${Utils.escapeHtml(r.id)}">
-        <span class="map-grupos-label" title="${Utils.escapeHtml(r.selector)} — ${Utils.escapeHtml(r.efeito)}">${Utils.escapeHtml(r.nome)}</span>
-        <button type="button" class="map-grupos-eye${r.ativo ? '' : ' off'}" data-acao="toggle-ativo" title="${r.ativo ? 'Desligar regra' : 'Ligar regra'}">${r.ativo ? '👁️' : '🚫'}</button>
-      </div>`).join('')
-      : '<div class="map-grupos-vazio">Nenhuma regra ainda — crie no painel "🏷️ Grupos" do Mapa 2D.</div>';
+    // [27/09/2026] CORRIGIDO — pedido verbatim: "Em vez de ter dois botões
+    // ('▶️' e '↩️') para cada script na janela do botão 'Scripts', deve ser
+    // como na janela do botão 'Grupos' (apenas um botão para ativar/
+    // desativar tanto no 2D quanto no 3D)." Um só botão-👁️/🚫 (MESMO do
+    // Grupos), que roda quando desligado e desfaz quando ligado — chama os
+    // MESMOS `run()`/`stop()` de sempre.
+    const linhas = scripts.length
+      ? scripts.map((s) => {
+        const rodando = AM.isRunning(s.id);
+        return `
+      <div class="map-grupos-row" data-id="${Utils.escapeHtml(s.id)}">
+        <span class="map-grupos-label" title="${rodando ? 'Em execução' : 'Parado'}">${Utils.escapeHtml(s.nome)}</span>
+        <button type="button" class="map-grupos-eye${rodando ? '' : ' off'}" data-acao="toggle-ativo" title="${rodando ? 'Desexecutar (desfazer)' : 'Executar'}">${rodando ? '👁️' : '🚫'}</button>
+      </div>`;
+      }).join('')
+      : '<div class="map-grupos-vazio">Nenhum script ainda — crie no painel "🎬 Scripts" do Mapa 2D.</div>';
 
     panel.innerHTML = `
-      <div class="map-panel-head"><b>🏷️ Grupos</b><button type="button" class="icon-btn sm map-panel-close" id="v3d-grupos-close" title="Fechar">✕</button></div>
+      <div class="map-panel-head"><b>🎬 Scripts</b><button type="button" class="icon-btn sm map-panel-close" id="v3d-scripts-close" title="Fechar">✕</button></div>
       <div class="map-grupos-body">
-        ${linhasRegras}
-        <div class="map-grupos-vazio" style="opacity:.7">Editar nome/seletor/efeito: use o painel "🏷️ Grupos" do Mapa 2D.</div>
+        ${linhas}
+        <div class="map-grupos-vazio" style="opacity:.7">Criar/editar/excluir script, seletor/método: use o painel "🎬 Scripts" do Mapa 2D.</div>
       </div>
     `;
 
-    panel.querySelector('#v3d-grupos-close').onclick = () => this._closeGruposPanel3D();
-    panel.querySelectorAll('[data-acao="toggle-ativo"]').forEach((btn) => {
+    panel.querySelector('#v3d-scripts-close').onclick = () => this._closeScriptsPanel3D();
+    // [27/09/2026] CORRIGIDO — mesmo pedido/mesma técnica do painel Grupos
+    // 3D acima: alternar um script só muda o próprio botão, sem
+    // `panel.innerHTML = ...` de novo (o que tirava o arrastar recém-
+    // ligado, já que `_openScriptsPanel3D` liga uma vez só, no
+    // `.map-panel-head` daquele momento).
+    panel.querySelectorAll('.map-grupos-row').forEach((linha) => {
+      const id = linha.dataset.id;
+      const btn = linha.querySelector('[data-acao="toggle-ativo"]');
       btn.addEventListener('click', () => {
-        const id = btn.closest('.map-grupos-row')?.dataset.id;
-        if (!id) return;
-        Mapping.toggleGrupoRegraAtivo(map, id);
-        salvarERebuild();
-        this._renderGruposPanelBody3D(panel, container);
+        // [27/09/2026] CORRIGIDO — `_rebuildScene()` (cenário INTEIRO) daqui
+        // saiu: `AM.run()`/`AM.stop()` já agendam, elas mesmas, um refresh
+        // AO VIVO só dos objetos que o script de fato tocou (ver
+        // `AutomationManager._agendarRefresh3DLive`/`_rastrear`,
+        // js/automation.js) — mais barato e já reflete na hora, sem
+        // reconstruir nada além do necessário.
+        if (AM.isRunning(id)) AM.stop(map, id); else AM.run(map, id);
+        DB.saveMap(map);
+        const rodando = AM.isRunning(id);
+        linha.querySelector('.map-grupos-label').title = rodando ? 'Em execução' : 'Parado';
+        btn.classList.toggle('off', !rodando);
+        btn.textContent = rodando ? '👁️' : '🚫';
+        btn.title = rodando ? 'Desexecutar (desfazer)' : 'Executar';
       });
     });
   },
@@ -10361,6 +10445,13 @@ const View3D = {
     [
       '_openObjectPanel', '_openPanel', '_hideOrRemovePanel', '_showPersistentPanel',
       '_makePanelDraggable', '_bringPanelToFront', '_saveMap', '_closePanel',
+      // [27/09/2026] NOVO — pedido verbatim: "No 'Ver em 3D', não está
+      // sendo possível mover a janela do botão 'Scripts'."
+      // Causa raiz: `_openScriptsPanel3D` nunca
+      // chamava `_makePanelDraggable` nenhuma (só o painel 2D arrastava) —
+      // `_applyRememberedPanelPos` copiado junto pra also lembrar a posição
+      // entre aberturas, igual aos outros painéis.
+      '_applyRememberedPanelPos',
       '_scriptFieldsetHtml', '_wireScriptFieldset', '_trajetoFieldsetHtml',
       '_wireTrajetoFieldset', '_historicoFieldsetHtml', '_wireHistoricoFieldset',
       '_deleteObjectById', '_elLayerLocked', '_updateBbmItemCount',
@@ -11361,6 +11452,13 @@ const View3D = {
     if (!this._running) return;
     const delta = Math.min(0.05, (t - this._lastT) / 1000);
     this._lastT = t;
+    // [27/09/2026] NOVO -- motor de tween (js/lib/tweenengine.js, window.TWEEN)
+    // nunca era "tocado" (nada no app chamava TWEEN.update(...)) -- ou seja,
+    // Select().animate()/.blink()/.aparecer()/.desaparecer() ficavam
+    // registrados mas NUNCA avançavam de fato. Chamando aqui, todo quadro do
+    // "Ver em 3D", com o mesmo `t` (ms, performance.now()) que o próprio
+    // requestAnimationFrame já entrega.
+    if (window.TWEEN && typeof window.TWEEN.update === 'function') window.TWEEN.update(t);
     // [18/09/2026 UTC] NOVO (RODADA 152) — WATCHDOG por QUADRO, pedido
     // verbatim do usuário: "a solução que você implementou funciona, porém
     // ainda existe o salto (agora o salto que tinha antes + o salto de

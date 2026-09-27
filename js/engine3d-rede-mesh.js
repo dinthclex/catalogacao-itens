@@ -418,18 +418,18 @@ class Engine3DRedeMeshMixin {
    *  ainda envolvêssemos o resultado inteiro numa única `CatmullRomCurve3`, como o código fazia antes).
    *  Sem nenhum ponto `reto`, o resultado equivale a uma única `CatmullRomCurve3(ctrl)` (comportamento de
    *  sempre). Devolve `null` se `ctrl` tiver menos de 2 pontos. */
-  // [23/09/2026 UTC] AMPLIADO -- pedido verbatim do usuário: "O cabo está torcido ao fazer uma conexão a
-  // 180°." + "Onde está a implementação do 'realistic-cable-bend' [...] isto é para quando se chega em um
-  // equipamento e pressiona a tecla 'L' [...] é aí que esta implementação das curvas do cabo devem
-  // funcionar." `js/realistic-cable-bend.js` (módulo isolado, ver comentário grande dele) passa a ser
-  // consumido AQUI -- a função que monta a curva de TODO cabo desenhado no modo 'Lógica' (`rebuildCabos`)
-  // e durante o arraste ao vivo (`caboAtualizarTuboVivo`), ambos já chamavam `_curvaDeRotaCabo`. Novo 2º
-  // parâmetro opcional `minRaioDobraM` (raio de curvatura físico mínimo, em metros -- ver chamadores).
+  // [23/09/2026 UTC] REVERTIDO -- pedido verbatim do usuário: "Remova do app tudo que tem haver com a dobra
+  // do cabo que foi implementado nas últimas rodadas [...] Os cabos devem 'voltar ao normal'." O 2º
+  // parâmetro `minRaioDobraM` continua aceito (compatibilidade com os chamadores, que ainda calculam um
+  // raio mínimo a partir do diâmetro do cabo) mas NÃO é mais usado aqui -- `js/realistic-cable-bend.js`
+  // (`RealisticCableBend.generateRealisticBendPath`, o "raio de curvatura mínimo físico"/"barriga elástica"
+  // em dobras fechadas) foi removido do projeto por completo, junto com `_redeExtremosNormais` (só existia
+  // pra alimentar aquela função com a normal do conector). Cada trecho curvo volta a virar uma única
+  // `CatmullRomCurve3` direto sobre os pontos de controle crus, exatamente como antes de qualquer dessas
+  // rodadas.
   _curvaDeRotaCabo(ctrl, minRaioDobraM) {
     const THREE = this.THREE;
     if (!Array.isArray(ctrl) || ctrl.length < 2) return null;
-    const RCB = window.RealisticCableBend;
-    const minR = Math.max(0.01, minRaioDobraM || 0.025); // ~raio de curvatura mínimo físico (Cat6/Cat6A: ~4x o diâmetro)
     const runs = [];
     let atual = [ctrl[0]];
     for (let i = 0; i < ctrl.length - 1; i++) {
@@ -449,24 +449,7 @@ class Engine3DRedeMeshMixin {
         path.add(new THREE.LineCurve3(vs[0], vs[1]));
         return;
       }
-      // CAUSA RAIZ do torcer em 180°: mesmo com o "Parallel Transport Frame" de `_buildTuboEstavel` (ver
-      // comentário grande lá -- aquele bug, de saltar 180° de referência entre 2 pontos vizinhos, já foi
-      // corrigido antes), uma dobra LITERALMENTE de ~180° entre só 2-3 pontos de controle crus ainda faz a
-      // TANGENTE da curva reverter quase instantaneamente num único ponto -- o PTF então precisa girar a
-      // seção transversal quase 180° num único anel pra continuar "de pé" (perpendicular à tangente), o
-      // que parece uma torção mesmo sem nenhum bug de referência: é a rota em si que dobra de forma não
-      // física ali. CORRIGIDO: antes de montar a spline, os pontos deste trecho passam por
-      // `RealisticCableBend.generateRealisticBendPath` -- nunca deixa a rota reverter em cima de si mesma:
-      // dobras moderadas viram um arco circular de raio físico mínimo (`minR`), dobras fechadas (perto de
-      // 180°) viram uma pequena "barriga" lateral de alívio de tensão (ver comentário grande no próprio
-      // arquivo `realistic-cable-bend.js`). Com a tangente nunca mais revertendo de golpe, o PTF não
-      // precisa mais girar a seção quase 180° num só anel -- some a última fonte visual de torção.
-      let vs = run.pts;
-      if (RCB && vs.length >= 3) {
-        const suavizados = RCB.generateRealisticBendPath(vs[0], vs[vs.length - 1], vs.slice(1, -1), minR);
-        if (Array.isArray(suavizados) && suavizados.length >= 2) vs = suavizados;
-      }
-      const vsThree = vs.map((p) => new THREE.Vector3(p.x, p.y, p.z));
+      const vsThree = run.pts.map((p) => new THREE.Vector3(p.x, p.y, p.z));
       path.add(new THREE.CatmullRomCurve3(vsThree, false, 'centripetal'));
     });
     return path;
