@@ -88,8 +88,13 @@ class ObjImportMeshBuilder {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(obj.x, baseY, obj.y);
     mesh.rotation.y = objAnguloToRotY(obj.angulo); // ver objAnguloToRotY — bate com a rotação do 2D
+    // [65ª rodada] REGRA "MODELO FIXO SEGUE AS DIMENSÕES" (ver comentário no construtor de Engine3D): se o objeto tem largura/altura/profundidade
+    // próprias, a malha do arquivo é escalada para elas (escala = dimensão atual / tamanho original do arquivo); sem esses campos = tamanho do arquivo.
+    const w0 = bb.maxX - bb.minX, d0 = bb.maxZ - bb.minZ, h0 = bb.maxY - bb.minY;
+    const sx = (obj.largura > 0 && w0 > 1e-6) ? obj.largura / w0 : 1, sy = (obj.altura > 0 && h0 > 1e-6) ? obj.altura / h0 : 1, sz = (obj.profundidade > 0 && d0 > 1e-6) ? obj.profundidade / d0 : 1;
+    mesh.scale.set(sx, sy, sz);
     this._group.add(mesh);
-    const w = bb.maxX - bb.minX, d = bb.maxZ - bb.minZ, h = bb.maxY - bb.minY;
+    const w = w0 * sx, d = d0 * sz, h = h0 * sy;
     const objPos = { x: obj.x, y: baseY + h / 2, z: obj.y };
     const objPick = { id: obj.id, type: 'object', pos: objPos, center: objPos, radius: Math.max(w, d) * 0.6 || 0.3, ref: obj, obb: { half: { x: w / 2 || 0.2, y: h / 2 || 0.2, z: d / 2 || 0.2 }, rotY: mesh.rotation.y, shape: 'box', segments: 14 } };
     this.pickables.push(objPick);

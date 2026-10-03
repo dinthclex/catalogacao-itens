@@ -704,6 +704,30 @@ class Engine3D {
   // `_initThree`/`_resize`) caso algum consumidor futuro precise de um
   // contexto isolado de verdade por algum motivo (ex.: exportar uma
   // imagem/thumbnail offscreen sem afetar o que está na tela).
+  // =====================================================================================================================================
+  // REGRA DE OURO DOS CONSTRUTORES DE MALHA 3D (64ª/65ª rodadas — leia antes de criar/alterar qualquer construtor de objeto)
+  //
+  //   "Cada objeto deve poder ter QUAISQUER dimensões. As medidas do catálogo são só as medidas INICIAIS: Largura/Profundidade/Altura
+  //    do objeto (janela de propriedades, seção 'Forma' = Transformação › Dimensões X/Z/Y = Dimensões do Modelador) sempre mandam na malha 3D."
+  //
+  // O QUE JÁ ACONTECEU (não repetir): objetos montados por um MODELO FIXO — molde do TIPO editado em "Acessar modelos"
+  // (`_objectModelsByTipo` → `_buildTypeMoldeMesh`), malha .glb/.obj estática ou importada (`_buildModeloArquivoMesh`), .obj importado
+  // (`objecttypes/objimport.js`) — ignoravam largura/profundidade/altura: o dado e o 2D mudavam e o 3D ficava no tamanho antigo
+  // (pilar com molde: sempre 1,2 × 2,8 × 0,6 m). O painel parecia "quebrado", mas o construtor é que não lia as dimensões.
+  //
+  // COMO CADA CAMINHO OBEDECE HOJE (todos os ramos de `_buildOneObjectMeshCore`):
+  //   1. `obj.customMesh` (malha própria do Modelador): tamanho = bbox da malha × `customMeshXform.scale{X,Y,Z}`. A janela de propriedades
+  //      grava a escala = dimensão ÷ bbox, e a Transformação grava largura/altura/profundidade = bbox × escala (espelho nos dois sentidos).
+  //   2. Molde do tipo / .glb / .obj estático / .glb importado: `_escalaModeloPorDims(obj, nativo)` = dimensão atual ÷ tamanho REAL da malha
+  //      (caixa da geometria sem escala — [82ª rodada]; antes era ÷ dimensão de fábrica, errado quando o molde não tem o tamanho do perfil, ex. pilar).
+  //   3. .obj importado (`ObjImportMeshBuilder`): dimensão atual ÷ tamanho original do arquivo.
+  //   4. Construtores procedurais (caixa/cilindro/cone genérico, mesa, pilar, escada, luminária, ... em `js/objecttypes/*.js`): recebem
+  //      `perfil` (largura/profundidade/altura do objeto quando `forma` é retângulo/polígono) e desenham NAS dimensões do perfil.
+  //   5. `forma === 'imagem'`: largura × profundidade do objeto.
+  // QUALQUER construtor NOVO (ou novo tipo de modelo/arquivo) PRECISA ler as dimensões do objeto — ou aplicar `_escalaModeloPorDims` — e
+  // QUALQUER mudança de dimensão deve reconstruir só aquele objeto (`rebuildObjectIncremental`). Se um modelo é "fixo" por natureza,
+  // escale-o; nunca ignore as dimensões em silêncio. Teste: mude a altura/largura pelo painel e meça a caixa da malha (`Box3`).
+  // =====================================================================================================================================
   constructor(canvas, initialConfig, opts) {
     this.canvas = canvas;
     this._eye = !!(opts && opts.eye);
@@ -793,7 +817,11 @@ class Engine3D {
     // isso, resolução/antialiasing só pegariam o padrão fixo na primeira
     // abertura, porque `_initThree` roda antes do primeiro `setConfig`.
     this._config = {
-      raycastEnabled: true, raycastHighlightStyle: 'hitbox', raycastPrecision: 'hitbox',
+      // [29/09/2026] `raycastPrecision` padrão trocado pra 'pixelperfect' -- pedido verbatim: "Nas
+      // 'configurações 3D', há a 'Precisão de mira', deixe, como padrão, 'Pixel Perfect'." (só o
+      // valor-padrão MUDOU aqui, antes de qualquer `setConfig`/preferência salva do usuário —
+      // ver comentário grande acima sobre `initialConfig`.)
+      raycastEnabled: true, raycastHighlightStyle: 'hitbox', raycastPrecision: 'pixelperfect',
       // Pedido do usuário (28/08/2026, rodada do Modelador 3D — "Não use
       // antialiasing"): o antialiasing só pode ser decidido na CRIAÇÃO do
       // WebGLRenderer (ver comentário grande em _initThree, logo abaixo,
@@ -807,8 +835,9 @@ class Engine3D {
       // tinha "Antialiasing 3D" ligado explicitamente no painel de
       // configurações (MapConfig) continua vendo antialiasing normalmente —
       // só o PADRÃO de quem nunca mexeu nessa opção é que muda.
-      renderDistance: 42, resolucao3D: 'alta', fpsLimite: 0, antialiasing3D: false,
+      renderDistance: 42, resolucao3D: 'alta', fpsLimite: 0, antialiasing3D: false, refracaoVidros3D: false, vidroJanela3D: 'atual',
       modoLuminarias3D: 'dinamico',
+      tipoChao3D: 'tabuas', quadriculadoChao3D: true, sombras3D: 'media',   // [01/10/2026] 37ª rodada — ver mapconfig.js DEFAULTS
       // Ver mapconfig.js DEFAULTS (seção "🔗 Item associado") e
       // _addItemAssociadoDestaque logo abaixo.
       itemAssociado3DSelo: 'plaquinha', itemAssociado3DContorno: true,
@@ -1219,6 +1248,10 @@ class Engine3D {
     this._dirLight = dir;
     this._ambientLight = new THREE.AmbientLight(0xffffff, 0.06);
     scene.add(this._ambientLight);
+    // [01/10/2026] NOVO (37ª rodada) — "A sombra deve ser implementada no nosso projeto." (vinda do HTML: PCFSoftShadowMap + DirectionalLight com castShadow).
+    // O alvo da luz precisa estar na cena pra a sombra poder seguir a câmera (ver _updateSombraFollow).
+    scene.add(dir.target);
+    this._aplicarSombras();
 
     // NOVO (01/09/2026), item #10 do pedido de 12 itens, verbatim: "Implemente
     // o Sol e a Lua no cenário 3D." Antes só existia a PALETA de céu/luz
@@ -1390,6 +1423,14 @@ class Engine3D {
   _buildGlassPane(w, h) {
     const THREE = this.THREE;
     const geo = new THREE.PlaneGeometry(Math.max(w, 0.01), Math.max(h, 0.01));
+    // [91ª] Opção "Vidro da janela" (Configurações 3D › Porta / Janela): 'fisico' = o mesmo vidro da Telha de Vidro (material do Three.js; opacidade, ou refração real se "Refração nos vidros do cenário" estiver ligada). Padrão 'atual' = vidro "Minecraft" em passe à parte.
+    if (this._config && this._config.vidroJanela3D === 'fisico') {
+      const real = !!this._config.refracaoVidros3D;
+      const props = { color: 0xbfe2ec, roughness: 0.04, metalness: 0, side: THREE.DoubleSide, transparent: true, opacity: 0.35, depthWrite: false };
+      const pm = real ? new THREE.MeshPhysicalMaterial({ ...props, transmission: 1, ior: 1.5, thickness: 0.02 }) : new THREE.MeshStandardMaterial(props);
+      const pmesh = new THREE.Mesh(geo, pm); pmesh.userData.vidroFisico = true;
+      return pmesh;
+    }
     const mat = new THREE.MeshBasicMaterial({
       map: this._glassShineTexture, transparent: true, side: THREE.DoubleSide, depthWrite: false,
     });
@@ -2904,7 +2945,87 @@ class Engine3D {
     if (astroNoCeu) this._dirLight.position.copy(astroNoCeu.position).normalize().multiplyScalar(10);
     else this._dirLight.position.set(4.5, 8.5, -3); // nem Sol nem Lua acima do horizonte (crepúsculo rápido) — mantém a direção original de antes desta mudança
 
+    // [01/10/2026] 37ª rodada — direção do astro guardada à parte: a posição REAL da luz passa a ser (alvo + direção*40), recalculada a cada quadro
+    // por _updateSombraFollow pra a sombra seguir a câmera.
+    this._sunDir = this._dirLight.position.clone().normalize();
     this._lastSkyUpdateAt = performance.now();
+  }
+
+  /** [01/10/2026] NOVO (37ª rodada) — "A sombra deve ser implementada no nosso projeto." Liga/desliga o mapa de sombras conforme a config
+   *  sombras3D ('desligadas' | 'media' = 1024 | 'alta' = 2048) e prepara a luz direcional (Sol/Lua). LIMITES honestos: só a luz direcional
+   *  projeta sombra (as PointLight das luminárias NÃO — cada uma custaria 6 render passes); só objetos e chão participam (paredes/portas não projetam);
+   *  de noite a luz direcional é fraca, então a sombra quase não aparece. */
+  _sombrasAtivas() { const m = this._config?.sombras3D; return m === 'media' || m === 'alta' || m === undefined; }
+  _aplicarSombras() {
+    if (!this.renderer || !this._dirLight) return;
+    const THREE = this.THREE;
+    const on = this._sombrasAtivas();
+    const tam = this._config?.sombras3D === 'alta' ? 2048 : 1024;
+    this.renderer.shadowMap.enabled = on || this.renderer.shadowMap.enabled;   // renderer compartilhado (eye): nunca desliga o de outro olho
+    if (!this._eye) this.renderer.shadowMap.enabled = on;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    const dl = this._dirLight;
+    dl.castShadow = on;
+    if (dl.shadow.mapSize.x !== tam) { dl.shadow.mapSize.set(tam, tam); if (dl.shadow.map) { dl.shadow.map.dispose(); dl.shadow.map = null; } }
+    dl.shadow.bias = -0.0004;
+    dl.shadow.normalBias = 0.03;
+  }
+  /** Sombra segue a câmera: caixa ortográfica de ±R metros em volta dela, na direção do Sol/Lua (resolução útil constante em qualquer parte do mapa). */
+  _updateSombraFollow() {
+    const dl = this._dirLight;
+    if (!dl || !dl.castShadow || !this.camera3 || !this._sunDir) return;
+    const R = Math.max(14, Math.min(40, this._renderDistance() * 0.5));
+    const cam = dl.shadow.camera;
+    if (cam.right !== R) { cam.left = -R; cam.right = R; cam.top = R; cam.bottom = -R; cam.near = 1; cam.far = 140; cam.updateProjectionMatrix(); }
+    const c = this.camera3.position;
+    const snap = (2 * R) / dl.shadow.mapSize.x;   // 1 texel: evita a sombra "tremer" quando a câmera anda
+    const tx = Math.round(c.x / snap) * snap, tz = Math.round(c.z / snap) * snap;
+    dl.target.position.set(tx, 0, tz);
+    dl.target.updateMatrixWorld();
+    dl.position.set(tx + this._sunDir.x * 60, this._sunDir.y * 60, tz + this._sunDir.z * 60);
+  }
+
+  /** [01/10/2026] NOVO (37ª rodada) — "O chão que foi implementado, neste arquivo, deve ser reaproveitado no nosso projeto." Textura do chão do HTML
+   *  (fundo #1e293b + linhas de tábua #334155 a cada 64px num canvas 512), cobrindo 2 m (mesmo tamanho de célula do xadrez, 'cell' em setScene). */
+  _buildPlankTexture(comGrade) {
+    const THREE = this.THREE;
+    const c = document.createElement('canvas');
+    c.width = c.height = 512;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(0, 0, 512, 512);
+    ctx.strokeStyle = '#334155'; ctx.lineWidth = 4;
+    for (let i = 0; i <= 512; i += 64) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke(); }
+    // [01/10/2026] NOVO (41ª rodada) — "além das listras desenhadas no chão, no render 3D aparecia um quadriculado, deve ser possível habilitá-lo ou não" — o GridHelper(10m, 20 divisões)
+    // do HTML tinha células de 0,5 m; aqui vira linhas finas a cada 0,5 m na própria textura (tile de 2 m = 4 células), pois um GridHelper não cobriria o chão "infinito".
+    if (comGrade) {
+      ctx.strokeStyle = 'rgba(100,116,139,0.75)'; ctx.lineWidth = 2;
+      for (let i = 0; i < 512; i += 128) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke();
+      }
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = 4;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /** [01/10/2026] NOVO (41ª rodada) — "Faça um outro tipo de chão, agora, com um quadriculado de 30cm x 30cm e um traço fino de 1mm." Tile de 0,6 m (2x2 células de 30 cm)
+   *  num canvas 1024 (1 mm ≈ 1,7 px; traço de 2 px). Linhas nas bordas do tile e no meio (x=0, 512 e wrap), cinza médio sobre fundo claro. */
+  _buildQuad30Texture() {
+    const THREE = this.THREE;
+    const c = document.createElement('canvas');
+    c.width = c.height = 1024;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#dfe3e8'; ctx.fillRect(0, 0, 1024, 1024);
+    ctx.fillStyle = '#5b6470';
+    [-1, 511, 1023].forEach((p) => { ctx.fillRect(p, 0, 2, 1024); ctx.fillRect(0, p, 1024, 2); });
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = 8;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
   }
 
   /** Aplica a config do painel 2D/3D (ver mapconfig.js) — chamado uma vez ao
@@ -2936,11 +3057,18 @@ class Engine3D {
       // certo pra próxima vez que a tela 3D for aberta, mas sozinho não é
       // garantia de efeito imediato na cena já em tela.
       this._applyColorSpaceEfeito();
+      this._aplicarSombras();   // [01/10/2026] 37ª rodada — sombras3D
     }
     if (this.scene?.fog && this.camera3) {
       const rd = this._renderDistance();
-      this.scene.fog.near = this._fogNear(rd);
-      this.scene.fog.far = rd;
+      // [30/09/2026] NOVO (19ª rodada) — pedido verbatim: "Deve haver um controle para ativar/desativar a neblina." Desligada: near/far da neblina vão pra muito longe (efetivamente sem neblina); o far da CÂMERA (abaixo) continua vindo de `rd`, então a distância de renderização segue valendo.
+      if (this._config.neblina3DAtiva === false) {
+        this.scene.fog.near = 1e6;
+        this.scene.fog.far = 1e6 + 1;
+      } else {
+        this.scene.fog.near = this._fogNear(rd);
+        this.scene.fog.far = rd;
+      }
       // [10/09/2026] NOVO — respeita `setClipPlanes` (ver comentário grande
       // lá) enquanto um override de recorte estiver ativo (orb
       // calibrado), em vez de sobrescrever `far` sempre a
@@ -2984,6 +3112,11 @@ class Engine3D {
   setScene(mapData) {
     this.mapData = mapData;
     this.pickables = [];
+    // [30/09/2026] NOVO — o selo "ℹ️ Informações" (ver setInfoBadgeWorldPos)
+    // vive dentro de `this._group`, que este método descarta/recria do
+    // zero mais abaixo — zera a referência aqui pra nunca reaproveitar um
+    // `THREE.Sprite` órfão (de uma cena JÁ descartada) na próxima chamada.
+    this._infoBadgeSprite = null;
     // Índice "qual patrimônio está em quais objetos" (pedido do usuário,
     // 26/08/2026: "As flags devem aparecer no 3D também" — mesmas duas
     // flags do mapa 2D, ver mapview.js _drawItemBadges/
@@ -3128,7 +3261,7 @@ class Engine3D {
     this._luzesLeves = [];
     if (this._config.modoLuminarias3D === 'leve') {
       (mapData.objects || []).forEach((o) => {
-        if (o.tipo !== 'luminaria') return;
+        if (o.tipo !== 'luminaria' && o.tipo !== 'luminaria-mesa') return;
         this._luzesLeves.push({ x: o.x, y: (o.piso || 0) * (mapData.alturaPiso || 2.8) + (o.elevacao || 0), z: o.y });
       });
     }
@@ -3170,8 +3303,21 @@ class Engine3D {
     if (wireframe) {
       floorMat = new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true });
     } else {
+      // [01/10/2026] NOVO (37ª rodada) — tipo de chão escolhido nas configurações 3D (padrão: tábuas, o chão do HTML; alternativa: xadrez antigo).
+      const _tc = this._config.tipoChao3D;
+      const _kindBase = (_tc === 'xadrez' || _tc === 'quadriculado30') ? _tc : 'tabuas';
+      // [01/10/2026] MUDADO (46ª rodada) — "[Quadriculado sobre as tábuas] em vez do jeito atual, use THREE.GridHelper [...] Deve servir para todos os 'chãos', não só para as 'Tábuas'." A grade deixou de
+      // ser desenhada na textura das tábuas: agora é um THREE.GridHelper separado (ver _updateRefGrid), valendo para qualquer tipo de chão.
+      const _grade = false;
+      const _kindChao = _kindBase;
+      if (this._floorTexKind !== _kindChao) {
+        try { this._floorTexture?.dispose?.(); } catch (e) { /* ignora */ }
+        this._floorTexture = _kindBase === 'tabuas' ? this._buildPlankTexture(_grade) : (_kindBase === 'quadriculado30' ? this._buildQuad30Texture() : this._buildCheckerTexture());
+        this._floorTexKind = _kindChao;
+      }
       const tex = this._floorTexture;
-      tex.repeat.set(floorLargura / cell, floorProfundidade / cell);
+      const _tileM = _kindBase === 'quadriculado30' ? 0.6 : cell;   // metros que uma repetição da textura cobre
+      tex.repeat.set(floorLargura / _tileM, floorProfundidade / _tileM);
       // Alinha a FASE do padrão quadriculado com a ORIGEM DO MUNDO (0,0) —
       // pedido do usuário (03/09/2026): "o ladrilho do chão do mundo deve
       // estar 'em fase' com o mapa 2D (os ladrilhos devem partir da
@@ -3190,8 +3336,8 @@ class Engine3D {
       // mapeia pra +Z, fase invertida em relação a X — ver `_floorInfo`).
       const mod1 = (x) => ((x % 1) + 1) % 1;
       tex.offset.set(
-        mod1((centroX - floorLargura / 2) / cell),
-        mod1(-(centroZ + floorProfundidade / 2) / cell),
+        mod1((centroX - floorLargura / 2) / _tileM),
+        mod1(-(centroZ + floorProfundidade / 2) / _tileM),
       );
       floorMat = new THREE.MeshLambertMaterial({ map: tex });
       // [13/09/2026] NOVO — ver comentário grande em
@@ -3238,6 +3384,7 @@ class Engine3D {
       floorMat.needsUpdate = true;
     }
     const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.receiveShadow = this._sombrasAtivas();   // [01/10/2026] 37ª rodada
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(centroX, 0, centroZ);
     // [13/09/2026 — ITEM B] `depthWrite:false`+`renderOrder:-2000` foram
@@ -3270,6 +3417,21 @@ class Engine3D {
     // achar o shader dele todo quadro.
     this._floorMesh = floor;
     this._group.add(floor);
+    // [01/10/2026] NOVO (46ª rodada) — "Nas 'configurações 3D', [...] 'Quadriculado sobre as tábuas', em vez do jeito atual, use THREE.GridHelper. Acrescente: grid.material.opacity = 0.4; grid.material.transparent = true;
+    // [...] grade de referência. Deve servir para todos os 'chãos'." GridHelper de 200 m com 400 divisões (células de 0,5 m, como o GridHelper(10, 20) do HTML enviado). O chão é "infinito" e um GridHelper
+    // tem tamanho finito: a grade acompanha a câmera em passos de 0,5 m (_updateRefGrid, todo quadro), então as linhas ficam sempre alinhadas à origem do mundo e parecem não ter fim.
+    this._refGrid = null;
+    if (!wireframe && this._config.quadriculadoChao3D !== false) {
+      const grid = new THREE.GridHelper(200, 400);
+      grid.material.opacity = 0.4;
+      grid.material.transparent = true;
+      grid.material.depthWrite = false;   // linha translúcida não deve escrever profundidade (mesmo motivo do chão)
+      grid.position.set(Math.round(centroX * 2) / 2, 0.003, Math.round(centroZ * 2) / 2);   // 3 mm acima do chão: sem briga de profundidade
+      grid.renderOrder = -1999;
+      grid.userData.refGrid = true;
+      this._group.add(grid);
+      this._refGrid = grid;
+    }
     floor.userData.pick = { type: 'floor' };
     this._pickMeshes.push(floor);
     // Modo wireframe: o `floor` acima usa `floorGeo` = PlaneGeometry SEM
@@ -3942,6 +4104,7 @@ class Engine3D {
     // Ver comentário grande em `this._instancedPools` (constructor) — 1x por
     // cena inteira, depois que TODAS as malhas (`_pickMeshes`) já existem.
     this._rebuildInstancedPools();
+    try { window.FolhaAtlas && window.FolhaAtlas.buildPools(this); } catch (e) { console.warn('[Engine3D] pools de folhas:', e); }   // [51ª] folhas de papel instanciadas (1 draw call por página do atlas)
     this._setupCullMeshes();
     this._setupWallOcclusionMeshes();
     // [13/09/2026 UTC] NOVO — ver comentário grande de _buildOcclusionSectors
@@ -4050,6 +4213,7 @@ class Engine3D {
       // corte por frustum ser útil de verdade.
       inst.computeBoundingSphere();
       inst.frustumCulled = true;
+      inst.castShadow = inst.receiveShadow = this._sombrasAtivas();   // [01/10/2026] 37ª rodada
       this._group.add(inst);
       this._instancedPools[poolKey] = { mesh: inst, count: meshes.length, tipo, piso };
     });
@@ -4071,6 +4235,9 @@ class Engine3D {
     if (!pool) return;
     pool.mesh.setMatrixAt(inst.index, mesh.visible ? inst.matrix : this._zeroInstMatrix);
     pool.mesh.instanceMatrix.needsUpdate = true;
+    // [51ª rodada] CORRIGIDO -- o culling por distância (_updateDistanceCulling) acabava de escrever mesh.visible = true, e a malha individual era desenhada JUNTO com a instância
+    // (objeto desenhado 2x: o dobro de triângulos/draw calls). A visibilidade lógica já foi passada à instância acima; a malha individual fica invisível (o picking não depende de visible).
+    mesh.visible = false;
   }
 
   /** "Promove" uma malha individual instanciada pro Raio X (pontual ou
@@ -4133,15 +4300,22 @@ class Engine3D {
    *  é bem mais barato que redesenhar o canvas do zero. */
   _getProceduralFloorTexture(kind, larguraM, profundidadeM) {
     const THREE = this.THREE;
-    const TAMANHO_LAJOTA_M = kind === 'lajota' ? 0.6 : 0.6; // 60cm — mesma escala pedida pro chão lajotado e pro forro modular
+    const TAMANHO_LAJOTA_M = kind === 'lajota30' ? 0.3 : 0.6; // 60cm — chão lajotado e forro modular; [88ª] 'lajota30' = 30×30 cm
     const cacheKeyCanvas = 'canvas::' + kind;
     let base = this._texturaProceduralCache[cacheKeyCanvas];
     if (!base) {
-      const CANVAS_PX = 256;
+      const CANVAS_PX = kind === 'lajota30' ? 1024 : 256;   // [88ª] 1024 px por 300 mm: o rejunte de 1 mm fica com ~3,4 px
       const canvas = document.createElement('canvas');
       canvas.width = CANVAS_PX; canvas.height = CANVAS_PX;
       const ctx = canvas.getContext('2d');
-      if (kind === 'lajota') {
+      if (kind === 'lajota30') {
+        // [88ª rodada] Lajota 30×30 cm com rejunte de 1 mm: cada ladrilho desenha meia junta (0,5 mm) na própria borda; ao lado do vizinho a junta soma 1 mm.
+        ctx.fillStyle = '#d8d2c4';
+        ctx.fillRect(0, 0, CANVAS_PX, CANVAS_PX);
+        const lw = CANVAS_PX / 300 * 0.5;
+        ctx.strokeStyle = '#5a5448'; ctx.lineWidth = lw;
+        ctx.strokeRect(lw / 2, lw / 2, CANVAS_PX - lw, CANVAS_PX - lw);
+      } else if (kind === 'lajota') {
         // Chão lajotado: fundo bege/cinza-claro, linhas de rejunte
         // cinza-escuro bem marcadas (contraste alto — pedido: "linhas de
         // rejunte cinza-escuro"), um único quadrado de lajota preenchendo
@@ -4170,6 +4344,7 @@ class Engine3D {
       }
       base = new THREE.CanvasTexture(canvas);
       base.wrapS = base.wrapT = THREE.RepeatWrapping;
+      base.anisotropy = 8;
       this._texturaProceduralCache[cacheKeyCanvas] = base;
     }
     // `repeat` depende do tamanho REAL do objeto (largura/profundidade,
@@ -4251,8 +4426,22 @@ class Engine3D {
     const childrenBefore = this._group.children.length;
     const baseYExtra = (obj.piso || 0) * (this.mapData?.alturaPiso || 2.8) + (obj.elevacao || 0);
     this._assocDestaqueFeito = false;
+    this._itemBadgeTop = null;   // [30/09/2026] NOVO (16ª rodada) — ver _alteracaoBadgeY
+    this._caixaFallbackObj = null;   // [30/09/2026] NOVO (21ª rodada) — caixa delimitadora do objeto ANTES dos destaques (ver fallback dos selos)
+    this._alteracaoDestaqueFeito = false;   // [30/09/2026] NOVO (15ª rodada) — ver fallback dos selos Histórico/Especificações abaixo
     this._buildOneObjectMeshCore(obj, wireframe, colWireframe);
     this._applyObjectExtraTransform(obj, baseYExtra, childrenBefore);
+    // [01/10/2026] NOVO (37ª rodada) — sombras: em QUALQUER builder, as malhas novas (lambert/standard/phong, não Basic/vidro) projetam e recebem sombra.
+    if (this._sombrasAtivas() && !wireframe) {
+      for (let i = childrenBefore; i < this._group.children.length; i++) {
+        this._group.children[i].traverse?.((n) => {
+          if (!n.isMesh || !n.material) return;
+          const m0 = Array.isArray(n.material) ? n.material[0] : n.material;
+          if (!m0 || m0.isMeshBasicMaterial || m0.transparent) return;
+          n.castShadow = true; n.receiveShadow = true;
+        });
+      }
+    }
     // Efeitos `.opacity()`/`.highlight()` dos 'Scripts' (`entity.opacidade`/
     // `entity.destacado`, campos DIRETOS no objeto — ver comentário grande
     // de `_applyGrupoOpacidadeDestaque` abaixo) aplicados também no 3D,
@@ -4276,9 +4465,45 @@ class Engine3D {
         if (!box.isEmpty()) {
           const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
           const objBox = Object.assign({}, obj, { x: c.x, y: c.z, angulo: 0 });
+          // [30/09/2026] NOVO (21ª rodada) — guarda a caixa SEM os destaques pra os selos de Histórico/Especificações usarem a MESMA altura-base/topo (ver fallback abaixo).
+          this._caixaFallbackObj = { c: c.clone(), sz: sz.clone(), minY: box.min.y };
           this._addItemAssociadoDestaque(objBox, { w: sz.x, d: sz.z, h: sz.y, y0: 0 }, box.min.y);
         }
       } catch (e) { console.warn('[Engine3D] destaque de item associado (caixa delimitadora):', e); }
+    }
+    // [30/09/2026] CORRIGIDO (15ª rodada) — pedido verbatim: "A opção 'Selos de Histórico/Especificações' não está fazendo o que
+    // deveria, pois coloquei uma entrada no histórico e não apareceu destaque visual no 'Ver em 3D', só aparece a bolinha no mapa
+    // 2D." CAUSA RAIZ: os selos ● Histórico / ◆ Especificações só eram desenhados no caminho GENÉRICO de _buildOneObjectMeshCore
+    // (perfil de catálogo). Todo objeto que sai por OUTRO construtor — malha do Modelador, molde editado do tipo, .glb/.obj
+    // importado, tipos registrados (objecttypes), imagem etc. — retorna cedo, ANTES desse trecho, e nunca ganhava o selo
+    // (a opção ligada não tinha efeito nenhum neles). Mesmo problema/solução do destaque de item associado logo acima:
+    // fallback pela caixa delimitadora do que acabou de ser montado, só quando o caminho genérico NÃO desenhou os selos.
+    if (!this._alteracaoDestaqueFeito && !wireframe && this._config?.destaqueAlteracoes3D !== false && this._group.children.length > childrenBefore) {
+      try {
+        const temHist = !!window.ObjectStandard?.corIndicadorHistorico(obj);
+        const temEspec = !!window.ObjectStandard?.temEspecificacoes(obj);
+        if (temHist || temEspec) {
+          const THREE = this.THREE;
+          // [30/09/2026] CORRIGIDO (21ª rodada) — pedido verbatim: "estão acima do desenho do ícone do patrimônio ('🔗'). Devem ficar na mesma altura." CAUSA RAIZ REAL: neste fallback a caixa delimitadora era recalculada DEPOIS de o destaque do patrimônio já estar na cena — e ela engloba o contorno azul, os selos e o FACHO azul de 3,2m, então o 'topo' do objeto ficava lá em cima e a altura clampada de bolinha/losango (base+1,5m, limite topo-0,03m) saía MAIS ALTA que a do selo 🔗 (que usou a caixa limpa, limitada ao topo real) em todo objeto menor que ~1,5m. Era justamente a dependência da altura da coluna que o usuário suspeitou. Agora reaproveita a caixa limpa guardada acima (_caixaFallbackObj), e só recalcula quando o objeto não tem patrimônio (aí não existe facho na cena).
+          let c, sz, minY;
+          if (this._caixaFallbackObj) { c = this._caixaFallbackObj.c; sz = this._caixaFallbackObj.sz; minY = this._caixaFallbackObj.minY; }
+          else {
+            const box = new THREE.Box3();
+            for (let i = childrenBefore; i < this._group.children.length; i++) {
+              const ch = this._group.children[i];
+              ch.updateMatrixWorld(true);
+              box.expandByObject(ch);
+            }
+            if (!box.isEmpty()) { c = box.getCenter(new THREE.Vector3()); sz = box.getSize(new THREE.Vector3()); minY = box.min.y; }
+          }
+          if (c && sz) {
+            const objBox = Object.assign({}, obj, { x: c.x, y: c.z });
+            const perfilBox = { w: sz.x, d: sz.z, h: sz.y, y0: 0 };
+            if (temHist) this._addHistoricoDestaque(objBox, perfilBox, minY, temEspec);
+            if (temEspec) this._addEspecDestaque(objBox, perfilBox, minY, temHist);
+          }
+        }
+      } catch (e) { console.warn('[Engine3D] selos Histórico/Especificações (caixa delimitadora):', e); }
     }
   }
 
@@ -4436,7 +4661,17 @@ class Engine3D {
     // Modeler3D). Objetos SEM `customMesh` (a esmagadora maioria, incluindo
     // TODO objeto salvo antes desta rodada) não entram aqui — retrocompatibilidade
     // total com o resto do método abaixo, inalterado.
-    if (obj.customMesh && Array.isArray(obj.customMesh.vertices) && obj.customMesh.vertices.length >= 3) {
+    // [80ª rodada] CORRIGIDO — pedido: "o que for mudado na malha do 2D deve ser refletido no 3D e em tempo real [...] a mesma malha deve ser editada tanto no 2D quanto no 3D. Não deve ser
+    // uma cópia genérica de molde. Os objetos têm medidas padrão [...] Após isto, é possível editar livremente a forma da malha." CAUSA RAIZ: o projeto tem assets/modelos/js/piso.malha.js (molde
+    // estático do Piso); os ramos de malha fixa abaixo (customMesh do Modelador, molde do tipo salvo em 'Acessar modelos', Model3DLoader/.glb/.obj) davam `return` ANTES do registro de tipos, então o Piso com contorno editado (obj.pisoPoligono) era sempre
+    // desenhado como o molde escalado (por isso o gizmo — que só muda largura/profundidade — "funcionava" e os vértices não). Agora, quando o tipo registrado declara `malhaPropria(obj)` (o objeto tem
+    // geometria própria editável), os moldes são ignorados e a malha sai dos dados do próprio objeto — os mesmos que o 2D desenha. Sem edição, o molde/medidas padrão continuam valendo.
+    // [81ª rodada] PRIORIDADE — REGRA GERAL DA ENGINE, para TODOS os objetos: quando o 2D guarda a forma do objeto (o tipo registrado declara `malhaPropria(obj)`), a malha 3D é gerada
+    // desses MESMOS dados e nenhum molde (customMesh, molde de "Acessar modelos", .glb/.obj) é usado. Tipos cujo 2D só guarda a pegada (largura × profundidade × altura, ângulo, cor —
+    // ex.: cadeira, mesa) continuam com o molde, que já segue essas medidas do 2D (65ª/66ª). Hoje: Piso (sempre). Novo tipo com forma editável no 2D => basta declarar malhaPropria.
+    const _defMalhaPropria = window.ObjectTypes && window.ObjectTypes.get && window.ObjectTypes.get(obj.tipo);
+    const _malhaPropria = !!(_defMalhaPropria && typeof _defMalhaPropria.malhaPropria === 'function' && _defMalhaPropria.malhaPropria(obj));
+    if (!_malhaPropria && obj.customMesh && Array.isArray(obj.customMesh.vertices) && obj.customMesh.vertices.length >= 3) {
       this._buildCustomMeshObject(obj, baseY, wireframe, colWireframe);
       return;
     }
@@ -4457,7 +4692,8 @@ class Engine3D {
     // chave de `OBJECT3D_PROFILES` (checagem implícita dentro do `if`, via
     // `this._objectModelsByTipo[obj.tipo]` só existir pros 33 tipos reais),
     // então esses dois ramos abaixo continuam intocados.
-    if (this._objectModelsByTipo[obj.tipo] && (this._objectModelsByTipo[obj.tipo].detalhado || this._objectModelsByTipo[obj.tipo].lowpoly)) {
+    // [80ª/81ª] malha própria (mesmos dados do 2D) vence o molde do tipo salvo em "Acessar modelos"
+    if (!_malhaPropria && this._objectModelsByTipo[obj.tipo] && (this._objectModelsByTipo[obj.tipo].detalhado || this._objectModelsByTipo[obj.tipo].lowpoly)) {
       this._buildTypeMoldeMesh(obj, baseY, wireframe, colWireframe);
       return;
     }
@@ -4494,7 +4730,8 @@ class Engine3D {
     // módulos diferentes) de propósito, sem introduzir uma dependência
     // cruzada nova entre engine3d.js e o Modelador.
     const _escadaModificadaAgora = obj.tipo === 'escada' && this._escadaFoiModificada(obj);
-    if (!_escadaModificadaAgora) {
+    // [80ª/81ª] malha própria vence também os moldes de arquivo (.glb importado, .glb e .obj estáticos — ex.: piso.malha.js)
+    if (!_escadaModificadaAgora && !_malhaPropria) {
     const modeloArquivoNome = obj.modeloArquivo || OBJECT3D_PROFILES[obj.tipo]?.modeloArquivo;
     if (modeloArquivoNome && window.Model3DLoader?.hasModel?.(modeloArquivoNome)) {
       this._buildModeloArquivoMesh(obj, baseY, wireframe, colWireframe, modeloArquivoNome, window.Model3DLoader);
@@ -4514,7 +4751,7 @@ class Engine3D {
     // ver tabela de limitações em assets/obj/conversor-obj-js.html). MESMO
     // tratamento de `y0` (objeto "flutuante" tipo monitor/interruptor) do
     // bloco de malha `.obj` logo abaixo, mesmo motivo.
-    if (!_escadaModificadaAgora) {
+    if (!_escadaModificadaAgora && !_malhaPropria) {
       const nomeGlb = obj.modeloGlbEstatico || OBJECT3D_PROFILES[obj.tipo]?.modeloGlbEstatico || obj.tipo;
       if (nomeGlb && window.GlbMeshSource?.hasModel?.(nomeGlb)) {
         const y0Perfil = obj.semY0 ? 0 : (OBJECT3D_PROFILES[obj.tipo]?.y0 || 0);
@@ -4535,7 +4772,7 @@ class Engine3D {
     // view3d.js `_rebuildScene` ANTES deste `setScene`, mesmo espírito de
     // `Model3DLoader.preloadAll` acima) — arquivo `.malha.js` ausente cai,
     // sem avisar/travar nada, na geometria procedural de sempre abaixo.
-    if (!_escadaModificadaAgora) {
+    if (!_escadaModificadaAgora && !_malhaPropria) {
       const nomeMalha = obj.modeloMalhaEstatica || OBJECT3D_PROFILES[obj.tipo]?.modeloMalhaEstatica || obj.tipo;
       if (nomeMalha && window.ObjMeshSource?.hasModel?.(nomeMalha)) {
         // [15/09/2026 UTC] NOVO — pedido verbatim (rodada "malha estática
@@ -4611,10 +4848,14 @@ class Engine3D {
       // sentido pro usuário pra uma "placa" fininha.
       if (obj.reticuloMetrico) { perfil.h = 0.001; perfil.y0 = obj.altura || 0; }
     } else if (obj.forma === 'poligono') {
-      perfil = { shape: 'cylinder', r: obj.raio || 0.3, h: obj.altura || 0.5, y0: 0, color: _hexToThreeColor(obj.cor), segments: Math.max(3, Math.round(obj.lados || 24)) };
+      // [58ª rodada] forma redonda com largura/profundidade (elipse desenhada no 2D / campos de dimensão da Transformação): o raio vem delas ((l+p)/4, o mesmo valor que o painel mostra como Raio), em vez de ser ignorado
+      const _rEl = (obj.largura != null) ? (obj.largura + (obj.profundidade != null ? obj.profundidade : obj.largura)) / 4 : null;
+      perfil = { shape: 'cylinder', r: (_rEl > 0 ? _rEl : (obj.raio || 0.3)), rx: (obj.largura > 0 ? obj.largura / 2 : null), rz: (obj.largura != null ? ((obj.profundidade != null ? obj.profundidade : obj.largura) / 2) : null), h: obj.altura || 0.5, y0: 0, color: _hexToThreeColor(obj.cor), segments: Math.max(3, Math.round(obj.lados || 24)) };
     } else {
       perfil = OBJECT3D_PROFILES[obj.tipo] || OBJECT3D_DEFAULT_PROFILE;
       if (obj.semY0 && perfil.y0) perfil = { ...perfil, y0: 0 }; // [21/09/2026] elevação já decidida (ver Mapping.addObject)
+      // [01/10/2026] CORRIGIDO (35ª rodada) — pedido verbatim: "Ao trocar a cor de um objeto no 'Ver em 3D', a cor não é atualizada, nem saindo e entrando de novo no 'Ver em 3D'. Porém, no mapa 2D, é atualizado. Aparentemente, o novo 'material' não é aplicado no 3D." CAUSA RAIZ: só as formas desenhadas (retangulo/poligono, ramos acima) liam `obj.cor`; objetos de catálogo sem forma usavam SEMPRE a cor fixa do perfil (OBJECT3D_PROFILES[tipo].color) — o painel gravava `cor` (e o 2D a usa), mas aqui ela era ignorada. Agora, se o objeto tem `cor`, ela vence a do perfil (cópia do perfil: o objeto compartilhado entre todos do tipo NÃO é mutado). Vale para os construtores que usam `perfil.color` (caixa/cilindro genéricos, mesa, pilar, cadeira...). LIMITE HONESTO: construtores que desenham com cores/materiais próprios (malhas .glb/.obj estáticas, rack, equipamentos de rede etc.) não passam por aqui — se algum deles ainda ignorar a cor, é um caso à parte.
+      if (typeof obj.cor === 'string' && obj.cor) { const _cc = _hexToThreeColor(obj.cor); if (_cc !== undefined && _cc !== null) perfil = { ...perfil, color: _cc }; }
     }
     // Modo "leve" de luminárias (ver _tintForLight/mapconfig.js) — clareia
     // a cor deste objeto se ele cair no alcance de alguma luminária. Clona
@@ -4646,7 +4887,32 @@ class Engine3D {
     // Ver _addHistoricoDestaque abaixo (mesmo padrão de sprite-selo de
     // _addItemAssociadoDestaque acima, só que mais simples: um pontinho só,
     // sem contorno/flags).
-    this._addHistoricoDestaque(obj, perfil, baseY);
+    // [30/09/2026] ALTERADO — pedido verbatim: "No 'Modo Navegação' havia um
+    // destaque simples [...] indicando que houve alteração de histórico. Se
+    // ainda não tiver alguma seção que trate disso nas 'configurações 3D',
+    // faça uma seção para isso e torne opcional aparecer este destaque ou
+    // não. Deve ser possível ativar este destaque com alterações feitas
+    // tanto no 'Histórico' quanto nas 'Especificações'. Cada uma deve ter o
+    // seu 'ícone' [...] Os ícones devem coexistir." Os dois destaques
+    // (Histórico/Especificações) agora respeitam o mesmo interruptor único
+    // `destaqueAlteracoes3D` (seção "🔔 Destaque de alteração", nova em
+    // "⚙️ Configurações 3D" — ver mapconfig.js) — e são desenhados JUNTOS
+    // quando os dois valem pro mesmo objeto (ver `_addEspecDestaque`
+    // abaixo, que desloca o próprio selo pro lado quando o de Histórico
+    // também está presente, pra não sobrepor um em cima do outro).
+    const destaqueLigado = this._config?.destaqueAlteracoes3D !== false;
+    const temHistDestaque = destaqueLigado && !!(window.ObjectStandard?.corIndicadorHistorico(obj));
+    const temEspecDestaque = destaqueLigado && !!(window.ObjectStandard?.temEspecificacoes(obj));
+    // [30/09/2026] NOVO -- try/catch com console.error: usuário relatou que
+    // os selos (Histórico/Especificações) não estavam aparecendo no "Ver em
+    // 3D" e a causa não pôde ser reproduzida com certeza nesta sessão (sem
+    // navegador pra depurar ao vivo) -- qualquer exceção aqui dentro agora
+    // fica visível no console do navegador (antes, um erro silencioso
+    // faria o selo simplesmente sumir sem pista nenhuma) em vez de travar
+    // o resto da malha do objeto.
+    this._alteracaoDestaqueFeito = true;   // [30/09/2026] NOVO (15ª rodada) — evita o fallback do wrapper (_buildOneObjectMesh) duplicar os selos
+    if (temHistDestaque) { try { this._addHistoricoDestaque(obj, perfil, baseY, temEspecDestaque); } catch (e) { console.error('[Engine3D] selo de Histórico (destaque 3D) falhou:', e, obj?.id); } }
+    if (temEspecDestaque) { try { this._addEspecDestaque(obj, perfil, baseY, temHistDestaque); } catch (e) { console.error('[Engine3D] selo de Especificações (destaque 3D) falhou:', e, obj?.id); } }
     // [18/09/2026 UTC] NOVO -- "Rack" modular de 19" (pedido verbatim:
     // "Integre ao catalogo este novo objeto modular chamado 'Rack'"). Builder
     // DEDICADO, ver `_buildRackMesh` e js/rack-modular.js. Se o modulo nao
@@ -4690,7 +4956,10 @@ class Engine3D {
   _buildGenericCatalogMesh(obj, perfil, baseY, wireframe, colWireframe) {
     const THREE = this.THREE;
     let geo;
-    if (perfil.shape === 'cylinder') geo = new THREE.CylinderGeometry(perfil.r, perfil.r, perfil.h, perfil.segments || 14);
+    if (perfil.shape === 'cylinder') {
+      geo = new THREE.CylinderGeometry(perfil.r, perfil.r, perfil.h, perfil.segments || 14);
+      if (perfil.rx > 0 && perfil.rz > 0 && perfil.r > 0) geo.scale(perfil.rx / perfil.r, 1, perfil.rz / perfil.r);   // [58ª] elipse (largura x profundidade)
+    }
     else if (perfil.shape === 'cone') geo = new THREE.ConeGeometry(perfil.r, perfil.h, 14);
     else geo = new THREE.BoxGeometry(perfil.w, perfil.h, perfil.d);
     // [13/09/2026] NOVO — "Chão lajotado" e "Teto modular" (pedido do
@@ -4703,8 +4972,9 @@ class Engine3D {
     // antecipado, no builder dedicado `_buildTetoGessoMesh` acima).
     let mapaProcedural = null;
     if (!wireframe) {
-      if (obj.tipo === 'piso' && obj.acabamento === 'lajota') mapaProcedural = this._getProceduralFloorTexture('lajota', perfil.w, perfil.d);
-      else if (obj.tipo === 'teto-modular') mapaProcedural = this._getProceduralFloorTexture('modular', perfil.w, perfil.d);
+      // [88ª] desenho de referência escolhido no painel (Piso/Teto): ver PisoCustom.padraoDe/kindDe
+      const PCx = window.PisoCustom, kindPad = PCx && (obj.tipo === 'piso' || obj.tipo === 'teto-modular') ? PCx.kindDe(PCx.padraoDe(obj)) : null;
+      if (kindPad) mapaProcedural = this._getProceduralFloorTexture(kindPad, perfil.w, perfil.d);
     }
     const mat = wireframe
       ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
@@ -4764,7 +5034,7 @@ class Engine3D {
     // (rotY=0) já os envolve igual em qualquer ângulo de visão.
     const obbHalf = perfil.shape === 'box'
       ? { x: (perfil.w || 0.5) / 2, y: perfil.h / 2, z: (perfil.d || 0.5) / 2 }
-      : { x: perfil.r || 0.3, y: perfil.h / 2, z: perfil.r || 0.3 };
+      : { x: (perfil.shape === 'cylinder' && perfil.rx > 0 ? perfil.rx : perfil.r) || 0.3, y: perfil.h / 2, z: (perfil.shape === 'cylinder' && perfil.rz > 0 ? perfil.rz : perfil.r) || 0.3 };
     const obbRotY = perfil.shape === 'box' ? mesh.rotation.y : 0;
     // shape/segments: além da caixa delimitadora, guarda a forma real
     // (box/cylinder/cone) e o número de lados usados na malha (perfil.segments,
@@ -5162,7 +5432,29 @@ class Engine3D {
         const v1x = perpX * (largura / 2), v1z = perpY * (largura / 2);
         meshX = hingeX + Math.cos(phi) * v0x + Math.sin(phi) * v1x;
         meshZ = hingeZ + Math.cos(phi) * v0z + Math.sin(phi) * v1z;
-        meshRotY = rotY + phi;
+        // CORRIGIDO (29/09/2026), pedido verbatim: "quando está marcado
+        // 'Esquerda', a animação não funciona como deveria [...] a porta
+        // deve abrir e girar pela dobradiça, não deslizar." CAUSA RAIZ: a
+        // POSIÇÃO do centro da folha (`meshX`/`meshZ`, acima) já leva
+        // `hingeSign` em conta corretamente (o arco sempre tem raio
+        // constante a partir da dobradiça, testado e confirmado pros dois
+        // lados) — mas a ROTAÇÃO da malha (`meshRotY`) somava sempre "+phi",
+        // sem inverter o SENTIDO do giro conforme o lado da dobradiça. Uma
+        // dobradiça na "direita" e uma na "esquerda" abrem girando em
+        // sentidos OPOSTOS (visto de cima) pra alcançar a mesma orientação
+        // final perpendicular à parede — sem esse sinal, a malha da folha
+        // girava do jeito errado enquanto o CENTRO dela seguia o arco certo,
+        // e o resultado combinado (posição certa + rotação errada) parecia
+        // um deslizamento em vez de um giro rígido em torno da dobradiça
+        // (a aresta que deveria ficar "grudada" na dobradiça se afastava
+        // dela ao longo da abertura, só voltando a coincidir no fim do
+        // curso). Prova por álgebra (ver conversa) + teste numérico
+        // (Playwright, distância entre cada aresta da folha e o ponto da
+        // dobradiça ao longo de toda a animação): com `hingeSign * phi`,
+        // uma das duas arestas fica a distância exatamente 0 da dobradiça
+        // em TODO quadro, para os dois lados — antes, isso só acontecia pro
+        // lado "direita".
+        meshRotY = rotY + hingeSign * phi;
       }
       // `partsLocal` — UMA peça (porta) ou VÁRIAS (moldura+vidro da janela,
       // ver acima): cada uma em coordenadas LOCAIS (lx/lz giram junto com
@@ -5341,6 +5633,34 @@ class Engine3D {
       offX: mesh.position.x - obj.x, offY: mesh.position.y - baseY, offZ: mesh.position.z - obj.y,
       objId: obj.id,
     };
+    // [30/09/2026] CORRIGIDO — pedido verbatim: "Verifique as animações que
+    // há nos objetos [...] e faça a caixa de hit teste ir junto, não ficar
+    // estático (como no caso que estava acontecendo com a porta)." MESMA
+    // causa raiz do bug já corrigido em `_updateDoorAnimations`/porta: a
+    // caixa de hit-test (`userData.pick` — um OBB separado da malha visual,
+    // usado tanto pelo modo "Caixa de colisão" quanto de fallback) tem sua
+    // PRÓPRIA posição/rotação (`pick.pos`/`pick.center`/`pick.obb.rotY`),
+    // calculada 1x na montagem — igual à malha, nunca era atualizada de
+    // novo depois disso. `_syncScriptedObjectTransforms` (logo abaixo) já
+    // movia a malha VISUAL certinho a cada quadro pra qualquer objeto
+    // animado por Script (ou, no caso do carro dirigível, pela física de
+    // condução — ver `carro.js`, que chama isto incondicionalmente) — mas a
+    // caixa de clique ficava PRESA na posição de montagem, com o mesmo
+    // sintoma da porta generalizado pra QUALQUER objeto animado (mesa/
+    // cadeira/planta/teto-gesso com Script, carro dirigido): clicar nele
+    // depois de mover simplesmente não funcionava, porque o clique testava
+    // contra a caixa velha, no lugar errado. Guarda aqui o mesmo tipo de
+    // offset (posição relativa a obj.x/baseY/obj.y na hora da montagem) —
+    // só 1x por `pick` (`_scriptSyncOffset` como guarda), já que várias
+    // malhas de um objeto composto (ex. as 4 pernas + tampo da mesa) podem
+    // compartilhar o MESMO objeto `pick`; marcar de novo seria inofensivo,
+    // só redundante.
+    const pick = mesh.userData.pick;
+    if (pick && pick.pos && !pick._scriptSyncOffset) {
+      pick._scriptSyncOffset = {
+        offX: pick.pos.x - obj.x, offY: pick.pos.y - baseY, offZ: pick.pos.z - obj.y,
+      };
+    }
   }
 
   /** [13/09/2026] NOVO — "edição/animação ao vivo" de Script (Tarefa 3 do
@@ -5369,6 +5689,21 @@ class Engine3D {
       const baseY = (obj.piso || 0) * (this.mapData?.alturaPiso || 2.8) + (obj.elevacao || 0);
       mesh.position.set(obj.x + base.offX, baseY + base.offY, obj.y + base.offZ);
       mesh.rotation.y = objAnguloToRotY(obj.angulo);
+      // [30/09/2026] CORRIGIDO — ver comentário grande em `_tagScriptBase`
+      // acima pro porquê: atualiza a caixa de hit-test (`userData.pick`)
+      // JUNTO da malha visual, todo quadro, em vez de deixá-la presa na
+      // posição/rotação de quando o objeto foi montado.
+      const pick = mesh.userData.pick;
+      if (pick && pick.pos && pick._scriptSyncOffset) {
+        const so = pick._scriptSyncOffset;
+        pick.pos.x = obj.x + so.offX;
+        pick.pos.y = baseY + so.offY;
+        pick.pos.z = obj.y + so.offZ;
+        if (pick.center !== pick.pos) {
+          pick.center.x = pick.pos.x; pick.center.y = pick.pos.y; pick.center.z = pick.pos.z;
+        }
+        if (pick.obb) pick.obb.rotY = mesh.rotation.y;
+      }
       // [13/09/2026] NOVO — pedido esclarecido do usuário sobre o robô
       // recepcionista: "'trocar de uniforme' é só o momento em que ela vai
       // desligar o holograma e ligá-lo [...] depois de alguma coisa feita
@@ -5554,7 +5889,34 @@ class Engine3D {
       const meshX = hingeX + Math.cos(phi) * v0x + Math.sin(phi) * v1x;
       const meshZ = hingeZ + Math.cos(phi) * v0z + Math.sin(phi) * v1z;
       mesh.position.set(meshX, baseY + altura / 2, meshZ);
-      mesh.rotation.y = rotY + phi;
+      // CORRIGIDO (29/09/2026) — mesma causa raiz/fórmula de
+      // `_buildDoorOrWindowMesh` (ver comentário grande lá): a rotação
+      // precisa do MESMO `hingeSign` já usado na posição, senão a folha gira
+      // no sentido errado pra dobradiça "esquerda" e parece deslizar em vez
+      // de girar em torno da dobradiça.
+      const novoMeshRotY = rotY + hingeSign * phi;
+      mesh.rotation.y = novoMeshRotY;
+      // CORRIGIDO (29/09/2026), pedido verbatim: "O hit test da porta deve
+      // ir junto. Percebi que a modelo 3D da porta se mexe, mas a caixa de
+      // hit teste dela não acompanha. Por isso, quando a porta está aberta e
+      // se tenta clicar nela, não funciona, pois só funciona na região da
+      // caixa de hit test (que ficou estática)." CAUSA RAIZ: o objeto
+      // `pick` (usado pelo raycaster/hover — `pos`/`center`/`obb.rotY`,
+      // ver `_buildDoorOrWindowMesh` mais acima, `mesh.userData.pick`) é
+      // calculado UMA VEZ SÓ, na construção da malha (a posição/ângulo de
+      // abertura que a porta tinha NAQUELE instante) — esta função já
+      // atualizava `mesh.position`/`mesh.rotation.y` (a malha visual) a
+      // cada quadro, mas nunca tocava no `pick`, que ficava "esquecido" na
+      // posição/ângulo de quando a cena foi montada. Corrigido: atualiza
+      // `pick.pos`/`pick.center`/`pick.obb.rotY` com os MESMOS valores
+      // recém-calculados pra malha — clicar na porta agora acerta onde ela
+      // está DE VERDADE, aberta ou fechada, em qualquer ângulo intermediário.
+      const pick = mesh.userData?.pick;
+      if (pick) {
+        pick.pos = { x: meshX, y: baseY + altura / 2, z: meshZ };
+        pick.center = pick.pos;
+        if (pick.obb) pick.obb.rotY = novoMeshRotY;
+      }
     }
   }
 
@@ -5788,7 +6150,29 @@ class Engine3D {
    *  cor diferentes pro mesmo dado. NO-OP se o objeto não tiver nenhuma
    *  entrada de histórico ainda (o indicador só existe quando algo foi
    *  colocado ali) ou se `ObjectStandard` não estiver carregado. */
-  _addHistoricoDestaque(obj, perfil, baseY) {
+  /** [30/09/2026] NOVO (16ª rodada) — pedido verbatim: "A bolinha verde de destaque no 'Ver em 3D' não está aparecendo [...] Os
+   *  destaques que um objeto receber devem coexistir. O do patrimônio e o destaque de alteração do histórico devem coexistir."
+   *  CAUSA: o selo de Histórico (círculo 0,16m a topo+0,14m) e o selo do patrimônio (plaquinha 0,34m a até topo-0,03m; em objetos
+   *  BAIXOS — notebook, monitor, impressora... — o piso do clamp joga a plaquinha pra base+0,12m) caíam no MESMO ponto da tela e o
+   *  da frente (mesmo renderOrder, sem teste de profundidade) escondia o outro; Histórico e Especificações também só se separavam
+   *  em X do MUNDO (±0,11m), o que some vendo o objeto de lado. Agora todos os selos de um objeto são EMPILHADOS na VERTICAL (os
+   *  sprites sempre encaram a câmera, então empilhar em Y nunca sobrepõe, de qualquer ângulo): primeiro os do patrimônio (como
+   *  sempre), depois, acima deles, Histórico e, acima, Especificações. Devolve o Y do centro do selo do slot pedido
+   *  (0 = Histórico/1º selo de alteração, 1 = o seguinte). */
+  _alteracaoBadgeY(obj, topoY, slot, baseObjY) {
+    // [30/09/2026] MUDADO (20ª rodada) — MESMA altura do selo do patrimônio (ver _addItemAssociadoDestaque: ALTURA_VISAO 1,5m clampada entre base+0,12 e topo-0,03); `slot` não empilha mais (os três ficam numa LINHA horizontal: losango | patrimônio | bolinha).
+    return Utils.clamp(baseObjY + 1.5, baseObjY + 0.12, topoY - 0.03);
+  }
+
+  /** [30/09/2026] NOVO (18ª rodada) — desloca o sprite de alteração pra DIREITA na tela (pivô do sprite fora do centro, então vale de qualquer ângulo de câmera e escala com a distância), saindo de cima da coluna/facho de destaque e do selo do patrimônio, sem se afastar do objeto. */
+  _alteracaoBadgeShift(sprite, lado) {
+    // [30/09/2026] MUDADO (18ª rodada, 2º ajuste) — pedido verbatim: "A losango verde (das especificações) acaba ficando em cima da coluna de destaque do patrimônio também, deve ficar próximo do objeto". Causa raiz: o losango ficava empilhado ACIMA da bolinha (mesmo X de tela, deslocamento pequeno), ainda dentro da largura da coluna/facho. Agora os dois selos ficam na MESMA altura rente ao topo do objeto, um de cada lado da coluna: Histórico à direita (lado=1), Especificações à esquerda (lado=-1), ambos ~0,32m de tela do eixo (borda mais próxima ~0,24m, fora do raio máx. 0,16m do facho).
+    // [30/09/2026] CORRIGIDO (19ª rodada) — CAUSA RAIZ REAL de bolinha/losango continuarem em cima da coluna azul: `center` é propriedade do THREE.Sprite, NÃO do material; `sprite.material.center` é undefined, o .set() lançava erro e o try/catch engolia — o deslocamento lateral NUNCA foi aplicado nas rodadas 18ª. Confirmado renderizando a cena num Chromium headless (selos colados no facho). Agora usa sprite.center.
+    // [30/09/2026] MUDADO (22ª rodada) — pedido verbatim: "ordene os 3 ícones da esquerda para a direita na mesma ordem em que aparecem nas propriedades. Coloque-os mais juntos também." Ordem da janela de propriedades: Patrimônio, Especificações, Histórico => 🔗 (centro, no eixo do objeto) | ◆ Especificações | ● Histórico, à direita do 🔗 e bem colados (0,28m e 0,46m do eixo; selos de 0,16m). `center` = 0,5 - deslocamento/largura.
+    sprite.center.set(lado === 'hist' ? 0.5 - 0.425 / 0.16 : 0.5 - 0.255 / 0.16, 0.5);   // [01/10/2026] MUDADO (24ª rodada) — "Os 3 ícones devem ficar mais juntos": 0,255m/0,425m do eixo (antes 0,28/0,46), praticamente encostados
+  }
+
+  _addHistoricoDestaque(obj, perfil, baseY, coexisteComEspec) {
     if (!window.ObjectStandard) return;
     const cor = window.ObjectStandard.corIndicadorHistorico(obj);
     if (!cor) return;
@@ -5799,9 +6183,227 @@ class Engine3D {
     const tex = this._buildHistoricoBadgeTexture(cor);
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
     sprite.scale.set(0.16, 0.16, 1);
-    sprite.position.set(obj.x, topoY + 0.14, obj.y);
+    // [30/09/2026] NOVO — quando o objeto TAMBÉM tem o selo de
+    // "Especificações" (`_addEspecDestaque`), desloca este um pouco pra
+    // ESQUERDA (o de Especificações desloca pra DIREITA, ver lá) — "os
+    // ícones devem coexistir", pedido verbatim, sem um cobrir o outro.
+    // [30/09/2026] MUDADO (16ª rodada) — empilhado na vertical (ver _alteracaoBadgeY); sem mais deslocamento em X do mundo.
+    // [30/09/2026] CORRIGIDO (20ª rodada) — pedido verbatim: "Certifique-se que a impressão dos desenhos não são condicionadas ao valor das alturas da coluna do patrimônio e que todos os 3 desenhos ficam a mesma distância do chão." Causa raiz: o selo do patrimônio fica em clamp(base+1,5m, base+0,12m .. topo-0,03m) enquanto bolinha/losango ficavam em topo+0,14m — em objetos altos, bem acima do selo (por isso 'em cima da coluna'). Agora os três usam EXATAMENTE a mesma fórmula de altura (_alteracaoBadgeY), independente de existir patrimônio.
+    sprite.position.set(obj.x, this._alteracaoBadgeY(obj, topoY, 0, baseY + y0), obj.y);
+    this._alteracaoBadgeShift(sprite, 'hist');
     sprite.renderOrder = 5;
+    sprite.userData.alteracaoObjId = obj.id;   // [30/09/2026] NOVO (15ª rodada) — permite remover/recriar o selo ao vivo (ver rebuildObjectIncremental)
     this._group.add(sprite);
+  }
+
+  /** [30/09/2026] NOVO — mesma ideia de `_addHistoricoDestaque` (pontinho
+   *  simples plantado acima do objeto), agora pro pedido verbatim: "Deve
+   *  ser possível ativar este destaque com alterações feitas tanto no
+   *  'Histórico' quanto nas 'Especificações'. Cada uma deve ter o seu
+   *  'ícone' indicando que houve alteração do objeto. Os ícones devem
+   *  coexistir." Cor/forma DIFERENTES de propósito (losango âmbar, contra o
+   *  círculo verde/cinza do Histórico) — pra dar pra diferenciar os dois de
+   *  relance. HONESTIDADE DE ESCOPO: ao contrário do Histórico (que tem
+   *  `modificadoEm` por entrada, permitindo a cor "recente vs. antigo"),
+   *  especificações/descrição são um campo livre simples, sem data de
+   *  edição registrada — então este selo é BINÁRIO (aparece/não aparece,
+   *  sempre a mesma cor), não "recente vs. antigo" como o de Histórico.
+   *  `window.ObjectStandard.temEspecificacoes` (js/objectstandard.js) é
+   *  quem decide se aparece: qualquer especificação cadastrada OU uma
+   *  descrição não vazia. */
+  _addEspecDestaque(obj, perfil, baseY, coexisteComHistorico) {
+    if (!window.ObjectStandard) return;
+    const cor = window.ObjectStandard.corIndicadorEspec(obj);
+    if (!cor) return;
+    const THREE = this.THREE;
+    const h = Math.max(perfil.h || 0.5, 0.05);
+    const y0 = perfil.y0 || 0;
+    const topoY = baseY + y0 + h;
+    const tex = this._buildEspecBadgeTexture(cor);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+    sprite.scale.set(0.16, 0.16, 1);
+    // [30/09/2026] MUDADO (16ª rodada) — empilhado na vertical (ver _alteracaoBadgeY): 2º slot se há selo de Histórico, senão 1º.
+    // [30/09/2026] CORRIGIDO (20ª rodada) — pedido verbatim: "Certifique-se que a impressão dos desenhos não são condicionadas ao valor das alturas da coluna do patrimônio e que todos os 3 desenhos ficam a mesma distância do chão." Causa raiz: o selo do patrimônio fica em clamp(base+1,5m, base+0,12m .. topo-0,03m) enquanto bolinha/losango ficavam em topo+0,14m — em objetos altos, bem acima do selo (por isso 'em cima da coluna'). Agora os três usam EXATAMENTE a mesma fórmula de altura (_alteracaoBadgeY), independente de existir patrimônio.
+    sprite.position.set(obj.x, this._alteracaoBadgeY(obj, topoY, 0, baseY + y0), obj.y);
+    this._alteracaoBadgeShift(sprite, 'espec');
+    sprite.renderOrder = 5;
+    sprite.userData.alteracaoObjId = obj.id;   // [30/09/2026] NOVO (15ª rodada) — permite remover/recriar o selo ao vivo (ver rebuildObjectIncremental)
+    this._group.add(sprite);
+  }
+
+  /** Textura (losango) do selo de "Especificações" acima — [30/09/2026]
+   *  MUDADO: agora a cor segue o tempo (verde/cinza, mesma lógica do
+   *  Histórico via `ObjectStandard.corIndicadorEspec`), então o cache
+   *  passou a ser por COR (mesmo esquema de `_buildHistoricoBadgeTexture`),
+   *  não mais uma textura amber única. */
+  _buildEspecBadgeTexture(cor) {
+    this._especBadgeTexCache = this._especBadgeTexCache || new Map();
+    if (this._especBadgeTexCache.has(cor)) return this._especBadgeTexCache.get(cor);
+    const THREE = this.THREE;
+    const c = document.createElement('canvas');
+    c.width = 48; c.height = 48;
+    const ctx = c.getContext('2d');
+    ctx.translate(24, 24);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = cor;
+    ctx.fillRect(-13, -13, 26, 26);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(10,13,17,0.6)';
+    ctx.strokeRect(-13, -13, 26, 26);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this._especBadgeTexCache.set(cor, tex);
+    return tex;
+  }
+
+  // -------------------------------------------------------------------
+  // [30/09/2026] NOVO — botão "ℹ️ Informações" (Modo Navegação, duplo
+  // clique) virou um selo de VERDADE no espaço 3D (em vez de um botão HTML
+  // fixo na tela) — pedido verbatim: "Este botão deve aparecer acima do
+  // objeto no 3D e estar sujeito ao 'bater' do raycaster [...] Deve ser
+  // opcional a janela ser fixa [...] ou ficar aparecendo de acordo com a
+  // posição do objeto no mundo 3D em tempo real. Por padrão, deve ser este
+  // último jeito." Ver `view3d.js` `_armarBotaoInformacoes3D`/
+  // `_atualizarBotaoInformacoes3D` (quem chama estes 3 métodos, todo
+  // quadro, quando o modo "acompanhar objeto" está ativo — o padrão).
+  // -------------------------------------------------------------------
+
+  /** Textura do selo "ℹ️" — círculo azul com o 'i', mesmo espírito das
+   *  outras (`_buildHistoricoBadgeTexture`/`_buildEspecBadgeTexture`), cor
+   *  fixa (não tem "tempo" nenhum aqui, é só um botão), cache único. */
+  _buildInfoBadgeTexture() {
+    if (this._infoBadgeTexCache) return this._infoBadgeTexCache;
+    const THREE = this.THREE;
+    // [30/09/2026] CORRIGIDO (12ª rodada) — pedido verbatim: "No 'Ver em 3D', no 'Modo Navegação', ao apontar para
+    // um objeto e dar dois cliques, aparece um botão 'i' de informação. Este botão deve ser nítido em quaisquer
+    // nível de proximidade." CAUSA: a textura era 48x48 px (esticada quando o selo ocupava muitos pixels de perto
+    // = borrado) e o tamanho do sprite era FIXO no mundo (0.26m: enorme de perto, minúsculo/ilegível de longe).
+    // Agora: textura 256x256 (com mipmaps + anisotropia) e tamanho em tela constante (ver setInfoBadgeWorldPos).
+    const N = 256, c = document.createElement('canvas');
+    c.width = N; c.height = N;
+    const ctx = c.getContext('2d');
+    ctx.beginPath();
+    ctx.arc(N / 2, N / 2, N * 0.42, 0, Math.PI * 2);
+    ctx.fillStyle = '#2f8fff';
+    ctx.fill();
+    ctx.lineWidth = N * 0.0625;
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold ' + Math.round(N * 0.54) + 'px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('i', N / 2, N / 2 + N * 0.02);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.generateMipmaps = true;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    try { tex.anisotropy = this.renderer?.capabilities?.getMaxAnisotropy?.() || 4; } catch (e) { /* ignora */ }
+    this._infoBadgeTexCache = tex;
+    return tex;
+  }
+
+  /** [30/09/2026] NOVO (14ª rodada) — pedido verbatim: "Ao apontar para o botão 'i', ele deve receber um destaque suave."
+   *  Textura de destaque: mesmo selo, azul mais claro + halo suave (cache único). */
+  _buildInfoBadgeHoverTexture() {
+    if (this._infoBadgeHoverTexCache) return this._infoBadgeHoverTexCache;
+    const THREE = this.THREE;
+    const N = 256, c = document.createElement('canvas');
+    c.width = N; c.height = N;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(N / 2, N / 2, N * 0.36, N / 2, N / 2, N * 0.5);
+    g.addColorStop(0, 'rgba(120,190,255,0.55)'); g.addColorStop(1, 'rgba(120,190,255,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(N / 2, N / 2, N * 0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(N / 2, N / 2, N * 0.38, 0, Math.PI * 2);
+    ctx.fillStyle = '#5aa9ff'; ctx.fill();
+    ctx.lineWidth = N * 0.0625; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold ' + Math.round(N * 0.5) + 'px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('i', N / 2, N / 2 + N * 0.02);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.generateMipmaps = true; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.magFilter = THREE.LinearFilter;
+    try { tex.anisotropy = this.renderer?.capabilities?.getMaxAnisotropy?.() || 4; } catch (e) { /* ignora */ }
+    this._infoBadgeHoverTexCache = tex;
+    return tex;
+  }
+
+  /** [30/09/2026] NOVO (14ª rodada) — liga/desliga o destaque suave do selo "ℹ️" (textura clara + 15% maior). */
+  setInfoBadgeHover(on) {
+    const sp = this._infoBadgeSprite;
+    if (!sp) return;
+    const ligado = !!on;
+    if (this._infoBadgeHover === ligado) return;
+    this._infoBadgeHover = ligado;
+    sp.material.map = ligado ? this._buildInfoBadgeHoverTexture() : this._buildInfoBadgeTexture();
+    sp.material.needsUpdate = true;
+    const b = this._infoBadgeBaseScale || sp.scale.x;
+    const k = ligado ? 1.15 : 1;
+    sp.scale.set(b * k, b * k, 1);
+  }
+
+  /** Cria (na 1ª chamada) ou reposiciona o selo "ℹ️" em `pos` (`{x,y,z}`
+   *  do MUNDO) — chamado todo quadro pelo modo "acompanhar objeto" de
+   *  `view3d.js`, então só troca `sprite.position`, nunca recria a malha
+   *  à toa. */
+  setInfoBadgeWorldPos(pos) {
+    if (!pos || !this._group) return;
+    const THREE = this.THREE;
+    if (!this._infoBadgeSprite) {
+      const tex = this._buildInfoBadgeTexture();
+      this._infoBadgeSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+      this._infoBadgeSprite.renderOrder = 6;
+      this._group.add(this._infoBadgeSprite);
+    }
+    // [30/09/2026] CORRIGIDO (12ª rodada) — tamanho EM TELA constante (~34px), qualquer distância: altura do
+    // mundo visível a distância d = 2·d·tan(fov/2); escala = (34px / altura do canvas) · isso. Antes: 0.26m fixos.
+    try {
+      const cam = this.camera3;
+      const altPx = (this.renderer?.domElement?.clientHeight) || 600;
+      const d = Math.max(0.05, cam.position.distanceTo(new THREE.Vector3(pos.x, pos.y, pos.z)));
+      const esc = (34 / altPx) * 2 * d * Math.tan((cam.fov * Math.PI / 180) / 2);
+      this._infoBadgeBaseScale = esc;
+      const k = this._infoBadgeHover ? 1.15 : 1;
+      this._infoBadgeSprite.scale.set(esc * k, esc * k, 1);
+    } catch (e) { this._infoBadgeSprite.scale.set(0.26, 0.26, 1); }
+    this._infoBadgeSprite.position.set(pos.x, pos.y, pos.z);
+    this._infoBadgeSprite.visible = true;
+  }
+
+  /** Remove/esconde o selo "ℹ️" — chamado quando o botão "expira"/o modo
+   *  fixo está em uso/o "Ver em 3D" é fechado (ver `_rebuildScene`, que
+   *  reconstrói `this._group` do zero — o sprite antigo já era descartado
+   *  junto, então nem precisa chamar isto ali). */
+  clearInfoBadge() {
+    if (this._infoBadgeSprite) this._infoBadgeSprite.visible = false;
+    this.setInfoBadgeHover?.(false);   // [30/09/2026] NOVO (14ª rodada)
+  }
+
+  /** Posição do TOPO do pickable `entityId` (`this.pickables`, já
+   *  atualizado todo quadro pra objetos animados — ver
+   *  `_syncScriptedObjectTransforms` — então "acompanhar a posição real do
+   *  objeto" sai de graça, sem nenhum código extra de rastreamento aqui).
+   *  `null` se o objeto não tiver mais pickable (removido/fora do piso
+   *  atual etc.) — quem chama trata isso escondendo o selo. */
+  getPickableTopWorldPos(entityId) {
+    const p = this.pickables.find((x) => x.id === entityId);
+    if (!p) return null;
+    const halfY = p.obb?.half?.y ?? (p.radius || 0.3);
+    return { x: p.pos.x, y: p.pos.y + halfY + 0.18, z: p.pos.z };
+  }
+
+  /** Teste de mira SIMPLES (esfera) contra o selo "ℹ️" atual — pedido
+   *  verbatim: "estar sujeito ao 'bater' do raycaster [...] apontar para
+   *  ele e o raycaster 'bater' nele, então, clica-se". Raio generoso
+   *  (0.22m) de propósito — o selo é pequeno e a pessoa está mirando de
+   *  longe, mesma folga que um alvo de UI merece (não é uma peça da cena
+   *  que precisa de precisão pixel-perfect). */
+  hitTestInfoBadge(origin, dir) {
+    if (!this._infoBadgeSprite || !this._infoBadgeSprite.visible) return false;
+    // [30/09/2026] MUDADO (12ª rodada) — raio de acerto acompanha o tamanho em tela do selo (ver setInfoBadgeWorldPos), com folga generosa.
+    const raioAcerto = Math.max(0.03, (this._infoBadgeSprite.scale.x || 0.26) * 0.85);
+    const t = this._raySphereT(origin, dir, this._infoBadgeSprite.position, raioAcerto);
+    return t !== null;
   }
 
   /** Destaque visual de "item associado" (obj.itemId) — pedido do usuário
@@ -5917,7 +6519,12 @@ class Engine3D {
         const texOrd = this._buildOrdinalBadgeTexture(maiorOrdinal);
         const spriteOrd = new THREE.Sprite(new THREE.SpriteMaterial({ map: texOrd, transparent: true, depthTest: false }));
         spriteOrd.scale.set(larguraSub, larguraSub, 1);
-        spriteOrd.position.set(obj.x, Utils.clamp(baseObjY + ALTURA_VISAO - 0.30, baseObjY + 0.12, topoY - 0.03), obj.y);
+        let yOrd = Utils.clamp(baseObjY + ALTURA_VISAO - 0.30, baseObjY + 0.12, topoY - 0.03);
+        // [30/09/2026] CORRIGIDO (16ª rodada) — "os destaques que um objeto receber devem coexistir": em objeto BAIXO o clamp joga o
+        // ordinal pro MESMO ponto do selo principal (ambos em base+0,12m) e um escondia o outro; nesse caso o ordinal sobe pra
+        // ACIMA do conjunto (depois do contador "×N", se houver).
+        if (Math.abs(yOrd - sprite.position.y) < 0.2) yOrd = sprite.position.y + (ids.length > 1 ? 0.60 : 0.30);
+        spriteOrd.position.set(obj.x, yOrd, obj.y);
         spriteOrd.renderOrder = 6;
         this._group.add(spriteOrd);
         badgeSprites.push(spriteOrd);
@@ -5928,6 +6535,9 @@ class Engine3D {
     // posição de referência do raycast é a do selo principal (as flags,
     // deslocadas só ±0.3m dele, ficam bem próximas o bastante pra esconder/
     // mostrar TODAS juntas como um grupo único, sem parecer picotado).
+    // [30/09/2026] NOVO (16ª rodada) — guarda até onde (altura Y) vai o conjunto de selos do patrimônio deste objeto, pra os selos
+    // de alteração (Histórico/Especificações) serem empilhados ACIMA dele, sem se sobrepor (ver _alteracaoBadgeY).
+    try { this._itemBadgeTop = { id: obj.id, y: Math.max(...badgeSprites.map((sp) => sp.position.y + (sp.scale.y || 0) / 2)) }; } catch (e) { this._itemBadgeTop = null; }
     this._itemBadgeGroups.push({ pos: { x: sprite.position.x, y: sprite.position.y, z: sprite.position.z }, sprites: badgeSprites });
 
     // Destaque extra opcional — dois EFEITOS independentes (pedido do
@@ -6126,7 +6736,103 @@ class Engine3D {
    *  `ModelerUI.buildStandaloneObjectTransformPanel` `persist()`). Garante
    *  o resultado CORRETO pra qualquer tipo de builder, sem duplicar
    *  fórmulas de posicionamento à mão. */
+  /** [01/10/2026] NOVO (42ª rodada) — "A malha 3D não se mexe na tela. É só uma atualização de posição." Desloca (dx, dz em metros do mundo = dx, dy do mapa 2D) TODAS as malhas já
+   *  construídas de um objeto, direto em `position` — o mesmo que o HTML enviado faz (mesh.position), sem reconstruir nada. Também move os dados de picking (pos/center), os selos
+   *  de alteração e as luzes de luminária do objeto. Objeto desenhado por pool de instâncias (muitos do mesmo tipo) não tem malha própria visível: nesse caso cai na reconstrução
+   *  incremental. Devolve true se tratou. */
+  moveObjectLive(obj, dx, dz, dy = 0) {
+    if (!this._ready || !this._group || !obj) return false;
+    const eDeste = (n) => n?.userData?.pick?.ref === obj;
+    const nos = this._group.children.filter((node) => {
+      if (eDeste(node)) return true;
+      let achou = false;
+      node?.traverse?.((n) => { if (eDeste(n)) achou = true; });
+      return achou;
+    });
+    if (!nos.length) return false;
+    let pool = false;
+    nos.forEach((node) => node.traverse?.((n) => { if (n.userData?._inst) pool = true; }));
+    if (pool) return this.rebuildObjectIncremental(obj);
+    const vetores = new Set();
+    const mover = (node) => {
+      node.position.x += dx; node.position.z += dz; node.position.y += dy;   // [43ª] dy = variação de elevação (empilhamento dinâmico)
+      node.updateMatrix?.();
+      node.updateMatrixWorld?.(true);
+      node.traverse?.((n) => { const pk = n.userData && n.userData.pick; if (pk && pk.ref === obj) { if (pk.pos) vetores.add(pk.pos); if (pk.center) vetores.add(pk.center); } });
+    };
+    nos.forEach(mover);
+    this._group.children.filter((n) => n?.userData?.alteracaoObjId === obj.id).forEach((n) => { n.position.x += dx; n.position.z += dz; n.position.y += dy; n.updateMatrixWorld?.(true); });
+    vetores.forEach((p) => { p.x += dx; p.z += dz; p.y += dy; });
+    (this._dynamicLights || []).forEach((l) => { if (l.userData?.ownerObjId === obj.id) { l.position.x += dx; l.position.z += dz; l.position.y += dy; } });
+    // [01/10/2026] CORRIGIDO (44ª rodada) — o corte por distância (_cullMeshes) guarda x/z em cache: acompanha o deslocamento, senão o objeto movido some/aparece pela posição antiga.
+    (this._cullMeshes || []).forEach((c) => { if (c.mesh?.userData?.pick?.ref === obj) { c.x += dx; c.z += dz; } });
+    // [44ª] a linha de base (o que a malha representa) acompanha o deslocamento aplicado.
+    const _b = this._liveBase && this._liveBase.get(obj);
+    if (_b) { _b.x += dx; _b.y += dz; _b.e += dy; }
+    return true;
+  }
+
+  /** [01/10/2026] NOVO (44ª rodada) — "A atualização em tempo real está funcionando do 3D para o 2D (3D->2D). Porém, não está funcionando do 2D para o 3D (2D->3D). É só para atualizar a posição
+   *  do objeto no 3D." CAUSA RAIZ (confirmada rodando o app num Chromium): DB.getMap devolve cloneRec = cópia RASA ({...r}), então o mapa do 2D (MapView._map) e o do 3D (View3D._map) compartilham
+   *  o MESMO array objects e os MESMOS objetos. Mover no 2D já altera o objeto que a malha 3D representa, e o sync da 38ª-43ª comparava o objeto do 3D com o do 2D (idênticos, dx = 0): nenhuma
+   *  malha era deslocada e o diff nunca via mudança. Por isso o 3D->2D funcionava (mesmo objeto) e o 2D->3D não. Correção: o motor guarda, por objeto, a LINHA DE BASE do que as malhas
+   *  desenhadas representam (x, y, elevação efetiva e uma assinatura de tamanho/ângulo) e syncObjectLive compara o objeto com ELA. */
+  _liveEfetiva(o) {
+    return (o.elevacao || 0) + (o.semY0 ? 0 : ((typeof OBJECT3D_PROFILES !== 'undefined' && OBJECT3D_PROFILES[o.tipo] && OBJECT3D_PROFILES[o.tipo].y0) || 0));
+  }
+
+  _liveSig(o) {
+    // [47ª rodada] + campos de conteúdo (folha de papel: texto/fonte/cor do texto; cor) -- editar o conteúdo no 2D reconstrói a malha no 3D
+    return [o.angulo, o.largura, o.profundidade, o.altura, o.piso, o.rotX, o.rotZ, o.escala, o.raio, o.texto, o.papelFonte, o.papelCorTexto, o.papelLinhas, o.papelMargem, o.papelFonteTam, o.cor, o.padrao, o.acabamento].join('|');
+  }
+
+  _liveSnap(o) {
+    // [77ª rodada] pp = vértices do Piso editável (contorno/furos/recortes): mudou => troca só a geometria (CustomFloor.updateVertices) — sem isso a malha ficava "estática" no 3D.
+    return { x: o.x || 0, y: o.y || 0, e: this._liveEfetiva(o), sig: this._liveSig(o), pp: o.pisoPoligono ? JSON.stringify(o.pisoPoligono) : '', tl: o.telha ? JSON.stringify(o.telha) : '' };
+  }
+
+  /** Chamado logo depois de setScene (ver View3D._rebuildScene): grava a linha de base de todos os objetos/portas/janelas da cena. */
+  _liveBaseline() {
+    this._liveBase = new Map();
+    ['objects', 'portas', 'janelas'].forEach((k) => (this.mapData?.[k] || []).forEach((o) => { this._liveBase.set(o, this._liveSnap(o)); }));
+  }
+
+  /** Atualiza a malha de UM objeto para o estado atual dele. Devolve 'same' (nada mudou), 'moved' (só posição/elevação: malhas deslocadas, sem recriar), 'rebuilt' (tamanho/ângulo mudou:
+   *  malha reconstruída) ou false (objeto desconhecido pela cena — quem chamou decide, ex.: reconstrução completa). */
+  syncObjectLive(obj) {
+    const base = this._liveBase && this._liveBase.get(obj);
+    if (!base || !this._ready) return false;
+    const cur = this._liveSnap(obj);
+    if (cur.sig !== base.sig) return this.rebuildObjectIncremental(obj) ? 'rebuilt' : false;
+    if (cur.pp !== base.pp) {
+      const ok = !!(obj.pisoPoligono && window.PisoCustom && window.PisoCustom.atualizar3D(this, obj));   // geometria nova + dispose da antiga, na malha existente
+      if (!ok) return this.rebuildObjectIncremental(obj) ? 'rebuilt' : false;                          // converteu/voltou a retângulo: reconstrói
+      base.pp = cur.pp;
+    }
+    if (obj.tipo === 'telha' && (cur.tl !== base.tl || (obj.telha && obj.telha.grupo && (cur.pp !== base.pp || cur.x !== base.x || cur.y !== base.y || cur.e !== base.e)))) {
+      // [88ª] Telha: qualquer troca nas propriedades (material, formato, inclinação, águas, união) RECONSTRÓI a geometria; membros da mesma união se refazem juntos (ver rebuildObjectIncremental)
+      return this.rebuildObjectIncremental(obj) ? 'rebuilt' : false;
+    }
+    const dx = cur.x - base.x, dz = cur.y - base.y, dy = cur.e - base.e;
+    if (!dx && !dz && !dy) return 'same';
+    return this.moveObjectLive(obj, dx, dz, dy) ? 'moved' : false;
+  }
+
+  /** [01/10/2026] NOVO (44ª rodada) — envoltório de _rebuildObjectIncrementalCore: depois de reconstruir a malha de um objeto, regrava a "linha de base" dele (posição/elevação/assinatura
+   *  que a malha representa) — ver _liveBaseline/syncObjectLive. */
   rebuildObjectIncremental(obj) {
+    const r = this._rebuildObjectIncrementalCore(obj);
+    if (r && this._liveBase && obj) { try { this._liveBase.set(obj, this._liveSnap(obj)); } catch (e) { /* ignora */ } }
+    // [88ª] telhados unidos são uma peça única: refazer um refaz os outros membros da união (superfície = máximo das águas de todos)
+    if (r && obj && obj.tipo === 'telha' && window.CustomRoof && !this._rebuildGrupoTelha) {
+      this._rebuildGrupoTelha = true;
+      try { window.CustomRoof.membros(obj, this.mapData).forEach((o) => { if (o !== obj && o.id !== obj.id) { this._rebuildObjectIncrementalCore(o); if (this._liveBase) this._liveBase.set(o, this._liveSnap(o)); } }); } catch (e) { console.warn('[Telha] união:', e); }
+      this._rebuildGrupoTelha = false;
+    }
+    return r;
+  }
+
+  _rebuildObjectIncrementalCore(obj) {
     if (!this._ready || !this._group || !this.mapData || !obj) return false;
     const eDeste = (n) => n?.userData?.pick?.ref === obj;
     const topoParaRemover = this._group.children.filter((node) => {
@@ -6162,14 +6868,18 @@ class Engine3D {
           }
         }
         if (!n.isMesh) return;
-        if (n.material && n.material.map && n.material.map.isCanvasTexture) n.material.map.dispose();   // serigrafia dos equipamentos de rede
+        if (n.material && n.material.map && n.material.map.isCanvasTexture && !n.material.map.userData?.compartilhado) n.material.map.dispose();   // serigrafia dos equipamentos de rede
         n.geometry?.dispose?.();
-        if (Array.isArray(n.material)) n.material.forEach((mt) => mt?.dispose?.());
-        else n.material?.dispose?.();
+        if (Array.isArray(n.material)) n.material.forEach((mt) => { if (!mt?.userData?.compartilhado) mt?.dispose?.(); });
+        else if (!n.material?.userData?.compartilhado) n.material?.dispose?.();
       });
     });
     this._pickMeshes = this._pickMeshes.filter((m) => !eDeste(m));
     this.pickables = this.pickables.filter((p) => p?.ref !== obj);
+    // [30/09/2026] NOVO (15ª rodada) — os selos ● Histórico / ◆ Especificações não têm userData.pick (não são clicáveis), então a
+    // limpeza acima não os removia: ao reconstruir o objeto "ao vivo" (ex.: depois de adicionar uma entrada de histórico dentro do
+    // 3D) o selo antigo ficaria duplicado/desatualizado. Remove os selos deste objeto (marcados em _addHistoricoDestaque/_addEspecDestaque).
+    this._group.children.filter((n) => n?.userData?.alteracaoObjId === obj.id).forEach((n) => { this._group.remove(n); try { n.material?.dispose?.(); } catch (e) { /* ignora */ } });
     const wireframe = this.mode === 'wireframe';
     const colWireframe = 0x78c8ff; // MESMA constante de `setScene`/`addObjectIncremental`, ver lá
     const childrenBefore = this._group.children.length;
@@ -6532,6 +7242,16 @@ class Engine3D {
    *     mapa. Em troca, um bloco só PARCIALMENTE fora do alcance continua
    *     mostrando TUDO que tem dentro (corte mais grosseiro, "tudo ou nada"
    *     por bloco, nunca corta um objeto sozinho no meio do caminho). */
+  /** [01/10/2026] NOVO (46ª rodada) — mantém a grade de referência (THREE.GridHelper) centrada na câmera, em passos de 0,5 m (a fase da grade não muda: sempre alinhada à origem do mundo). */
+  _updateRefGrid(camera) {
+    const g = this._refGrid;
+    const cp = (this.camera3 && this.camera3.position) || (camera && camera.position);
+    if (!g || !cp) return;
+    const x = Math.round(cp.x * 2) / 2, z = Math.round(cp.z * 2) / 2;
+    if (g.position.x !== x) g.position.x = x;
+    if (g.position.z !== z) g.position.z = z;
+  }
+
   _updateDistanceCulling(camera) {
     const lista = this._cullMeshes;
     if (!lista?.length) return;
@@ -7234,7 +7954,14 @@ class Engine3D {
    *  visual pros milhares de objetos já existentes sem material customizado. */
   _applyObjMaterialOverride(obj, childrenBefore) {
     if (!obj || !this._group) return;
-    const temOverride = obj.rugosidade != null || obj.metalico != null || obj.opacidade != null || !!obj.texturaUrl;
+    // [01/10/2026] NOVO (36ª rodada) — "Sobre ao trocar a cor de um objeto, ainda não está aparecendo no 'Ver em 3D'. Faça a cor ser um material.
+    // Deste modo, será a aplicação de um material que tem cor e as malhas são atualizadas." CAUSA RAIZ: a cor só era lida DENTRO de alguns
+    // builders (retângulo/polígono/perfil genérico); os demais (registro de tipos, glb/obj, mesas, etc.) usavam cor fixa própria e ignoravam
+    // obj.cor. Agora a cor é um campo do MESMO passe de material (rugosidade/metálico/opacidade/textura), aplicado depois de QUALQUER builder,
+    // em setScene, addObjectIncremental e rebuildObjectIncremental. LIMITE: tinge todas as malhas lambert/standard/phong do objeto com a cor
+    // única (peças multicoloridas de um mesmo builder ficam de uma cor só); vidro (transparente) e materiais com textura de canvas são preservados.
+    const temCor = typeof obj.cor === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(obj.cor);
+    const temOverride = temCor || obj.rugosidade != null || obj.metalico != null || obj.opacidade != null || !!obj.texturaUrl;
     if (!temOverride) return;
     const THREE = this.THREE;
     const novos = this._group.children.slice(childrenBefore);
@@ -7244,6 +7971,11 @@ class Engine3D {
         if (!n.isMesh || !n.material) return;
         const mats = Array.isArray(n.material) ? n.material : [n.material];
         mats.forEach((mat) => {
+          if (temCor && mat.color && !(mat.isMeshBasicMaterial) && !(mat.transparent && mat.opacity < 1 && obj.opacidade == null) && !(mat.map && mat.map.isCanvasTexture)) {
+            mat.color.set(obj.cor);
+            mat.userData = mat.userData || {};
+            mat.userData._corMaterial = obj.cor;
+          }
           if (!mat.isMeshStandardMaterial && !mat.isMeshPhysicalMaterial) return;
           if (obj.rugosidade != null) mat.roughness = Utils.clamp(obj.rugosidade, 0, 1);
           if (obj.metalico != null) mat.metalness = Utils.clamp(obj.metalico, 0, 1);
@@ -7635,6 +8367,49 @@ class Engine3D {
     return new THREE.Mesh(geo, mat);
   }
 
+  /** [64ª rodada] Modelo FIXO (molde do tipo, .glb/.obj estático ou importado) ignorava largura/profundidade/altura do objeto: o painel e a
+   *  Transformação mudavam os dados (e o 2D), mas a malha 3D ficava no tamanho antigo. Devolve a escala (x=largura, y=altura, z=profundidade)
+   *  = dimensão atual do objeto / dimensão de fábrica do tipo (OBJECT3D_PROFILES). Dimensões iguais às de fábrica => 1 (modelo como foi desenhado). */
+  //  [82ª rodada] CORRIGIDO — pedido: "o pilar não está seguindo as medidas proporcionalmente. 10cm no 2D, não está correspondendo [...] no 3D, embora nas
+  //  propriedades esteja 10cm. O formato da malha visualmente está maior do que deveria." CAUSA: a escala era dimensão ÷ dimensão de FÁBRICA do perfil
+  //  (pilar 0,30 m), mas a malha do molde (pilar.malha.js) tem 1,20 × 2,80 × 0,60 m — 10 cm viravam 0,1/0,3 × 1,2 = 40 cm. Agora, quando o construtor passa o
+  //  tamanho REAL da malha (`nativo`, caixa da geometria sem escala), a escala é dimensão ÷ tamanho real: a malha fica exatamente com as medidas do 2D.
+  _escalaModeloPorDims(obj, nativo) {
+    const pf = OBJECT3D_PROFILES[obj.tipo];
+    const r = (v, f) => { const a = Number(v), b = Number(f); return (isFinite(a) && a > 0 && isFinite(b) && b > 0) ? Math.max(0.001, Math.min(1000, a / b)) : 1; };
+    if (obj.tipo === 'escada') return { x: 1, y: 1, z: 1 };
+    const temDims = obj.forma === 'retangulo' || (obj.forma === 'poligono' && obj.largura != null);
+    if (!temDims) return { x: 1, y: 1, z: 1 };
+    if (nativo && nativo.x > 1e-6 && nativo.z > 1e-6) return { x: r(obj.largura, nativo.x), y: (obj.altura != null && nativo.y > 1e-6) ? r(obj.altura, nativo.y) : 1, z: r(obj.profundidade, nativo.z), exato: true };
+    if (!pf) return { x: 1, y: 1, z: 1 };
+    return { x: r(obj.largura, pf.w), y: r(obj.altura, pf.h), z: r(obj.profundidade, pf.d) };
+  }
+  /** [83ª rodada] ESTRATÉGIA DE MALHA (gancho do catálogo "Mobiliário Padrão × Objetos Especiais", ver ObjCategorias.estrategiaMalha):
+   *   - 'compartilhada' (básico, sem modificação): o clone do molde COMPARTILHA a geometria com os outros objetos do mesmo tipo (e a caixa genérica entra no
+   *     InstancedMesh quando há muitos iguais) — leve, para itens replicados pelo cenário.
+   *   - 'isolada' (objeto especial OU objeto modificado no 2D — medidas diferentes das do molde): o objeto DEIXA o molde e ganha geometria PRÓPRIA (cópia),
+   *     então editar este objeto nunca afeta os outros. Pedido: "atualizou a malha no 2D, deve ser refletido no 3D, deixando o molde e tendo malha individual". */
+  _estrategiaMalha(obj, escala) {
+    const esp = window.ObjCategorias && window.ObjCategorias.estrategiaMalha ? window.ObjCategorias.estrategiaMalha(obj.tipo) : 'compartilhada';
+    if (esp === 'isolada') return 'isolada';
+    const mod = escala && ['x', 'y', 'z'].some((k) => Math.abs((escala[k] || 1) - 1) > 0.005);
+    return mod ? 'isolada' : 'compartilhada';
+  }
+  _aplicarEstrategiaMalha(raiz, obj, escala) {
+    const est = this._estrategiaMalha(obj, escala);
+    if (est === 'isolada') raiz.traverse((c) => { if (c.isMesh && c.geometry) c.geometry = c.geometry.clone(); });
+    raiz.userData.estrategiaMalha = est;
+    return est;
+  }
+  /** [82ª rodada] tamanho real (x, y, z) de uma malha/grupo SEM escala nem rotação — base da escala exata acima. */
+  _tamanhoNativo(raiz) {
+    const THREE = this.THREE, ps = raiz.position.clone(), rt = raiz.rotation.clone(), sc = raiz.scale.clone();
+    raiz.position.set(0, 0, 0); raiz.rotation.set(0, 0, 0); raiz.scale.set(1, 1, 1); raiz.updateMatrixWorld(true);
+    const s = new THREE.Box3().setFromObject(raiz).getSize(new THREE.Vector3());
+    raiz.position.copy(ps); raiz.rotation.copy(rt); raiz.scale.copy(sc); raiz.updateMatrixWorld(true);
+    return { x: s.x, y: s.y, z: s.z };
+  }
+
   /** NOVO (01/09/2026), item GRANDE #5, verbatim: "Deve ser possível editar o
    *  modelo dos objetos 3D padrão. Também devem ter dois modelos: um mais
    *  detalhado e um low poly (para melhorar desempenho)." + decisão do
@@ -7684,7 +8459,10 @@ class Engine3D {
     const verts = (detalhado || lowpoly).vertices || [];
     let minY = 0;
     for (let i = 0; i < verts.length; i++) { const y = verts[i]?.[1]; if (typeof y === 'number' && y < minY) minY = y; }
-    raiz.position.set(obj.x, baseY - minY, obj.y);
+    const _esc = this._escalaModeloPorDims(obj, this._tamanhoNativo(raiz));   // [82ª] escala pelo tamanho REAL do molde (medidas do 2D exatas)
+    raiz.scale.set(_esc.x, _esc.y, _esc.z);
+    this._aplicarEstrategiaMalha(raiz, obj, _esc);   // [83ª] malha individual se modificado/especial
+    raiz.position.set(obj.x, baseY - minY * _esc.y, obj.y);
     raiz.rotation.y = objAnguloToRotY(obj.angulo);
     this._group.add(raiz);
     raiz.updateMatrixWorld(true);
@@ -7755,6 +8533,7 @@ class Engine3D {
     // abaixo) — por isso a ORDEM importa: primeiro posiciona em
     // `baseY` "provisório" (y=0 relativo), mede a caixa, e só then ajusta Y
     // pra encostar a base real no chão.
+    const _nativo = this._tamanhoNativo(raiz);   // [82ª] tamanho real da malha do molde
     raiz.position.set(obj.x, baseY, obj.y);
     raiz.rotation.y = objAnguloToRotY(obj.angulo);
     // Escala opcional (`obj.modeloArquivoEscala`, ex. usuário achou o
@@ -7762,7 +8541,7 @@ class Engine3D {
     // padrão, mesmo espírito de `obj.customMesh` nunca forçar escala
     // sozinho.
     const escala = (typeof obj.modeloArquivoEscala === 'number' && obj.modeloArquivoEscala > 0) ? obj.modeloArquivoEscala : 1;
-    raiz.scale.setScalar(escala);
+    { const _e2 = this._escalaModeloPorDims(obj, _nativo); raiz.scale.setScalar(_e2.exato ? 1 : escala); raiz.scale.x *= _e2.x; raiz.scale.y *= _e2.y; raiz.scale.z *= _e2.z; this._aplicarEstrategiaMalha(raiz, obj, _e2); }   // [82ª] medidas do 2D exatas (÷ tamanho real do molde); [83ª] malha individual se modificado/especial
     this._group.add(raiz);
     raiz.updateMatrixWorld(true);
     const box3 = new THREE.Box3().setFromObject(raiz);
@@ -8104,7 +8883,8 @@ class Engine3D {
         || (this._countBadgeTexCache && [...this._countBadgeTexCache.values()].includes(t))
         || (this._ordinalBadgeTexCache && [...this._ordinalBadgeTexCache.values()].includes(t))
         || t === this._anelDouradoTex;
-      mats.forEach((m) => { if (m?.map && m.map !== this._floorTexture && m.map !== this._glassShineTexture && !isBadgeTex(m.map)) m.map.dispose?.(); m?.dispose?.(); });
+      // [50ª rodada] texturas/materiais COMPARTILHADOS (atlas das folhas de papel, ver folha-atlas.js) nunca são descartados aqui.
+      mats.forEach((m) => { if (m?.userData?.compartilhado) return; if (m?.map && m.map !== this._floorTexture && m.map !== this._glassShineTexture && !isBadgeTex(m.map) && !m.map.userData?.compartilhado) m.map.dispose?.(); m?.dispose?.(); });
       // Modo "Sólido+wireframe para desempenho" (ver _setupHybridMeshes)
       // guarda um SEGUNDO material por malha (`_solidMat`/`_wireMat`) que
       // pode não ser o `obj.material` ATUAL no momento do descarte (a malha
@@ -8779,6 +9559,7 @@ class Engine3D {
     // logo abaixo), senão o shader do chão desenharia este quadro com o
     // retângulo/estado do quadro ANTERIOR (1 quadro atrasado).
     this._updateFloorMaskUniform();
+    this._updateSombraFollow();   // [01/10/2026] 37ª rodada
     if (this._eye) {
       // [13/09/2026] NOVO — ver comentário grande em `_renderGlassOnlyPass`
       // pra arquitetura completa: só entra no passe extra do vidro quando
@@ -8996,6 +9777,8 @@ class Engine3D {
     // quadro (setadas/atualizadas logo acima). Lista normalmente vazia
     // (nenhum tipo customizado nos dois níveis ainda) — custo zero nesse caso.
     (this._lodObjects || []).forEach((lod) => lod.update(this.camera3));
+    this._updateRefGrid(camera);
+    try { window.FolhaAtlas && window.FolhaAtlas.updateLOD(this, this.camera3); } catch (e) { /* ignora */ }   // [51ª] LOD das folhas de papel (célula alta quando perto)
     this._updateDistanceCulling(camera);
     // [13/09/2026 UTC] NOVO — ver comentário grande de _buildOcclusionSectors
     // (mais acima) pro sistema completo. Roda DEPOIS de
@@ -9099,7 +9882,7 @@ class Engine3D {
         g.sprites.forEach((s) => { s.visible = true; });
         return;
       }
-      this._raycaster.set(
+      this._rcLivre(); this._raycaster.set(
         new THREE.Vector3(origin.x, origin.y, origin.z),
         new THREE.Vector3(dx / dist, dy / dist, dz / dist),
       );
@@ -9110,6 +9893,7 @@ class Engine3D {
       // dele, entre ele e a câmera.
       this._raycaster.far = Math.max(0.01, dist - 0.05);
       const bloqueado = this._raycaster.intersectObjects(meshes, false).length > 0;
+      this._raycaster.far = Infinity; // [84ª rodada] o raycaster é COMPARTILHADO com o picking: nunca deixar o alcance reduzido (causava falha de clique/destaque por distância)
       g.sprites.forEach((s) => { s.visible = !bloqueado; });
     });
   }
@@ -9138,13 +9922,15 @@ class Engine3D {
     const dx = toPos.x - fromPos.x, dy = toPos.y - fromPos.y, dz = toPos.z - fromPos.z;
     const dist = Math.hypot(dx, dy, dz);
     if (dist < 1e-4) return false;
-    this._raycaster.set(
+    this._rcLivre(); this._raycaster.set(
       new THREE.Vector3(fromPos.x, fromPos.y, fromPos.z),
       new THREE.Vector3(dx / dist, dy / dist, dz / dist),
     );
     this._raycaster.near = 0;
     this._raycaster.far = Math.max(0.01, dist - 0.05);
-    return this._raycaster.intersectObjects(meshes, false).length > 0;
+    const _bloq = this._raycaster.intersectObjects(meshes, false).length > 0;
+    this._raycaster.far = Infinity; // [84ª rodada] ver nota acima: raycaster compartilhado com o picking
+    return _bloq;
   }
 
   // ---------- "Recolhedor" de itens no 3D (pedido do usuário: "como no
@@ -9270,6 +10056,9 @@ class Engine3D {
     }
   }
 
+  /** [84ª rodada] Raycaster compartilhado: garante alcance ilimitado antes de cada uso (testes de oclusão reduzem `far`). */
+  _rcLivre() { if (this._raycaster) { this._raycaster.near = 0; this._raycaster.far = Infinity; } }
+
   /** Raio a partir do centro da tela (mira), no espaço do mundo. */
   centerRay(camera) {
     return { origin: { x: camera.x, y: camera.y, z: camera.z }, dir: cameraForward(camera) };
@@ -9313,7 +10102,7 @@ class Engine3D {
   raycastWall(origin, dir) {
     if (!this.THREE || !this._raycaster || !this._pickMeshes?.length) return null;
     const THREE = this.THREE;
-    this._raycaster.set(new THREE.Vector3(origin.x, origin.y, origin.z), new THREE.Vector3(dir.x, dir.y, dir.z).normalize());
+    this._rcLivre(); this._raycaster.set(new THREE.Vector3(origin.x, origin.y, origin.z), new THREE.Vector3(dir.x, dir.y, dir.z).normalize());
     const wallMeshes = this._pickMeshes.filter((m) => m.userData?.pick?.type === 'wall');
     if (!wallMeshes.length) return null;
     const hits = this._raycaster.intersectObjects(wallMeshes, false);
@@ -9415,7 +10204,7 @@ class Engine3D {
     let best = floorHit ? { x: floorHit.x, y: 0, z: floorHit.z, t: floorHit.t, restingOnId: null } : null;
     if (this.THREE && this._raycaster && this._pickMeshes?.length) {
       const THREE = this.THREE;
-      this._raycaster.set(
+      this._rcLivre(); this._raycaster.set(
         new THREE.Vector3(origin.x, origin.y, origin.z),
         new THREE.Vector3(dir.x, dir.y, dir.z).normalize(),
       );
@@ -9471,7 +10260,7 @@ class Engine3D {
     let best = floorHit ? { x: floorHit.x, y: 0, z: floorHit.z, t: floorHit.t, restingOnId: null, normal: { x: 0, y: 1, z: 0 } } : null;
     if (this.THREE && this._raycaster && this._pickMeshes?.length) {
       const THREE = this.THREE;
-      this._raycaster.set(
+      this._rcLivre(); this._raycaster.set(
         new THREE.Vector3(origin.x, origin.y, origin.z),
         new THREE.Vector3(dir.x, dir.y, dir.z).normalize(),
       );
@@ -9518,7 +10307,7 @@ class Engine3D {
   raycastLateral(origin, dir) {
     if (!this.THREE || !this._raycaster || !this._pickMeshes?.length) return null;
     const THREE = this.THREE;
-    this._raycaster.set(
+    this._rcLivre(); this._raycaster.set(
       new THREE.Vector3(origin.x, origin.y, origin.z),
       new THREE.Vector3(dir.x, dir.y, dir.z).normalize(),
     );
@@ -9547,9 +10336,13 @@ class Engine3D {
    *  real (só as de tipo item/câmera/objeto — paredes e chão nunca são
    *  "clicáveis" aqui) em vez da esfera aproximada do modo 'hitbox'. */
   pickFromRay(origin, dir) {
+    // [30/09/2026] NOVO (14ª rodada) — pedido verbatim: "O raycaster deve atingir somente o botão 'i' quando apontado para ele,
+    // não o que estiver atrás dele." Se a mira está em cima do selo "ℹ️" visível, NADA atrás dele é devolvido (clique,
+    // clique duplo, hover, edição — todos passam por aqui ou por hoverPick) — o selo é tratado por view3d.js à parte.
+    if (this.hitTestInfoBadge(origin, dir)) return null;
     if (this._config?.raycastPrecision === 'pixelperfect' && this._raycaster && this._pickMeshes?.length) {
       const THREE = this.THREE;
-      this._raycaster.set(
+      this._rcLivre(); this._raycaster.set(
         new THREE.Vector3(origin.x, origin.y, origin.z),
         new THREE.Vector3(dir.x, dir.y, dir.z).normalize(),
       );
@@ -9671,7 +10464,7 @@ class Engine3D {
     if (!this._raycaster || !this._pickMeshes?.length) return null;
     const THREE = this.THREE;
     const ray = rayOverride || this.centerRay(camera);
-    this._raycaster.set(
+    this._rcLivre(); this._raycaster.set(
       new THREE.Vector3(ray.origin.x, ray.origin.y, ray.origin.z),
       new THREE.Vector3(ray.dir.x, ray.dir.y, ray.dir.z).normalize(),
     );
@@ -9714,6 +10507,8 @@ class Engine3D {
    *  abaixo. */
   hoverPick(camera, rayOverride) {
     if (!this._ready || !this.mapData) return null;
+    // [30/09/2026] NOVO (14ª rodada) — idem pickFromRay: mirando o selo "ℹ️", o destaque/hover não pega o objeto atrás dele.
+    { const _r = rayOverride || this.centerRay(camera); if (this.hitTestInfoBadge(_r.origin, _r.dir)) return null; }
     if (this._config.raycastPrecision === 'pixelperfect') return this._hoverPickPixelPerfect(camera, rayOverride);
     const ray = rayOverride || this.centerRay(camera);
     let best = null, bestT = Infinity;

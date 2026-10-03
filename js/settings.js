@@ -180,9 +180,16 @@ const SettingsView = {
     'historySempreVisivel', 'mapa2dGrade', 'mapa2dReguas', 'mapa2dSnapGrade', 'mapa2dSnapGradeM', 'imaMagnetPx',
     'render3dModo', 'paredeUniaoDist', 'geoAtivo', 'mapaModoPadrao', 'hudAtivo', 'organizeOrder',
     'mapSaveDebounceMs', 'capturarIpPublico',
+    'dbMonitorConfig', // [01/10/2026] NOVO — config do monitor do IndexedDB (js/dbmonitor.js); "Redefinir padrões" devolve ao padrão
     'autoExportAtivo', 'autoExportIntervaloMin', 'autoExportDestinos', 'autoExportIncluirImagens',
     'iconesSvgAtivo', 'iconesSvgBaixarInternet', 'iconesSvgAliases', 'iconesSvgFallback',
     'mapa3dConfig',
+    // [30/09/2026] CORRIGIDO (11ª rodada) — chaves "soltas" legadas (de quando estas 3 opções moravam em
+    // settings.js) que MapConfig.get() reherda quando mapa3dConfig não existe: sem apagá-las aqui, o
+    // reset trazia de volta 'separada' (valor antigo) em vez do padrão 'atual'. Ver MapConfig.get().
+    'desempenho2DModoRedesenho', 'desempenho2DBufferSecundario', 'camada3DNovosItens',
+    // [30/09/2026] NOVO (14ª rodada) — modo da busca na janela 'Objetos' do mapa 2D (padrão 'compacto'); "Redefinir padrões" também o devolve ao padrão.
+    'mapa2dObjPickerBuscaModo',
     // NOVO (09/09/2026) — ver js/classicmode.js: qual dos 2 modos de
     // apresentação (Workspace/BSP OU Clássico) o app deve abrir da
     // próxima vez. Resetar volta pro padrão ([25/09/2026] MUDADO: layout Clássico -- pedido verbatim "O padrão
@@ -944,6 +951,25 @@ const SettingsView = {
           </div>
         </div>
 
+        <!-- [01/10/2026] NOVO — pedido verbatim: "Nas 'configurações do app', em 'Mapa, 3D e aparelho', coloque uma seção para esta funcionalidade, logo acima da seção '📊 HUD de performance'." Controles gerados por DBMonitor.controlsHtml (mesmos da janela do gráfico); ver js/dbmonitor.js. -->
+        <div class="settings-section" data-cat="mapa">
+          <h3>💾 Monitor do IndexedDB</h3>
+          <p style="font-size:12.5px; color:var(--text-dim)">Gráfico das leituras e escritas do banco (tempo ocupado e bytes) desde que a página carregou — útil para ver quanto tempo o app passa nessa atividade. Também há um botão 💾 no rodapé da grade do mapa 2D.</p>
+          <label class="radio-opt">
+            <input type="checkbox" id="st-dbm-mini" ${window.DBMonitor && window.DBMonitor.getConfig().miniAtiva ? 'checked' : ''}>
+            <span><span class="t">Mostrar a miniatura do gráfico</span><br><span class="d">Janelinha flutuante com o gráfico resumido (clique nela para abrir a janela completa; arraste para mover).</span></span>
+          </label>
+          ${window.DBMonitor ? window.DBMonitor.controlsHtml('st-dbm') : '<p style="font-size:12px;color:var(--text-dim)">Monitor indisponível (js/dbmonitor.js não carregou).</p>'}
+          <div style="margin-top:8px"><button class="btn secondary sm" id="st-dbm-abrir" title="Abre a janela flutuante do gráfico">💾 Abrir a janela do gráfico</button></div>
+        </div>
+
+        <!-- [02/10/2026] NOVO — pedido verbatim: "Coloque uma seção, nas 'configurações do app', em 'Mapa, 3D e aparelho' sobre este nova funcionalidade de passos do app." Ver js/steprecorder.js. -->
+        <div class="settings-section" data-cat="mapa">
+          <h3>⏺ Gravador de passos</h3>
+          ${window.StepRecorder ? window.StepRecorder.controlsHtml('st-steps') : '<p style="font-size:12px;color:var(--text-dim)">Gravador indisponível (js/steprecorder.js não carregou).</p>'}
+        </div>
+        <!-- [78ª rodada] </div> sobrando removido: fechava o contêiner antes do HUD e as seções seguintes ficavam sem o limite de largura (não eram cards). -->
+
         <div class="settings-section" data-cat="mapa">
           <h3>📊 HUD de performance</h3>
           <label class="radio-opt">
@@ -1682,6 +1708,15 @@ const SettingsView = {
       await ClassicMode?.toggle?.();
     };
     container.querySelector('#st-hud').onchange = async (e) => { await Perf.setEnabled(e.target.checked); };
+    // [01/10/2026] Monitor do IndexedDB (ver seção acima e js/dbmonitor.js)
+    if (window.DBMonitor) {
+      await DBMonitor.carregarConfig();
+      window.DBMonitor.wireControls(container, 'st-dbm');
+      const miniChk = container.querySelector('#st-dbm-mini');
+      if (miniChk) { miniChk.checked = !!DBMonitor.getConfig().miniAtiva; miniChk.onchange = (e) => DBMonitor.setConfig({ miniAtiva: !!e.target.checked }); }
+      if (window.StepRecorder) window.StepRecorder.wireControls(container, 'st-steps'); // [65ª] gravador de passos (js/steprecorder.js)
+      const abrirBtn = container.querySelector('#st-dbm-abrir'); if (abrirBtn) abrirBtn.onclick = () => DBMonitor.abrirJanela();
+    }
     container.querySelector('#st-history-sempre').onchange = async (e) => { await History.setAlwaysShow(e.target.checked); };
     // [10/09/2026] Pedido verbatim: toggle "Mostrar a Tela de Abertura ao
     // iniciar o app" — ver comentário grande junto do checkbox HTML acima.

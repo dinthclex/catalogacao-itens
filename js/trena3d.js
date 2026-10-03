@@ -165,7 +165,7 @@ class Trena3D {
     const cache = (!!this._cfgAdapter && this._cfgAdapter._cache) ? this._cfgAdapter._cache : null;
     const def = (!!this._cfgAdapter && this._cfgAdapter.DEFAULTS) ? this._cfgAdapter.DEFAULTS : {};
     const v = cache ? cache.trena3DModo : undefined;
-    return (v !== undefined ? v : (def.trena3DModo !== undefined ? def.trena3DModo : 'trena')) || 'trena';
+    return 'trena'; // [85ª rodada] modo 'poli' removido (só trocava nome/ícone)
   }
 
   _trena3DCfg() {
@@ -294,6 +294,7 @@ class Trena3D {
       // subseção para isso com uma opção para que o raycaster atinja os
       // lados." Ver `_trena3DRaycastPrincipal`/`Engine3D.raycastSurfaceAmpliado`.
       permitirSuperficiesLaterais: g('trena3DPermitirSuperficiesLaterais', false) === true,
+      toleranciaBorda: g('trena3DToleranciaBorda', true) !== false,
       // [16/09/2026 UTC] NOVO (RODADA 101) — pedido verbatim: "Após
       // estabelecer o 1º ponto da medida deve ser possível 'continuar
       // naquele nível' (de y) [...] estando livre para movimentar o Z e
@@ -820,9 +821,52 @@ class Trena3D {
    *  mesma config 2x no mesmo frame/clique). */
   _trena3DRaycastPrincipal(ray, cfgJaLido) {
     const cfg = cfgJaLido || this._trena3DCfg();
-    return cfg.permitirSuperficiesLaterais
+    const hit = cfg.permitirSuperficiesLaterais
       ? this._engine.raycastSurfaceAmpliado(ray.origin, ray.dir)
       : this._engine.raycastSurface(ray.origin, ray.dir);
+    return cfg.toleranciaBorda ? this._trena3DToleranciaBorda(ray, hit) : hit;
+  }
+
+  /** [85ª rodada] TOLERÂNCIA DE BORDA — com "Pixel Perfect", passar um pouco da borda de uma superfície mira em outra coisa. Ao mirar no TOPO de um objeto
+   *  (hit com `restingOnId`, y>0, normal p/ cima) guarda-se esse alvo (id + altura). Nos raios seguintes que NÃO acertam o topo dele, interseta-se o raio com o plano
+   *  horizontal dessa altura; se o ponto cair fora do contorno (externo, ou dentro de um recorte/furo interno) mas a menos de TOL do contorno, o ponto é fixado na borda. */
+  _trena3DToleranciaBorda(ray, hit) {
+    const topo = hit && hit.restingOnId && hit.y > 0.001 && (!hit.normal || hit.normal.y > 0.5);
+    if (topo) { this._trena3DBordaAlvo = { id: hit.restingOnId, y: hit.y }; return hit; }
+    const al = this._trena3DBordaAlvo; if (!al) return hit;
+    if (hit && hit.restingOnId === al.id) return hit;
+    const o = ray.origin, d = ray.dir; if (Math.abs(d.y) < 1e-6) return hit;
+    const t = (al.y - o.y) / d.y; if (t <= 0.05) return hit;
+    if (hit && hit.t != null && hit.t < t - 0.02) return hit;   // algo mais perto que o plano da superfície: mantém
+    const px = o.x + d.x * t, pz = o.z + d.z * t;
+    const an = this._trena3DAneisDoAlvo(al.id); if (!an) return hit;
+    const tol = Math.max(0.2, 0.03 * t);
+    const dentro = (r) => { let c = false; for (let i = 0, j = r.length - 1; i < r.length; j = i++) { const a = r[i], b = r[j]; if (((a[1] > pz) !== (b[1] > pz)) && (px < (b[0] - a[0]) * (pz - a[1]) / (b[1] - a[1]) + a[0])) c = !c; } return c; };
+    const naSuperficie = an.faces.some((f) => dentro(f.outer) && !f.holes.some(dentro));
+    let melhor = null;
+    an.aneis.forEach((r) => r.forEach((a, i) => {
+      const b = r[(i + 1) % r.length], dx = b[0] - a[0], dz = b[1] - a[1], L2 = dx * dx + dz * dz || 1e-9;
+      const u = Math.max(0, Math.min(1, ((px - a[0]) * dx + (pz - a[1]) * dz) / L2)), qx = a[0] + u * dx, qz = a[1] + u * dz, dist = Math.hypot(px - qx, pz - qz);
+      if (!melhor || dist < melhor.dist) melhor = { dist, x: qx, z: qz };
+    }));
+    if (naSuperficie) return { x: px, y: al.y, z: pz, t, restingOnId: al.id, normal: { x: 0, y: 1, z: 0 } };
+    if (melhor && melhor.dist <= tol) return { x: melhor.x, y: al.y, z: melhor.z, t, restingOnId: al.id, normal: { x: 0, y: 1, z: 0 } };
+    return hit;
+  }
+
+  /** Contornos (mundo, [x,z]) do objeto `id`: Piso com contorno livre usa as faces reais (contorno − recortes, com furos); demais objetos usam a caixa das malhas. */
+  _trena3DAneisDoAlvo(id) {
+    const eng = this._engine, THREE = eng && eng.THREE; if (!THREE) return null;
+    const objs = (eng.mapData && eng.mapData.objects) || [], o = objs.find((x) => x.id === id); if (!o) return null;
+    if (window.PisoCustom && window.PisoCustom.tem(o)) {
+      const c = Math.cos(o.angulo || 0), s = Math.sin(o.angulo || 0), mp = (p) => [o.x + p[0] * c - p[1] * s, o.y + p[0] * s + p[1] * c];
+      const faces = window.PisoCustom.faces(o.pisoPoligono.contorno, o.pisoPoligono.furos).map((f) => ({ outer: f.outer.map(mp), holes: f.holes.map((h) => h.map(mp)) }));
+      return { faces, aneis: faces.flatMap((f) => [f.outer].concat(f.holes)) };
+    }
+    const ms = (eng._pickMeshes || []).filter((m) => m.userData && m.userData.pick && m.userData.pick.ref === o); if (!ms.length) return null;
+    const bb = new THREE.Box3(); ms.forEach((m) => bb.expandByObject(m));
+    const r = [[bb.min.x, bb.min.z], [bb.max.x, bb.min.z], [bb.max.x, bb.max.z], [bb.min.x, bb.max.z]];
+    return { faces: [{ outer: r, holes: [] }], aneis: [r] };
   }
 
   /** [16/09/2026 UTC] CORRIGIDO — pedido verbatim: "Esta opção deve servir
@@ -1558,6 +1602,7 @@ class Trena3D {
         meshMeioFin.renderOrder = 999;
         meshMeioFin.userData.medidaId = m.id;
         subgrupo.add(meshMeioFin);
+        var trena3DMeioMesh = meshMeioFin;   // [54ª] a esfera do ponto médio também respeita a oclusão (ver _trena3DAtualizarOclusao)
         // [17/09/2026 UTC] NOVO (RODADA 123) — DEBUG TEMPORÁRIO, pedido
         // verbatim do usuário pra investigar a divergência visual relatada
         // entre a caixa de texto e a esfera vermelha: "imprima junto com o
@@ -1694,7 +1739,7 @@ class Trena3D {
       // função de oclusão já trata isso com fallback pro `midpoint`.
       this._trena3DEntries.push({
         id: m.id, obj3d: subgrupo, labelEl: label, midpoint: meio,
-        p1, p2, segMeshes: trena3DSegMeshes, ponta1: trena3DPonta1, ponta2: trena3DPonta2,
+        p1, p2, segMeshes: trena3DSegMeshes, ponta1: trena3DPonta1, ponta2: trena3DPonta2, meioMesh: (typeof trena3DMeioMesh !== 'undefined' ? trena3DMeioMesh : null),
       });
     });
   }
@@ -1745,6 +1790,7 @@ class Trena3D {
         if (e.segMeshes) e.segMeshes.forEach((s) => { s.mesh.visible = true; });
         if (e.ponta1) e.ponta1.visible = true;
         if (e.ponta2) e.ponta2.visible = true;
+        if (e.meioMesh) e.meioMesh.visible = true;
         if (e.labelEl) e.labelEl.dataset.oculto = '';
       });
       return;
@@ -1776,6 +1822,9 @@ class Trena3D {
         e.ponta2.visible = !b2;
         if (!b2) algumaParteVisivel = true;
       }
+      // [54ª rodada] a esfera vermelha do ponto médio usa depthTest:false (para aparecer sobre a linha) e NÃO entrava neste teste: ficava visível atrás de paredes/objetos
+      // mesmo com a linha, as pontas e o rótulo escondidos. Agora segue a mesma regra ("Visibilidade: só se visível"): some quando o ponto médio está bloqueado.
+      if (e.meioMesh) e.meioMesh.visible = !this._engine.isSegmentOccluded(origem, { x: e.midpoint.x, y: e.midpoint.y, z: e.midpoint.z });
       if (e.labelEl) e.labelEl.dataset.oculto = algumaParteVisivel ? '' : '1';
     });
   }
@@ -3801,6 +3850,9 @@ class Trena3D {
     // `_trena3DCfg()`, que só cobre a seção "📏 Trena 3D" das
     // Configurações 3D) — lido direto do cache do this._cfgAdapter.
     const painelAtivoCfg = (this._cfgAdapter._cache?.trena3DPainelRapidoAtivo ?? this._cfgAdapter.DEFAULTS?.trena3DPainelRapidoAtivo) !== false;
+    // [85ª rodada] a janelinha segue IMEDIATAMENTE o botão "Mostrar janela de acesso rápido...": ao alternar a opção, o "fechado manualmente" (✕) deixa de valer.
+    if (this._trena3DUltPainelAtivoCfg !== undefined && this._trena3DUltPainelAtivoCfg !== painelAtivoCfg) this._trena3DPainelRapidoFechadoManualmente = false;
+    this._trena3DUltPainelAtivoCfg = painelAtivoCfg;
     const deveMostrar = painelAtivoCfg && !this._trena3DPainelRapidoFechadoManualmente;
     if (!deveMostrar) {
       if (this._trena3DPainelRapidoEl) this._trena3DPainelRapidoEl.style.display = 'none';

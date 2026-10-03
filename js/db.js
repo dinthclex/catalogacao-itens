@@ -378,14 +378,26 @@ function _notifyDbError(err, contexto) {
 // pra "travar no início", se o catálogo tiver muitos itens/fotos em
 // base64). `performance.now()` (não `Date.now()`) pra precisão de
 // milissegundos sem depender do relógio do sistema.
-function tx(storeNames, mode, fn) {
+// [01/10/2026] NOVO — 4º parâmetro opcional `rotulo` (texto curto: quem pediu esta transação) e integração com js/dbmonitor.js
+// (monitor de leituras/escritas, pedido verbatim: "Implemente uma janela que mostrar as leituras e escritas do IndexedDB, como
+// um gráfico"). Tudo via `window.DBMonitor?.` — se o monitor não carregar, o banco funciona exatamente como antes.
+// Sobre o log "[DB] tx(settings, readwrite) concluída em 1731ms" (pergunta do usuário: "Verifique o que gera a mensagem"):
+// nasce AQUI, no `console.log` de "concluída" abaixo, para TODA transação; o tempo é de `tx()` ser chamada até o `oncomplete`.
+// Uma escrita em `settings` é um único `put` de um registro minúsculo, então ~1,7 s não é o custo de gravar: é fila (transações
+// readwrite sobre a MESMA store rodam uma de cada vez, e o `openDB()` também entra na conta) e/ou thread principal ocupada
+// (a conclusão só é entregue quando o JS livra — ver o JSON.stringify de 22 s citado acima). O rótulo (ex.: `setSetting("x")`)
+// agora aparece no log e na janela 💾 do monitor, para identificar QUEM gravou.
+function tx(storeNames, mode, fn, rotulo) {
   const isWrite = mode === 'readwrite'; // só grava de verdade nesse modo — leitura não dispara o aviso
   if (isWrite) _emitSaveStatus('saving');
   const _dbgNomes = Array.isArray(storeNames) ? storeNames.join('+') : storeNames;
   const _dbgInicio = performance.now();
-  console.log(`[DB] tx(${_dbgNomes}, ${mode}) iniciada...`);
+  const _mon = window.DBMonitor && window.DBMonitor.inicio ? window.DBMonitor.inicio({ stores: _dbgNomes, modo: mode, rotulo: rotulo || '' }) : 0;
+  const _rot = rotulo ? ` [${rotulo}]` : '';
+  console.log(`[DB] tx(${_dbgNomes}, ${mode})${_rot} iniciada...`);
   return openDB().then((db) => new Promise((resolve, reject) => {
     const t = db.transaction(storeNames, mode);
+    if (_mon) { try { window.DBMonitor.instrumentar(t, _mon); } catch (e) { /* só métrica */ } }
     let result;
     Promise.resolve(fn(t)).then((r) => { result = r; }).catch(reject);
     t.oncomplete = () => resolve(result);
@@ -393,16 +405,40 @@ function tx(storeNames, mode, fn) {
     t.onabort = () => reject(t.error || new Error('Transação abortada'));
   })).then((result) => {
     if (isWrite) _emitSaveStatus('saved');
-    console.log(`[DB] tx(${_dbgNomes}, ${mode}) concluída em ${(performance.now() - _dbgInicio).toFixed(0)}ms`);
+    if (_mon) { try { window.DBMonitor.fim(_mon, true); } catch (e) { /* só métrica */ } }
+    console.log(`[DB] tx(${_dbgNomes}, ${mode})${_rot} concluída em ${(performance.now() - _dbgInicio).toFixed(0)}ms`);
     return result;
   }).catch((err) => {
     if (isWrite) _emitSaveStatus('error');
-    console.log(`[DB] tx(${_dbgNomes}, ${mode}) FALHOU após ${(performance.now() - _dbgInicio).toFixed(0)}ms:`, err);
+    if (_mon) { try { window.DBMonitor.fim(_mon, false); } catch (e) { /* só métrica */ } }
+    console.log(`[DB] tx(${_dbgNomes}, ${mode})${_rot} FALHOU após ${(performance.now() - _dbgInicio).toFixed(0)}ms:`, err);
     _notifyDbError(err, `${mode} em ${_dbgNomes}`);
     throw err;
   });
 }
 
+// [01/10/2026] NOVO — SISTEMÁTICA PADRÃO "cache otimista + gravação em segundo plano" (pedido verbatim: "as gravações/leituras
+// do/no IndexedDB devem ser em segundo plano e as ações do app devem ser imediatas. Verifique a sistemática aplicada para isso e
+// padronize para as chamadas ao IndexedDB."). O app já tinha a ideia pronta em `saveMap` (cache em RAM atualizado na hora, gravação
+// adiada), mas (a) `saveMap` ainda devolvia uma Promise que só resolvia DEPOIS da gravação — e quase todo chamador faz `await` nela
+// (29 `await this._saveMap()` só no mapa, mais desfazer/refazer), então a ação "esperava o debounce de ~1 s" (causa do atraso de ~1 s
+// ao colar); e (b) as outras escritas (setSetting, updateItem, saveAmbientePhoto, touchType/touchSector) faziam `await tx(...)` ANTES
+// de atualizar o cache, ficando atrás de qualquer transação lenta na fila (o "tx(settings, readwrite) concluída em 1731ms").
+// REGRA: quem lê o dado lê do cache em RAM (sempre atual); o cache é atualizado ANTES; a gravação de verdade vai por `txBg`, que
+// devolve na hora e só registra falha (o próprio `tx` já avisa o usuário por toast). Quando alguém PRECISA esperar a gravação
+// (ex.: importação em lote), existe `opts.immediate`/`DB.aguardarGravacoes()`. Pendências: apagar (delete*), addItem/addAmbientePhoto
+// e as stores de modelos continuam aguardando a gravação (são raras e o chamador usa o id/erro) — ver changelog.
+function txBg(storeNames, mode, fn, rotulo) {
+  try { tx(storeNames, mode, fn, rotulo).catch(() => { /* já notificado por tx() */ }); } catch (e) { console.error('[DB] txBg:', e); }
+  return Promise.resolve();
+}
+
+// [01/10/2026] NOVO — "Coloque no painel do IndexedDB um jeito de poder ver a lista das 29 esperas do mapa, além de outras que tenham, (cada
+// função que grava no IndexedDB). Coloque, também, um contador de chamadas para cada uma também e os tempos (último, mais rápido e mais
+// demorado)." Para a aba "Funções que gravam" do Monitor saber QUAL função gravou, TODA gravação (readwrite) agora passa um rótulo
+// (último argumento de tx): addItem, mergeFromRemote, touchLastConsulted, deleteItem, putItemRaw, deleteType, deleteSector, saveMap(immediate),
+// deleteMap, addAmbientePhoto, deleteAmbientePhoto, deleteSetting, setObjectModel, deleteObjectModel, putModelo3D, deleteModelo3D, importAll
+// (as demais já tinham: setSetting, saveMap, updateItem, touchType, touchSector, saveAmbientePhoto). Antes essas caíam em "(sem rótulo)".
 // ---------- Debounce/batch de saveMap (ver comentário grande acima do
 // método DBApi.saveMap) ----------
 // Tempo configurável pelo usuário (Configurações → 📦 Catálogo → "⏱️
@@ -430,7 +466,7 @@ function _flushMapSave(id) {
   if (!pending) return Promise.resolve();
   _pendingMapSaves.delete(id);
   clearTimeout(pending.timer);
-  return tx([STORES.maps], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.maps).put(pending.rec)))
+  return tx([STORES.maps], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.maps).put(pending.rec)), `saveMap(${id})`)
     .then(() => { pending.waiters.forEach((w) => w.resolve(cloneRec(pending.rec))); })
     .catch((e) => { pending.waiters.forEach((w) => w.reject(e)); });
 }
@@ -492,7 +528,7 @@ function makeStoreCache(storeName, keyPath) {
   return {
     async ensure() {
       if (!ready) {
-        ready = tx([storeName], 'readonly', (t) => reqToPromise(t.objectStore(storeName).getAll()))
+        ready = tx([storeName], 'readonly', (t) => reqToPromise(t.objectStore(storeName).getAll()), `carga inicial de ${storeName}`)
           .then((all) => { map = new Map(all.map((r) => [r[keyPath], r])); })
           .catch((e) => { ready = null; throw e; }); // falhou: permite tentar de novo na próxima leitura
       }
@@ -768,7 +804,7 @@ const DBApi = {
         ...tokenize(item.setor),
       ]),
     ];
-    await tx([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).add(item)));
+    await tx([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).add(item)), 'addItem');
     // Cache atualizado SÓ DEPOIS do disco confirmar (ver comentário no topo
     // do arquivo — write-through, nunca write-back). `ensure()` aqui não
     // recarrega nada se o cache já estava pronto; se ainda não estava, já
@@ -804,8 +840,8 @@ const DBApi = {
         ...tokenize(updated.setor),
       ]),
     ];
-    await tx([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).put(updated)));
-    map.set(id, updated);
+    map.set(id, updated); // [01/10/2026] cache primeiro, gravação em segundo plano (ver txBg)
+    txBg([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).put(updated)), `updateItem(${id})`);
     this._invalidateDupCache();
     if (updated.tipo) await this.touchType(updated.tipo);
     if (updated.setor) await this.touchSector(updated.setor);
@@ -899,7 +935,7 @@ const DBApi = {
         ...tokenize(merged.setor),
       ]),
     ];
-    await tx([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).put(merged)));
+    await tx([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).put(merged)), 'mergeFromRemote');
     map.set(merged.id, merged);
     this._invalidateDupCache();
     if (merged.tipo) await this.touchType(merged.tipo);
@@ -912,13 +948,13 @@ const DBApi = {
     const existing = map.get(id);
     if (!existing) return null;
     const updated = { ...existing, ultimaConsultaEm: nowISO() };
-    await tx([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).put(updated)));
+    await tx([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).put(updated)), 'touchLastConsulted');
     map.set(id, updated);
     return cloneRec(updated);
   },
 
   async deleteItem(id) {
-    await tx([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).delete(id)));
+    await tx([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).delete(id)), 'deleteItem');
     const map = await _itemsCache.ensure();
     map.delete(id);
     this._invalidateDupCache();
@@ -929,7 +965,7 @@ const DBApi = {
    *  criadoEm/modificadoEm/buscaTokens: grava o registro inteiro tal como
    *  veio, pra desfazer uma edição ou exclusão restaurar o item byte a byte. */
   async putItemRaw(record) {
-    await tx([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).put(record)));
+    await tx([STORES.items], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.items).put(record)), 'putItemRaw');
     const map = await _itemsCache.ensure();
     map.set(record.id, { ...record });
     this._invalidateDupCache();
@@ -1065,8 +1101,8 @@ const DBApi = {
     const rec = existing ? { ...existing } : { nome, usos: 0, defaults: {} };
     rec.usos += 1;
     if (defaults) rec.defaults = { ...rec.defaults, ...defaults };
-    await tx([STORES.types], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.types).put(rec)));
-    map.set(nome, rec);
+    map.set(nome, rec); // [01/10/2026] cache primeiro, gravação em segundo plano (ver txBg)
+    txBg([STORES.types], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.types).put(rec)), `touchType("${nome}")`);
     return cloneRec(rec);
   },
 
@@ -1076,7 +1112,7 @@ const DBApi = {
   },
 
   async deleteType(nome) {
-    await tx([STORES.types], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.types).delete(nome)));
+    await tx([STORES.types], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.types).delete(nome)), 'deleteType');
     const map = await _typesCache.ensure();
     map.delete(nome);
   },
@@ -1087,8 +1123,8 @@ const DBApi = {
     const existing = map.get(nome);
     const rec = existing ? { ...existing } : { nome, usos: 0 };
     rec.usos += 1;
-    await tx([STORES.sectors], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.sectors).put(rec)));
-    map.set(nome, rec);
+    map.set(nome, rec); // [01/10/2026] cache primeiro, gravação em segundo plano (ver txBg)
+    txBg([STORES.sectors], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.sectors).put(rec)), `touchSector("${nome}")`);
     return cloneRec(rec);
   },
 
@@ -1098,7 +1134,7 @@ const DBApi = {
   },
 
   async deleteSector(nome) {
-    await tx([STORES.sectors], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.sectors).delete(nome)));
+    await tx([STORES.sectors], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.sectors).delete(nome)), 'deleteSector');
     const map = await _sectorsCache.ensure();
     map.delete(nome);
   },
@@ -1153,7 +1189,7 @@ const DBApi = {
         _pendingMapSaves.delete(id);
       }
       try {
-        await tx([STORES.maps], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.maps).put(rec)));
+        await tx([STORES.maps], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.maps).put(rec)), 'saveMap(immediate)');
         if (pendingAntigo) pendingAntigo.waiters.forEach((w) => w.resolve(cloneRec(rec)));
         return cloneRec(rec);
       } catch (e) {
@@ -1181,15 +1217,26 @@ const DBApi = {
       }
     });
     if (abrindoJanelaNova) {
-      const debounceMs = await this.getMapSaveDebounceMs();
-      // `pending` pode já ter um `rec` mais novo aqui (uma chamada seguinte
-      // absorveu nesta mesma janela enquanto a config estava sendo lida) —
-      // sem problema, o timer só é criado agora, e `_flushMapSave` sempre lê
-      // `pending.rec` na hora de gravar, então pega a versão mais recente.
-      pending.timer = setTimeout(() => _flushMapSave(id), debounceMs);
+      // [01/10/2026] MUDADO — o timer agora é armado em segundo plano (antes: `await getMapSaveDebounceMs()` bloqueava `saveMap`).
+      const armaTimer = (debounceMs) => {
+        // `pending` pode já ter um `rec` mais novo aqui (uma chamada seguinte absorveu nesta mesma janela) — sem problema,
+        // `_flushMapSave` sempre lê `pending.rec` na hora de gravar, então pega a versão mais recente.
+        if (_pendingMapSaves.get(id) === pending) pending.timer = setTimeout(() => _flushMapSave(id), debounceMs);
+      };
+      this.getMapSaveDebounceMs().then(armaTimer, () => armaTimer(MAP_SAVE_DEBOUNCE_DEFAULT_MS));
     }
-    return resultado;
+    // [01/10/2026] MUDADO — pedido verbatim: "Ao 'copiar' e, depois, 'colar', a troca da seleção [...] demora em torno de 1s [...]
+    // Deve ser por causa da espera para gravação no IndexedDB, novamente." CAUSA RAIZ: devolvia `resultado`, que só resolve quando
+    // a gravação de verdade acontece (~1 s depois) — e os chamadores fazem `await`. O cache em RAM já foi atualizado acima, então
+    // ninguém precisa esperar: por padrão devolve na hora. Quem quiser esperar a gravação passa `opts.aguardar: true` (ou usa
+    // `immediate`). Falha de gravação continua avisada por tx() (toast); `resultado` é consumido aqui pra não gerar rejeição solta.
+    if (opts.aguardar) return resultado;
+    resultado.catch(() => { /* já notificado por tx() */ });
+    return cloneRec(rec);
   },
+
+  /** Espera TODAS as gravações de mapa pendentes (debounce) terminarem — para os raros casos que precisam de durabilidade. */
+  aguardarGravacoes() { return flushPendingMapSaves(); },
 
   /** Tempo (ms) de espera antes de gravar de verdade uma rajada de mudanças
    *  no mapa (ver saveMap acima) — configurável em Configurações → 📦
@@ -1300,7 +1347,7 @@ const DBApi = {
     const novoParentId = removed?.parentId || null;
     const filhos = [...map.values()].filter((m) => (m.parentId || null) === id);
     for (const filho of filhos) await this.saveMap({ ...filho, parentId: novoParentId });
-    await tx([STORES.maps], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.maps).delete(id)));
+    await tx([STORES.maps], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.maps).delete(id)), 'deleteMap');
     map.delete(id);
 
     // Rodada 11 (ação "Excluir ambiente" no menu do Mapa): excluir um
@@ -1398,7 +1445,7 @@ const DBApi = {
       criadoEm: ts,
       atualizadoEm: ts,
     };
-    await tx([STORES.mapPhotos], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.mapPhotos).add(rec)));
+    await tx([STORES.mapPhotos], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.mapPhotos).add(rec)), 'addAmbientePhoto');
     const map = await _mapPhotosCache.ensure();
     map.set(id, rec);
     return cloneRec(rec);
@@ -1407,9 +1454,9 @@ const DBApi = {
   /** Regrava a foto inteira (usado ao adicionar/editar/remover um orb, renomear etc.). */
   async saveAmbientePhoto(photoObj) {
     const rec = { ...photoObj, atualizadoEm: nowISO() };
-    await tx([STORES.mapPhotos], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.mapPhotos).put(rec)));
     const map = await _mapPhotosCache.ensure();
-    map.set(rec.id, rec);
+    map.set(rec.id, rec); // [01/10/2026] cache primeiro, gravação em segundo plano (ver txBg)
+    txBg([STORES.mapPhotos], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.mapPhotos).put(rec)), `saveAmbientePhoto(${rec.id})`);
     return cloneRec(rec);
   },
 
@@ -1509,7 +1556,7 @@ const DBApi = {
   },
 
   async deleteAmbientePhoto(id) {
-    await tx([STORES.mapPhotos], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.mapPhotos).delete(id)));
+    await tx([STORES.mapPhotos], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.mapPhotos).delete(id)), 'deleteAmbientePhoto');
     const map = await _mapPhotosCache.ensure();
     map.delete(id);
   },
@@ -1523,9 +1570,11 @@ const DBApi = {
 
   async setSetting(key, value) {
     const rec = { key, value };
-    await tx([STORES.settings], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.settings).put(rec)));
+    // [01/10/2026] MUDADO — cache primeiro, gravação em segundo plano (ver txBg no topo): antes `await tx(...)` vinha ANTES e a
+    // chamada ficava presa atrás de qualquer transação lenta (log "tx(settings, readwrite) concluída em 1731ms").
     const map = await _settingsCache.ensure();
     map.set(key, rec);
+    txBg([STORES.settings], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.settings).put(rec)), `setSetting("${key}")`);
     // NOVO (01/09/2026), item GRANDE #3 do pedido de 12 itens: "As
     // configurações e opções de menu devem ser guardadas em um arquivo a
     // parte" — ver js/serverprefs.js (ServerPrefs.scheduleSync, debounced).
@@ -1566,7 +1615,7 @@ const DBApi = {
   // deliberadamente PRESERVADAS (mapa atual selecionado, nome da
   // conferência, identidade do aparelho, dados/backups).
   async deleteSetting(key) {
-    await tx([STORES.settings], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.settings).delete(key)));
+    await tx([STORES.settings], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.settings).delete(key)), 'deleteSetting');
     const map = await _settingsCache.ensure();
     map.delete(key);
     // Mesmo gatilho de ServerPrefs que setSetting logo acima (ver comentário
@@ -1617,14 +1666,14 @@ const DBApi = {
   async setObjectModel(tipo, nivel, mesh) {
     const id = _chaveObjectModel(tipo, nivel);
     const rec = { id, tipo, nivel, mesh, modificadoEm: nowISO() };
-    await tx([STORES.objectModels], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.objectModels).put(rec)));
+    await tx([STORES.objectModels], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.objectModels).put(rec)), 'setObjectModel');
     const map = await _objectModelsCache.ensure();
     map.set(id, rec);
   },
 
   async deleteObjectModel(tipo, nivel) {
     const id = _chaveObjectModel(tipo, nivel);
-    await tx([STORES.objectModels], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.objectModels).delete(id)));
+    await tx([STORES.objectModels], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.objectModels).delete(id)), 'deleteObjectModel');
     const map = await _objectModelsCache.ensure();
     map.delete(id);
   },
@@ -1655,12 +1704,12 @@ const DBApi = {
    *  `{ tamanhoBytes, importadoEm }` pra eventual tela de gerenciamento. */
   async putModelo3D(nome, base64, meta) {
     const rec = { nome, base64, meta: meta || null, modificadoEm: nowISO() };
-    await tx([STORES.modelos3d], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.modelos3d).put(rec)));
+    await tx([STORES.modelos3d], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.modelos3d).put(rec)), 'putModelo3D');
     return cloneRec(rec);
   },
 
   async deleteModelo3D(nome) {
-    await tx([STORES.modelos3d], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.modelos3d).delete(nome)));
+    await tx([STORES.modelos3d], 'readwrite', (t) => reqToPromise(t.objectStore(STORES.modelos3d).delete(nome)), 'deleteModelo3D');
   },
 
   // ---------- ARMAZENAMENTO PERSISTENTE ----------
@@ -2115,7 +2164,7 @@ const DBApi = {
       for (const s of dump.sectors || []) await reqToPromise(t.objectStore(STORES.sectors).put(s));
       for (const p of fotosRemapeadas) await reqToPromise(t.objectStore(STORES.mapPhotos).put(p));
       for (const m of dump.objectModels || []) await reqToPromise(t.objectStore(STORES.objectModels).put(m));
-    });
+    }, 'importAll');
     const [tMap, sMap, pMap, mMap] = await Promise.all([
       _typesCache.ensure(), _sectorsCache.ensure(), _mapPhotosCache.ensure(), _objectModelsCache.ensure(),
     ]);

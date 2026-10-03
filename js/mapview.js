@@ -776,6 +776,32 @@ class Map2DRenderer {
    *  Mapping.applyDefaultShapeToObject só no `obj` de dentro de
    *  _drawFormaShape, uma cópia local que nunca chegava até aqui). */
   _drawObjectSelHoverRing(ctx, obj, sx, sy, pad, hover) {
+    // [74ª rodada] Texto: a caixa de hover/seleção tem as MESMAS dimensões da caixa do Texto (a justa das letras, a mesma do gizmo), sem folga nem caixa simétrica.
+    if (obj.tipo === 'texto3d' && window.Texto3D) {
+      const bb = window.Texto3D.bbox2D(obj);
+      if (bb.x0 <= bb.x1) {
+        const z = this.view.zoom;
+        ctx.save(); ctx.translate(sx, sy); ctx.rotate((obj.angulo || 0) + this.view.rot);
+        ctx.beginPath(); ctx.rect(bb.x0 * z, bb.y0 * z, (bb.x1 - bb.x0) * z, (bb.y1 - bb.y0) * z);
+        if (hover) { ctx.setLineDash([3, 3]); ctx.strokeStyle = '#9d9ea0'; ctx.lineWidth = 1.5; }
+        else { ctx.setLineDash([4, 3]); ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 2.5; }
+        ctx.stroke(); ctx.restore();
+        return;
+      }
+    }
+    // [84ª rodada] Piso com contorno livre: o retângulo tracejado é a caixa dos vértices mais distantes do contorno REAL (ao vivo, também durante o arrasto de um vértice).
+    if (window.PisoCustom && window.PisoCustom.tem(obj)) {
+      const bb = window.PisoCustom.bbox(obj);
+      if (bb.x0 <= bb.x1) {
+        const z = this.view.zoom;
+        ctx.save(); ctx.translate(sx, sy); ctx.rotate((obj.angulo || 0) + this.view.rot);
+        ctx.beginPath(); ctx.rect(bb.x0 * z - pad, bb.y0 * z - pad, (bb.x1 - bb.x0) * z + pad * 2, (bb.y1 - bb.y0) * z + pad * 2);
+        if (hover) { ctx.setLineDash([3, 3]); ctx.strokeStyle = '#9d9ea0'; ctx.lineWidth = 1.5; }
+        else { ctx.setLineDash([4, 3]); ctx.strokeStyle = '#00e5ff'; ctx.lineWidth = 2.5; }
+        ctx.stroke(); ctx.restore();
+        return;
+      }
+    }
     if (obj.forma !== 'retangulo' && obj.forma !== 'poligono' && obj.forma !== 'imagem') {
       const fp = Mapping.objectFootprintFor(obj);
       obj = { ...obj, forma: fp.forma, largura: fp.largura, profundidade: fp.profundidade, raio: fp.raio, lados: fp.lados };
@@ -963,19 +989,31 @@ class Map2DRenderer {
     // traço CHEIO (não mais tracejado), mesma cor/espessura, "gira 90° a
     // partir da dobradiça" em coordenadas locais.
     const hingeX = door.abertura === 'esquerda' ? -largura / 2 : largura / 2;
-    // Arco de 1/4 de círculo (90°, não 270°) entre a posição FECHADA (o vão,
-    // ao longo do eixo da parede — ângulo 0 a partir da dobradiça, do lado
-    // da folha) e a posição ABERTA (a reta vertical acima, ângulo -90°) —
-    // bug relatado pelo usuário: com `anticlockwise` errado pro lado
-    // "direita" (o padrão), o `ctx.arc` completava o caminho LONGO (270°)
-    // em vez do curto (90°) entre os mesmos dois ângulos. Sentido sempre
-    // CRESCENTE (`anticlockwise=false`) nos dois lados — só o par
-    // início/fim muda, espelhado conforme a dobradiça:
-    //  - "direita" (hingeX=+largura/2): fechada aponta pra -x (ângulo π),
-    //    aberta aponta pra -y (ângulo 3π/2) — 180°→270°, sweep de +90°.
-    //  - "esquerda" (hingeX=-largura/2): fechada aponta pra +x (ângulo 0),
-    //    aberta aponta pra -y (ângulo -π/2) — -90°→0°, sweep de +90°.
-    const [startAngle, endAngle] = door.abertura === 'esquerda' ? [-Math.PI / 2, 0] : [Math.PI, Math.PI * 1.5];
+    // CORRIGIDO (29/09/2026), pedido verbatim: "Atualmente, ao posicionar
+    // uma porta no mapa 2D, seu desenho indicativo de abertura da porta fica
+    // do lado de cima da porta, mesmo ela abrindo para o lado de baixo [no
+    // 'Ver em 3D'] [...] faça com que o desenho da porta no mapa 2D, fique
+    // no mesmo sentido de abertura da porta no 'Ver em 3D'." CAUSA RAIZ: o
+    // lado pro qual a folha abre no 3D é FIXO — sempre o mesmo lado
+    // perpendicular ao vão (`perpX=-sin(ang), perpY=cos(ang)` em
+    // engine3d.js `_buildDoorOrWindowMesh`/`_updateDoorAnimations`, que em
+    // `ang=0` aponta pra "+y" do mundo — o MESMO eixo Y usado por
+    // `pos.y`/`door.y` aqui no 2D, sem inversão nenhuma entre os dois). Este
+    // desenho, porém, sempre apontava a abertura pra "-y" local (a reta
+    // vertical ACIMA, sentido oposto) — dava a impressão de abrir "pro lado
+    // de cima" mesmo quando o 3D (de verdade) abre "pro lado de baixo" (+y).
+    // Corrigido: `openAngle` agora é sempre π/2 (+y local), o MESMO lado do
+    // 3D — só a ponta "fechada" (`closedAngle`, ao longo do vão) continua
+    // dependendo da dobradiça (0 = "esquerda", π = "direita"). `startAngle`/
+    // `endAngle` do arco-guia são só `closedAngle`/`openAngle` em ORDEM
+    // crescente (`Math.min`/`Math.max`) — garante o caminho CURTO (90°, não
+    // 270°) com `anticlockwise=false` nos dois casos, sem precisar decorar
+    // qual dos dois vem primeiro (bug antigo do "caminho longo" que motivou
+    // o `anticlockwise=false` fixo — ver histórico).
+    const closedAngle = door.abertura === 'esquerda' ? 0 : Math.PI;
+    const openAngle = Math.PI / 2; // sempre "+y" local -- mesmo lado fixo do 3D, ver comentário acima
+    const startAngle = Math.min(closedAngle, openAngle);
+    const endAngle = Math.max(closedAngle, openAngle);
     // Guia de referência (alcance completo do giro, 0°→90°) — TRACEJADO,
     // sempre no mesmo lugar, indicativo só do sentido de abertura.
     ctx.strokeStyle = cor; ctx.lineWidth = 1.5;
@@ -995,8 +1033,9 @@ class Map2DRenderer {
     // retângulo já desenhado acima — visualmente "some" dentro dele, exatamente
     // o esperado de uma porta fechada; ao abrir, gira de verdade em direção
     // à posição vertical, em traço CHEIO (mais forte que o guia tracejado).
-    const closedAngle = door.abertura === 'esquerda' ? endAngle : startAngle;
-    const openAngle = door.abertura === 'esquerda' ? startAngle : endAngle;
+    // [29/09/2026] `closedAngle`/`openAngle` já calculados acima (mesmos
+    // valores, reaproveitados aqui) — removida a duplicata que existia
+    // antes desta correção.
     const grausAbertura = door.anguloAbertura != null ? door.anguloAbertura : (door.aberta ? 90 : 0);
     const leafAngle = closedAngle + (openAngle - closedAngle) * (grausAbertura / 90);
     ctx.strokeStyle = cor; ctx.lineWidth = 1.5;
@@ -1214,14 +1253,36 @@ class Map2DRenderer {
     // do desenho, ver `_drawItemBadges`/footprints acima), com um piso mínimo
     // em pixels de tela (`Math.max`) só pra não desaparecer/virar 1px num
     // zoom muito, muito afastado.
+    // [30/09/2026] MUDADO (17ª rodada) — pedido verbatim: "O 2D deve seguir o mesmo padrão visual de empilhamento de ícones (patrimônio, histórico e especificações)." Antes ficava na diagonal (x-offset,y-offset); agora empilha na vertical logo acima do selo de patrimônio (mesma ordem do 3D: patrimônio → histórico → espec).
     const zoomFator = Math.max(0.15, Math.min(1, (this.view?.zoom || 40) / 40));
-    const offset = Math.max(4, 13 * zoomFator);
     const raio = Math.max(2.5, 5 * zoomFator);
-    const bx = anchor.x - offset, by = anchor.y - offset;
+    const passo = Math.max(7, 13 * zoomFator);
+    const temPatrim = (obj.itemIds || []).some((e) => e && e.id);
+    const bx = anchor.x, by = anchor.y - (temPatrim ? passo : 0);
     ctx.save();
     ctx.beginPath(); ctx.arc(bx, by, raio, 0, Math.PI * 2);
     ctx.fillStyle = cor;
     ctx.fill();
+    ctx.strokeStyle = '#0a0d11'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.restore();
+  }
+
+  /** [30/09/2026] NOVO (17ª rodada) — selo de Especificações no 2D (losango), empilhado acima do patrimônio e do histórico, espelhando o 3D. Binário (ObjectStandard.corIndicadorEspec). */
+  _drawEspecBadge2D(ctx, obj, anchor) {
+    if (!anchor || !window.ObjectStandard?.corIndicadorEspec) return;
+    const cor = window.ObjectStandard.corIndicadorEspec(obj);
+    if (!cor) return;
+    const zoomFator = Math.max(0.15, Math.min(1, (this.view?.zoom || 40) / 40));
+    const raio = Math.max(2.5, 5 * zoomFator);
+    const passo = Math.max(7, 13 * zoomFator);
+    const temPatrim = (obj.itemIds || []).some((e) => e && e.id);
+    const temHist = !!(window.ObjectStandard.getHistorico?.(obj) || []).length && !!window.ObjectStandard.corIndicadorHistorico(obj);
+    const nivel = (temPatrim ? 1 : 0) + (temHist ? 1 : 0);
+    const bx = anchor.x, by = anchor.y - passo * nivel;
+    const r = raio * 1.2;
+    ctx.save();
+    ctx.beginPath(); ctx.moveTo(bx, by - r); ctx.lineTo(bx + r, by); ctx.lineTo(bx, by + r); ctx.lineTo(bx - r, by); ctx.closePath();
+    ctx.fillStyle = cor; ctx.fill();
     ctx.strokeStyle = '#0a0d11'; ctx.lineWidth = 1; ctx.stroke();
     ctx.restore();
   }
@@ -1331,6 +1392,19 @@ class Map2DRenderer {
     ctx.save();
     ctx.translate(sx, sy);
     ctx.rotate((obj.angulo || 0) + this.view.rot);
+    // [69ª rodada] Texto 3D: contornos das letras (mesma malha do 3D), sem caixa preenchida.
+    if (obj.tipo === 'texto3d' && window.Texto3D && window.ModelerMesh) {
+      const bl = window.Texto3D.draw2D(this, ctx, obj, selected);
+      ctx.restore();
+      return { x: sx + bl.x, y: sy + bl.y };
+    }
+    // [74ª rodada] Piso com contorno livre e furos (obj.pisoPoligono): desenho próprio (preenchimento evenodd + alças dos vértices) — ver js/objecttypes/piso-custom.js.
+    if (obj.tipo === 'telha' && window.PisoCustom && !window.PisoCustom.tem(obj)) window.PisoCustom.tornarEditavel(obj);   // [88ª] telhado antigo: contorno editável (idempotente) para o 2D mostrar as águas
+    if (window.PisoCustom && window.PisoCustom.tem(obj)) {
+      const bl = window.PisoCustom.draw2D(this, ctx, obj, selected, strokeColor, strokeW, fillMode);
+      ctx.restore();
+      return { x: sx + bl.x, y: sy + bl.y };
+    }
     // Forma "imagem" (colar/carregar — pedido do usuário) — desenha a
     // imagem de verdade (drawImage), sem preenchimento/traço/ícone (esses
     // conceitos são só das formas geométricas abaixo). Ramo à parte com
@@ -2152,6 +2226,7 @@ class Map2DRenderer {
       const badgeAnchor = this._drawFormaShape(ctx, obj, s.x, s.y, selected);
       this._drawItemBadges(ctx, obj, badgeAnchor);
       this._drawHistoricoBadge2D(ctx, obj, badgeAnchor);
+      this._drawEspecBadge2D(ctx, obj, badgeAnchor);
       if ((obj.itemIds || []).length) {
         if (this.destaqueExtraRaio2DAtivo) this._drawDestaqueExtraRaioObj(ctx, obj, s.x, s.y);
         if (this.destaqueExtraDourado2DAtivo) this._drawDestaqueExtraObj(ctx, obj, s.x, s.y);
@@ -2377,7 +2452,14 @@ class Map2DRenderer {
     // Objeto associado a um ou mais itens do catálogo (obj.itemIds) ganha
     // selo(s) 🔗 — em
     // qualquer forma. Ver _drawItemBadges.
-    (this.mapData.objects || []).forEach((obj) => {
+    // [01/10/2026] CORRIGIDO (44ª rodada) — "ao arrastar um gabinete que estava no chão para a área onde tem uma mesa, no mapa 2D, ele sobe para cima da mesa, no 3D. Porém, no 2D, o desenho do gabinete
+    // continua sendo renderizado em baixo do desenho da mesa. Coisas deste tipo devem ser ajustadas no 2D." CAUSA RAIZ: o passe de objetos desenhava na ORDEM DO ARRAY (ordem de criação), sem olhar a
+    // elevação; o empilhamento (Mapping.recalcularElevacao) só mudava o campo elevacao, que o 2D ignorava ao desenhar. Agora, quando algum objeto tem elevação, o desenho segue a ordem de
+    // empilhamento: do mais baixo para o mais alto (ordenação ESTÁVEL — objetos na mesma altura mantêm a ordem de antes, então nada muda para mapas sem empilhamento). O clique/seleção já
+    // priorizava o objeto de cima (Mapping._findTopObjectAt), então desenho e seleção passam a concordar.
+    let _objsOrdem = this.mapData.objects || [];
+    if (_objsOrdem.some((o) => o.elevacao)) _objsOrdem = _objsOrdem.slice().sort((a, b) => (a.elevacao || 0) - (b.elevacao || 0));
+    _objsOrdem.forEach((obj) => {
       if (!this._layerVisible(obj.layerId)) return;
       if (!this._pisoVisible(obj)) return;
       // Imagem da camada-fundo já foi desenhada como "piso", antes das
@@ -2399,6 +2481,7 @@ class Map2DRenderer {
       const badgeAnchor = this._drawFormaShape(ctx, obj, s.x, s.y, selected);
       this._drawItemBadges(ctx, obj, badgeAnchor);
       this._drawHistoricoBadge2D(ctx, obj, badgeAnchor);
+      this._drawEspecBadge2D(ctx, obj, badgeAnchor);
       if ((obj.itemIds || []).length) {
         if (this.destaqueExtraRaio2DAtivo) this._drawDestaqueExtraRaioObj(ctx, obj, s.x, s.y);
         if (this.destaqueExtraDourado2DAtivo) this._drawDestaqueExtraObj(ctx, obj, s.x, s.y);
@@ -2465,7 +2548,13 @@ class Map2DRenderer {
       // desenhada como `opts.formaDraft` (gizmo ativo) já É, por definição,
       // a selecionada — mesma lógica que já valia só pro retículo, extendida
       // pra todas.
-      this._drawFormaShape(ctx, fd.obj, fd.geom.center.x, fd.geom.center.y, true);
+      // [73ª rodada] Texto: desenha as letras na ORIGEM do objeto e com as escalas que a caixa do gizmo representa (esticar a caixa estica o texto).
+      let _dObj = fd.obj, _dx = fd.geom.center.x, _dy = fd.geom.center.y;
+      if (fd.textoPose) {
+        _dObj = Object.assign({}, fd.obj, { texto3d: Object.assign({}, fd.obj.texto3d || {}, { escalaX: fd.textoPose.escalaX, escalaZ: fd.textoPose.escalaZ }) });
+        const _sp = this.worldToScreen(fd.textoPose.x, fd.textoPose.y); _dx = _sp.x; _dy = _sp.y;
+      }
+      this._drawFormaShape(ctx, _dObj, _dx, _dy, true);
       ctx.restore();
     }
 
@@ -2926,7 +3015,13 @@ class Map2DRenderer {
       const previewObj = {
         ...rawStamp,
         forma: fp.forma, largura: fp.largura, profundidade: fp.profundidade, raio: fp.raio, lados: fp.lados,
-        cor: rawStamp.cor || fp.cor, angulo: rawStamp.angulo || 0,
+        cor: rawStamp.cor || fp.cor,
+        // [29/09/2026] `g.angulo` é a rotação do GHOST em si (ciclada pelo
+        // botão do meio — ver _attachPanZoom), sempre prioritária sobre um
+        // eventual `angulo` de fábrica do stamp (raro, mas mantém o
+        // comportamento antigo como fallback quando o ghost ainda não tem
+        // rotação própria definida).
+        angulo: (g.angulo != null ? g.angulo : (rawStamp.angulo || 0)),
       };
       ctx.save();
       ctx.globalAlpha = 0.68; // menos opaco, pra não confundir com um objeto já colocado
@@ -3081,6 +3176,85 @@ class Map2DRenderer {
       ctx.lineCap = 'square';
       ctx.lineWidth = Math.max(1, (opts.paredeGhost.espessura || 0.12) * this.view.zoom);
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.restore();
+      // [30/09/2026] NOVO -- pedido verbatim: "Sobre a medida da parede atual, nas 'configurações
+      // 2D'... deve ter uma opção para a medida aparecer direto no desenho da parede, assim como
+      // aparece, quando uma medida é feita com a ferramenta 'Trena'." Mesma caixinha arredondada
+      // (fundo escuro + borda colorida + texto centralizado) que MapView._drawMedidasTracos2D
+      // desenha no meio de cada medida da Trena (ver desenharMedida lá) -- reproduzida aqui em vez de
+      // compartilhada porque aquela vive na classe MapView (usa this._toolSelection/_hoverEl, que não
+      // fazem sentido pra um ghost ainda nem criado) e esta vive em Map2DRenderer.
+      if (opts.paredeGhost.mostrarMedida && opts.paredeGhost.medidaTexto) {
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        const cor = '#6bdb9a';
+        ctx.save();
+        ctx.font = '600 12px sans-serif';
+        const texto = opts.paredeGhost.medidaTexto;
+        const padX = 7, textW = ctx.measureText(texto).width, boxW = textW + padX * 2, boxH = 19;
+        ctx.fillStyle = 'rgba(10,12,16,.85)';
+        ctx.beginPath();
+        const r = 5, x0 = mx - boxW / 2, y0 = my - boxH / 2;
+        ctx.moveTo(x0 + r, y0);
+        ctx.arcTo(x0 + boxW, y0, x0 + boxW, y0 + boxH, r);
+        ctx.arcTo(x0 + boxW, y0 + boxH, x0, y0 + boxH, r);
+        ctx.arcTo(x0, y0 + boxH, x0, y0, r);
+        ctx.arcTo(x0, y0, x0 + boxW, y0, r);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = cor; ctx.lineWidth = 1; ctx.stroke();
+        ctx.fillStyle = cor;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(texto, mx, my + 0.5);
+        ctx.restore();
+      }
+    }
+    // [30/09/2026] NOVO — pedido verbatim: "No mapa 2D, ao selecionar o
+    // objeto 'Parede', o ghost da parede deve ser um quadrado de lado igual
+    // a espessura da parede." Fase ANTES do 1º clique (`opts.paredeGhost`
+    // acima só existe DEPOIS do 1º ponto marcado) — mesmo espírito do ghost
+    // de Objeto/Item (uma prévia simples seguindo o cursor, avisando o que
+    // vai ser criado antes de qualquer clique), mas quadrado em vez da
+    // forma do tipo, do tamanho real da espessura configurada da parede.
+    if (opts.paredeSquareGhost) {
+      const p = this.worldToScreen(opts.paredeSquareGhost.x, opts.paredeSquareGhost.y);
+      const ladoPx = Math.max(2, (opts.paredeSquareGhost.espessura || 0.12) * this.view.zoom);
+      ctx.save();
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = 'rgba(107,219,154,0.35)';
+      ctx.strokeStyle = '#6bdb9a';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(p.x - ladoPx / 2, p.y - ladoPx / 2, ladoPx, ladoPx);
+      ctx.strokeRect(p.x - ladoPx / 2, p.y - ladoPx / 2, ladoPx, ladoPx);
+      ctx.restore();
+    }
+    // [30/09/2026] NOVO — pedido verbatim: "Sobre o snap, é o ghost que
+    // faltava para indicar a posição em que o item vai ficar [...] Tanto em
+    // cadastrar um novo patrimônio quanto em tirar uma foto, na parte de
+    // 'Vincular a um lugar no mapa', se o snap estiver ligado, deve
+    // funcionar. Um ghost do item respectivo deve ir aparecendo na posição
+    // que ficará em caso se clique em 'Marcar aqui'." A cruz fixa
+    // (`_showPhotoPlacementCrosshair`, HTML sobreposto) fica sempre no
+    // CENTRO da tela — mas com "🧲 Snap na grade" ligado, a posição de
+    // verdade que "✅ Marcar aqui" vai gravar (`screenToWorld` do centro,
+    // já arredondada pro snap) pode cair um pouco AO LADO do centro exato
+    // — este selo mostra exatamente onde, com o ícone do tipo de coisa
+    // sendo posicionada (📷 foto, 🔗 patrimônio, 📍 genérico).
+    if (opts.placementSnapGhost) {
+      const g = opts.placementSnapGhost;
+      const icone = g.tipo === 'foto' ? '📷' : g.tipo === 'item' ? '🔗' : '📍';
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(g.x, g.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#7cffb2';
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(10,13,17,0.7)';
+      ctx.stroke();
+      ctx.font = '16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(icone, g.x, g.y - 8);
       ctx.restore();
     }
     // Ferramenta "Parede" — "✕" no ponto de junção com outra parede sob o
@@ -3700,6 +3874,52 @@ const DISPLAY_UNIT_LABELS = { pixels: 'pixels', polegadas: 'polegadas', centimet
 // que seria zerado/recriado a cada _mountPlanta) — só um F5 de verdade reseta este arquivo.
 let _mapAutoFitDoneThisPageLoad = false;
 
+// [01/10/2026] NOVO — texto do campo de busca da janela Objetos, persistente até recarregar a página (ver _openObjectPickerPanel).
+let _objPickerBuscaTexto = '';
+
+/** [01/10/2026] NOVO — busca "multi-termo" da janela Objetos (pedido verbatim: "deve aceitar buscas do tipo 'mesa;gabinete' [...] Termos como "gabinete" ou 'gabinete' (com aspas simples ou duplas) também devem exibir o resultado. Implemente essa sistemática e outras do mesmo tipo."). Devolve um predicado `(texto) => boolean`. Sintaxe, sem acento e sem diferenciar maiúsculas:
+ *   - `mesa;gabinete` (também `,` ou `|`): OU — casa quem tiver QUALQUER um dos grupos.
+ *   - `mesa redonda` (espaço): E — o texto precisa ter AS DUAS palavras (em qualquer ordem).
+ *   - `"mesa redonda"` ou `'mesa redonda'`: frase exata (aspas simples ou duplas); `"gabinete"` equivale a gabinete.
+ *   - `-cadeira` ou `!cadeira`: exclui quem tiver o termo (ex.: `mesa -redonda`).
+ *   - `ga*ete`, `m?sa`: curinga (`*` = qualquer trecho, `?` = 1 caractere).
+ *  Entrada vazia casa tudo. Não depende de nada do resto do app. */
+function compilarBuscaMulti(entrada) {
+  const norm = (t) => String(t == null ? '' : t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const texto = String(entrada == null ? '' : entrada);
+  // 1) separa em grupos OU (fora de aspas) e, em cada grupo, em tokens E (espaço fora de aspas).
+  const gs = [[]]; let t = null; let q = null;
+  const fecha = () => { if (t && t.txt.length) gs[gs.length - 1].push(t); t = null; };
+  for (const ch of texto) {
+    if (q) { if (ch === q) { q = null; } else { t.txt += ch; } continue; }
+    if (ch === '"' || ch === "'") { if (!t) t = { txt: '', frase: true, neg: false }; else t.frase = true; q = ch; continue; }
+    if (ch === ';' || ch === ',' || ch === '|') { fecha(); gs.push([]); continue; }
+    if (/\s/.test(ch)) { fecha(); continue; }
+    if (!t) { t = { txt: '', frase: false, neg: false }; if ((ch === '-' || ch === '!')) { t.neg = true; continue; } }
+    t.txt += ch;
+  }
+  fecha();
+  const grupoValido = gs.filter((g) => g.length);
+  if (!grupoValido.length) return () => true;
+  const compilaToken = (tk) => {
+    const alvo = norm(tk.txt);
+    if (!alvo) return () => true;
+    if (!tk.frase && /[*?]/.test(alvo)) {
+      const re = new RegExp(alvo.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.'));
+      return (txt) => re.test(txt);
+    }
+    return (txt) => txt.includes(alvo);
+  };
+  const preparados = grupoValido.map((g) => g.map((tk) => ({ neg: tk.neg, bate: compilaToken(tk) })));
+  return (alvoTxt) => {
+    const txt = norm(alvoTxt);
+    return preparados.some((g) => g.every((tk) => (tk.neg ? !tk.bate(txt) : tk.bate(txt))));
+  };
+}
+
+// [01/10/2026] NOVO — pedido verbatim: "Para as 'janelas' que aparecem ali [🐞], deve aparecer uma nova informação, um contador de quantas vezes ela foi chamada desde que a página foi carregada (contador de reconstruções)." Variável de módulo (como `_mapAutoFitDoneThisPageLoad`): sobrevive a sair/voltar do Mapa e a fechar a janela 🐞; só um F5 zera. Conta CRIAÇÕES do elemento da janela (cada vez que o campo recebe um elemento novo, ver defineProperty logo após MapView). Como a contagem é no momento da atribuição (não por amostragem de 1s), nada se perde com a janela 🐞 fechada.
+const _debugWinContagem = {};
+
 const MapView = {
   // ---------- Estrutura de navegação da tela Mapa ----------
   // 'entry' (padrão ao abrir): os 2 botões grandes "Planta baixa"/"Foto" +
@@ -3816,15 +4036,6 @@ const MapView = {
   // Painel de propriedades flutuante (câmera/parede/objeto/pino de item
   // selecionado) — só um por vez, ver _openPanel/_closePanel.
   _panelEl: null,
-  // Modal (não o painel flutuante genérico acima) de "Propriedades da
-  // camada" — único que bloqueia o resto do app enquanto aberto, ver
-  // _openLayerPropertiesPanel/_closeLayerPropertiesModal.
-  _layerPropsModalEl: null,
-  // Duração (ms) da animação FLIP do arrastar/soltar da lista de camadas —
-  // MESMO valor usado tanto pra tocar a animação (_ensureLayersFlipLoop)
-  // quanto pra travar novas trocas até ela terminar (_onLayerRowDragMove,
-  // `drag.lockedUntil`) — precisam ser o mesmo número, daí ser um campo só.
-  _LAYER_FLIP_DURATION_MS: 180,
   _selectedWallId: null,
   _selectedObjectId: null,
   _selectedDoorId: null, // ferramenta "Porta" — ver _openDoorPanel
@@ -3833,6 +4044,18 @@ const MapView = {
   // "Carimbo" atual do modo Objetos — o tipo escolhido no painel persistente
   // (ver _openObjectPickerPanel), reusado em cliques seguintes até trocar.
   _objectStampType: null,
+  // NOVO (29/09/2026), pedido verbatim: "No mapa 2D, no 'Modo Desenho', os
+  // objetos ainda não estão girando 90 graus com uma clicada no botão do
+  // meio do mouse (o desenho do ghost deve indicar isto)." — rotação (em
+  // radianos, múltiplo de 90°) aplicada ao "carimbo"/ghost do objeto ainda
+  // não colocado (ferramenta Objetos, ícones de catálogo), ciclada pelo
+  // botão do meio (ver _attachPanZoom) e usada tanto no desenho do ghost
+  // (Map2DRenderer.render, opts.objectGhost) quanto no objeto de verdade
+  // criado ao clicar (ver _onCanvasClick, ramo `_ptool === 'objects'`).
+  // Zerada sempre que o tipo escolhido muda (ver _ativarBotaoFerramenta/
+  // _openObjectPickerPanel.escolherTipo) — mesmo espírito do 3D
+  // (`_buildCardinalIndex = 0` a cada troca de ferramenta, ver view3d.js).
+  _objectGhostAngulo: 0,
   _objectPickerEl: null, // painel persistente do catálogo (modo Objetos)
   _formsPickerEl: null, // painel persistente de presets (ferramenta Formas)
   // Config atual da ferramenta "Formas" (barra de contexto — ver
@@ -3966,6 +4189,7 @@ const MapView = {
   _objPanelCollapsed: false, // painel de valores da forma (_openObjectPanel) minimizado — ver botão "mostrar/ocultar" no cabeçalho dele, estado lembrado entre reaberturas
   _formaDraftDrag: null, // { kind:'move'|'resize'|'rotate'|'pivot', handle, startX,startY, orig } em progresso
   _textCreateDrag: null, // { startScreen:{x,y}, curScreen:{x,y}, moved } — retângulo-molde do texto NOVO em progresso (ver _onObjectsPointerDown/Move/Up)
+  // [01/10/2026] MUDADO — "Os códigos da janela 'Camadas' devem ser modulares e independentes o máximo possível do restante dos códigos do app." Todo o código da janela (abrir/fechar/desenhar lista/arrastar/7 botões/Propriedades/histórico/isolamento de erros) foi movido para js/mapview-camadas.js (carregado logo depois deste arquivo, ver index.html). Aqui ficam só os campos de estado lidos por outros pontos do mapa.
   _layersPanelEl: null, // painel persistente de camadas (ver _openLayersPanel)
   // ---------- Janela "🎨 Cores" (ver _openCoresPanel/_renderCoresPanel) ----------
   // 22/08/2026 — pedido do usuário: voltar pro editor de cores PADRÃO de
@@ -4353,14 +4577,14 @@ const MapView = {
     { id: 'reticulo', icon: '📐', label: 'Retículo métrico', title: 'Retículo métrico: desenha um retângulo com uma grade de 1m x 1m dentro, a partir do primeiro ponto tocado (origem da grade). Redimensione com o gizmo, como qualquer forma. Também disponível fora desta janela, na bandeja lateral do Modo Navegação.' },
     // NOVO (03/09/2026), pedido verbatim: "a régua deve ser uma ferramenta
     // também" — RENOMEADA pro mesmo pedido: "não deve mais se chamar
-    // 'Régua' e sim 'Trena (de medir)'". Mesmo princípio do Retículo
+    // 'Régua' e sim 'Trena'". Mesmo princípio do Retículo
     // métrico acima: um único `_ptool` ('medida'), acessível tanto por
     // aqui (janela Ferramentas) quanto pela bandeja lateral do Modo
     // Navegação (ver _mountPlanta, botão #map2d-drawer-medida) — os dois
     // botões ficam sempre em sincronia porque os dois só refletem o mesmo
     // `this._ptool`. Barra de contexto própria com o toggle "grade"/
     // "manual" — ver _medidaToolctxHtml.
-    { id: 'medida', icon: '📏', label: 'Trena (de medir)', title: 'Trena (de medir): toque em 2 pontos do mapa para medir a distância entre eles — use a ferramenta "🗑️ Apagar" para remover uma medida já feita. Segure Shift pra travar o ângulo em múltiplos de 15°, ou Ctrl (+ setas ↑/↓ se houver mais de um cruzamento) pra ficar perpendicular a uma medida/traço já feito. Também disponível fora desta janela, na bandeja lateral do Modo Navegação.' },
+    { id: 'medida', icon: '📏', label: 'Trena', title: 'Trena: toque em 2 pontos do mapa para medir a distância entre eles — use a ferramenta "🗑️ Apagar" para remover uma medida já feita. Segure Shift pra travar o ângulo em múltiplos de 15°, ou Ctrl (+ setas ↑/↓ se houver mais de um cruzamento) pra ficar perpendicular a uma medida/traço já feito. Também disponível fora desta janela, na bandeja lateral do Modo Navegação. É a MESMA "📏 Trena 3D" de "Ver em 3D" — as medidas feitas aqui aparecem lá (e vice-versa), guardadas juntas no mesmo lugar (map.medidas2d).' },
     // NOVO (03/09/2026), pedido verbatim: "o traço guia deve se tornar uma
     // ferramenta também. E poder ser excluído pela ferramenta 'Apagar'."
     // Mesmo princípio das duas ferramentas acima.
@@ -4409,10 +4633,16 @@ const MapView = {
     // `_setPTool` (onde é lida) — só um clique de VERDADE neste botão
     // (nunca o resync silencioso de mount/remount) conta como decisão nova
     // do usuário sobre a janela de Objetos.
+    const _eraTexto = id === 'texto';
+    if (_eraTexto) id = 'obj:texto3d'; // [69ª rodada] "Texto" = mesmo objeto do Texto 3D (ghost 'Texto', sem abrir propriedades)
     if (String(id).startsWith('obj:')) {
       if (this._formaDraft) this._finalizeFormaDraft();
+      this._suprimirPickerObjetos = _eraTexto; // [69ª] Texto não abre a janela de escolha de objetos
       this._setPTool('objects', { cliqueDoBotao: true });
+      this._suprimirPickerObjetos = false;
       this._objectStampType = String(id).slice(4);
+      this._objectGhostAngulo = 0; // [29/09/2026] novo tipo escolhido -- ghost sempre começa "apontando pro Norte"
+      if (_eraTexto) this._closeObjectPickerPanel(false); // [69ª] Texto: só o ghost 'Texto' (sem janela de objetos nem de propriedades)
       this._updateToolCtx?.();
       return;
     }
@@ -4974,7 +5204,7 @@ const MapView = {
     container.querySelector('#map2d-drawer-reticulo-toggle').onclick = () => this._toggleReticuloDrawer();
     container.querySelector('#map2d-drawer-reticulo-arrastar').onclick = () => this._setReticuloDrawerModo('arrastar');
     container.querySelector('#map2d-drawer-reticulo-clique').onclick = () => this._setReticuloDrawerModo('clique');
-    // ATUALIZADO (05/09/2026) — "Trena (de medir)"/"Traço guia" ganharam
+    // ATUALIZADO (05/09/2026) — "Trena"/"Traço guia" ganharam
     // botões próprios COM toast (mantidos, mesmos ids NOVOS — ver HTML
     // acima, agora gerados pelo laço genérico junto das demais
     // ferramentas: id="map2d-drawer-tool-medida"/"map2d-drawer-tool-traco").
@@ -5074,7 +5304,11 @@ const MapView = {
     this._magnetPx = await DB.getSetting('imaMagnetPx', 5);
     this._showGrid = await DB.getSetting('mapa2dGrade', true);
     this._showRulers = await DB.getSetting('mapa2dReguas', false);
-    this._gridSnap = await DB.getSetting('mapa2dSnapGrade', false);
+    // [30/09/2026] MUDADO -- pedido verbatim: "Por padrão, no app, o snap do
+    // mapa 2D deve vir ativado com o valor de 10cm." O valor (mapa2dSnapGradeM)
+    // já tinha padrão 0.1m (10cm, ver logo abaixo) — só faltava o snap em si
+    // (mapa2dSnapGrade) vir LIGADO por padrão (antes: false).
+    this._gridSnap = await DB.getSetting('mapa2dSnapGrade', true);
     // Chave de configuração NOVA (mapa2dSnapGradeM, em METROS) — a antiga
     // (mapa2dSnapGradePx) guardava px de TELA, um número que não faz sentido
     // reaproveitar direto como metros (10 "px" virando 10 METROS de encaixe
@@ -5180,6 +5414,10 @@ const MapView = {
       // também, deve ter o seu habilitador para poder reposicionar os que
       // já foram inseridos na grade." — MESMO padrão da Trena logo acima.
       this._tracoReposicionarExtremidadesAtivo2D = !!cfg.traco2DReposicionarExtremidadesAtivo;
+      // [30/09/2026] NOVO -- pedido verbatim: "Sobre a medida da parede atual, nas 'configurações
+      // 2D'... deve ter uma opção para a medida aparecer direto no desenho da parede." Ver
+      // DEFAULTS.paredeMostrarMedidaAoDesenhar2D em mapconfig.js e o uso em paredeGhost, mais abaixo.
+      this._paredeMostrarMedidaAoDesenhar2D = cfg.paredeMostrarMedidaAoDesenhar2D !== false;
       this._onMapConfigChange = (c) => {
         // Idem, ao vivo — reage na hora se a pessoa muda a opção em
         // "⚙️ Configurações do mapa" com a Planta baixa já aberta.
@@ -5201,6 +5439,8 @@ const MapView = {
         this._medidaReposicionarExtremidadesAtivo2D = !!c.medida2DReposicionarExtremidadesAtivo;
         // "✏️ Traço guia › Reposicionar traços feitos pelas suas extremidades" — idem, ao vivo.
         this._tracoReposicionarExtremidadesAtivo2D = !!c.traco2DReposicionarExtremidadesAtivo;
+        // "🧱 Parede › Mostrar a medida direto no desenho da parede" — idem, ao vivo.
+        this._paredeMostrarMedidaAoDesenhar2D = c.paredeMostrarMedidaAoDesenhar2D !== false;
         // "🗺️ Mapa 2D › Origem do mundo" — idem, ao vivo (ver _drawOrigemMundo).
         if (this._renderer) this._renderer.showOrigemMundo = c.mapa2dMostrarOrigemMundo !== false;
         // Trocar de modo pode deixar o quadro "parado" numa versão antiga
@@ -5243,6 +5483,7 @@ const MapView = {
     // pode vir antes ou depois de _mountTopbarMapa — não há dependência entre as duas.
     this._mountBottombarMapa();
 
+    _debugWinContagem.toolsidebar = (_debugWinContagem.toolsidebar || 0) + 1; // [01/10/2026] contador de reconstruções (🐞): a barra de Ferramentas é recriada a cada mount da Planta
     container.querySelector('#map-toolsidebar-close').onclick = () => this._toggleToolsidebar(false);
     this._makePanelDraggable(container.querySelector('#map-toolsidebar'), 'toolsidebar');
     this._applyRememberedPanelPos(container.querySelector('#map-toolsidebar'), 'toolsidebar');
@@ -5387,7 +5628,7 @@ const MapView = {
     // Esc cancela a reta em desenho (modo "Inserir retas", já com o 1º ponto
     // marcado) — sem precisar completar um 2º toque indesejado nem trocar de
     // modo pra "resetar" o ponto pendente.
-    document.addEventListener('keydown', this._onKeyDown = (e) => this._onEscCancel(e));
+    document.addEventListener('keydown', this._onKeyDown = (e) => { if (!this._temFocoTeclado()) return; this._onEscCancel(e); });
 
     // Shift ligado/desligado (estado "ao vivo", não por evento único) — usado
     // pela ferramenta Parede pra escolher o passo do ângulo travado ao
@@ -5416,7 +5657,7 @@ const MapView = {
     // progresso (2º ponto sendo posicionado) — fora disso, as setas seguem
     // livres pro resto do app (atalhos de navegação por teclado etc.).
     document.addEventListener('keydown', this._onMedidaCtrlDown = (e) => {
-      if (this._organizeIsOpen()) return;
+      if (this._organizeIsOpen() || !this._temFocoTeclado()) return;
       if (e.key === 'Control' || e.key === 'Meta') this._ctrlDown = true;
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && this._ctrlDown && (this._medida2dDraft || this._traco2dDraft)) {
         const n = this._perpSnapInfo?.candidatesCount || 0;
@@ -5432,8 +5673,10 @@ const MapView = {
     // Teclado do personagem 2D (WASD/setas + Shift correr) — só reage em
     // "🧭 Modo Navegação" (ver _updatePersonagem2D) e nunca "rouba" teclas de
     // um campo de texto focado (mesma checagem de _onClipboardKeyDown, acima).
-    document.addEventListener('keydown', this._onPersonagemKeyDown = (e) => this._onPersonagemKey(e, true));
+    document.addEventListener('keydown', this._onPersonagemKeyDown = (e) => { if (!this._temFocoTeclado()) return; this._onPersonagemKey(e, true); });
     document.addEventListener('keyup', this._onPersonagemKeyUp = (e) => this._onPersonagemKey(e, false));
+    if (this._onBspFoco) document.removeEventListener('bsp-foco-mudou', this._onBspFoco);
+    document.addEventListener('bsp-foco-mudou', this._onBspFoco = (ev) => { const d = ev.detail || {}; if (this._container && d.perdeu && d.perdeu.contains(this._container)) { this._personagemKeys = {}; this._shiftDown = false; this._ctrlDown = false; } });   // [53ª] Workspace
     window.addEventListener('blur', this._onPersonagemBlur = () => { this._personagemKeys = {}; });
 
     // Perder o foco da janela (trocar de aba, alt+tab, clicar fora do
@@ -5461,7 +5704,7 @@ const MapView = {
     // elemento salvo ANTES desta correção com camada nula/órfã (senão fica
     // "preso visível" mesmo com todas as camadas desligadas — ver
     // isLayerVisible). Ver Mapping.ensureAllElementsLayered.
-    if (Mapping.ensureAllElementsLayered(this._map)) await this._saveMap();
+    if (Mapping.ensureAllElementsLayered(this._map)) await this._saveMap('_mountPlanta');
     this._activeLayerId = this._map.layers[0]?.id || null; // camada padrão pra elementos novos, ver _activeLayerId
     await this._refreshItensNoMapa();
     await this._refreshFotosNoMapa();
@@ -6288,7 +6531,7 @@ const MapView = {
       this._showScreen('entry');
     };
     root.querySelector('#tbm-map-nome').onclick = () => this._openMapSwitcherModal();
-    root.querySelector('#tbm-view3d-btn').onclick = () => App.openView3D(this._map?.id);
+    root.querySelector('#tbm-view3d-btn').onclick = () => { try { this._finalizeFormaDraft(); } catch (_) { /* sem rascunho */ } App.openView3D(this._map?.id); }; // [76ª] grava a edição em andamento (gizmo/Piso) antes de abrir o 3D
 
     root.querySelector('#tbm-cut').onclick = () => this._clipboardCutOrCopy('cut');
     root.querySelector('#tbm-copy').onclick = () => this._clipboardCutOrCopy('copy');
@@ -6338,7 +6581,7 @@ const MapView = {
     });
     root.querySelector('#tbm-tool').onclick = (e) => this._toggleToolPicker(e.currentTarget);
 
-    document.addEventListener('keydown', this._onTopbarMapaKeyDown = (e) => this._onClipboardKeyDown(e));
+    document.addEventListener('keydown', this._onTopbarMapaKeyDown = (e) => { if (!this._temFocoTeclado()) return; this._onClipboardKeyDown(e); });
     this._updateTopbarMapaState();
 
     // NOVO (08/09/2026), pedido verbatim: "o cabeçalho continua dele
@@ -6597,6 +6840,12 @@ const MapView = {
     root.querySelector('#bbm-nav-prev').onclick = () => this._bbmNavigateElement(-1);
     root.querySelector('#bbm-nav-next').onclick = () => this._bbmNavigateElement(1);
     root.querySelector('#bbm-debug-btn').onclick = () => this._toggleDebugWindow();
+    // [01/10/2026] NOVO — botão 💾 (Monitor do IndexedDB, js/dbmonitor.js) no rodapé; `aoMudarJanela` mantém o azul de "ativo" sincronizado quando a janela abre/fecha por outro caminho (✕ da própria janela, Configurações).
+    const dbioBtn = root.querySelector('#bbm-dbio-btn');
+    if (dbioBtn) {
+      dbioBtn.onclick = () => { if (window.DBMonitor) window.DBMonitor.alternarJanela(); else Utils.toast?.('Monitor do IndexedDB indisponível (js/dbmonitor.js não carregou).', { type: 'warn' }); };
+      if (window.DBMonitor) { window.DBMonitor.aoMudarJanela((aberta) => { if (dbioBtn.isConnected) dbioBtn.classList.toggle('active', aberta); }); dbioBtn.classList.toggle('active', window.DBMonitor.janelaAberta()); }
+    }
     // NOVO (07/09/2026), pedido verbatim: "Coloque um botão... para dar
     // toggle na miniatura 3D." — mesmo padrão do #bbm-hud-btn logo abaixo:
     // só chama `MapConfig.set(...)`, quem realmente monta/desmonta a
@@ -6814,7 +7063,12 @@ const MapView = {
     const hasContent = ['walls', 'points', 'trilha', 'objects', 'textos']
       .some((campo) => (this._map[campo] || []).length > 0);
     if (!hasContent) {
-      if (!soPosicao) this._setZoomToStepIndex(this._nearestZoomStepIndex(100));
+      // [30/09/2026] MUDADO -- pedido verbatim: "O padrão do app de zoom inicial do mapa 2D deve ser
+      // 19%, ao voltar às configurações de fábrica." Mapa recém-criado/vazio (sem paredes/pontos/
+      // trilha/objetos/textos) caia sempre no zoom mais próximo de 100% -- agora cai no mais próximo
+      // de 19%.
+      // [01/10/2026] MUDADO — pedido verbatim: "No mapa 2D, o padrão de zoom do app deve ser 6% ao retornar as 'configurações de fábrica'". Causa raiz: o padrão (mapa vazio / sem nada salvo) era fixo em 19% (rodada de 30/09) neste ponto; agora 6% (degrau 6 existe em ZOOM_STEPS_PCT).
+      if (!soPosicao) this._setZoomToStepIndex(this._nearestZoomStepIndex(6));
       if (!soZoom) { this._renderer.view.cx = 0; this._renderer.view.cy = 0; }
       this._syncZoomSliderPosition();
       this._updateBottombarMapa();
@@ -6960,11 +7214,14 @@ const MapView = {
     }
     const minZoom = zoomPctToViewZoom(ZOOM_STEPS_PCT[0], dpr);
     zoomPanoramico = Math.max(zoomPanoramico, minZoom);
+    // [01/10/2026] NOVO (34ª rodada) — opts.modo 'deslizar': só a fase de deslocamento (sem afastar nem aproximar: o zoom segue o atual e vai direto ao zoom final ao chegar). Padrão ('animado') = 3 fases de sempre. Ver App.verNoMapa2D / MapConfig.modoVoo2D.
+    const deslizar = opts.modo === 'deslizar';
+    if (deslizar) zoomPanoramico = view.zoom;
     this._viewFly = {
       t0: performance.now(),
       fromCx: view.cx, fromCy: view.cy, fromZoom: view.zoom,
       zoomPanoramico, toCx: x, toCy: y, zoomFinal,
-      T1: 550, T2: 900, T3: 550, // afasta / desloca / aproxima
+      T1: deslizar ? 0 : 550, T2: deslizar ? 700 : 900, T3: deslizar ? 0 : 550, // afasta / desloca / aproxima
       onComplete: opts.onComplete || null,
     };
     if (this._viewFlyRaf) cancelAnimationFrame(this._viewFlyRaf);
@@ -7061,14 +7318,18 @@ const MapView = {
       (this._map.objects || []).forEach((o) => {
         const nome = this._formaNome?.(o) || o.tipo || 'Objeto';
         if (String(nome).toLowerCase().includes(ql) || String(o.tipo || '').toLowerCase().includes(ql)) {
-          renderRow(`🧊 ${nome}`, `x=${o.x.toFixed(1)} y=${o.y.toFixed(1)}`, o.x, o.y);
+          renderRow(`🧊 ${nome}`, `X=${o.x.toFixed(1)} Z=${o.y.toFixed(1)}`, o.x, o.y);   // [01/10/2026] MUDADO (33ª rodada) — eixos reais do mapa 2D: X e Z (o campo y do 2D é o Z do mundo)
         }
       });
       // Patrimônios com posição NESTE mapa.
       const items = await DB.getItemsByAmbiente(this._map.id);
-      items.filter((it) => typeof it.mapaX === 'number' && !it.mapaAuto).forEach((it) => {
+      // [01/10/2026] MUDADO (33ª rodada) — "Se um patrimônio estiver vinculado a um objeto, então, a sua posição de vínculo no mapa é a posição do objeto": a busca também acha patrimônios só vinculados a objeto e vai até o OBJETO.
+      items.forEach((it) => {
+        const pObj = Mapping.posicaoDoItemNoMapa(this._map, it.id);
+        const pos = pObj ? { x: pObj.x, y: pObj.y } : ((typeof it.mapaX === 'number' && !it.mapaAuto) ? { x: it.mapaX, y: it.mapaY } : null);
+        if (!pos) return;
         const hay = `${it.patrimonio || ''} ${it.descricao || ''} ${it.tipo || ''}`.toLowerCase();
-        if (hay.includes(ql)) renderRow(`📦 ${it.descricao || it.patrimonio || 'Patrimônio'}`, it.patrimonio || '', it.mapaX, it.mapaY);
+        if (hay.includes(ql)) renderRow(`📦 ${it.descricao || it.patrimonio || 'Patrimônio'}`, `${it.patrimonio || ''}${pObj ? ` · no objeto ${pObj.nome}` : ''}`, pos.x, pos.y);
       });
       if (!resultsEl.children.length) resultsEl.innerHTML = '<div style="color:var(--text-dim); font-size:13px; padding:6px">Nada encontrado.</div>';
     };
@@ -7232,9 +7493,28 @@ const MapView = {
   // serviria pra depurar nada). Seções com `<details>/<summary>` nativos —
   // ferramenta de debug, sem necessidade de nada mais elaborado (pedido
   // reconhece isso: "não precisa ser elaborado visualmente").
+  /** [01/10/2026] NOVO — janela de ajuda da busca de Objetos (botão ❓). Conteúdo em `MapPanelCards.buscaObjetosAjuda`. */
+  _openBuscaObjetosAjuda() {
+    document.getElementById('busca-ajuda-overlay')?.remove();
+    const ov = document.createElement('div');
+    ov.id = 'busca-ajuda-overlay';
+    ov.style.cssText = 'position:fixed; inset:0; z-index:99998; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.35)';
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--bg-elev,#171b21); color:var(--text,#e7ebf0); border:1px solid var(--border,#2a303a); border-radius:12px; box-shadow:var(--shadow,0 6px 24px rgba(0,0,0,.35))';
+    card.innerHTML = window.MapPanelCards.buscaObjetosAjuda();
+    ov.appendChild(card);
+    const fecha = () => ov.remove();
+    ov.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === ov) fecha(); });
+    ov.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { fecha(); document.removeEventListener('keydown', esc); } });
+    document.body.appendChild(ov);
+    card.querySelector('#busca-ajuda-fechar').onclick = fecha;
+  },
+
   _toggleDebugWindow() {
     if (this._debugWindowEl) this._closeDebugWindow();
     else this._openDebugWindow();
+    this._updateBottombarMapa(); // [01/10/2026] sincroniza o azul de 'ativo' do botão 🐞 na hora
   },
 
   _closeDebugWindow() {
@@ -7248,6 +7528,7 @@ const MapView = {
     if (this._debugWindowRefreshTimer) { clearInterval(this._debugWindowRefreshTimer); this._debugWindowRefreshTimer = null; }
     this._debugWindowEl?.remove();
     this._debugWindowEl = null;
+    this._updateBottombarMapa?.(); // [01/10/2026] fechar pelo ✕ também apaga o azul do botão 🐞
   },
 
   _openDebugWindow() {
@@ -7316,13 +7597,14 @@ const MapView = {
    *  de propriedades troca `this._panelEl` de referência, ver _openPanel). */
   _debugKnownWindows() {
     return [
-      { name: 'Painel de propriedades (objeto/parede/câmera/texto/porta/janela/pino)', getEl: () => this._panelEl },
-      { name: 'Roda de rotação da foto (🎯 Definir rotações)', getEl: () => this._fotoPinWheelEl },
-      { name: 'Ferramentas', getEl: () => this._container?.querySelector('#map-toolsidebar') },
-      { name: 'Camadas', getEl: () => this._layersPanelEl },
-      { name: 'Cores', getEl: () => this._coresPanelEl },
-      { name: 'Seletor de objeto/forma', getEl: () => this._objectPickerEl },
-      { name: 'Esta janela de depuração', getEl: () => this._debugWindowEl },
+      // [01/10/2026] NOVO — `contaKey` = chave em `_debugWinContagem` (contador de reconstruções por janela, ver abaixo da declaração de MapView).
+      { name: 'Painel de propriedades (objeto/parede/câmera/texto/porta/janela/pino)', contaKey: '_panelEl', getEl: () => this._panelEl },
+      { name: 'Roda de rotação da foto (🎯 Definir rotações)', contaKey: '_fotoPinWheelEl', getEl: () => this._fotoPinWheelEl },
+      { name: 'Ferramentas', contaKey: 'toolsidebar', getEl: () => this._container?.querySelector('#map-toolsidebar') },
+      { name: 'Camadas', contaKey: '_layersPanelEl', getEl: () => this._layersPanelEl },
+      { name: 'Cores', contaKey: '_coresPanelEl', getEl: () => this._coresPanelEl },
+      { name: 'Seletor de objeto/forma', contaKey: '_objectPickerEl', getEl: () => this._objectPickerEl },
+      { name: 'Esta janela de depuração', contaKey: '_debugWindowEl', getEl: () => this._debugWindowEl },
     ];
   },
 
@@ -7436,11 +7718,16 @@ const MapView = {
             <td class="map-debug-win-x"></td>
             <td class="map-debug-win-y"></td>
             <td class="map-debug-win-vis"></td>
+            <td class="map-debug-win-cont"></td>
           `;
           tr.querySelector('.map-debug-win-name').textContent = w.name;
         }
         tr.querySelector('.map-debug-win-existe').textContent = existe ? '✅' : '—';
         tr.querySelector('.map-debug-win-estado').textContent = estadoTxt;
+        // [01/10/2026] NOVO — "deve aparecer uma nova informação, um contador de quantas vezes ela foi chamada desde que a página foi carregada (contador de reconstruções)."
+        const contaCell = tr.querySelector('.map-debug-win-cont');
+        contaCell.textContent = String(_debugWinContagem[w.contaKey] || 0);
+        contaCell.title = 'Quantas vezes esta janela foi criada/recriada (elemento novo no DOM) desde que a página carregou. Só um F5 zera.';
         // NOVO (06/09/2026), pedido verbatim: "Deve ser possível mudar as
         // posições das coisas que aparecem ali com botões triplos" — um
         // controle "◄ valor ►" por COORDENADA (X e Y), no espírito de
@@ -7510,7 +7797,7 @@ const MapView = {
         btn.textContent = fs === 'oculto' ? '🚫 Oculto' : fs === 'forcado' ? '👁️ Forçado' : '➖ Normal';
         btn.title = 'Clique pra alternar: normal → oculto → forçado visível → normal.';
       },
-      6,
+      7,
     );
 
     // ---- Seções "Objetos"/"Fotos"/"Itens" ----
@@ -7770,6 +8057,8 @@ const MapView = {
     // quadro/movimento do mouse, então o botão nunca fica "dessincronizado"
     // por muito tempo.
     if (typeof Perf !== 'undefined') root.querySelector('#bbm-hud-btn')?.classList.toggle('active', Perf.enabled);
+    // [01/10/2026] NOVO — "O botão '🐞' de depuração, no rodapé da grade do mapa 2D, deve receber o mesmo destaque visual (azul) dos outros botões dali, quando estiver ativo." CAUSA RAIZ: o único botão do rodapé sem o toggle da classe 'active' era o 🐞 (🧊/📊 vizinhos já faziam); agora reflete `_debugWindowEl` (aberta = azul).
+    root.querySelector('#bbm-debug-btn')?.classList.toggle('active', !!this._debugWindowEl);
     // NOVO (07/09/2026) — mesmo raciocínio do #bbm-hud-btn logo acima:
     // mantém `#bbm-minimap3d-btn` sincronizado mesmo quando a miniatura é
     // ligada/desligada por FORA daqui (ex.: checkbox #mc-miniatura3d em
@@ -8559,8 +8848,11 @@ const MapView = {
       kind: r.kind,
       id: r.id,
       fromCut: mode === 'cut',
-      data: r.kind === 'itemPin' ? { x: r.ref.x, y: r.ref.y, piso: r.ref.piso, label: r.ref.label, layerId: r.ref.layerId } : { ...r.ref },
+      // [01/10/2026] MUDADO (34ª rodada) — pedido verbatim: "o copiar e colar deve funcionar de modo que fique exatamente igual ao que estava." Objetos: cópia PROFUNDA tirada na hora de copiar (um retrato; editar o original depois não muda o que será colado) + `ordem` = posição original em map.objects (a ordem de desenho/empilhamento é mantida ao colar).
+      ordem: r.kind === 'object' ? (this._map.objects || []).findIndex((x) => x.id === r.id) : null,
+      data: r.kind === 'itemPin' ? { x: r.ref.x, y: r.ref.y, piso: r.ref.piso, label: r.ref.label, layerId: r.ref.layerId } : (r.kind === 'object' ? ((typeof structuredClone === 'function') ? structuredClone(r.ref) : JSON.parse(JSON.stringify(r.ref))) : { ...r.ref }),
     }));
+    this._clipboardCamadaAtiva = this._activeLayerId;   // [01/10/2026] NOVO (35ª rodada) — camada ativa NA HORA de copiar/recortar (ver _clipboardPaste: só troca de camada se outra foi selecionada depois)
     if (mode === 'copy') {
       Utils.toast(`📋 ${refs.length} elemento${refs.length === 1 ? '' : 's'} copiado${refs.length === 1 ? '' : 's'}.`, { type: 'ok' });
       this._updateTopbarMapaState();
@@ -8579,7 +8871,7 @@ const MapView = {
       const idx = (arr || []).findIndex((x) => x.id === r.id);
       if (idx >= 0) arr.splice(idx, 1);
     });
-    if (elRefs.length) { Mapping.recalcBounds(this._map); await this._saveMap(); }
+    if (elRefs.length) { Mapping.recalcBounds(this._map); await this._saveMap('_clipboardCutOrCopy'); }
     if (itemRefs.length) await this._refreshItensNoMapa();
     this._clearToolSelection();
     Utils.toast(`✂️ ${refs.length} elemento${refs.length === 1 ? '' : 's'} recortado${refs.length === 1 ? '' : 's'}.`, { type: 'ok' });
@@ -8746,7 +9038,7 @@ const MapView = {
     });
     if (tracoSnapshots.length) this._map.tracos2d = (this._map.tracos2d || []).filter((t) => !tracoIds.includes(t.id));
     if (medidaSnapshots.length) this._map.medidas2d = (this._map.medidas2d || []).filter((m) => !medidaIds.includes(m.id));
-    if (elRefs.length || tracoSnapshots.length || medidaSnapshots.length) { Mapping.recalcBounds(this._map); await this._saveMap(); }
+    if (elRefs.length || tracoSnapshots.length || medidaSnapshots.length) { Mapping.recalcBounds(this._map); await this._saveMap('_deleteSelection'); }
     if (itemRefs.length) await this._refreshItensNoMapa();
     // NOVO (06/09/2026) — ver comentário grande acima: reconstrói
     // `this._map.fotos` do zero a partir do banco (mesma função usada por
@@ -8826,12 +9118,23 @@ const MapView = {
     const cfg = (typeof MapConfig !== 'undefined') ? await MapConfig.get() : {};
     const duplicarItens = !!cfg.duplicarItensAoColar;
     const layerId = this._activeLayerId;
+    // [01/10/2026] MUDADO (35ª rodada) — pedido verbatim: "Ao colar, só muda a camada se foi selecionado outro, então, será colado na camada em que estiver ativa." Se a camada ativa é a MESMA de quando se copiou, cada elemento colado FICA na camada em que estava; se outra camada foi selecionada depois de copiar, tudo é colado na camada ATIVA agora. (Antes: sempre a ativa.)
+    const camadaMudou = this._clipboardCamadaAtiva !== undefined && this._clipboardCamadaAtiva !== this._activeLayerId;
+    const camadaDe = (orig) => ((camadaMudou || orig == null) ? layerId : orig);
     const newSelection = new Set();
     const criados = []; // {kind, id} — pra undo (excluir de novo)
     const itemVoltas = []; // {id, to:{x,y,piso}} — pinos recortados repostos
     const skipped = [];
     let n = 0;
-    for (const entry of this._clipboard) {
+    // [01/10/2026] MUDADO (34ª rodada) — pedido verbatim: "No mapa 2D, ao 'copiar' e, depois, 'colar', os elementos devem manter as suas distâncias relativas idênticas. Por exemplo, se havia um Gabinete 'dentro' de uma Mesa, isso deve permanecer. Pois, se não for assim, ao colar, os objetos ficarão um em cima do outro pela lógica padrão de empilhamento de objetos. [...] O que muda são os nomes dos objetos (para que não fiquem iguais), ids, e posições." CAUSA RAIZ: cada objeto colado passava por Mapping.addObject, que roda o EMPILHAMENTO AUTOMÁTICO sempre que o objeto copiado não trazia `elevacao` numérica (objetos no chão não trazem) — e como a cópia cai a +0,5 m do original, ela era empilhada em cima do original/dos outros colados (elevação nova), além de ganhar `semY0`. Também mantinha o MESMO nome do original, o mesmo `grupoId` (a cópia entrava no grupo do original) e referências por id (ex.: rackId) apontando pro original. AGORA os objetos são clonados por Mapping.cloneObjectExato: cópia profunda de TODOS os campos (elevação/semY0/forma/componentes... exatamente como estavam), SEM empilhamento; muda só: id, nome (único, ex.: Mesa.001 -> Mesa.002), posição (x/y + deslocamento; origem do retículo métrico junto) e camada (a ativa, como antes). Referências por id e grupos entre os objetos COLADOS JUNTOS são remapeados pros ids novos (grupo com 1 só membro colado deixa de ser grupo); a ordem de desenho original é mantida (`ordem`, guardada ao copiar). LIMITES HONESTOS: paredes/portas/janelas/textos continuam como antes (cópia com deslocamento; porta presa a parede cola solta); `redo` de "Colar" continua só atualizando a tela (limitação antiga, não mexida aqui).
+    const objEntradas = this._clipboard.filter((e) => e.kind === 'object').sort((a, b) => (a.ordem ?? 1e9) - (b.ordem ?? 1e9));
+    const idMapObj = new Map(objEntradas.map((e) => [e.id, Utils.uid('obj')]));
+    const gcount = new Map();
+    objEntradas.forEach((e) => { const g = e.data.grupoId; if (g) gcount.set(g, (gcount.get(g) || 0) + 1); });
+    const grupoMap = new Map();
+    gcount.forEach((c, g) => { if (c >= 2) grupoMap.set(g, Utils.uid('grp')); });
+    const entradasColar = [...this._clipboard.filter((e) => e.kind !== 'object'), ...objEntradas];
+    for (const entry of entradasColar) {
       if (entry.kind === 'itemPin') {
         if (entry.fromCut) {
           const to = { x: entry.data.x + OFFSET, y: entry.data.y + OFFSET, piso: entry.data.piso || 0 };
@@ -8848,7 +9151,7 @@ const MapView = {
             const { id: _id, patrimonio, buscaTokens, criadoEm, modificadoEm, ...rest } = orig;
             // Item novo (duplicata de verdade) entra na camada ATIVA agora — mesma
             // regra de qualquer outro elemento novo colado (ver `layerId` acima).
-            const novo = await DB.addItem({ ...rest, patrimonio: '', mapaX: entry.data.x + OFFSET, mapaY: entry.data.y + OFFSET, mapaPiso: entry.data.piso || 0, mapaLayerId: layerId, ambienteId: this._map.id });
+            const novo = await DB.addItem({ ...rest, patrimonio: '', mapaX: entry.data.x + OFFSET, mapaY: entry.data.y + OFFSET, mapaPiso: entry.data.piso || 0, mapaLayerId: camadaDe(entry.data.layerId), ambienteId: this._map.id });
             criados.push({ kind: 'itemDup', id: novo.id });
             newSelection.add(`itemPin:${novo.id}`);
             n++;
@@ -8863,17 +9166,16 @@ const MapView = {
       // (a camada ATIVA agora, não a de onde veio) mudam.
       if (entry.kind === 'wall') {
         const { id: _id, x1, y1, x2, y2, criadoEm, ...rest } = entry.data;
-        const w = Mapping.addWall(this._map, x1 + OFFSET, y1 + OFFSET, x2 + OFFSET, y2 + OFFSET, { ...rest, layerId });
+        const w = Mapping.addWall(this._map, x1 + OFFSET, y1 + OFFSET, x2 + OFFSET, y2 + OFFSET, { ...rest, layerId: camadaDe(entry.data.layerId) });
         criados.push({ kind: 'wall', id: w.id });
         newSelection.add(`wall:${w.id}`);
       } else if (entry.kind === 'object') {
-        const { id: _id, x, y, criadoEm, tipo, ...rest } = entry.data;
-        const o = Mapping.addObject(this._map, x + OFFSET, y + OFFSET, tipo, { ...rest, layerId });
+        const o = Mapping.cloneObjectExato(this._map, entry.data, { dx: OFFSET, dy: OFFSET, layerId: camadaDe(entry.data.layerId), idMap: idMapObj, grupoMap });
         criados.push({ kind: 'object', id: o.id });
         newSelection.add(`object:${o.id}`);
       } else if (entry.kind === 'text') {
         const { id: _id, x, y, criadoEm, content, ...rest } = entry.data;
-        const t = Mapping.addText(this._map, x + OFFSET, y + OFFSET, content, { ...rest, layerId });
+        const t = Mapping.addText(this._map, x + OFFSET, y + OFFSET, content, { ...rest, layerId: camadaDe(entry.data.layerId) });
         criados.push({ kind: 'text', id: t.id });
         newSelection.add(`text:${t.id}`);
       } else if (entry.kind === 'porta') {
@@ -8884,13 +9186,13 @@ const MapView = {
         // como uma porta solta nova, em vez de arriscar um vínculo errado.
         const { id: _id, x, y, angulo, parentWallId, posAoLongoDaParede, criadoEm, ...rest } = entry.data;
         const pos = parentWallId ? Mapping.resolveDoorWindowPos(this._map, entry.data) : { x, y, angulo: angulo || 0 };
-        const d = Mapping.addDoor(this._map, pos.x + OFFSET, pos.y + OFFSET, { ...rest, angulo: pos.angulo, parentWallId: null, layerId });
+        const d = Mapping.addDoor(this._map, pos.x + OFFSET, pos.y + OFFSET, { ...rest, angulo: pos.angulo, parentWallId: null, layerId: camadaDe(entry.data.layerId) });
         criados.push({ kind: 'porta', id: d.id });
         newSelection.add(`porta:${d.id}`);
       } else if (entry.kind === 'janela') {
         const { id: _id, x, y, angulo, parentWallId, posAoLongoDaParede, criadoEm, ...rest } = entry.data;
         const pos = parentWallId ? Mapping.resolveDoorWindowPos(this._map, entry.data) : { x, y, angulo: angulo || 0 };
-        const j = Mapping.addWindow(this._map, pos.x + OFFSET, pos.y + OFFSET, { ...rest, angulo: pos.angulo, parentWallId: null, layerId });
+        const j = Mapping.addWindow(this._map, pos.x + OFFSET, pos.y + OFFSET, { ...rest, angulo: pos.angulo, parentWallId: null, layerId: camadaDe(entry.data.layerId) });
         criados.push({ kind: 'janela', id: j.id });
         newSelection.add(`janela:${j.id}`);
       }
@@ -8898,8 +9200,10 @@ const MapView = {
     }
     const mapId = this._map.id;
     const elCriados = criados.filter((c) => c.kind !== 'itemDup');
-    if (elCriados.length) { Mapping.recalcBounds(this._map); await this._saveMap(); }
+    if (elCriados.length) { Mapping.recalcBounds(this._map); await this._saveMap('_clipboardPaste'); }
     if (itemVoltas.length || criados.some((c) => c.kind === 'itemDup')) await this._refreshItensNoMapa();
+    // [01/10/2026] CORRIGIDO — "No mapa 2D, ao fazer o 'copiar', depois, 'colar', a seleção deve ficar nos elementos 'colados', não mais nos elementos 'copiados' ainda." CAUSA RAIZ: `_toolSelection` já virava os colados, mas as REGIÕES de seleção (`_selectionRegions` — a área azul do Laço/Elipse/retângulo desenhada em volta dos ORIGINAIS) continuavam vivas: seguiam desenhadas sobre os copiados e qualquer 'Mover seleção'/recálculo (_recomputeToolSelectionFromRegions) devolvia a seleção pros copiados. Agora a colagem descarta as regiões antigas, como `_clearToolSelection` já faz.
+    this._selectionRegions = [];
     this._toolSelection = newSelection;
     this._updateToolCtx();
     if (n) Utils.toast(`📄 ${n} elemento${n === 1 ? '' : 's'} colado${n === 1 ? '' : 's'}.`, { type: 'ok' });
@@ -9211,7 +9515,7 @@ const MapView = {
       Utils.toast(this._ptool === 'reticulo' ? 'Retículo métrico cancelado.' : 'Desenho cancelado.', { type: 'warn' });
     }
     // NOVO (03/09/2026) — mesmo pedido do ESC acima, agora cobrindo também
-    // "Trena (de medir)"/"Traço guia" (viraram ferramentas de verdade nesta
+    // "Trena"/"Traço guia" (viraram ferramentas de verdade nesta
     // rodada, ver PTOOLS): um 1º ponto já marcado (aguardando o 2º clique)
     // também pode ser descartado com ESC, sem precisar tocar num lugar
     // vazio nem trocar de ferramenta.
@@ -9259,6 +9563,14 @@ const MapView = {
       // demanda logo abaixo — é ela mesma quem marca `_redrawDirty` quando o
       // boneco está de fato andando (ver _updatePersonagem2D).
       const _nowT = performance.now();
+      // [01/10/2026] CORRIGIDO (40ª rodada) — "A atualização imediata ainda não está acontecendo do 2D para o 3D." CAUSA RAIZ: na 38ª só o arraste DIRETO de um objeto
+      // (_draggingObject) empurrava o movimento pro 3D; o 2D tem vários outros arrastes (Mover selecionados/_moveSelDrag, mover região, gizmos/_groupDrag, curva...)
+      // que só chegavam ao 3D ao SOLTAR (_saveMap). Agora, enquanto QUALQUER arraste estiver ativo, a cada ~80 ms um diff RÁPIDO (posição/tamanho/ângulo) é empurrado.
+      if ((this._draggingObject || this._moveSelDrag || this._moveRegionDrag || this._groupDrag || this._wallChainDrag || this._curveHandleDrag || this._draggingFotoPin || this._draggingItemPin)
+        && _nowT - (this._sync3DUltimoT || 0) > 80) {
+        this._sync3DUltimoT = _nowT;
+        try { this._sync3DLive(null, { rapido: true }); } catch (e) { /* ignora */ }
+      }
       const _dt = this._personagemLastT ? Math.min(0.05, (_nowT - this._personagemLastT) / 1000) : 0;
       this._personagemLastT = _nowT;
       // [27/09/2026] NOVO -- motor de tween (js/lib/tweenengine.js, window.TWEEN)
@@ -9332,6 +9644,7 @@ const MapView = {
         return;
       }
       this._redrawDirty = false;
+      try { window.PisoCustomEdit?.syncBar(); } catch (_) { /* a barra nunca derruba o quadro */ }
       Perf.markFrameStart();
       // Gizmo de grupo da ferramenta "Mover selecionados" (ver _groupBox/
       // _computeGroupBox) — recalculado do ZERO a cada quadro OCIOSO (sem
@@ -9364,8 +9677,10 @@ const MapView = {
       // antes do clique, o cursor vira só 'crosshair' (ver _computeCursor)
       // enquanto não há um rascunho em progresso.
       const objectGhostAtivo = (this._ptool === 'objects'); // [14/09/2026 UTC] unificado — 'objects' agora é _ptool de verdade
-      const objectGhost = (objectGhostAtivo && this._objectStampType && !this._draggingObject && this._mouseScreen)
-        ? { stamp: this._objectStampType, ...this._renderer.screenToWorld(this._mouseScreen.x, this._mouseScreen.y) }
+      // [76ª rodada] ferramenta Piso: ghost da laje (10×10 m) seguindo o cursor, como os demais objetos.
+      const _pisoGhostAtivo = (this._ptool === 'piso');
+      const objectGhost = (((objectGhostAtivo && this._objectStampType) || _pisoGhostAtivo) && !this._draggingObject && this._mouseScreen)
+        ? { stamp: _pisoGhostAtivo ? 'piso' : this._objectStampType, angulo: this._objectGhostAngulo || 0, ...this._renderer.screenToWorld(this._mouseScreen.x, this._mouseScreen.y) }
         : null;
       // Seleção/retângulo das ferramentas Paint.NET (ver _ptool) — o
       // destaque POR ITEM (retângulo tracejado) só faz sentido nas
@@ -9580,8 +9895,14 @@ const MapView = {
             reticuloOrigemX: this._formaDraft.reticuloOrigemX,
             reticuloOrigemY: this._formaDraft.reticuloOrigemY,
             reticuloOrigemModo: this._formaDraft.reticuloOrigemModo,
+            texto3d: this._formaDraft.texto3d, // [71ª rodada] desenho das letras durante a reedição (gizmo)
+            // [89ª] objetos com contorno livre (Piso/Teto/Telha) em modo gizmo: o desenho é o do contorno real, esticado ao vivo pela caixa do gizmo
+            ...(this._formaDraft.reedit && this._formaDraft.reedit.orig.pisoPoligono && window.PisoCustom ? (() => { const o0 = this._formaDraft.reedit.orig; return { pisoPoligono: window.PisoCustom.escalado(o0.pisoPoligono, this._formaDraft.largura / (o0.largura || 1), this._formaDraft.profundidade / (o0.profundidade || 1)), telha: o0.telha, padrao: o0.padrao, acabamento: o0.acabamento }; })() : {}),
+            textoBase: this._formaDraft.textoBase, gizmoAtivo: true, // [73ª rodada]
           },
           geom: formaDraftGeom,
+          // [73ª rodada] Texto: o objeto desenhado usa a ORIGEM e as escalas derivadas da caixa do gizmo (ver `_texto3dDraftPose`).
+          textoPose: this._texto3dDraftPose(this._formaDraft),
           // Marcador VERDE da âncora de redimensionamento — 3 pedidos do
           // usuário (25/08/2026) combinados: (1) "'livre' significa poder
           // movê-lo manualmente pra qualquer posição, assim como a âncora
@@ -9668,8 +9989,18 @@ const MapView = {
       // _computeParedeHover/_paredeHover) — pedido do usuário: "deve
       // aparecer um 'X' indicando que se clicar naquele momento o ponto de
       // junção... será começado ali".
+      // [30/09/2026] NOVO -- `mostrarMedida`/`medidaTexto` pro Map2DRenderer.render desenhar a
+      // caixinha com o comprimento em cima do ghost, mesmo visual da medida da Trena (ver
+      // DEFAULTS.paredeMostrarMedidaAoDesenhar2D em mapconfig.js e o desenho em Map2DRenderer.render,
+      // opts.paredeGhost). `_currentDrawLengthMeters` já calcula EXATAMENTE este mesmo comprimento
+      // (ver comentário grande lá) — reaproveitado aqui em vez de recalcular.
       const paredeGhost = (this._mode === 'view' && this._ptool === 'parede' && this._paredeStart && this._mouseScreen)
-        ? { from: this._paredeStart, to: this._paredeResolvePoint(this._mouseScreen.x, this._mouseScreen.y), espessura: this._paredeEspessura }
+        ? { from: this._paredeStart, to: this._paredeResolvePoint(this._mouseScreen.x, this._mouseScreen.y), espessura: this._paredeEspessura, mostrarMedida: this._paredeMostrarMedidaAoDesenhar2D, medidaTexto: this._paredeMostrarMedidaAoDesenhar2D ? this._formatLength(this._currentDrawLengthMeters() || 0) : null }
+        : null;
+      // [30/09/2026] NOVO — quadradinho-ghost ANTES do 1º clique (ver
+      // comentário grande em Map2DRenderer.render, opts.paredeSquareGhost).
+      const paredeSquareGhost = (this._mode === 'view' && this._ptool === 'parede' && !this._paredeStart && this._mouseScreen)
+        ? { ...this._paredeResolvePoint(this._mouseScreen.x, this._mouseScreen.y), espessura: this._paredeEspessura }
         : null;
       const paredeJoin = (this._mode === 'view' && this._ptool === 'parede' && this._paredeHover)
         ? this._renderer.worldToScreen(this._paredeHover.x, this._paredeHover.y)
@@ -9690,7 +10021,29 @@ const MapView = {
       // `null`, mesmo com a régua ligada.
       const cursorScreen = this._showRulers ? this._mouseScreen : null;
       const selectionBoundsWorld = this._showRulers ? this._computeSelectionWorldBoundsForRuler() : null;
-      this._renderer.render({ drawingPoints: this._drawingPoints, ghost, snapPreview, objectGhost, toolSelection, rectSelect, selectionRegions, lassoPreview, ellipsePreview, pencilPreview, curvePreview, curveEdit, curveHover, formaResizeHandles, formaDraft, textHandles, textCreateDraft, groupGizmo, paredeGhost, paredeJoin, doorWindowGhost: this._doorWindowGhost, fotoOrbGhost: this._fotoOrbGhost, personagem2D: this._navMode ? this._personagem2D : null, hoverEl: this._hoverEl, cursorScreen, selectionBoundsWorld });
+      // [30/09/2026] NOVO — pedido verbatim: "Sobre o snap, é o ghost que
+      // faltava para indicar a posição em que o item vai ficar [...] Tanto em
+      // cadastrar um novo patrimônio quanto em tirar uma foto [...] se o
+      // snap estiver ligado, deve funcionar. Um ghost do item respectivo deve
+      // ir aparecendo na posição que ficará em caso se clique em 'Marcar
+      // aqui'." Cobre os 3 modos que usam a mesma "faixa de mirar" fixa no
+      // centro da tela (`_showPhotoPlacementCrosshair`): foto
+      // (`_photoPlacementId`), novo patrimônio (`_itemPlacementId`) e o
+      // seletor genérico de posição (`_mapPositionPickerActive`, usado por
+      // "🗺️ Definir origem no mapa" em mapconfig.js). `screenToWorld` do
+      // centro da tela JÁ aplica o snap da grade quando ligado (confirmado
+      // em rodada anterior) — só precisamos converter de volta pra tela pra
+      // desenhar o selo na posição de verdade (que pode ficar um pouco fora
+      // do centro exato quando o snap "puxa" pro ponto de grade mais perto).
+      let placementSnapGhost = null;
+      if (this._renderer && this._renderer.canvas && (this._photoPlacementId || this._itemPlacementId || this._mapPositionPickerActive)) {
+        const canvas = this._renderer.canvas;
+        const tipo = this._photoPlacementId ? 'foto' : (this._itemPlacementId ? 'item' : 'posicao');
+        const world = this._renderer.screenToWorld(canvas.width / 2, canvas.height / 2);
+        const p = this._renderer.worldToScreen(world.x, world.y);
+        placementSnapGhost = { x: p.x, y: p.y, tipo };
+      }
+      this._renderer.render({ drawingPoints: this._drawingPoints, ghost, snapPreview, objectGhost, toolSelection, rectSelect, selectionRegions, lassoPreview, ellipsePreview, pencilPreview, curvePreview, curveEdit, curveHover, formaResizeHandles, formaDraft, textHandles, textCreateDraft, groupGizmo, paredeGhost, paredeSquareGhost, paredeJoin, placementSnapGhost, doorWindowGhost: this._doorWindowGhost, fotoOrbGhost: this._fotoOrbGhost, personagem2D: this._navMode ? this._personagem2D : null, hoverEl: this._hoverEl, cursorScreen, selectionBoundsWorld });
       // NOVO (03/09/2026) — "Régua"/"Traço guia" da bandeja lateral (ver
       // _onMedida2DClique/_onTraco2DClique): desenhados numa passada PRÓPRIA,
       // por cima do quadro que Map2DRenderer.render acabou de terminar (o
@@ -9791,7 +10144,9 @@ const MapView = {
    *  seguidas rápido (arrastar, digitar) continua seguro e cada chamada
    *  ainda resolve quando a gravação de fato acontece — só não é mais 1
    *  gravação por chamada. */
-  _saveMap() {
+  _saveMap(origem) {
+    // [01/10/2026] NOVO (38ª rodada) — ver _sync3DLive: toda gravação do mapa 2D também empurra o que mudou pro "Ver em 3D" aberto ao lado (Workspace).
+    try { this._agendarSync3D(); } catch (e) { /* ignora */ }
     // NOVO (06/09/2026) — `_saveMap()` é o "escoadouro" comum de QUASE toda
     // adição/remoção de parede/câmera/objeto/texto no mapa (dezenas de
     // chamadores, ver grep) — ponto único e barato pra manter o contador
@@ -9801,10 +10156,174 @@ const MapView = {
     // parte de `this._map` salvo neste método) — ver _refreshItensNoMapa/
     // _refreshFotosNoMapa, que têm sua PRÓPRIA chamada equivalente.
     this._updateBbmItemCount();
-    return DB.saveMap(this._map).catch((e) => {
+    // [01/10/2026] NOVO — "Coloque no painel do IndexedDB um jeito de poder ver a lista das 29 esperas do mapa [...] um contador de
+    // chamadas para cada uma também e os tempos (último, mais rápido e mais demorado)." `origem` = nome da chamada (os 27
+    // `await this._saveMap('...')` reais passam um nome fixo; as demais chamadas, sem nome, são identificadas pela pilha de chamadas
+    //; custo de microssegundos por chamada). O tempo medido é o que o chamador ESPERA: da chamada até a Promise
+    // resolver (hoje ~0 ms, porque DB.saveMap devolve na hora — a gravação de verdade aparece na linha "saveMap" do grupo "Gravações").
+    const _M = window.DBMonitor;
+    const _t0 = _M ? performance.now() : 0;
+    let _nome = origem;
+    if (_M && !_nome) {
+      try {
+        const ln = String(new Error().stack || '').split('\n')[2] || '';
+        const m = /at (?:async )?(?:new )?([^\s(]+)?\s*\(?.*?([^\/\\]+):(\d+):\d+\)?\s*$/.exec(ln);
+        _nome = m ? `${m[1] || '(anônima)'} · ${m[2]}:${m[3]}` : '(origem desconhecida)';
+      } catch (e) { _nome = '(origem desconhecida)'; }
+    }
+    return DB.saveMap(this._map).then((r) => {
+      if (_M && _M.espera) _M.espera(_nome, performance.now() - _t0, 'espera');
+      return r;
+    }).catch((e) => {
       console.error('Falha ao salvar o mapa:', e);
       Utils.toast('⚠️ Falha ao salvar o mapa — tente novamente.', { type: 'danger', duration: 5000 });
     });
+  },
+
+  /** [01/10/2026] NOVO (38ª rodada) — "Assim como no arquivo que te enviei dá para mover um objeto no cenário 2D e imediatamente o mesmo objeto é movido no cenário 3D,
+   *  faça isso no nosso projeto também. Pois há como alternar entre o modo 'Workspace' [...] e o 'Layout Clássico'." CAUSA RAIZ: o 2D (MapView._map) e o "Ver em 3D"
+   *  (View3D._map) carregam CÓPIAS separadas do mapa (DB.getMap devolve um clone a cada leitura), então mexer num objeto do 2D nunca chegava ao 3D aberto ao lado —
+   *  só aparecia reabrindo o 3D. Agora: (a) durante o ARRASTE de um objeto no 2D, cada quadro copia os campos pro objeto de mesmo id do 3D e reconstrói só a malha dele
+   *  (via AutomationManager._agendarRefresh3DLive, que já agrupa 1 reconstrução por quadro); (b) em QUALQUER _saveMap (setas, rotação, painel de propriedades, colar,
+   *  adicionar/remover) um diff compara objetos/portas/janelas/paredes e atualiza o 3D (mudança de campos = malha incremental; mudança de quantidade/ordem ou de
+   *  paredes = _rebuildScene completo). Sem "Ver em 3D" montado para o mesmo mapa (Layout Clássico com o 3D fechado) não faz nada — o 3D lê o mapa salvo ao abrir.
+   *  LIMITES: só 2D → 3D (mover no 3D não atualiza o 2D); gizmos de várias peças/redimensionar atualizam ao soltar (via _saveMap), não quadro a quadro. */
+  _sync3DAlvo() {
+    const v = window.View3D;
+    if (!v || !v._engine || !v._engine._ready || !v._map || !this._map || v._map.id !== this._map.id || v._map === this._map) return null;
+    return v;
+  },
+  /** [01/10/2026] NOVO (44ª rodada) — sem "Ver em 3D" aberto o empilhamento também precisa acontecer no 2D (o desenho agora segue a elevação): recalcula o apoio de quem mudou de posição
+   *  desde a última checagem (baseline por objeto em WeakMap; a 1ª vez que um objeto é visto só grava a posição). Com o 3D aberto quem faz isso é _sync3DLive (via linha de base do motor). */
+  _recalcElev2D(objs) {
+    if (!this._map || !window.Mapping || !Mapping.recalcularElevacao) return;
+    this._elevPos = this._elevPos || new WeakMap();
+    (objs || this._map.objects || []).forEach((o) => {
+      const b = this._elevPos.get(o);
+      if (b && (b.x !== o.x || b.y !== o.y)) { try { Mapping.recalcularElevacao(this._map, o); } catch (e) { /* ignora */ } }
+      this._elevPos.set(o, { x: o.x, y: o.y });
+    });
+  },
+  _sync3DLive(objs, { rapido = false } = {}) {
+    const v = this._sync3DAlvo();
+    if (!v) { this._recalcElev2D(objs); return; }
+    const m2 = this._map, m3 = v._map, eng = v._engine;
+    const clone = (x) => JSON.parse(JSON.stringify(x));
+    const copiar = (o3, o2) => { Object.keys(o3).forEach((k) => { if (!(k in o2)) delete o3[k]; }); Object.assign(o3, clone(o2)); };
+    const noMotor = (o3) => ['objects', 'portas', 'janelas'].some((k) => (eng.mapData?.[k] || []).includes(o3));
+    // [01/10/2026] CORRIGIDO (44ª rodada) — "A atualização em tempo real está funcionando do 3D para o 2D (3D->2D). Porém, não está funcionando do 2D para o 3D (2D->3D). É só para atualizar a posição
+    // do objeto no 3D. Está sendo considerado como malha estática, no 3D? [...] Verifique qual o impedimento que está acontecendo na engine 3D." CAUSA RAIZ (reproduzida num Chromium com o Workspace
+    // montado): DB.getMap devolve cloneRec = cópia RASA, então MapView._map.objects e View3D._map.objects são O MESMO ARRAY com os MESMOS objetos. Mover no 2D já mexe no objeto que o 3D usa; a
+    // 38ª-43ª comparavam o objeto do 3D com o do 2D (idênticos): dx = 0, nenhum deslocamento, e o diff nunca via diferença. Não é malha estática (moveObjectLive funciona, tanto que o ALT + arrastar
+    // do 3D move livremente): o que faltava era saber ONDE a malha está. Agora a comparação é com a linha de base guardada pelo motor (Engine3D._liveBase/syncObjectLive: posição, elevação e
+    // assinatura de tamanho/ângulo que a malha desenhada representa). Se por qualquer motivo os objetos do 2D e do 3D forem cópias distintas, copiar() continua sincronizando os campos.
+    this._sync3DMovidos = this._sync3DMovidos || new Set();
+    const sujos = [];
+    let completo = false;
+    const aplicar = (o3, o2) => {
+      if (o3 !== o2) copiar(o3, o2);
+      // [47ª rodada] Digitando o texto da folha: só reconstrói a malha quando a digitação parar por 3 s (ver ObjectPanelCard/_segurarSync3DTexto).
+      if (this._sync3DSegura && this._sync3DSegura.id === o3.id && Date.now() < this._sync3DSegura.ate) return;
+      // [01/10/2026] 43ª rodada — elevação dinâmica: ao mudar de posição, o 2D recalcula o apoio (ver Mapping.recalcularElevacao) e o 3D sobe/desce junto. Posição "antes" = linha de base do motor.
+      const base = eng._liveBase && eng._liveBase.get(o3);
+      if (base && (o3.x !== base.x || o3.y !== base.y) && window.Mapping && Mapping.recalcularElevacao) { try { Mapping.recalcularElevacao(m2, o3); } catch (e) { /* ignora */ } }
+      const r = noMotor(o3) ? eng.syncObjectLive(o3) : false;
+      if (r === 'moved') this._sync3DMovidos.add(o3);
+      else if (r === false) { if (noMotor(o3)) sujos.push(o3); else completo = true; }
+    };
+    if (objs) {
+      const idx = new Map((m3.objects || []).map((o) => [o.id, o]));
+      objs.forEach((o2) => { const o3 = idx.get(o2.id); if (!o3) { completo = true; return; } aplicar(o3, o2); });
+    } else {
+      ['objects', 'portas', 'janelas'].forEach((k) => {
+        const a2 = m2[k] || [], a3 = m3[k] || [];
+        // [82ª rodada] durante o gizmo (reedição) o objeto está FORA da lista do 2D de propósito: não propaga a lista (o 3D é atualizado ao vivo por _sync3DDraftLive).
+        if (k === 'objects' && this._formaDraft && this._formaDraft.reedit && !a2.some((o) => o.id === this._formaDraft.reedit.id)) return;
+        // [82ª rodada] MESMOS OBJETOS no 2D e no 3D: em vez de CLONAR a lista (o que deixava o 3D com cópias para sempre — depois de qualquer gizmo o
+        // 3D -> 2D parava de funcionar, pois cada lado editava um objeto diferente), o 3D passa a usar a MESMA lista do 2D. Editar de um lado = editar o
+        // objeto do outro; o motor sabe o que redesenhar pela linha de base (syncObjectLive).
+        if (a2 !== a3 && (a2.length !== a3.length || a2.some((o, i) => a3[i] && a3[i] !== o))) { m3[k] = a2; completo = true; return; }
+        if (a2 !== a3) m3[k] = a2;   // mesmos objetos em listas diferentes: só passa a compartilhar a lista (nada a redesenhar)
+        // Com objetos compartilhados, o motor é quem sabe se algo mudou (syncObjectLive compara com a linha de base, barato: uma conta por objeto); só com cópias distintas há o que comparar aqui.
+        a2.forEach((o2, i) => {
+          const o3 = a3[i] || o2;
+          if (o3 !== o2) {   // cópias distintas (não é o caso hoje): só aplica se algo mudou
+            const mudou = rapido ? (o2.x + '|' + o2.y + '|' + o2.elevacao) !== (o3.x + '|' + o3.y + '|' + o3.elevacao) : JSON.stringify(o2) !== JSON.stringify(o3);
+            if (!mudou) return;
+          }
+          aplicar(o3, o2);
+        });
+      });
+      // objetos adicionados/removidos/ocultos (camada, andar): com a lista compartilhada o tamanho nunca difere entre 2D e 3D — compara com o que a cena DESENHOU (só ao gravar, não a cada quadro do arraste).
+      if (!rapido && !completo) {
+        try {
+          let vis = window.Mapping.filterByLayerVisibility(m3);
+          vis = window.Mapping.filterByPiso(vis, v._pisoFiltro3D);
+          const eo = (eng.mapData && eng.mapData.objects) || [];
+          const lv = vis.objects || [];
+          if (lv.length !== eo.length || lv.some((o, i) => o !== eo[i])) completo = true;
+        } catch (e) { /* ignora */ }
+      }
+      // paredes: a base de comparação é o que o 2D tinha na última sincronização (NÃO o mapa do 3D, que difere em detalhes e forçava reconstrução completa a cada gravação).
+      const wj = JSON.stringify(m2.walls || []);
+      if (this._sync3DWallsJson === undefined) this._sync3DWallsJson = wj;
+      if (!rapido && wj !== this._sync3DWallsJson) { this._sync3DWallsJson = wj; if (m3.walls !== m2.walls) m3.walls = clone(m2.walls || []); completo = true; }
+    }
+    if (completo) { this._sync3DMovidos.clear(); try { v._rebuildScene({ liveSync: true }); } catch (e) { console.warn('[MapView] sync 3D (reconstrução completa):', e); } return; }
+    // acerto final (só fora do arraste): objetos que só foram deslocados ganham a reconstrução de verdade da malha (selos, luzes, pools de instâncias).
+    if (!rapido && !objs && this._sync3DMovidos.size) { this._sync3DMovidos.forEach((o3) => sujos.push(o3)); this._sync3DMovidos.clear(); }
+    sujos.forEach((o3) => { if (noMotor(o3)) { if (window.AutomationManager?._agendarRefresh3DLive) window.AutomationManager._agendarRefresh3DLive(m3, o3); else eng.rebuildObjectIncremental(o3); } });
+  },
+  /** [47ª rodada] Pedido: "Ao editar o conteúdo de um objeto folha, deve atualizar no 3D, após acabar de digitar [...] Quando ficar 3s sem digitar nada, atualiza."
+   *  Chamado a cada tecla; segura a reconstrução da malha deste objeto no 3D e agenda uma sincronização 3 s após a última tecla. */
+  _segurarSync3DTexto(id, ms = 3000) {
+    this._sync3DSegura = { id, ate: Date.now() + ms };
+    clearTimeout(this._sync3DTextoTimer);
+    this._sync3DTextoTimer = setTimeout(() => { this._sync3DSegura = null; try { this._agendarSync3D(); } catch (e) { /* ignora */ } }, ms + 30);
+  },
+  /** [82ª rodada] Pedido: "Ao redimensionar com o gizmo, o 3D deve atualizar a cada quadro, também, não só quando a edição for confirmada." Durante o gizmo
+   *  (reedição) o objeto sai de `_map.objects` e só volta ao confirmar — por isso o 3D só mudava no fim. Agora, 1x por quadro, os valores do rascunho (posição,
+   *  largura/profundidade/altura, ângulo, cor) são aplicados ao objeto da CENA 3D (achado por id) e a malha dele é refeita (syncObjectLive). Cancelar devolve os
+   *  valores originais (_restaurar3DDraft); confirmar segue o caminho normal (_finalizeFormaDraft -> _saveMap -> _sync3DLive). */
+  _agendarSync3DDraft() {
+    if (this._sync3DDraftRaf) return;
+    const f = () => { this._sync3DDraftRaf = 0; try { this._sync3DDraftLive(); } catch (e) { console.warn('[MapView] gizmo -> 3D ao vivo:', e); } };
+    this._sync3DDraftRaf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame(f) : setTimeout(f, 16);
+  },
+  _objeto3DPorId(id) {
+    const v = window.View3D, eng = v && v._engine;
+    if (!eng || !eng._ready || !eng.mapData || !this._map || !v._map || v._map.id !== this._map.id) return null;
+    const o3 = (eng.mapData.objects || []).find((o) => o.id === id);
+    return o3 ? { v, eng, o3 } : null;
+  },
+  _sync3DDraftLive() {
+    const d = this._formaDraft; if (!d || !d.reedit) return;
+    const alvo = this._objeto3DPorId(d.reedit.id); if (!alvo) return;
+    const { eng, o3 } = alvo;
+    const CAMPOS = ['x', 'y', 'largura', 'profundidade', 'altura', 'angulo', 'cor'];
+    if (!d._orig3D) { d._orig3D = {}; CAMPOS.forEach((k) => { d._orig3D[k] = o3[k]; }); }
+    let x = d.x, y = d.y;
+    if (d.texto3d && window.Texto3D) {
+      const pose = this._texto3dDraftPose(d);
+      if (pose) { x = pose.x; y = pose.y; o3.texto3d = Object.assign({}, d.texto3d, { escalaX: pose.escalaX, escalaZ: pose.escalaZ }); }
+    } else { o3.largura = d.largura; o3.profundidade = d.profundidade; }
+    o3.x = x; o3.y = y; o3.angulo = d.angulo || 0; o3.altura = d.stamp.altura; if (d.stamp.cor) o3.cor = d.stamp.cor;
+    const r = eng.syncObjectLive(o3);
+    if (r === false) eng.rebuildObjectIncremental(o3);
+    if (d.texto3d) eng.rebuildObjectIncremental(o3);   // o Texto não entra na assinatura de tamanho: refaz direto
+  },
+  _restaurar3DDraft() {
+    const d = this._formaDraft; if (!d || !d.reedit || !d._orig3D) return;
+    const alvo = this._objeto3DPorId(d.reedit.id); if (!alvo) return;
+    Object.keys(d._orig3D).forEach((k) => { if (d._orig3D[k] === undefined) delete alvo.o3[k]; else alvo.o3[k] = d._orig3D[k]; });
+    if (d.reedit.orig.texto3d) alvo.o3.texto3d = d.reedit.orig.texto3d;
+    if (alvo.eng.syncObjectLive(alvo.o3) === false || d.texto3d) alvo.eng.rebuildObjectIncremental(alvo.o3);
+  },
+  _agendarSync3D() {
+    if (this._sync3DAgendado || !this._sync3DAlvo()) return;
+    this._sync3DAgendado = true;
+    const f = () => { this._sync3DAgendado = false; try { this._sync3DLive(); } catch (e) { console.warn('[MapView] sync 3D:', e); } };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(f); else setTimeout(f, 16);
   },
 
   /** NOVO (07/09/2026), pedido verbatim: "mesmo estando marcado 1 segundo
@@ -10167,6 +10686,9 @@ const MapView = {
    *  algum campo de texto está focado (painel aberto, busca etc.) — mesma
    *  checagem de _onClipboardKeyDown, pra nunca "roubar" W/A/S/D de quem só
    *  está digitando. `preventDefault` nas setas evita rolar a página. */
+  /** [53ª rodada] Workspace: o teclado só vale se o painel do Mapa for o ativo (ver BSPLayout.containerTemFoco). */
+  _temFocoTeclado() { return !window.BSPLayout || !window.BSPLayout.containerTemFoco || window.BSPLayout.containerTemFoco(this._container); },
+
   _onPersonagemKey(e, down) {
     if (this._organizeIsOpen()) return; // ver _organizeIsOpen — "Organizar" está por cima, não deixa vazar pro Mapa
     if (!this._navMode) { if (!down) this._personagemKeys = {}; return; }
@@ -10491,10 +11013,17 @@ const MapView = {
    *  fácil de estender no futuro sem duplicar a checagem em dois lugares
    *  de novo. Substitui de vez `_objectStampHasGizmo` e `_isTipoComGizmo`
    *  (ambas removidas — todos os call sites trocados pra esta). */
-  _TIPOS_COM_GIZMO: ['piso', 'teto-gesso', 'teto-modular'],
+  _TIPOS_COM_GIZMO: ['piso', 'teto-gesso', 'teto-modular', 'telha'],
   _tipoObjetoTemGizmo(stampOuTipo) {
     if (stampOuTipo && typeof stampOuTipo === 'object') return !!stampOuTipo.temGizmo;
-    return this._TIPOS_COM_GIZMO.includes(stampOuTipo);
+    // [86ª rodada] COLOCAÇÃO: tipo-string armado (ex.: Teto) entra direto na grade, com forma sólida fixa e SEM gizmo; o gizmo só aparece depois, ao clicar no objeto já colocado (ver `_tipoObjetoTemGizmoReedicao`).
+    return false;
+  },
+  /** [71ª rodada] Igual a `_tipoObjetoTemGizmo`, mas para objeto JÁ COLOCADO (string `obj.tipo`) — também reconhece o Texto ('texto3d'), que ganha o
+   *  gizmo de 8 alças só na SELEÇÃO/reedição (referência para os alinhamentos). Fica FORA de `_TIPOS_COM_GIZMO` de propósito: aquela lista também é
+   *  consultada com o tipo ARMADO no catálogo (`_objectStampType`), e o botão "Texto" precisa continuar colocando o ghost "Texto" sem gizmo/janela. */
+  _tipoObjetoTemGizmoReedicao(tipo) {
+    return tipo === 'texto3d' || this._TIPOS_COM_GIZMO.includes(tipo);
   },
 
   /** [14/09/2026 UTC] NOVO — pedido verbatim: "No mapa 2D, na janela
@@ -10536,6 +11065,9 @@ const MapView = {
   // removida (nem os call sites) pra manter o diff desta rodada restrito à
   // eliminação do 'objeto-forma' em si.
   _ptoolBtnIsActive(btnPtool) {
+    // [69ª rodada] o botão "Texto" agora é o objeto Texto 3D carimbado pela ferramenta Objetos.
+    if (btnPtool === 'texto') return this._ptool === 'objects' && this._objectStampType === 'texto3d';
+    if (btnPtool === 'objects' && this._ptool === 'objects' && this._objectStampType === 'texto3d') return false;
     return btnPtool === this._ptool;
   },
 
@@ -10569,7 +11101,7 @@ const MapView = {
     // ponto só não existe, ao contrário de uma curva já com os 4 pontos).
     this._paredeStart = null;
     this._paredeHover = null;
-    // NOVO (03/09/2026) — "Trena (de medir)"/"Traço guia" viraram
+    // NOVO (03/09/2026) — "Trena"/"Traço guia" viraram
     // ferramentas de verdade (`_ptool==='medida'`/'traco', ver PTOOLS) —
     // trocar de ferramenta com um 1º ponto já marcado (aguardando o 2º)
     // descarta ele, mesmo espírito de `_paredeStart`/`_curveCreateStart`
@@ -10908,7 +11440,7 @@ const MapView = {
       el.innerHTML = this._reticuloToolctxHtml();
       this._wireReticuloToolctx(el);
     } else if (this._ptool === 'medida') {
-      // NOVO (03/09/2026), pedido verbatim: "'Trena (de medir)'... em suas
+      // NOVO (03/09/2026), pedido verbatim: "'Trena'... em suas
       // propriedades (propriedades das ferramentas que ficam no cabeçalho
       // do mapa 2D), deve ter um toggle de 'inserir medida manualmente' ou
       // 'inserir conforme a grade'." Barra PRÓPRIA, mesmo espírito de
@@ -11579,6 +12111,41 @@ const MapView = {
    *  ferramenta 'select' ativa o clique simples agora seleciona (ver
    *  _onCanvasClick), não navega. Funciona com qualquer ferramenta Paint.NET
    *  ativa (exceto 'hand', que tem zero interação por definição). */
+  /** [83ª rodada] Abre a janela de propriedades do elemento achado ({kind,id}) e GARANTE que ela fique aberta: os handlers de clique são assíncronos e um
+   *  deles podia fechar a janela logo depois de o duplo clique abri-la; 350 ms depois confere e, se ela não estiver visível para esse elemento, reabre. */
+  _abrirPainelPorHit(hit) {
+    if (!hit || !this._map) return false;
+    const abrir = () => {
+      if (hit.kind === 'object') {
+        const o = (this._map.objects || []).find((x) => x.id === hit.id); if (!o || o.reticuloMetrico) return false;
+        this._openObjectPanel(o).then(() => this._ensureObjPanelVisivelECentralizado()); return true;
+      }
+      if (hit.kind === 'wall') { const w = (this._map.walls || []).find((x) => x.id === hit.id); if (!w) return false; this._openWallPanel(w); this._ensureObjPanelVisivelECentralizado(); return true; }
+      if (hit.kind === 'text') { const t = (this._map.textos || []).find((x) => x.id === hit.id); if (!t) return false; this._openTextPanel(t); this._ensureObjPanelVisivelECentralizado(); return true; }
+      if (hit.kind === 'porta') { const d = (this._map.portas || []).find((x) => x.id === hit.id); if (!d) return false; this._openDoorPanel(d); this._ensureObjPanelVisivelECentralizado(); return true; }
+      if (hit.kind === 'janela') { const j = (this._map.janelas || []).find((x) => x.id === hit.id); if (!j) return false; this._openWindowPanel(j); this._ensureObjPanelVisivelECentralizado(); return true; }
+      if (hit.kind === 'itemPin') { const it = (this._map.itens || []).find((x) => x.id === hit.id); if (!it) return false; this._openItemPinPanel(it); this._ensureObjPanelVisivelECentralizado(); return true; }
+      return false;
+    };
+    if (!abrir()) return false;
+    clearTimeout(this._garantePainelTimer);
+    this._garantePainelTimer = setTimeout(() => {
+      const p = this._panelEl;
+      const visivel = p && p.isConnected && getComputedStyle(p).display !== 'none' && String(p.dataset.entityId || '') === String(hit.id);
+      if (!visivel && hit.kind === 'object') abrir();
+    }, 350);
+    return true;
+  },
+  /** [83ª rodada] Ferramenta Objetos: desfaz os objetos colocados pelos 2 cliques de um duplo clique (o duplo clique é para abrir a janela, não para colocar). */
+  _desfazerColocadosNoDuploClique() {
+    const agora = Date.now(), ids = (this._colocadosRecentes || []).filter((c) => agora - c.t < 700).map((c) => c.id);
+    this._colocadosRecentes = [];
+    this._bloqueiaColocarAte = agora + 250;   // um clique assíncrono atrasado também não coloca
+    if (!ids.length || !this._map) return;
+    this._map.objects = (this._map.objects || []).filter((o) => !ids.includes(o.id));
+    try { Mapping.recalcBounds(this._map); } catch (e) { /* ignora */ }
+    this._saveMap('duplo clique (desfaz colocação)');
+  },
   _onCanvasDblClick(e) {
     // ATUALIZADO (05/09/2026) — furo pro Modo Navegação IGUAL ao que
     // _onCanvasClick já dá pra "Retículo métrico" (ver `_navMode &&
@@ -11650,14 +12217,14 @@ const MapView = {
     if (this._ptool === 'reticulo' || this._ptool === 'select' || this._ptool === 'piso') {
       let obj = null;
       const draftEmReedicaoRelevante = this._formaDraft?.reedit
-        && (this._formaDraft.reticuloMetrico || this._tipoObjetoTemGizmo(this._formaDraft.stamp?.tipo));
+        && (this._formaDraft.reticuloMetrico || this._tipoObjetoTemGizmoReedicao(this._formaDraft.stamp?.tipo));
       if (draftEmReedicaoRelevante && this._hitTestFormaDraft(sx, sy)) {
         const savedId = this._formaDraft.reedit.id;
         this._finalizeFormaDraft();
         obj = (this._map?.objects || []).find((o) => o.id === savedId) || null;
       } else {
         const hitObj = this._hitTestObject(sx, sy);
-        if (hitObj && (hitObj.reticuloMetrico || this._tipoObjetoTemGizmo(hitObj.tipo))) obj = hitObj;
+        if (hitObj && !hitObj.pisoPoligono && (hitObj.reticuloMetrico || this._tipoObjetoTemGizmoReedicao(hitObj.tipo))) obj = hitObj;
       }
       if (obj) {
         this._startFormaReedit(obj);
@@ -11746,8 +12313,22 @@ const MapView = {
     // `_openObjectPanel` (a ÚNICA assíncrona do grupo — aguarda os itens
     // associados antes de montar o painel de verdade, ver comentário grande
     // dela).
+    // [83ª rodada] CORRIGIDO — pedido: "No 'Modo Desenho', às vezes, ocorre de dar dois cliques em cima de um objeto e não abrir a janela de propriedades, embora o objeto
+    // ficar com o contorno amarelo." CAUSA: o contorno amarelo (hover, _computeHoverEl) aparece também nas ferramentas Objetos, Laço, Elipse e Mover
+    // seleção/selecionado, mas o duplo clique só abria a janela com Selecionar/Piso/Retículo. Agora, nessas ferramentas, o duplo clique abre a janela do MESMO objeto
+    // que está com o contorno amarelo. Na ferramenta Objetos (com um tipo escolhido) os 2 cliques do duplo clique colocavam 2 objetos novos em cima: eles são desfeitos.
+    const FERR_DUPLO_CLIQUE_PAINEL = ['objects', 'move-selected', 'move-selection', 'lasso', 'ellipse'];
+    if (FERR_DUPLO_CLIQUE_PAINEL.includes(this._ptool)) {
+      if (this._ptool === 'objects') this._desfazerColocadosNoDuploClique();
+      const salvo = this._mouseScreen; this._mouseScreen = { x: sx, y: sy };
+      let hov = null; try { hov = this._computeHoverEl(); } catch (err) { hov = null; }
+      this._mouseScreen = salvo;
+      if (!hov) { const ho = this._hitTestObject(sx, sy); if (ho) hov = { kind: 'object', id: ho.id }; }
+      if (hov && this._abrirPainelPorHit(hov)) return;
+    }
     if (this._ptool === 'select' || this._ptool === 'piso') {
       const hitSel = this._hitTestDrawable(sx, sy, 16, true);
+      if (hitSel && this._abrirPainelPorHit(hitSel)) return;
       if (hitSel) {
         if (hitSel.kind === 'wall') {
           const w = (this._map.walls || []).find((w) => w.id === hitSel.id);
@@ -11928,8 +12509,8 @@ const MapView = {
         else if (kind === 'itemPin') this._openItemPinPanel(entity);
       },
       onDelete: async (kind, entity) => {
-        if (kind === 'wall') { Mapping.removeWall(this._map, entity.id); await this._saveMap(); }
-        else if (kind === 'object') { Mapping.removeObject(this._map, entity.id); await this._saveMap(); }
+        if (kind === 'wall') { Mapping.removeWall(this._map, entity.id); await this._saveMap('_openMapConfig #1'); }
+        else if (kind === 'object') { Mapping.removeObject(this._map, entity.id); await this._saveMap('_openMapConfig #2'); }
         else if (kind === 'itemPin') { await this._removeItemPin(entity.id); }
         await this._refreshMapaIfShowing();
       },
@@ -11937,6 +12518,7 @@ const MapView = {
   },
 
   async _onCanvasClick(e) {
+    if (!this._container) return;   // [79ª rodada] mapa desmontado (painel do Workspace trocado): o canvas antigo ainda dispara eventos
     // Um clique logo depois de arrastar um objeto OU um item pra reposicionar
     // (ver _onObjectsPointerUp) não deve ser tratado como um toque novo — sem
     // isso, soltar o arraste em cima de outro elemento abriria o painel/ficha
@@ -11960,7 +12542,7 @@ const MapView = {
       this._medidaVertexCarry = null;
       const world = carry.kind === 'medida' ? this._worldPointForMedida(sx0, sy0) : this._renderer.screenToWorld(sx0, sy0);
       if (carry.which === 'p1') { carry.item.x1 = world.x; carry.item.y1 = world.y; } else { carry.item.x2 = world.x; carry.item.y2 = world.y; }
-      await this._saveMap();
+      await this._saveMap('_onCanvasClick #1');
       const mapaDepois = JSON.parse(JSON.stringify(this._map));
       const mapId = this._map.id;
       Utils.toast(carry.kind === 'medida' ? 'Medida da Trena reposicionada ✓' : 'Traço guia reposicionado ✓', { type: 'ok' });
@@ -12008,7 +12590,7 @@ const MapView = {
     if (this._itemPlacementId) return;
     // NOVO (03/09/2026) — a bandeja lateral do Modo Navegação (ver
     // _mountReticuloDrawer/_toggleReticuloDrawer) dá acesso a "Retículo
-    // métrico", "Trena (de medir)" e "Traço guia" (as 3 são `_ptool` de
+    // métrico", "Trena" e "Traço guia" (as 3 são `_ptool` de
     // verdade agora, ver PTOOLS/_setPTool `forceDuringNav`) MESMO com "🧭
     // Modo Navegação" ligado — pedido explícito do usuário ("deve
     // continuar visível e utilizável"). Mesma prioridade/espírito de
@@ -12020,7 +12602,7 @@ const MapView = {
     const sx = (e.clientX - rect.left) * (canvas.width / rect.width);
     const sy = (e.clientY - rect.top) * (canvas.height / rect.height);
 
-    // "Trena (de medir)" (medição, 2 cliques) e "Traço guia" (linha
+    // "Trena" (medição, 2 cliques) e "Traço guia" (linha
     // tracejada de referência) — ver _onMedida2DClique/_onTraco2DClique.
     // ATUALIZADO (03/09/2026) — agora são `_ptool==='medida'`/'traco' de
     // verdade (ver PTOOLS), então ficam de fora do switch de ferramentas
@@ -12249,7 +12831,7 @@ const MapView = {
         Utils.toast('🔌 Cabo apagado.', { type: 'ok' });
         label = 'apagar cabo';
       }
-      await this._saveMap();
+      await this._saveMap('_onCanvasClick #2');
       const mapaDepois = JSON.parse(JSON.stringify(this._map));
       const mapId = this._map.id;
       History.push({
@@ -12279,8 +12861,16 @@ const MapView = {
       if (this._activeLayerLocked()) return;
       const world = this._renderer.screenToWorld(sx, sy);
       const isShape = typeof stamp === 'object';
-      if (isShape) Mapping.addObject(this._map, world.x, world.y, null, { ...stamp, layerId: this._activeLayerId });
-      else Mapping.addObject(this._map, world.x, world.y, stamp, { forma: 'icone', layerId: this._activeLayerId });
+      // [29/09/2026] O objeto de verdade nasce com o MESMO ângulo que o
+      // ghost estava mostrando (ver _objectGhostAngulo/_attachPanZoom) — do
+      // contrário o giro do ghost seria só cosmético, sem afetar o que é
+      // realmente colocado. `...stamp` vem primeiro pra não perder um
+      // `angulo` de fábrica do próprio stamp quando o ghost nunca foi
+      // girado (fica 0, o padrão de sempre).
+      if (this._bloqueiaColocarAte && Date.now() < this._bloqueiaColocarAte) return;   // [83ª] fim de um duplo clique (abrir janela), não é colocação
+      const _novo = isShape ? Mapping.addObject(this._map, world.x, world.y, null, { ...stamp, layerId: this._activeLayerId, angulo: this._objectGhostAngulo || 0 })
+        : Mapping.addObject(this._map, world.x, world.y, stamp, { forma: 'icone', layerId: this._activeLayerId, angulo: this._objectGhostAngulo || 0 });
+      if (_novo && _novo.id) { this._colocadosRecentes = (this._colocadosRecentes || []).filter((c) => Date.now() - c.t < 700); this._colocadosRecentes.push({ id: _novo.id, t: Date.now() }); }   // [83ª] ver _desfazerColocadosNoDuploClique
       this._saveMap();
       // Só insere — não abre o painel sozinho (ver comentário acima, no modo Câmera).
       return;
@@ -12382,7 +12972,7 @@ const MapView = {
           // esperar um tempo: o clique único SEMPRE chama
           // `_startFormaReedit` na hora, e é o botão — nunca mais o
           // duplo-clique — quem abre a janela de propriedades depois disso.
-          if (obj && (obj.reticuloMetrico || this._tipoObjetoTemGizmo(obj.tipo))) this._startFormaReedit(obj);
+          if (obj && !obj.pisoPoligono && (obj.reticuloMetrico || this._tipoObjetoTemGizmoReedicao(obj.tipo))) this._startFormaReedit(obj);
         }
         return;
       }
@@ -12516,6 +13106,14 @@ const MapView = {
     // cara, sem precisar de nenhum ajuste especial nesta ferramenta.
     if (this._ptool === 'piso') {
       if (this._activeLayerLocked()) return;
+      // [76ª rodada] clicar num Piso JÁ colocado não empilha outro: abre o gizmo de redimensionar (piso comum) ou seleciona (piso editável: alças dos vértices).
+      const _hitPiso = this._hitTestObject(sx, sy);
+      if (_hitPiso && _hitPiso.tipo === 'piso') {
+        if (!_hitPiso.pisoPoligono) this._startFormaReedit(_hitPiso);
+        else { this._toolSelection = new Set(['object:' + _hitPiso.id]); this._renderer.selectedObjectId = _hitPiso.id; this._selectedObjectId = _hitPiso.id; }
+        this._redrawDirty = true;
+        return;
+      }
       const world = this._renderer.screenToWorld(sx, sy);
       Mapping.addObject(this._map, world.x, world.y, 'piso', { layerId: this._activeLayerId });
       this._saveMap();
@@ -13113,6 +13711,7 @@ const MapView = {
   // (reposiciona) por uma distância mínima em pixels de tela — abaixo dela,
   // é tratado como clique (ver _suppressNextClick em _onCanvasClick).
   _onObjectsPointerDown(e) {
+    if (!this._container) return;   // [79ª rodada] mapa desmontado (painel do Workspace trocado): o canvas antigo ainda dispara eventos
     // Pedido do usuário (03/09/2026): durante "vincular foto ao mapa" (ver
     // _photoPlacementId), o arraste do botão esquerdo deve SEMPRE ser só
     // pan (mover a grade sob a cruz fixa), nunca arrastar um objeto/item já
@@ -14142,6 +14741,7 @@ const MapView = {
   },
 
   _onObjectsPointerMove(e) {
+    if (!this._container) return;   // [79ª rodada] ver _onCanvasClick
     // BUG CORRIGIDO (04/09/2026), pedido verbatim: "Atualmente, a medida
     // nem se move" — `_draggingFotoPin`/`_draggingMedida2DVertex` (e o novo
     // `_draggingTraco2DVertex`, mesma rodada) faltavam nesta lista de
@@ -14360,6 +14960,7 @@ const MapView = {
           d.resizeAnchor = { x: drag.pivot.x + rx * cosD - ry * sinD, y: drag.pivot.y + rx * sinD + ry * cosD };
         }
       }
+      this._agendarSync3DDraft();   // [82ª rodada] gizmo (mover/redimensionar/girar): o 3D acompanha a cada quadro, não só ao confirmar
       return;
     }
     if (this._eyedropperDown) { this._sampleColorAt(sx, sy); return; }
@@ -14698,9 +15299,11 @@ const MapView = {
       const dyGrupo = world.y - this._draggingObject.y;
       this._draggingObject.x = world.x;
       this._draggingObject.y = world.y;
+      const _sync3DObjs = [this._draggingObject];   // [01/10/2026] 38ª rodada — objetos movidos neste quadro, empurrados pro 3D ao vivo
       if (this._draggingObject.grupoId && window.Mapping) {
-        Mapping.groupMembers(this._map, this._draggingObject).forEach((o) => { o.x += dxGrupo; o.y += dyGrupo; });
+        Mapping.groupMembers(this._map, this._draggingObject).forEach((o) => { o.x += dxGrupo; o.y += dyGrupo; _sync3DObjs.push(o); });
       }
+      try { this._sync3DLive(_sync3DObjs); } catch (e) { /* ignora */ }
       // NOVO (04/09/2026): Retículo métrico — a origem (canto onde foi
       // clicado no 1º ponto da construção) precisa "grudar" no mesmo canto
       // físico do retângulo enquanto ele é arrastado por este caminho
@@ -14816,7 +15419,7 @@ const MapView = {
       const after = { largura: drag.obj.largura, profundidade: drag.obj.profundidade };
       if (before.largura === after.largura && before.profundidade === after.profundidade) return; // soltou sem arrastar de fato
       Mapping.recalcBounds(this._map);
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #1');
       const mapId = this._map.id, objId = drag.obj.id;
       const nome = this._formaNome(drag.obj);
       Utils.toast(`⬡ ${nome} ajustado(a).`, { type: 'ok' });
@@ -15029,7 +15632,7 @@ const MapView = {
         to: { x1: w.ref.x1, y1: w.ref.y1, x2: w.ref.x2, y2: w.ref.y2 },
       }));
       Mapping.recalcBounds(this._map);
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #2');
       Utils.toast(`∿ Reposicionado (${deltas.length} trecho${deltas.length === 1 ? '' : 's'}).`, { type: 'ok' });
       // Desfazer/refazer busca o mapa fresco pelo id, igual lápis/curva —
       // funciona mesmo se o usuário já tiver trocado de ambiente.
@@ -15058,7 +15661,7 @@ const MapView = {
       const txt = this._textResizeDrag.txt;
       this._textResizeDrag = null;
       this._suppressNextClick = true;
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #3');
       Utils.toast('Tamanho do texto ajustado ✓', { type: 'ok' });
       if (this._selectedTextId === txt.id && this._panelEl) this._openTextPanel(txt);
       return;
@@ -15067,7 +15670,7 @@ const MapView = {
       const txt = this._textRotateDrag.txt;
       this._textRotateDrag = null;
       this._suppressNextClick = true;
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #4');
       Utils.toast('Texto girado ✓', { type: 'ok' });
       if (this._selectedTextId === txt.id && this._panelEl) this._openTextPanel(txt);
       return;
@@ -15079,7 +15682,7 @@ const MapView = {
       this._dragTextMoved = false;
       if (!moved) return; // "clique parado" — o evento click cuida (abre o painel de edição)
       this._suppressNextClick = true;
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #5');
       Utils.toast('Texto reposicionado ✓', { type: 'ok' });
       if (this._selectedTextId === txt.id && this._panelEl) this._openTextPanel(txt);
       return;
@@ -15108,15 +15711,35 @@ const MapView = {
         extra.tamanho = Utils.clamp(Math.round(h), 8, 400);
       }
       const txt = Mapping.addText(this._map, world.x, world.y, 'Texto', extra);
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #6');
       this._openTextPanel(txt, { isNew: true });
       return;
     }
     if (this._pencilDown) {
       this._pencilDown = false;
-      const pts = this._pencilPoints;
+      let pts = this._pencilPoints;
       this._pencilPoints = [];
       this._suppressNextClick = true;
+      // 69ª/70ª rodada — só pontos COLINEARES de verdade viram UMA folha de parede (com o snap na grade ligado os pontos caem na grade, então
+      // colinearidade é exata; tolerância mínima só p/ ponto flutuante). Reta ≠ "quase reta": desvios reais continuam sendo cantos.
+      if (pts.length > 2) {
+        const tol = 1e-6;
+        const keep = new Array(pts.length).fill(false);
+        keep[0] = keep[pts.length - 1] = true;
+        const stack = [[0, pts.length - 1]];
+        while (stack.length) {
+          const [i0, i1] = stack.pop();
+          const A = pts[i0], B = pts[i1];
+          const dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy) || 1e-9;
+          let md = -1, mi = -1;
+          for (let i = i0 + 1; i < i1; i++) {
+            const d = Math.abs((pts[i].x - A.x) * dy - (pts[i].y - A.y) * dx) / L;
+            if (d > md) { md = d; mi = i; }
+          }
+          if (md > tol && mi > 0) { keep[mi] = true; stack.push([i0, mi], [mi, i1]); }
+        }
+        pts = pts.filter((_, i) => keep[i]);
+      }
       if (pts.length < 2) return; // clique parado — nenhum segmento pra criar
       const mapId = this._map.id;
       const layerId = this._activeLayerId;
@@ -15130,7 +15753,7 @@ const MapView = {
         Mapping.addWall(this._map, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, { ...wallStyle, layerId });
         wallIds.push(this._map.walls[this._map.walls.length - 1].id);
       }
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #7');
       Utils.toast(`✏️ ${wallIds.length} trecho(s) de parede desenhado(s) à mão livre.`, { type: 'ok' });
       // Desfazer/refazer busca o mapa fresco pelo id (em vez de mexer direto
       // em `this._map`) — se o usuário já tiver trocado de ambiente quando
@@ -15192,7 +15815,7 @@ const MapView = {
       if (itemDeltas.length) await this._refreshItensNoMapa();
       for (const p of fotoDeltas) { await CameraPin.save(this._map, p.id, { mapaX: p.to.x, mapaY: p.to.y }); }
       if (fotoDeltas.length) await this._refreshFotosNoMapa();
-      if (elDeltas.length) { Mapping.recalcBounds(this._map); await this._saveMap(); }
+      if (elDeltas.length) { Mapping.recalcBounds(this._map); await this._saveMap('_onObjectsPointerUp #8'); }
       Utils.toast(`${drag.items.length} elemento(s) reposicionado(s) ✓`, { type: 'ok' });
       const applyEl = (m, deltas, side) => {
         deltas.forEach((d) => {
@@ -15281,7 +15904,7 @@ const MapView = {
       if (itemDeltas.length) await this._refreshItensNoMapa();
       for (const p of fotoDeltas) { await CameraPin.save(this._map, p.id, { mapaX: p.to.x, mapaY: p.to.y }); }
       if (fotoDeltas.length) await this._refreshFotosNoMapa();
-      if (elDeltas.length) { Mapping.recalcBounds(this._map); await this._saveMap(); }
+      if (elDeltas.length) { Mapping.recalcBounds(this._map); await this._saveMap('_onObjectsPointerUp #9'); }
       Utils.toast(`${drag.items.length} elemento(s) ${drag.kind === 'resize' ? 'redimensionado(s)' : 'girado(s)'} ✓`, { type: 'ok' });
       const applyEl = (m, deltas, side) => {
         deltas.forEach((d) => {
@@ -15328,7 +15951,7 @@ const MapView = {
       // nenhum `confirm()` de união/fusão — mesmo que as pontas fiquem visualmente coincidentes,
       // isso é só coincidência geométrica, sem consequência nenhuma no modelo de dados.
       this._suppressNextClick = true;
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #10');
       Utils.toast('Objeto reposicionado ✓', { type: 'ok' });
       if (this._selectedObjectId === obj.id && this._panelEl) this._openObjectPanel(obj); // painel aberto na hora — atualiza os campos X/Y mostrados
       return;
@@ -15413,7 +16036,7 @@ const MapView = {
         return;
       }
       this._suppressNextClick = true;
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #11');
       const mapaDepois = JSON.parse(JSON.stringify(this._map));
       const mapId = this._map.id;
       Utils.toast('Medida da Trena reposicionada ✓', { type: 'ok' });
@@ -15439,7 +16062,7 @@ const MapView = {
         return;
       }
       this._suppressNextClick = true;
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #12');
       const mapaDepois = JSON.parse(JSON.stringify(this._map));
       const mapId = this._map.id;
       Utils.toast('Traço guia reposicionado ✓', { type: 'ok' });
@@ -15462,7 +16085,7 @@ const MapView = {
       this._dragMedidaBodyMoved = false;
       if (!moved) return; // "clique parado" — deixa o evento click cuidar (inicia uma medida NOVA dali, comportamento de sempre)
       this._suppressNextClick = true;
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #13');
       const mapaDepois = JSON.parse(JSON.stringify(this._map));
       const mapId = this._map.id;
       Utils.toast('Medida da Trena reposicionada ✓', { type: 'ok' });
@@ -15480,7 +16103,7 @@ const MapView = {
       this._dragTracoBodyMoved = false;
       if (!moved) return; // "clique parado" — deixa o evento click cuidar (inicia um traço NOVO dali, comportamento de sempre)
       this._suppressNextClick = true;
-      await this._saveMap();
+      await this._saveMap('_onObjectsPointerUp #14');
       const mapaDepois = JSON.parse(JSON.stringify(this._map));
       const mapId = this._map.id;
       Utils.toast('Traço guia transladado ✓', { type: 'ok' });
@@ -15579,6 +16202,14 @@ const MapView = {
       const isShape = o.forma === 'retangulo' || o.forma === 'poligono' || o.forma === 'imagem';
       const s = this._renderer.worldToScreen(o.x, o.y);
       const d = isShape ? 0 : Math.hypot(s.x - sx, s.y - sy);
+      // [49ª rodada] Sobreposição: entre objetos, vence o de maior TOPO (a mesa, mesmo com o centro do gabinete embaixo dela mais perto do cursor); só no empate de topo vale a regra antiga.
+      const ant = best && best.kind === 'object' ? (this._map.objects || []).find((q) => q.id === best.id) : null;
+      if (ant) {
+        const ta = this._topoObjetoMundo(ant), tn = this._topoObjetoMundo(o);
+        if (ant.tipo === 'telha' && o.tipo === 'telha' && Math.abs(tn - ta) < 1e-6) { if (this._areaTelha(o) <= this._areaTelha(ant)) { bestD = 0; best = { kind: 'object', id: o.id }; } return; }   // [89ª] idem _hitTestObject
+        if (tn < ta) return;
+        if (tn > ta) { bestD = Math.min(d, bestD); best = { kind: 'object', id: o.id }; return; }
+      }
       if (d < bestD || (isShape && d === 0 && bestD === 0)) { bestD = d; best = { kind: 'object', id: o.id }; }   // formas: o colocado por último (por cima) vence
     });
     (this._map.itens || []).forEach((it) => {
@@ -15720,6 +16351,8 @@ const MapView = {
    *  sempre) continua um círculo de raio fixo, com a folga de sempre
    *  (`thresholdPx`) — não mudou. */
   _pointInObjectShape(o, sx, sy, thresholdPx = 16) {
+    // [89ª rodada] TELHA: a caixa de teste é o CONTORNO real (águas/recortes), não a caixa retangular do objeto — telhados sobrepostos/unidos ficam selecionáveis cada um na sua parte.
+    if (o.tipo === 'telha' && window.PisoCustom && window.PisoCustom.tem(o)) { const w = this._renderer.screenToWorld(sx, sy); return Mapping.pointInObjectFootprint(o, w.x, w.y); }
     const s = this._renderer.worldToScreen(o.x, o.y);
     // 25/08/2026 — objeto "ícone" sem forma explícita (`o.forma` vazio/
     // 'icone') resolve a forma/tamanho reais na hora (ver
@@ -15804,12 +16437,28 @@ const MapView = {
     Utils.toast('Patrimônio vinculado ✓', { type: 'ok' });
   },
 
+  /** [49ª rodada] Altura do TOPO do objeto no mundo (andar + elevação + y0 + altura). A altura vem do próprio objeto ou, se não tiver, do perfil 3D do tipo
+   *  (mesa 0,75 m, gabinete 0,5 m...) -- antes caía sempre em 0,5 e mesa/gabinete empatavam. Usado pra decidir quem recebe hover/clique quando há sobreposição. */
+  /** [89ª] Área da caixa do contorno do telhado (m²) — desempate de seleção entre telhados sobrepostos. */
+  _areaTelha(o) { try { const b = window.PisoCustom.bbox(o); return Math.max(0, (b.x1 - b.x0) * (b.y1 - b.y0)); } catch (e) { return 1e9; } },
+
+    _topoObjetoMundo(o) {
+    try {
+      const pf = (window.OBJECT3D_PROFILES && window.OBJECT3D_PROFILES[o.tipo]) || null;
+      const h = (o.altura != null ? o.altura : (pf && pf.h != null ? pf.h : 0.5));
+      const base = (o.piso || 0) * ((this._map && this._map.alturaPiso) || 2.8) + (o.elevacao || 0) + (window.Mapping ? window.Mapping.y0Efetivo(o) : 0);
+      return o.forma === 'imagem' ? base : base + h;
+    } catch (e) { return o.elevacao || 0; }
+  },
+
   _hitTestObject(sx, sy, thresholdPx = 16) {
     if (!this._map) return null;
     let best = null;
     // [21/09/2026] O objeto colocado DEPOIS (mais adiante em map.objects = desenhado por cima no 2D) recebe o clique/arraste
     // quando vários se sobrepõem — antes ganhava o de centro mais perto, e a mesa (grande) acabava ficando com o clique
     // em cima de um monitor colocado sobre ela.
+    // [48ª rodada] ranking pela ALTURA DO TOPO (elevação + y0 + altura, no mundo): a mesa (topo ~0,75 m) vence o gabinete embaixo dela mesmo com os dois com elevação 0.
+    const topo = (o) => this._topoObjetoMundo(o);
     (this._map.objects || []).forEach((o) => {
       if (!this._layerVisible(o.layerId)) return;
       // NOVO (03/09/2026) — "Método de interação de camadas" (ver
@@ -15817,7 +16466,10 @@ const MapView = {
       // respeitar isolamento de camada configurável, não só visibilidade.
       if (!this._layerInteractable(o.layerId)) return;
       if (!this._pointInObjectShape(o, sx, sy, thresholdPx)) return;
-      best = o;   // o último acerto (mais recente) vence
+      // [47ª rodada] Mesmo critério do desenho 2D (_renderFrame): vence o de MAIOR elevação (o que está por cima);
+      // empate -> o mais recente na lista. Assim o gabinete sob a mesa não rouba o clique da mesa, e o que está sobre ela, sim.
+      if (best && o.tipo === 'telha' && best.tipo === 'telha' && Math.abs(topo(o) - topo(best)) < 1e-6) { if (this._areaTelha(o) <= this._areaTelha(best)) best = o; return; }   // [89ª] telhados na mesma área: o menor (por cima do maior) recebe o clique
+      if (!best || topo(o) >= topo(best)) best = o;
     });
     return best;
   },
@@ -15905,6 +16557,7 @@ const MapView = {
    *  já existia (pedido implícito do usuário: reeditar tem que ser seguro). */
   _cancelFormaDraft() {
     if (!this._formaDraft) return;
+    try { this._restaurar3DDraft(); } catch (e) { /* ignora */ }   // [82ª rodada] desfaz no 3D o que o gizmo mostrou ao vivo
     if (this._formaDraft.reedit && this._map) {
       this._map.objects = this._map.objects || [];
       this._map.objects.push(this._formaDraft.reedit.orig);
@@ -15912,6 +16565,7 @@ const MapView = {
     }
     this._formaDraft = null;
     this._formaDraftDrag = null;
+    try { this._agendarSync3D(); } catch (e) { /* ignora */ }   // [82ª rodada] devolve ao 3D a MESMA lista/objeto do 2D
     // [%(DATE)s] NOVO — pedido verbatim: "Mesmo deselecionando o objeto
     // que tem o gizmo, o menu de opção da âncora de redimensionamento
     // (quando estava aberto ao deselecionar o objeto) acaba por permanecer
@@ -15960,6 +16614,15 @@ const MapView = {
    *  `_objectStampHasGizmo` — também removida/renomeada na mesma rodada),
    *  que cobre Piso/Teto (por string de tipo) E Mesa/Coluna (por
    *  `stamp.temGizmo`) num só lugar. */
+  /** [73ª rodada] Pose REAL do Texto durante a reedição com gizmo: o rascunho guarda a caixa justa das letras (x, y = centro; largura/profundidade);
+   *  daqui sai a ORIGEM do objeto e as escalas (escalaX/escalaZ = escala inicial × razão da caixa). `null` se o rascunho não é de um Texto. */
+  _texto3dDraftPose(d) {
+    const tb = d && d.textoBase; if (!tb) return null;
+    const sx = Math.max(0.02, d.largura / tb.w0), sy = Math.max(0.02, d.profundidade / tb.h0);
+    const a = d.angulo || 0, c = Math.cos(a), s = Math.sin(a), lx = tb.cx * sx, ly = tb.cy * sy;
+    return { x: d.x - (lx * c - ly * s), y: d.y - (lx * s + ly * c), escalaX: tb.ex0 * sx, escalaZ: tb.ez0 * sy };
+  },
+
   _startFormaReedit(obj) {
     if (!this._map || !obj || (obj.forma !== 'retangulo' && obj.forma !== 'poligono' && obj.forma !== 'imagem')) return;
     if (this._elLayerLocked(obj.layerId)) { Utils.toast('🔒 Esta forma está numa camada bloqueada.', { type: 'warn' }); return; }
@@ -16035,8 +16698,24 @@ const MapView = {
       // acima: preserva o modo escolhido ao reeditar, senão a reedição
       // "esqueceria" e o retículo voltaria pro modo padrão ao salvar de novo.
       reticuloOrigemModo: obj.reticuloOrigemModo,
+      // [71ª rodada] Texto 3D: o objeto sai do mapa durante a reedição e é desenhado a partir do rascunho — precisa levar os parâmetros do texto
+      // (mesma referência de `obj.texto3d`, assim o cache da malha do Texto3D.mesh não recalcula a cada quadro).
+      texto3d: obj.tipo === 'texto3d' ? (obj.texto3d || (obj.texto3d = {})) : undefined,
       reedit: { id: obj.id, orig },
     };
+    // [73ª rodada] Texto 3D: a caixa do gizmo passa a ser a caixa JUSTA das letras (centro da caixa, não a origem do objeto) e redimensioná-la
+    // ESTICA o Texto de verdade. O rascunho guarda a caixa em (x, y, largura, profundidade) como qualquer forma; `textoBase` guarda a relação
+    // caixa↔origem/escala, e `_texto3dDraftPose` converte de volta (origem + escalaX/escalaZ) para desenhar e para gravar.
+    if (obj.tipo === 'texto3d' && window.Texto3D) {
+      const dr = this._formaDraft, T3 = window.Texto3D, bb = T3.bbox2D(obj);
+      if (bb.x0 <= bb.x1) {
+        const w = Math.max(0.02, bb.x1 - bb.x0), h = Math.max(0.02, bb.y1 - bb.y0), cx = (bb.x0 + bb.x1) / 2, cy = (bb.y0 + bb.y1) / 2;
+        const a0 = dr.angulo || 0, c0 = Math.cos(a0), s0 = Math.sin(a0), p0 = T3.params(obj);
+        dr.textoBase = { w0: w, h0: h, cx, cy, ex0: p0.escalaX > 0 ? p0.escalaX : 1, ez0: p0.escalaZ > 0 ? p0.escalaZ : 1 };
+        dr.x = obj.x + cx * c0 - cy * s0; dr.y = obj.y + cx * s0 + cy * c0;
+        dr.largura = dr.larguraInicial = w; dr.profundidade = dr.profundidadeInicial = h;
+      }
+    }
     this._formaDraftDrag = null;
     if (obj.fillMode) this._formaFillMode = obj.fillMode;
     if (obj.strokeWidth) this._formaStrokeWidth = obj.strokeWidth;
@@ -16081,6 +16760,7 @@ const MapView = {
     // direto no objeto original guardado em `reedit.orig` e só volta pra
     // grade de verdade ao finalizar a reedição (ver _finalizeFormaDraft).
     if ('elevacao' in patch && d.reedit) d.reedit.orig.elevacao = patch.elevacao;
+    this._agendarSync3DDraft();   // [82ª rodada] campos do painel durante o gizmo -> 3D na hora
   },
 
   /** "Finalizar" (ver _formasToolctxHtml/#toolctx-forma-finalizar) — conclui
@@ -16143,12 +16823,21 @@ const MapView = {
     // raciocínio do bloco acima — precisa ir explicitamente em `extra`,
     // senão a reedição "esqueceria" o modo escolhido e o retículo voltaria
     // pro padrão ('retangulo') ao salvar de novo.
+    // [73ª rodada] Texto: grava os parâmetros COM as escalas da caixa do gizmo e a origem real (a caixa do rascunho é o centro das letras).
+    let ox = d.x, oy = d.y, textoDims = null;
+    if (d.texto3d && window.Texto3D) {
+      const pose = this._texto3dDraftPose(d);
+      extra.texto3d = pose ? Object.assign({}, d.texto3d, { escalaX: pose.escalaX, escalaZ: pose.escalaZ }) : d.texto3d;
+      if (pose) { ox = pose.x; oy = pose.y; }
+      textoDims = window.Texto3D.dimsFor(extra.texto3d);
+    }
     if (d.reticuloMetrico) { extra.reticuloMetrico = true; extra.reticuloOrigemX = d.reticuloOrigemX; extra.reticuloOrigemY = d.reticuloOrigemY; extra.reticuloOrigemModo = d.reticuloOrigemModo; }
     if (d.stamp.forma === 'retangulo') { extra.largura = d.largura; extra.profundidade = d.profundidade; }
     else { extra.largura = d.largura; extra.profundidade = d.profundidade; extra.lados = d.stamp.lados; }
     // Forma "imagem" (colar/carregar — pedido do usuário): leva também o
     // dataURL e a proporção original (usada pelo redimensionar com Shift).
     if (d.stamp.forma === 'imagem') { extra.src = d.stamp.src; extra.aspect = d.stamp.aspect; extra.flipH = !!d.flipH; extra.flipV = !!d.flipV; }
+    if (textoDims) Object.assign(extra, textoDims); // [73ª rodada] largura/profundidade/altura do Texto seguem as letras (não a caixa do rascunho)
     this._formaDraft = null;
     this._formaDraftDrag = null;
     // [14/09/2026 UTC] NOVO — mesma causa raiz/pedido verbatim documentado em
@@ -16166,11 +16855,12 @@ const MapView = {
       // `before` abaixo) — ao contrário de uma forma nova, não gera id novo
       // nem muda de camada sozinha.
       const before = reedit.orig;
-      const after = { ...before, ...extra, x: d.x, y: d.y };
+      const after = { ...before, ...extra, x: ox, y: oy };
+      if (before.pisoPoligono && window.PisoCustom && before.largura > 0 && before.profundidade > 0) after.pisoPoligono = window.PisoCustom.escalado(before.pisoPoligono, (extra.largura || before.largura) / before.largura, (extra.profundidade || before.profundidade) / before.profundidade);   // [89ª] gizmo estica o contorno
       this._map.objects = this._map.objects || [];
       this._map.objects.push(after);
       Mapping.recalcBounds(this._map);
-      await this._saveMap();
+      await this._saveMap('_finalizeFormaDraft #1');
       const mapId = this._map.id, objId = after.id;
       const nome = this._formaNome(after);
       // BUG CORRIGIDO (07/09/2026), pedido verbatim: "mesmo estando marcado
@@ -16234,7 +16924,7 @@ const MapView = {
     const formaLabel = d.reticuloMetrico ? 'RetículoMétrico' : this._formaNome({ tipo: extra.tipo, forma: d.stamp.forma });
     extra.nome = Mapping._nextObjectName(this._map, formaLabel);
     const obj = Mapping.addObject(this._map, d.x, d.y, null, extra);
-    await this._saveMap();
+    await this._saveMap('_finalizeFormaDraft #2');
     const mapId = this._map.id, objId = obj.id, savedExtra = { ...extra };
     const nome = this._formaNome(obj);
     Utils.toast(`⬡ ${nome} colocado(a) na grade.`, { type: 'ok' });
@@ -16566,8 +17256,8 @@ const MapView = {
    *  que for preciso, só atualiza posição/visibilidade nas chamadas
    *  seguintes (nunca recria o DOM a cada quadro). */
   _syncFormaDraftPropBtn(geom) {
-    const relevante = !!(this._formaDraft?.reedit
-      && (this._formaDraft.reticuloMetrico || this._tipoObjetoTemGizmo(this._formaDraft.stamp?.tipo)));
+    // [91ª] qualquer objeto em reedição (gizmo ativo) ganha o botão 🗒️ de propriedades no canto superior direito
+    const relevante = !!(this._formaDraft?.reedit);
     if (!relevante || !geom || !geom.propBtn) { this._removeFormaDraftPropBtn(); return; }
     if (!this._formaDraftPropBtnEl) {
       const btn = document.createElement('button');
@@ -16586,7 +17276,8 @@ const MapView = {
       // sobre o canvas já tomam neste arquivo.
       btn.addEventListener('mousedown', (e) => e.stopPropagation());
       btn.addEventListener('dblclick', (e) => e.stopPropagation());
-      document.body.appendChild(btn);
+      // [92ª] dentro do próprio .map2d-wrap (mesmo contexto de empilhamento das janelas de propriedades): a janela em foco sempre fica POR CIMA do botão
+      (this._container ? (this._container.querySelector('.map2d-wrap') || this._container) : document.body).appendChild(btn);
       this._formaDraftPropBtnEl = btn;
     }
     const p = this._canvasScreenToViewportPx(geom.propBtn.x, geom.propBtn.y);
@@ -17282,12 +17973,51 @@ const MapView = {
   _hitTestWallForAttach(sx, sy) {
     if (!this._map || !this._renderer) return null;
     const wp = this._renderer.screenToWorld(sx, sy);
-    const activeLayerId = this._activeLayerId;
-    const onActiveLayer = (layerId) => this._renderer._layerVisible(layerId) && (!layerId || layerId === activeLayerId);
+    // ATUALIZADO (29/09/2026), pedido verbatim: "Em múltiplas camadas, porque
+    // é 2D, é a parede que estiver mais em cima que devem se unir." CAUSA
+    // RAIZ do critério antigo: escolhia a parede pela DISTÂNCIA em pixels
+    // até o cursor (`d < bestD`), ignorando em qual camada cada uma estava —
+    // com duas paredes empilhadas em camadas diferentes bem próximas uma da
+    // outra, podia "ganhar" a de baixo só por estar um pixel mais perto.
+    // Agora o critério principal é a CAMADA (índice menor em
+    // `this._map.layers` = mais em cima na pilha — mesma convenção de
+    // `_layerInteractable`/Mapping.reorderLayer), e a distância só desempata
+    // paredes na MESMA camada. Também trocado `onActiveLayer` (que só
+    // testava "é a camada ativa?") por `_layerInteractable`, que já respeita
+    // a config "Método de interação de camadas" (isolado × atual-e-abaixo) —
+    // mesmo padrão usado pelo resto dos hit-tests do arquivo, em vez de uma
+    // checagem simplificada só deste método.
+    const layers = this._map.layers || [];
+    const layerTopIndex = (layerId) => {
+      if (!layerId) return Infinity; // sem camada -- nunca "ganha" de uma parede realmente camada
+      const idx = layers.findIndex((l) => l.id === layerId);
+      return idx === -1 ? Infinity : idx;
+    };
     const thresholdPx = 16;
-    let best = null, bestD = Infinity;
+    // [30/09/2026] CORRIGIDO — pedido verbatim: "Ao clicar no botão 'unir à
+    // parede', nas propriedades di objeto porta ou janela, deve unir a
+    // parede que está em baixo do objeto atualmente. Coloquei uma porta em
+    // cima de outra parede e, ao clicar no botão para uni-las, acabou
+    // unindo em outra parrde e não naquela em que a porta estava em cima."
+    // CAUSA RAIZ: o critério de desempate acima (`idx < bestIdx || (idx ===
+    // bestIdx && d < bestD)`) dava à CAMADA prioridade ABSOLUTA sobre a
+    // distância — entre duas paredes candidatas (ambas dentro do limiar de
+    // 16px, mas em posições DIFERENTES, não sobrepostas), a de camada mais
+    // "em cima" sempre vencia, mesmo estando bem mais longe do cursor do
+    // que a outra parede, que era a que realmente estava embaixo da porta/
+    // janela. Isso fazia a porta se unir a uma parede vizinha (em outra
+    // camada) em vez da parede em que ela estava fisicamente apoiada. A
+    // regra de prioridade por camada foi criada na Rodada 145 para o caso
+    // de paredes SOBREPOSTAS (mesma posição, camadas diferentes — aí sim a
+    // de cima deve vencer, pois é a que aparece visualmente). Mantida para
+    // esse caso, mas agora só desempata quando as distâncias forem
+    // praticamente iguais (diferença < 2px, ou seja, coincidentes); fora
+    // isso, a parede mais PRÓXIMA do cursor (a que está de fato embaixo do
+    // objeto) sempre vence, que é o comportamento pedido.
+    const EPS_COINCIDENTE_PX = 2;
+    let best = null, bestIdx = Infinity, bestD = Infinity;
     (this._map.walls || []).forEach((w) => {
-      if (!onActiveLayer(w.layerId)) return;
+      if (!this._layerVisible(w.layerId) || !this._layerInteractable(w.layerId)) return;
       const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
       const lenSq = dx * dx + dy * dy;
       if (lenSq < 1e-9) return;
@@ -17295,7 +18025,12 @@ const MapView = {
       const px = w.x1 + t * dx, py = w.y1 + t * dy;
       const s = this._renderer.worldToScreen(px, py);
       const d = Math.hypot(s.x - sx, s.y - sy);
-      if (d < thresholdPx && d < bestD) { bestD = d; best = { wall: w, t: t * Math.sqrt(lenSq) }; }
+      if (d >= thresholdPx) return;
+      const idx = layerTopIndex(w.layerId);
+      const melhorQueAtual = (best === null)
+        || (d < bestD - EPS_COINCIDENTE_PX)
+        || (Math.abs(d - bestD) <= EPS_COINCIDENTE_PX && idx < bestIdx);
+      if (melhorQueAtual) { bestIdx = idx; bestD = d; best = { wall: w, t: t * Math.sqrt(lenSq) }; }
     });
     return best;
   },
@@ -17393,6 +18128,31 @@ const MapView = {
 
   _attachPanZoom(canvas) {
     let dragging = false, lastX = 0, lastY = 0;
+
+    // NOVO (29/09/2026), pedido verbatim: "No mapa 2D, do mesmo jeito que é
+    // no mapa 3D, faça como que, ao clicar com o botão do meio do mouse, a
+    // objeto rode 90 graus, indicando para onde está apontando com uma
+    // notificação (assim como no mapa 3D)." — `_MID_CLICK_ROT_LIMIAR_PX` é
+    // o quanto o cursor pode ter se movido entre o pointerdown e o pointerup
+    // do botão do meio pra AINDA contar como "clique parado" (e não como o
+    // arraste normal do botão do meio, que já move a grade — ver bloco de
+    // pan logo abaixo). Sem essa distinção, todo arraste com o botão do meio
+    // giraria o objeto embaixo do ponto onde o gesto começou.
+    const _MID_CLICK_ROT_LIMIAR_PX = 6;
+    let midClickStart = null; // {x,y} em coords de client, setado só no pointerdown do botão do meio
+    const _CARDINAL_LABELS_2D = ['Norte', 'Leste', 'Sul', 'Oeste']; // mesma convenção/ordem de js/view3d.js (_CARDINAL_LABELS)
+    // Gira `obj` 90° (sentido horário, mesmo ciclo do Modo Padrão em 3D — ver
+    // view3d.js handleMiddleClickAction), persiste e mostra o toast de
+    // orientação. Só chamada em Modo Edição (ver checagem no pointerup).
+    const _rotacionarObjetoNoMeio = (obj) => {
+      const atual = ((obj.angulo || 0) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+      let idx = Math.round(atual / (Math.PI / 2)) % 4;
+      idx = (idx + 1) % 4;
+      const novoAngulo = idx * (Math.PI / 2);
+      Mapping.updateObject(this._map, obj.id, { angulo: novoAngulo });
+      this._saveMap();
+      Utils.toast(`Alinhado para ${_CARDINAL_LABELS_2D[idx]}`, { type: 'ok', duration: 1200 });
+    };
 
     // NOVO (03/09/2026), pedido verbatim: "No mapa 2D, no PC o zoom está
     // funcionando com a roda do mouse, porém, no celular, ampliar usando o
@@ -17494,6 +18254,12 @@ const MapView = {
       // grade — botão direito (2) fica livre.
       if (e.button !== 0 && e.button !== 1) return;
       if (e.button === 1) e.preventDefault();
+      // NOVO (29/09/2026) — guarda o ponto de partida do botão do meio pra
+      // decidir no `pointerup` se foi um "clique parado" (gira o objeto sob
+      // o cursor) ou um arraste de verdade (só pan, comportamento de sempre
+      // — ver `_MID_CLICK_ROT_LIMIAR_PX`/`midClickStart` no topo desta
+      // função).
+      if (e.button === 1) midClickStart = { x: e.clientX, y: e.clientY };
       dragging = true; lastX = e.clientX; lastY = e.clientY;
       this._panDragging = true; // ver _updateCursor — cursor "grabbing" enquanto isto for true
       canvas.setPointerCapture(e.pointerId);
@@ -17583,7 +18349,46 @@ const MapView = {
     const _endTouchPinch = (e) => { if (e.pointerType === 'touch') { touchPointers.delete(e.pointerId); if (touchPointers.size < 2) pinchStartDist = 0; } };
     // NOVO (07/09/2026) — encerra o arrasto de rotação do mapa (ver
     // pointerdown/pointermove acima), por soltar o botão OU por cancelamento.
-    canvas.addEventListener('pointerup', (e) => { dragging = false; this._panDragging = false; this._mapDragRotateDrag = null; _endTouchPinch(e); });
+    canvas.addEventListener('pointerup', (e) => {
+      // NOVO (29/09/2026), pedido verbatim: "No mapa 2D, do mesmo jeito que
+      // é no mapa 3D, faça como que, ao clicar com o botão do meio do mouse,
+      // a objeto rode 90 graus, indicando para onde está apontando com uma
+      // notificação (assim como no mapa 3D)." — só conta como o "clique"
+      // (não o arraste, que continua só movendo a grade — comportamento
+      // pré-existente) quando o cursor ficou abaixo do limiar desde o
+      // pointerdown do botão do meio; e só gira em Modo Edição (Modo
+      // Navegação é somente-leitura, mesmo espírito de `_navMode` no resto
+      // do arquivo).
+      if (e.button === 1 && midClickStart) {
+        const moveu = Math.hypot(e.clientX - midClickStart.x, e.clientY - midClickStart.y);
+        if (moveu <= _MID_CLICK_ROT_LIMIAR_PX && !this._navMode) {
+          // NOVO (29/09/2026), pedido verbatim: "No mapa 2D, no 'Modo
+          // Desenho', os objetos ainda não estão girando 90 graus com uma
+          // clicada no botão do meio do mouse (o desenho do ghost deve
+          // indicar isto)." — com a ferramenta "Objetos" armada (um tipo já
+          // escolhido no painel, ghost seguindo o cursor — ver
+          // `objectGhostAtivo` em `_loop`), o clique do meio gira o GHOST
+          // (o que está prestes a ser colocado), não um objeto já existente
+          // por baixo do cursor — mesma prioridade do Modo Padrão em 3D
+          // (view3d.js handleMiddleClickAction: enquanto uma ferramenta de
+          // construir está armada, o meio gira o que está na mão, nunca algo
+          // já colocado).
+          if (this._ptool === 'objects' && this._objectStampType) {
+            const idx = (Math.round((this._objectGhostAngulo || 0) / (Math.PI / 2)) + 1) % 4;
+            this._objectGhostAngulo = idx * (Math.PI / 2);
+            Utils.toast(`Alinhado para ${_CARDINAL_LABELS_2D[idx]}`, { type: 'ok', duration: 1200 });
+          } else {
+            const rect = canvas.getBoundingClientRect();
+            const sx = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const sy = (e.clientY - rect.top) * (canvas.height / rect.height);
+            const alvo = this._hitTestObject(sx, sy);
+            if (alvo) _rotacionarObjetoNoMeio(alvo);
+          }
+        }
+        midClickStart = null;
+      }
+      dragging = false; this._panDragging = false; this._mapDragRotateDrag = null; _endTouchPinch(e);
+    });
     canvas.addEventListener('pointercancel', (e) => { dragging = false; this._panDragging = false; this._mapDragRotateDrag = null; _endTouchPinch(e); });
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -17746,6 +18551,26 @@ const MapView = {
     Utils.bringToFront(panel);
   },
 
+  /** [91ª] Andar / Y global / Y local das PORTAS e JANELAS (mesmo trio dos demais objetos). Y local = base da peça acima do chão do andar
+   *  (`elevacaoBase` + `alturaPeitoril`); Y global = andar × altura do andar + Y local. Presa numa parede, o andar é o DA PAREDE (somente leitura). */
+  _yFieldsHtml(prefix, el, padraoPeitoril) {
+    const aP = (this._map && this._map.alturaPiso) || 2.8, parede = el.parentWallId ? (this._map.walls || []).find((w) => w.id === el.parentWallId) : null;
+    const piso = (parede ? parede.piso : el.piso) || 0, yl = (el.elevacaoBase || 0) + (el.alturaPeitoril != null ? el.alturaPeitoril : padraoPeitoril);
+    const ax = '<span class="map-panel-axis-arrow" title="Sentido em que o eixo Y aumenta seus valores: apontando para você, para fora da tela (no mapa 2D, visto de cima, o Y é a altura)">⊙</span>';
+    return `<label class="map-panel-field" title="Número inteiro do andar (0 = térreo, 1 = primeiro andar, -1 = subsolo...). ${parede ? 'Presa numa parede, acompanha o andar dela — para mudar, mude o andar da parede ou solte a peça.' : 'Y global = andar × altura do andar + Y local.'}"><span>Andar / piso${parede ? ' <small style="opacity:.7">(da parede)</small>' : ''}</span><input type="number" step="1" id="${prefix}-piso" value="${piso}" ${parede ? 'disabled' : ''}></label>
+      <label class="map-panel-field" title="Altura da base da peça no MUNDO (0 = chão do andar 0). Aceita valores negativos."><span>Y global (m) ${ax} <small style="opacity:.7">(mundo)</small></span><input type="number" step="0.05" id="${prefix}-yg" value="${(piso * aP + yl).toFixed(2)}"></label>
+      <label class="map-panel-field" title="Altura da base da peça RELATIVA ao chão do andar (peitoril). Y global − andar × altura do andar."><span>Y local (m) ${ax} <small style="opacity:.7">(no andar)</small></span><input type="number" step="0.05" min="0" id="${prefix}-yl" value="${yl.toFixed(2)}"></label>`;
+  },
+  _wireYFields(panel, prefix, el, salvar, max) {
+    const aP = () => (this._map && this._map.alturaPiso) || 2.8, base = el.elevacaoBase || 0;
+    const q = (k) => panel.querySelector('#' + prefix + '-' + k), pisoAtual = () => (parseInt((q('piso') || {}).value, 10) || 0);
+    const yl = q('yl'), yg = q('yg'), pi = q('piso');
+    const gravaLocal = (v) => salvar({ alturaPeitoril: Utils.clamp(v - base, 0, max) });
+    if (yl) yl.addEventListener('input', (e) => { const v = parseFloat(e.target.value); if (!Number.isFinite(v)) return; if (yg) yg.value = (v + pisoAtual() * aP()).toFixed(2); gravaLocal(v); });
+    if (yg) yg.addEventListener('input', (e) => { const v = parseFloat(e.target.value); if (!Number.isFinite(v)) return; const loc = v - pisoAtual() * aP(); if (yl) yl.value = loc.toFixed(2); gravaLocal(loc); });
+    if (pi && !pi.disabled) pi.addEventListener('input', () => { salvar({ piso: pisoAtual() }); if (yg && yl) yg.value = ((parseFloat(yl.value) || 0) + pisoAtual() * aP()).toFixed(2); });
+  },
+
   /** Torna o painel de propriedades (câmera/parede/objeto/item — todos usam
    *  este mesmo componente, ver _openPanel) reposicionável por clicar/tocar e
    *  arrastar pelo título (.map-panel-head — já com altura mínima de 40px,
@@ -17782,7 +18607,7 @@ const MapView = {
     // abaixo — o painel garante o foco de novo ao soltar, não só ao
     // pressionar).
     panel.addEventListener('pointerup', () => this._bringPanelToFront(panel));
-    let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+    let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0, _foW = window.innerWidth, _foH = window.innerHeight;
 
     const onPointerDown = (e) => {
       if (e.target.closest('.map-panel-close, button, input, select, textarea')) return; // não atrapalha os controles do título
@@ -17796,12 +18621,15 @@ const MapView = {
       // (viewport), então left/top usam o valor puro, sem subtrair o
       // retângulo de nenhum container (antes, sendo `absolute` dentro de
       // `.map2d-wrap`, precisava descontar `wrapRect` — não mais).
+      // [01/10/2026] CORRIGIDO (44ª rodada) — ver Utils.fixedOrigin: no Workspace o bloco contentor do painel fixed é a TELA (transform), não o navegador; subtrai a origem dela.
+      const _fo = Utils.fixedOrigin(panel);
+      _foW = _fo.w; _foH = _fo.h;
       panel.classList.add('dragged');
-      panel.style.left = panelRect.left + 'px';
-      panel.style.top = panelRect.top + 'px';
+      panel.style.left = (panelRect.left - _fo.x) + 'px';
+      panel.style.top = (panelRect.top - _fo.y) + 'px';
       panel.style.width = panelRect.width + 'px';
-      startLeft = panelRect.left;
-      startTop = panelRect.top;
+      startLeft = panelRect.left - _fo.x;
+      startTop = panelRect.top - _fo.y;
       startX = e.clientX; startY = e.clientY;
       dragging = true;
       head.setPointerCapture(e.pointerId);
@@ -17820,8 +18648,8 @@ const MapView = {
       // Mantém pelo menos uma faixa do painel visível dentro da JANELA do
       // navegador inteira (não mais só a área da grade — pedido do
       // usuário), pra nunca conseguir "perder" o painel arrastando pra fora.
-      left = Utils.clamp(left, -panelRect.width + 60, window.innerWidth - 60);
-      top = Utils.clamp(top, 0, window.innerHeight - 44);
+      left = Utils.clamp(left, -panelRect.width + 60, _foW - 60);
+      top = Utils.clamp(top, 0, _foH - 44);
       panel.style.left = left + 'px';
       panel.style.top = top + 'px';
       if (posKey) { this._panelPositions = this._panelPositions || {}; this._panelPositions[posKey] = { left, top }; }
@@ -17852,8 +18680,9 @@ const MapView = {
     panel.style.left = pos.left + 'px';
     panel.style.top = pos.top + 'px';
     const panelRect = panel.getBoundingClientRect();
-    const maxLeft = Math.max(0, window.innerWidth - panelRect.width);
-    const maxTop = Math.max(0, window.innerHeight - panelRect.height);
+    const _fo = Utils.fixedOrigin(panel);   // [44ª] limites = bloco contentor (tela do Workspace ou navegador)
+    const maxLeft = Math.max(0, _fo.w - panelRect.width);
+    const maxTop = Math.max(0, _fo.h - panelRect.height);
     const left = Utils.clamp(pos.left, 0, maxLeft);
     const top = Utils.clamp(pos.top, 0, maxTop);
     panel.style.left = left + 'px';
@@ -19304,6 +20133,11 @@ const MapView = {
         panel.dataset.entityId = String(novaParede.id);
         panel.innerHTML = buildHtml(novaParede);
         wire(novaParede);
+        // CORRIGIDO (29/09/2026) — mesma causa raiz/correção do painel de
+        // porta abaixo (ver comentário grande em `_openDoorPanel`): sem
+        // isto, arrastar esta janela pela barra de título parava de
+        // funcionar depois de qualquer ação que chamasse `refresh()`.
+        this._rewireDragResize(panel);
       },
     };
   },
@@ -19378,7 +20212,7 @@ const MapView = {
           : `<label class="map-panel-field"><span>Posição X (m) <span class="map-panel-axis-arrow" title="Sentido em que o eixo X aumenta seus valores">→</span></span><input type="number" step="0.1" id="porta-x" value="${(d.x || 0).toFixed(2)}"></label>
              <label class="map-panel-field"><span>Posição Z (m) <span class="map-panel-axis-arrow" title="Sentido em que este eixo aumenta seus valores (para baixo no mapa 2D)">↓</span></span><input type="number" step="0.1" id="porta-y" value="${(d.y || 0).toFixed(2)}"></label>
              <label class="map-panel-field"><span>Rotação (°)</span><input type="number" step="1" id="porta-rotacao-solta" value="${Math.round((d.angulo || 0) * 180 / Math.PI)}"></label>`}
-        <label class="map-panel-field"><span>Altura em relação ao chão (m)</span><input type="number" step="0.05" min="0" max="3" id="porta-peitoril" value="${(d.alturaPeitoril || 0).toFixed(2)}"></label>
+        ${this._yFieldsHtml('porta', d, 0)}
         ${(d.elevacaoBase || 0) > 0 ? `<div class="map2d-toolctx-info" style="display:block;margin:4px 0;">🧱 apoiada em cima de outro objeto a ${(d.elevacaoBase || 0).toFixed(2)}m do chão — altura ABSOLUTA final: ${Mapping.doorWindowAlturaEfetiva(d).toFixed(2)}m</div>` : ''}
         <label class="map-panel-field" title="Só afeta a representação 3D — aberta corta um buraco de verdade na parede; fechada (padrão) não mexe na parede, só mostra a porta encostada nela. No 2D (vista de cima) não muda nada."><span>Aberta (3D)</span><input type="checkbox" id="porta-aberta" ${d.aberta ? 'checked' : ''}></label>
         <label class="map-panel-field"><span>Cor</span><input type="color" id="porta-cor" value="${hex}"></label>
@@ -19415,8 +20249,25 @@ const MapView = {
       panel.querySelector('#porta-abertura').onchange = (e) => salvar({ abertura: e.target.value });
       panel.querySelector('#porta-largura').oninput = (e) => salvar({ largura: Utils.clamp(parseFloat(e.target.value) || 0.8, 0.4, 3) });
       panel.querySelector('#porta-altura').oninput = (e) => salvar({ altura: Utils.clamp(parseFloat(e.target.value) || 2.1, 1.2, 3) });
-      panel.querySelector('#porta-peitoril').oninput = (e) => salvar({ alturaPeitoril: Utils.clamp(parseFloat(e.target.value) || 0, 0, 3) });
-      panel.querySelector('#porta-aberta').onchange = (e) => salvar({ aberta: e.target.checked });
+      this._wireYFields(panel, 'porta', d, salvar, 3);   // [91ª] andar + Y global + Y local
+      // CORRIGIDO (29/09/2026), pedido verbatim: "Ao colocar uma porta, ir no
+      // 'Ver em 3D', abrir a porta, depois, ir no mapa 2D, trocar para abrir
+      // para a 'Esquerda' e ir no 'Ver em 3D' de novo, a porta deixa de
+      // funcionar." CAUSA RAIZ: `el.anguloAbertura` (campo numérico 0-90,
+      // usado por Scripts/EventTrigger via `.abrirPorta()`/`.fecharPorta()`
+      // em automation.js) tem PRIORIDADE sobre `el.aberta` sempre que definido
+      // (ver engine3d.js `_buildDoorOrWindowMesh`/`_updateDoorAnimations`) —
+      // e, uma vez definido por um Script, nunca mais é limpo. Depois disso,
+      // marcar/desmarcar este checkbox não tinha NENHUM efeito (o valor antigo
+      // de `anguloAbertura` sempre vencia), dando a impressão de porta
+      // "travada" — mudar o lado da dobradiça e voltar ao 3D só tornava mais
+      // óbvio (a porta reaparecia sempre na mesma posição de abertura antiga).
+      // Corrigido: ao mexer manualmente neste checkbox, `anguloAbertura` é
+      // limpo (`null`), devolvendo o controle pra `aberta` — e a atualização é
+      // imediata porque toda troca de propriedade já dispara `_saveMap()` +
+      // rebuild completo da cena 3D (`_doorRuntime` é recriado do zero a cada
+      // `setScene`, então não há estado de animação antigo para "colar").
+      panel.querySelector('#porta-aberta').onchange = (e) => salvar({ aberta: e.target.checked, anguloAbertura: null });
       panel.querySelector('#porta-pos')?.addEventListener('input', (e) => salvar({ posAoLongoDaParede: parseFloat(e.target.value) || 0 }));
       panel.querySelector('#porta-x')?.addEventListener('input', (e) => salvar({ x: parseFloat(e.target.value) || 0 }));
       panel.querySelector('#porta-y')?.addEventListener('input', (e) => salvar({ y: parseFloat(e.target.value) || 0 }));
@@ -19436,12 +20287,18 @@ const MapView = {
       });
       panel.querySelector('#porta-unir')?.addEventListener('click', () => {
         if (!attachCandidate) return;
-        // `anguloExtra` calculado pra preservar o ângulo ATUAL da porta na
-        // tela (mesmo espírito de "Soltar da parede" acima, só que ao
-        // contrário) — sem isso ela "giraria" de repente pra ficar alinhada
-        // à parede assim que unida.
-        const wallAngle = Math.atan2(attachCandidate.wall.y2 - attachCandidate.wall.y1, attachCandidate.wall.x2 - attachCandidate.wall.x1);
-        salvar({ parentWallId: attachCandidate.wall.id, posAoLongoDaParede: attachCandidate.t, anguloExtra: (d.angulo || 0) - wallAngle });
+        // CORRIGIDO (29/09/2026), pedido verbatim: "se a porta ou janela
+        // estiver desalinhada em relação a parede, ao clicar para 'unir à
+        // parede', ela deve fazer a união de forma alinhada." Antes,
+        // `anguloExtra` era calculado pra PRESERVAR o ângulo atual da porta
+        // na tela (`(d.angulo||0) - wallAngle`) — então uma porta solta
+        // colocada torta continuava torta depois de unida, só que agora
+        // "grudada" à parede naquele mesmo ângulo errado. Corrigido:
+        // `anguloExtra: 0` sempre — union sempre alinha à parede (0° =
+        // alinhada, ver título do campo "Rotação (°, relativa à parede)"
+        // no painel). Quem quiser a porta torta em relação à parede pode
+        // ajustar esse campo manualmente depois de unida.
+        salvar({ parentWallId: attachCandidate.wall.id, posAoLongoDaParede: attachCandidate.t, anguloExtra: 0 });
         const fresh = (this._map.portas || []).find((x) => x.id === d.id);
         this._doorPanelApi.refresh(fresh || d);
         Utils.toast('Porta unida à parede.', { type: 'ok' });
@@ -19463,6 +20320,26 @@ const MapView = {
         built = buildHtml(novaPorta);
         panel.innerHTML = built.html;
         wire(novaPorta, built.attachCandidate);
+        // CORRIGIDO (29/09/2026), pedido verbatim: "Ao posicionar um objeto
+        // porta em cima de uma parede, acessar as propriedades e, depois,
+        // unir à parede, a janela de propriedades fica imóvel." CAUSA RAIZ:
+        // `panel.innerHTML = built.html` (linha acima) substitui TODO o
+        // conteúdo do painel — inclusive o `.map-panel-head` (a barra de
+        // título) — por um elemento NOVO; mas `_makePanelDraggable` (chamado
+        // só UMA VEZ, em `_openPanel`, ao criar o painel) tinha ligado os
+        // listeners de arrastar (`pointerdown`/`pointermove`/...) no
+        // elemento ANTIGO de `.map-panel-head`, que acabou de ser removido
+        // do DOM — o painel continuava no lugar (a posição em si não muda),
+        // só parava de RESPONDER a arrastar (por isso "fica imóvel"). Mesmo
+        // bug/mesma causa já resolvida em outro painel (ver
+        // `_rewireDragResize`, criado pro painel de 'Scripts' — "Deve ser
+        // possível continuar movendo a janela do botão 'Scripts'..."), só
+        // que esta função (`refresh`, usada por 'Unir à parede'/'Soltar da
+        // parede'/'Cor padrão'/trocar tipo etc.) nunca chamava esse helper.
+        // Corrigido chamando-o aqui — religa os listeners de arrastar no
+        // `.map-panel-head` ATUAL (o antigo já saiu do DOM), seguro de
+        // chamar toda vez (ver comentário grande de `_rewireDragResize`).
+        this._rewireDragResize(panel);
       },
     };
   },
@@ -19521,7 +20398,7 @@ const MapView = {
              (esse é o tamanho FÍSICO do vão da janela, que passou a ter
              limite de 10m em vez disso, ver comentário grande acima). Limite
              de 3m removido, virou 1000m (permite paredes/prédios altos). -->
-        <label class="map-panel-field"><span>Altura em relação ao chão — peitoril (m)</span><input type="number" step="0.05" min="0" max="1000" id="janela-peitoril" value="${(j.alturaPeitoril || 1).toFixed(2)}"></label>
+        ${this._yFieldsHtml('janela', j, 1)}
         ${(j.elevacaoBase || 0) > 0 ? `<div class="map2d-toolctx-info" style="display:block;margin:4px 0;">🧱 apoiada em cima de outro objeto a ${(j.elevacaoBase || 0).toFixed(2)}m do chão — altura ABSOLUTA final: ${Mapping.doorWindowAlturaEfetiva(j).toFixed(2)}m</div>` : ''}
         <label class="map-panel-field"><span>Grade de proteção</span><input type="checkbox" id="janela-grade" ${j.grade ? 'checked' : ''}></label>
         <label class="map-panel-field"><span>Bandeira (abre só o topo)</span><input type="checkbox" id="janela-bandeira" ${j.bandeira ? 'checked' : ''}></label>
@@ -19582,10 +20459,14 @@ const MapView = {
       // 1000m.
       panel.querySelector('#janela-largura').oninput = (e) => salvar({ largura: Utils.clamp(parseFloat(e.target.value) || 1.2, 0.3, 10) });
       panel.querySelector('#janela-altura').oninput = (e) => salvar({ altura: Utils.clamp(parseFloat(e.target.value) || 1.2, 0.3, 10) });
-      panel.querySelector('#janela-peitoril').oninput = (e) => salvar({ alturaPeitoril: Utils.clamp(parseFloat(e.target.value) || 1, 0, 1000) });
+      this._wireYFields(panel, 'janela', j, salvar, 1000);   // [91ª] andar + Y global + Y local (peitoril)
       panel.querySelector('#janela-grade').onchange = (e) => salvar({ grade: e.target.checked });
       panel.querySelector('#janela-bandeira').onchange = (e) => salvar({ bandeira: e.target.checked });
-      panel.querySelector('#janela-aberta').onchange = (e) => salvar({ aberta: e.target.checked });
+      // CORRIGIDO (29/09/2026) — mesma causa raiz/correção do checkbox
+      // equivalente da Porta acima (`#porta-aberta`): limpar `anguloAbertura`
+      // devolve o controle ao checkbox mesmo depois de um Script ter animado
+      // a janela via `.abrirPorta()`/`.fecharPorta()`.
+      panel.querySelector('#janela-aberta').onchange = (e) => salvar({ aberta: e.target.checked, anguloAbertura: null });
       panel.querySelector('#janela-pos')?.addEventListener('input', (e) => salvar({ posAoLongoDaParede: parseFloat(e.target.value) || 0 }));
       panel.querySelector('#janela-x')?.addEventListener('input', (e) => salvar({ x: parseFloat(e.target.value) || 0 }));
       panel.querySelector('#janela-y')?.addEventListener('input', (e) => salvar({ y: parseFloat(e.target.value) || 0 }));
@@ -19605,8 +20486,9 @@ const MapView = {
       });
       panel.querySelector('#janela-unir')?.addEventListener('click', () => {
         if (!attachCandidate) return;
-        const wallAngle = Math.atan2(attachCandidate.wall.y2 - attachCandidate.wall.y1, attachCandidate.wall.x2 - attachCandidate.wall.x1);
-        salvar({ parentWallId: attachCandidate.wall.id, posAoLongoDaParede: attachCandidate.t, anguloExtra: (j.angulo || 0) - wallAngle });
+        // CORRIGIDO (29/09/2026) — mesma causa raiz/correção do botão
+        // equivalente da Porta acima: unir sempre alinha (anguloExtra: 0).
+        salvar({ parentWallId: attachCandidate.wall.id, posAoLongoDaParede: attachCandidate.t, anguloExtra: 0 });
         const fresh = (this._map.janelas || []).find((x) => x.id === j.id);
         this._windowPanelApi.refresh(fresh || j);
         Utils.toast('Janela unida à parede.', { type: 'ok' });
@@ -19628,6 +20510,9 @@ const MapView = {
         built = buildHtml(novaJanela);
         panel.innerHTML = built.html;
         wire(novaJanela, built.attachCandidate);
+        // CORRIGIDO (29/09/2026) — mesma causa raiz/correção do painel de
+        // porta (ver comentário grande em `_openDoorPanel`).
+        this._rewireDragResize(panel);
       },
     };
   },
@@ -22279,6 +23164,9 @@ const MapView = {
         panel.dataset.entityId = String(novoTxt.id);
         panel.innerHTML = buildHtml(novoTxt, false);
         wire(novoTxt, false);
+        // CORRIGIDO (29/09/2026) — mesma causa raiz/correção do painel de
+        // porta (ver comentário grande em `_openDoorPanel`).
+        this._rewireDragResize(panel);
       },
     };
   },
@@ -22319,8 +23207,9 @@ const MapView = {
       const w = r.width || 320, h = r.height || 200;
       panel.classList.add('dragged'); // troca left/right/bottom fixos do CSS por left/top livres (ver _makePanelDraggable)
       panel.style.width = w + 'px';
-      panel.style.left = Math.max(10, (window.innerWidth - w) / 2) + 'px';
-      panel.style.top = Math.max(10, (window.innerHeight - h) / 2) + 'px';
+      const fo = Utils.fixedOrigin(panel);   // [01/10/2026] 46ª rodada — centraliza no bloco contentor (tela do Workspace ou navegador), ver Utils.fixedOrigin
+      panel.style.left = Math.max(10, (fo.w - w) / 2) + 'px';
+      panel.style.top = Math.max(10, (fo.h - h) / 2) + 'px';
     }
   },
 
@@ -22407,6 +23296,7 @@ const MapView = {
     const objectPanelMesmaInstancia = objectPanelCacheado?.isConnected && objectPanelCacheado.dataset.entityId === String(obj.id);
     if (objectPanelMesmaInstancia && objectPanelEstavaFechado) {
       this._showPersistentPanel(objectPanelCacheado);
+      try { this._objPanelSyncFromObject?.(obj); } catch (e) { /* ignora */ }   // [61ª] painel reaberto: atualiza os campos com o estado ATUAL do objeto (podia ter mudado pela Transformação enquanto estava fechado)
       return objectPanelCacheado;
     }
     const itemEntries = obj.itemIds || [];
@@ -22421,6 +23311,18 @@ const MapView = {
       panel.style.display = '';
       this._panelEl = panel;
       this._bringPanelToFront(panel);
+      // CORRIGIDO (29/09/2026) — mesma causa raiz/correção dos painéis de
+      // porta/janela/parede/texto (ver comentário grande em
+      // `_openDoorPanel`): `panel.innerHTML = html` acima troca o
+      // `.map-panel-head` inteiro, então os listeners de arrastar ligados
+      // no elemento ANTIGO (só na criação do painel, ver `_openPanel`)
+      // ficam órfãos. Este painel em particular é reaberto/reconstruído com
+      // bastante frequência (arrastar o objeto no mapa já chamava
+      // `_openObjectPanel` de novo a cada quadro, e agora também a seção
+      // "📋 Especificações/Hardware" reabre ao adicionar/remover um item) —
+      // sem isto, a janela "travava" (parava de responder a arrastar) toda
+      // vez que qualquer uma dessas ações rodasse.
+      this._rewireDragResize(panel);
     } else {
       panel = this._openPanel(html);
       this._objectPanelEl = panel;
@@ -22714,6 +23616,7 @@ const MapView = {
   },
 
   async _openObjectPickerPanel() {
+    if (this._suprimirPickerObjetos) return; // [69ª] ver _ativarBotaoFerramenta('texto')
     this._closeObjectPickerPanel();
     // `_closeObjectPickerPanel()` (linha acima, só pra descartar uma
     // instância anterior antes de recriar) acabou de marcar a flag como
@@ -22746,7 +23649,16 @@ const MapView = {
     // [21/09/2026] NOVO -- campo de busca por nome (ver renderGrid/wiring do input abaixo).
     // Não persiste entre aberturas de propósito -- é um filtro de uso pontual, igual a busca
     // de patrimônio (js/search.js), não uma preferência do painel.
-    let busca = '';
+    // [01/10/2026] MUDADO — "O que for colocado no campo de busca deve persistir se a janela 'Objetos' for fechada, até a página ser recarregada." Antes: nascia vazio a cada abertura (de propósito, ver acima). Agora o texto digitado vive em `_objPickerBuscaTexto` (variável de módulo, como `_mapAutoFitDoneThisPageLoad`) — sobrevive a fechar/abrir a janela e a sair/voltar do Mapa; só um F5 zera.
+    let busca = _objPickerBuscaTexto.trim().toLowerCase();
+    let buscaFn = busca ? compilarBuscaMulti(_objPickerBuscaTexto) : () => true; // predicado compilado de `busca` (ver compilarBuscaMulti)
+    // [30/09/2026] NOVO (12ª rodada) — modo da busca: 'atual' (itens sem match ficam invisíveis mas ocupam o
+    // espaço — método de sempre) | 'compacto' (itens sem match somem de verdade; só sobram os títulos e os
+    // objetos correspondentes, sem "buraco" em branco). Persistido (ver select #map-obj-picker-busca-modo).
+    // [30/09/2026] MUDADO (13ª rodada) — pedido verbatim: "Na busca na janela 'Objetos', o padrão do app deve ser
+    // 'Compactar'." Antes o padrão era 'atual'; agora é 'compacto' (só vale pra quem ainda não escolheu nada).
+    let buscaModo = await DB.getSetting('mapa2dObjPickerBuscaModo', 'compacto');
+    if (buscaModo !== 'atual') buscaModo = 'compacto';
     if (!this._container) return; // painel fechado enquanto esperava os awaits acima
     const panel = document.createElement('div');
     // [15/09/2026 UTC] NOVO — classe extra `.map-obj-picker-panel-resizable`
@@ -22774,7 +23686,21 @@ const MapView = {
     // apertada com 1 coluna só).
     const savedSize = await DB.getSetting('mapa2dObjPickerPanelSize', null);
     if (!this._container || this._objectPickerEl !== panel) return; // painel já fechado/trocado enquanto esperava o await acima
-    if (savedSize && savedSize.w && savedSize.h) {
+    // [30/09/2026] NOVO (12ª rodada) — pedido verbatim: "No mapa 2D, se a largura da tela que estiver no
+    // momento em que o botão 'Objetos' [...] for clicado for maior do que a altura, então, a janela de
+    // 'Objetos' deve aparecer com a largura de 500px e altura 500px. Senão, deve aparecer com o tamanho que
+    // já surge, que é bem menor." Tela em paisagem (innerWidth > innerHeight) -> 500x500 (limitado ao que
+    // cabe no mapa, pra não estourar numa janela de altura pequena — HONESTIDADE DE ESCOPO: só nesse caso
+    // fica menor que 500); senão segue o tamanho de sempre (salvo ou 300x360). O 500x500 NÃO é gravado como
+    // tamanho salvo (só um redimensionamento manual do usuário grava, via onResizeEnd).
+    const _telaPaisagem = window.innerWidth > window.innerHeight;
+    if (_telaPaisagem) {
+      const wrapEl = this._container.querySelector('.map2d-wrap');
+      const maxW = wrapEl ? Math.max(220, wrapEl.clientWidth - 20) : 500;
+      const maxH = wrapEl ? Math.max(200, wrapEl.clientHeight - 20) : 500;
+      panel.style.width = Math.min(500, maxW) + 'px';
+      panel.style.height = Math.min(500, maxH) + 'px';
+    } else if (savedSize && savedSize.w && savedSize.h) {
       panel.style.width = savedSize.w + 'px';
       panel.style.height = savedSize.h + 'px';
     } else {
@@ -22811,6 +23737,7 @@ const MapView = {
       if (chavesFerramenta.has(key)) { this._setPTool(key); return; }
       if (this._formaDraft) this._finalizeFormaDraft();
       this._objectStampType = key;
+      this._objectGhostAngulo = 0; // [29/09/2026] idem _ativarBotaoFerramenta -- novo tipo, ghost reseta pro Norte
       marcarAtivo();
       this._updateToolCtx();
     };
@@ -22859,11 +23786,13 @@ const MapView = {
       // SEMPRE montada por completo (mesmo HTML de quando não há busca) e o filtro só troca
       // `visibility` (não `display`) dos itens sem match -- o elemento continua ocupando a MESMA
       // célula/tamanho de grid de sempre, só fica invisível, então nada recalcula.
-      const bate = (o) => !busca || o.label.toLowerCase().includes(busca);
+      // [01/10/2026] MUDADO — "o campo de busca [...] deve aceitar buscas do tipo 'mesa;gabinete' [...] Termos como \"gabinete\" ou 'gabinete' (com aspas simples ou duplas) também devem exibir o resultado. Implemente essa sistemática e outras do mesmo tipo." Causa raiz: a busca era um único `includes` do texto digitado inteiro (então 'mesa;gabinete' e '"gabinete"', com as aspas, nunca casavam com nada). Agora usa `compilarBuscaMulti` (ver topo deste arquivo).
+      const bate = (o) => !busca || buscaFn(o.label);
       const botao = (o) => {
         const selo = window.NovosObjetos ? window.NovosObjetos.seloHtml(o.key, cfgObj, agora) : '';
         const oculto = !bate(o);
-        return `<button type="button" class="map-obj-pick-item${selo ? ' map-obj-pick-novo' : ''}${oculto ? ' map-obj-pick-oculto' : ''}${busca && !oculto ? ' map-obj-pick-match' : ''}" data-key="${o.key}" title="${Utils.escapeHtml(o.label)}">
+        // [30/09/2026] MUDADO (12ª rodada) — no modo 'compacto' o item sem match usa display:none (some e libera o espaço).
+        return `<button type="button" class="map-obj-pick-item${selo ? ' map-obj-pick-novo' : ''}${oculto ? (buscaModo === 'compacto' ? ' map-obj-pick-oculto-compacto' : ' map-obj-pick-oculto') : ''}${busca && !oculto ? ' map-obj-pick-match' : ''}" data-key="${o.key}" title="${Utils.escapeHtml(o.label)}">
               <span class="ic">${o.svg}</span>
               <span class="t">${Utils.escapeHtml(o.label)}</span>${selo}
             </button>`;
@@ -22880,14 +23809,21 @@ const MapView = {
           grupos.get(id).push(o);
         });
         const partes = [];
-        const blocoNovos = () => { if (novosSep.length) { partes.push(rotulo('Objetos novos importados', '#ffd166', '✦', !novosSep.some(bate))); novosSep.forEach((o) => partes.push(botao(o))); } };
+        const blocoNovos = () => { if (novosSep.length) { partes.push(rotulo('Objetos novos importados', '#ffd166', '✦', false)); novosSep.forEach((o) => partes.push(botao(o))); } };
         if (pos === 'inicio') blocoNovos();
+        // [83ª rodada] dentro de cada categoria: dois blocos — "Mobiliário Padrão" (básicos) e "Objetos Especiais" (ver ObjCategorias.separarPorUso).
+        const subRotulo = (u) => `<div class="map-obj-pick-subgroup-label map-obj-pick-uso-${u.id}" title="${Utils.escapeHtml(u.dica)}"><span class="uso-ic">${u.icone}</span><span>${Utils.escapeHtml(u.label)}</span></div>`;
         window.ObjCategorias.CATEGORIAS.forEach((c) => {
           const itens = grupos.get(c.id);
           if (!itens || !itens.length) return;
-          // Rótulo da categoria some (mesma técnica de visibility) só quando NENHUM item dela bate.
-          partes.push(rotulo(c.label, c.cor, c.icone, !itens.some(bate)));
-          itens.forEach((o) => partes.push(botao(o)));
+          // [30/09/2026] MUDADO (12ª rodada) — pedido verbatim: "Ao fazer uma busca por um nome de objeto [...] todos os títulos devem permanecer. Se não houver correspondências ali, fica só o título mesmo." Antes o título sumia (visibility) quando nenhum item da categoria batia; agora SEMPRE fica visível.
+          partes.push(rotulo(c.label, c.cor, c.icone, false));
+          const sep = window.ObjCategorias.separarPorUso ? window.ObjCategorias.separarPorUso(itens) : { itensBasicos: itens, itensEspeciais: [] };
+          const U = window.ObjCategorias.TIPOS_USO;
+          if (U && sep.itensBasicos.length) partes.push(subRotulo(U.basico));
+          sep.itensBasicos.forEach((o) => partes.push(botao(o)));
+          if (U && sep.itensEspeciais.length) partes.push(subRotulo(U.especial));
+          sep.itensEspeciais.forEach((o) => partes.push(botao(o)));
         });
         if (pos === 'fim') blocoNovos();
         grid.innerHTML = partes.join('');
@@ -22910,8 +23846,26 @@ const MapView = {
       renderGrid();
     };
     // [21/09/2026] NOVO -- pedido verbatim: "deve ter um campo para buscar o nome de um objeto."
+    // [30/09/2026] NOVO (12ª rodada) — pedido verbatim: "Deve haver uma opção para o momento da busca. Esta opção deve alternar entre o método atual e um método que faz aparecer só os títulos com o(s) objeto(s) correspondente(s), sem deixar um grande 'espaço em branco'."
+    const selBuscaModo = panel.querySelector('#map-obj-picker-busca-modo');
+    if (selBuscaModo) {
+      selBuscaModo.value = buscaModo;
+      selBuscaModo.onchange = (e) => {
+        buscaModo = e.target.value === 'compacto' ? 'compacto' : 'atual';
+        DB.setSetting('mapa2dObjPickerBuscaModo', buscaModo);
+        renderGrid();
+      };
+    }
+    {
+      const campoBusca = panel.querySelector('#map-obj-picker-busca');
+      if (campoBusca) campoBusca.value = _objPickerBuscaTexto; // [01/10/2026] restaura o texto persistido (renderGrid já usa `busca`/`buscaFn` iniciais)
+      const ajudaBtn = panel.querySelector('#map-obj-picker-busca-ajuda');
+      if (ajudaBtn) ajudaBtn.onclick = () => this._openBuscaObjetosAjuda(); // [01/10/2026] botão ❓ de ajuda da busca
+    }
     panel.querySelector('#map-obj-picker-busca').oninput = (e) => {
       busca = e.target.value.trim().toLowerCase();
+      _objPickerBuscaTexto = e.target.value; // [01/10/2026] persiste até recarregar a página
+      buscaFn = compilarBuscaMulti(e.target.value); // [01/10/2026] ';' / ',' / '|' = OU; aspas = frase; '-' = exclui; '*' '?' = curinga
       renderGrid();
     };
 
@@ -23474,7 +24428,7 @@ const MapView = {
    *  menores para as duas maneiras de desenhar"). */
   _toggleReticuloDrawer() {
     const ligar = this._ptool !== 'reticulo';
-    // ATUALIZADO (03/09/2026) — "Trena (de medir)"/"Traço guia" viraram
+    // ATUALIZADO (03/09/2026) — "Trena"/"Traço guia" viraram
     // `_ptool` de verdade nesta rodada (ver PTOOLS); `_setPTool` abaixo já
     // é MUTUAMENTE EXCLUSIVO por natureza (só existe um `this._ptool` de
     // cada vez) — ligar "Retículo métrico" aqui já desliga qualquer uma das
@@ -23492,7 +24446,7 @@ const MapView = {
     this._updateToolCtx(); // mantém a barra de contexto (se visível, fora de Modo Navegação) sincronizada
   },
 
-  /** "Trena (de medir)" — RENOMEADA de "Régua" (03/09/2026, pedido
+  /** "Trena" — RENOMEADA de "Régua" (03/09/2026, pedido
    *  verbatim). Medição por 2 cliques, mesma ideia da régua das fotos
    *  (ambientephotos.js _toggleMedidaMode), mas em coordenadas de MUNDO
    *  (metros), persistida em this._map.medidas2d. Ferramenta de verdade
@@ -23504,7 +24458,7 @@ const MapView = {
     const ligar = this._ptool !== 'medida';
     this._setPTool(ligar ? 'medida' : null, { skipModeReset: true, forceDuringNav: true });
     this._syncMap2DDrawerUI();
-    Utils.toast(ligar ? '📏 Trena (de medir): toque em 2 pontos do mapa para medir a distância — use a ferramenta "🗑️ Apagar" para remover uma medida já feita.' : '📏 Trena (de medir) desativada.', { duration: ligar ? 4000 : 2000 });
+    Utils.toast(ligar ? '📏 Trena: toque em 2 pontos do mapa para medir a distância — use a ferramenta "🗑️ Apagar" para remover uma medida já feita.' : '📏 Trena desativada.', { duration: ligar ? 4000 : 2000 });
   },
 
   /** Ponto do MUNDO pra um clique da Trena, respeitando o toggle "grade"/
@@ -23706,7 +24660,7 @@ const MapView = {
     // _resolveMedidaOuTracoPonto (Shift trava 15°, Ctrl trava perpendicular
     // a uma medida/traço já feito — ver comentário grande lá), em vez de ir
     // direto por _worldPointForMedida como antes.
-    const world = this._resolveMedidaOuTracoPonto(sx, sy, this._medida2dDraft, true);
+    let world = this._resolveMedidaOuTracoPonto(sx, sy, this._medida2dDraft, true);
     const p1 = this._medida2dDraft;
     this._medida2dDraft = null;
     this._perpSnapInfo = null;
@@ -23714,6 +24668,32 @@ const MapView = {
     if (this._medidaModoInsercao === 'manual') {
       this._openMedida2DValorModal(p1, world);
     } else {
+      // [30/09/2026] CORRIGIDO -- pedido verbatim: "No mapa 2D, na ferramenta 'Trena', ao fazer uma
+      // medida na grade do mapa 2D, mesmo o snap estando com 10cm, o arredondamento não fica em
+      // múltiplos de 10cm, aparecendo, às vezes, '3,61cm', por exemplo, em vez de '3,60cm'. Atualize
+      // o método de cálculo para que, quando o snap estiver definido, fique sempre em múltiplos do
+      // valor de snap." CAUSA RAIZ: `_worldPointForMedida`/`_resolveMedidaOuTracoPonto` encaixam CADA
+      // PONTA (x,y) da medida no múltiplo mais próximo do snap, cada eixo de forma independente — mas
+      // o COMPRIMENTO da medida (Math.hypot entre as duas pontas já encaixadas) é a hipotenusa de um
+      // triângulo, e a hipotenusa de dois catetos que são múltiplos de X quase nunca é, ela mesma, um
+      // múltiplo de X (ex.: catetos de 30cm e 10cm, ambos múltiplos de 10cm, dão uma hipotenusa de
+      // ~31,62cm) — não era um erro de arredondamento de ponto flutuante, era a própria geometria.
+      // Corrigido ajustando a 2ª ponta (`world`), MANTENDO A MESMA DIREÇÃO/ÂNGULO já resolvido acima
+      // (Shift/Ctrl/grade), só esticando ou encolhendo o comprimento até o múltiplo mais próximo do
+      // snap configurado (`this._gridSnapMeters`) -- assim a medida sempre fecha num múltiplo exato,
+      // como o nome "Conforme a grade" já prometia.
+      const passoMedida = (this._gridSnap && this._gridSnapMeters > 0) ? this._gridSnapMeters : 0;
+      if (passoMedida > 0) {
+        const dx = world.x - p1.x, dy = world.y - p1.y;
+        const distAtual = Math.hypot(dx, dy);
+        if (distAtual > 1e-9) {
+          const distSnap = Math.round(distAtual / passoMedida) * passoMedida;
+          if (distSnap > 0) {
+            const escala = distSnap / distAtual;
+            world = { x: p1.x + dx * escala, y: p1.y + dy * escala };
+          }
+        }
+      }
       // NOVO (07/09/2026), pedido verbatim: "...'Trena'... devem ter
       // nomes... implemente algo semelhante [ao bpy.data.objects] no app."
       this._map.medidas2d.push({ id: DB.uuid(), x1: p1.x, y1: p1.y, x2: world.x, y2: world.y, modo: 'grade', layerId: this._activeLayerId, criadoEm: DB.nowISO(), nome: Mapping._nextObjectName(this._map, 'Trena') }); // BUG CORRIGIDO (03/09/2026) — nascia sem layerId, ver Mapping.ensureAllElementsLayered
@@ -23760,7 +24740,7 @@ const MapView = {
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') salvar(); });
   },
 
-  /** Barra de contexto da "Trena (de medir)" — pedido verbatim: toggle
+  /** Barra de contexto da "Trena" — pedido verbatim: toggle
    *  "inserir medida manualmente" vs "inserir conforme a grade", com
    *  `title` explicando cada opção.
    *
@@ -23790,7 +24770,7 @@ const MapView = {
     const modoGrade = this._medidaModoInsercao !== 'manual';
     const reposicionar = !!this._medidaReposicionarExtremidadesAtivo2D;
     return `
-      <span class="map2d-toolctx-label">📏 Trena (de medir)</span>
+      <span class="map2d-toolctx-label">📏 Trena</span>
       <span class="map2d-medida-modo-group">
         <button type="button" class="icon-btn sm ${modoGrade ? 'active' : ''}" id="toolctx-medida-modo-grade" title="Conforme a grade: cada ponto encaixa na grade de 1m (ou na distância de '🧲 Snap na grade', se configurada) — igual a desenhar com o snap sempre ligado, mesmo que ele esteja desligado no cabeçalho.">🧲 Conforme a grade</button>
         <button type="button" class="icon-btn sm ${!modoGrade ? 'active' : ''}" id="toolctx-medida-modo-manual" title="Manual: cada ponto vai exatamente onde o dedo/cursor tocou, sem encaixar em nada — útil pra medir uma distância que não é um múltiplo redondo da grade.">✋ Manual</button>
@@ -24001,6 +24981,20 @@ const MapView = {
       // traços guia nunca checavam `visibility`/'🚫 Ocultar', então
       // `.hide()`/Grupos não tinham efeito sobre eles.
       if (t.visibility === false) return;
+      // [30/09/2026] CORRIGIDO -- pedido verbatim: "Todos os objetos (medidas também são objetos)
+      // devem ficar atrelados a camada que estiver selecionada... Fiz um teste, coloquei medidas na
+      // grade do mapa 2D com a ferramenta 'Trena', depois, desativei todas as camadas e as medidas
+      // ainda apareciam." CAUSA RAIZ: `_drawMedidasTracos2D` (aqui) nunca consultava a visibilidade
+      // da camada (`Mapping.isLayerVisible`) pra nenhum dos 2 tipos que desenha (traço guia/medida da
+      // Trena) -- MESMO já tendo `layerId` de verdade (atribuído na criação desde 03/09/2026, ver
+      // Mapping.ensureAllElementsLayered) e mesmo TODO outro tipo de elemento (parede/objeto/porta/
+      // janela/texto/foto, ver Map2DRenderer._layerVisible) já respeitar isso -- só estes 2 tipos
+      // ficavam de fora do filtro, por terem seu próprio método de desenho separado
+      // (_drawMedidasTracos2D, chamado à parte do resto do mapa, ver Map2DRenderer.render) em vez de
+      // passar pelo Map2DRenderer normal. Corrigido com a MESMA função central (Mapping.
+      // isLayerVisible) usada em todo o resto do app -- nenhuma migração de dados foi necessária,
+      // já tinham layerId salvo, só faltava respeitá-lo aqui no desenho.
+      if (!Mapping.isLayerVisible(this._map, t.layerId)) return;
       const a = toScreen(t.x1, t.y1), b = toScreen(t.x2, t.y2);
       // NOVO (06/09/2026), pedido verbatim: "Todos selecionáveis." — BUG
       // CORRIGIDO: `_drawMedidasTracos2D` (chamada 1x por quadro, à parte
@@ -24111,10 +25105,17 @@ const MapView = {
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
       if (draft) {
         [a, b].forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fillStyle = cor; ctx.fill(); });
-        return;
+      } else {
+        this._drawSetaPontaMedida2D(ctx, b, a, cor);
+        this._drawSetaPontaMedida2D(ctx, a, b, cor);
       }
-      this._drawSetaPontaMedida2D(ctx, b, a, cor);
-      this._drawSetaPontaMedida2D(ctx, a, b, cor);
+      // [30/09/2026] MUDADO — pedido verbatim: "Ao selecionar a ferramenta
+      // 'Trena', após o primeiro clique, a medida final [...] já deve ir
+      // sendo exibida enquanto o segundo clique ainda não for dado." Antes,
+      // o modo `draft` retornava ANTES de chegar aqui (só as 2 bolinhas nas
+      // pontas apareciam) — agora o texto/caixinha com a medida corrente
+      // também é desenhado durante o arraste, igual à medida já concluída
+      // (sem as setas nas pontas, que só fazem sentido pra medida final).
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       const texto = isManual ? (medida.valor ? String(medida.valor) : '(sem valor)') : this._formatMedida2DLabel(Math.hypot(x2 - x1, y2 - y1));
       ctx.font = '600 12px sans-serif';
@@ -24138,6 +25139,9 @@ const MapView = {
     // medidas da Trena nunca checavam `visibility`/'🚫 Ocultar'.
     (this._map.medidas2d || []).forEach((m) => {
       if (m.visibility === false) return;
+      // [30/09/2026] CORRIGIDO -- mesma causa raiz/mesmo fix do bloco de "tracos2d" logo acima (ver
+      // comentário grande lá) -- a medida da Trena também nunca respeitava a camada desligada.
+      if (!Mapping.isLayerVisible(this._map, m.layerId)) return;
       desenharMedida(m.x1, m.y1, m.x2, m.y2, { medida: m });
     });
     if (this._medida2dDraft && this._mouseScreen) {
@@ -24145,6 +25149,21 @@ const MapView = {
       // Traço guia acima: preview passa por _resolveMedidaOuTracoPonto.
       const w = this._resolveMedidaOuTracoPonto(this._mouseScreen.x, this._mouseScreen.y, this._medida2dDraft, true);
       desenharMedida(this._medida2dDraft.x, this._medida2dDraft.y, w.x, w.y, { draft: true });
+    } else if (this._ptool === 'medida' && !this._medidaVertexHover && this._mouseScreen && this._map) {
+      // [30/09/2026] NOVO — pedido verbatim: "No mapa 2D, o ghost da
+      // 'Trena' deve ser o ponto que aparece após o primeiro clique." ANTES
+      // do 1º clique (rascunho ainda não existe), mostra um pontinho-ghost
+      // seguindo o cursor — mesma posição que o 1º clique de verdade usaria
+      // (`_worldPointForMedida`, já respeita o "🧲 Snap na grade") — mesmo
+      // espírito do quadradinho-ghost da ferramenta "Parede" antes do 1º
+      // ponto.
+      const w = this._worldPointForMedida(this._mouseScreen.x, this._mouseScreen.y);
+      const p = toScreen(w.x, w.y);
+      ctx.save();
+      ctx.fillStyle = '#7cffb2';
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
     }
     ctx.restore();
     // NOVO (04/09/2026), item 4: "Ao ficar perpendicular um pequeno quadrado
@@ -24756,15 +25775,6 @@ const MapView = {
   // elemento já existente pelos painéis (cor da parede, ângulo da câmera
   // etc.) NÃO é bloqueado nesta versão — só os 3 pontos acima. Itens do
   // catálogo (pinos) ficam fora do sistema de camadas por completo.
-  _toggleLayersPanel() {
-    // NOVO (03/09/2026) — ver comentário grande em _toggleNavMode: as 4
-    // janelas (Histórico/Cores/Camadas/Ferramentas) ficam bloqueadas
-    // enquanto "🧭 Modo Navegação" está ligado, mesmo aviso já usado por
-    // _setPTool pras ferramentas de edição.
-    if (this._navMode) { Utils.toast('Desative o "🧭 Modo Navegação" para usar as janelas de edição.', { type: 'warn' }); return; }
-    if (this._layersPanelEl) this._closeLayersPanel();
-    else this._openLayersPanel();
-  },
 
   /** [26/09/2026] NOVO — painel '🎬 Scripts' (botão #map-scripts), pedido
    *  verbatim: "criar um Módulo de Automação e Scripts extremamente
@@ -25313,138 +26323,6 @@ const MapView = {
     return true;
   },
 
-  // ---------- Isolamento da janela "🗂️ Camadas" (pedido do usuário,
-  // 22/08/2026): "As funções que tem haver com a 'janela das camadas' e
-  // suas interações devem ser independentes do restante do código (para
-  // que caso 'quebrem', não prejudiquem a aplicação inteira)". As funções
-  // "de entrada" desse subsistema (abrir/fechar o painel, abrir/fechar as
-  // Propriedades da camada, (re)desenhar a lista, garantir a camada 3D)
-  // viram wrappers finos que chamam a implementação de verdade (sufixo
-  // `Impl`) dentro de um try/catch — qualquer erro ali fica CONTIDO aqui:
-  // loga no console, avisa com um toast, mas nunca sobe pra quebrar quem
-  // chamou (o mount da tela Mapa, um atalho de teclado, o loop de desenho
-  // etc.). Como TODA chamada interna entre essas funções já usa o nome
-  // público (ex.: `this._renderLayersPanel()`, não `...Impl()` direto),
-  // proteger só os wrappers já cobre em cascata toda a árvore de chamadas
-  // — os botões/campos individuais (tbtn add/del/dup/..., clique/duplo-
-  // clique na linha, campos de Propriedades) ganham a mesma proteção
-  // via `_camadasGuard`/`_camadasGuardAsync` abaixo, usados ao ligar cada
-  // `onclick`/`onchange`/`oninput` deles. ----------
-  _camadasErroContido(err, label) {
-    console.error(`[Janela de Camadas] Falha em "${label}" — contida, o resto do app continua funcionando:`, err);
-    Utils.toast?.(`⚠️ A janela de Camadas encontrou um problema (${label}) — o resto do app não foi afetado.`, { type: 'danger', duration: 5500 });
-  },
-  /** Embrulha um handler SÍNCRONO (ex.: um `onclick`) — usado pros botões e
-   *  campos individuais da janela de Camadas/Propriedades da camada. */
-  _camadasGuard(fn, label) {
-    return (...args) => {
-      try { return fn(...args); } catch (err) { this._camadasErroContido(err, label); return undefined; }
-    };
-  },
-  /** Mesma ideia, pra um handler ASSÍNCRONO — também contém uma REJEIÇÃO
-   *  (não só um `throw` síncrono), que do contrário viraria um "unhandled
-   *  promise rejection" solto. */
-  _camadasGuardAsync(fn, label) {
-    return async (...args) => {
-      try { return await fn(...args); } catch (err) { this._camadasErroContido(err, label); return undefined; }
-    };
-  },
-
-  /** Garante que a camada "Adicionados no 3D" já apareça na janela de
-   *  Camadas sempre que essa for a configuração ativa (Configurações 3D >
-   *  camada dos itens novos), em vez de só nascer na hora em que algo é de
-   *  fato construído dentro do 3D (ver view3d.js `_layerIdParaNovosItens`,
-   *  que cria/reaproveita a mesma camada pelo nome) — pedido do usuário: "a
-   *  opção de camada separada 'Adicionados no 3D' ... deve existir na
-   *  janela de camadas. Caso ainda não exista, deve ser criada." */
-  async _ensureLayer3DImpl() {
-    if (!this._map || typeof MapConfig === 'undefined') return;
-    const cfg = await MapConfig.get();
-    if ((cfg.camada3DNovosItens || 'separada') !== 'separada') return;
-    const existente = (this._map.layers || []).find((l) => l.nome === 'Adicionados no 3D');
-    if (!existente) {
-      Mapping.addLayer(this._map, 'Adicionados no 3D');
-      await this._saveMap();
-    }
-  },
-  async _ensureLayer3D(...args) { return this._camadasGuardAsync(() => this._ensureLayer3DImpl(...args), 'garantir camada 3D')(); },
-
-  async _openLayersPanelImpl() {
-    this._closeLayersPanel();
-    if (!this._container || !this._map) return;
-    // 22/08/2026 — BUG corrigido (pedido do usuário: "acabou ficando com
-    // duas 'janelas de camadas'"): virar `async` (pro `await
-    // _ensureLayer3D()` acima) abriu uma janela de corrida — se esta função
-    // fosse chamada de novo ANTES do await resolver (ex.: duas coisas
-    // pedindo pra abrir o painel de Camadas quase juntas), a 2ª chamada
-    // também rodava `_closeLayersPanel()` (sem achar nada pra fechar ainda,
-    // já que a 1ª ainda não tinha criado o painel dela) e as DUAS acabavam
-    // criando um painel cada, depois do respectivo await. Um "token de
-    // geração" simples resolve: só a chamada mais RECENTE (a que por
-    // último incrementou `_layersPanelGen`) segue em frente e cria o
-    // painel; qualquer chamada mais antiga, ao acordar do await, percebe
-    // que não é mais a mais recente e desiste sem criar nada.
-    const myGen = (this._layersPanelGen = (this._layersPanelGen || 0) + 1);
-    await this._ensureLayer3D();
-    if (myGen !== this._layersPanelGen || !this._container) return;
-    this._closeLayersPanel(); // por segurança — se outra chamada mais antiga chegou a criar algo entre o await e aqui
-    const panel = document.createElement('div');
-    panel.className = 'map-obj-picker-panel map-layers-panel'; // reaproveita o estilo base do painel persistente (posição/fundo/borda)
-    this._container.querySelector('.map2d-wrap')?.appendChild(panel);
-    this._layersPanelEl = panel;
-    // Posição padrão (pedido do usuário): canto INFERIOR DIREITO — só quando
-    // ainda não há uma posição lembrada de um arraste anterior nesta sessão
-    // (ver _panelPositions/_applyRememberedPanelPos, chamado logo abaixo,
-    // que sobrescreve isto se houver). Estilo inline (não em css/style.css,
-    // ausente neste recorte do workspace — ver CONTEXTO-PROJETO.md) porque
-    // a classe-base (.map-obj-picker-panel) por padrão ancorava perto do
-    // topo, como os outros painéis desse tipo (Ferramentas etc.).
-    if (!this._panelPositions?.layers) {
-      panel.style.top = 'auto';
-      panel.style.left = 'auto';
-      panel.style.right = '12px';
-      panel.style.bottom = '12px';
-    }
-    // [10/09/2026] NOVO — pedido verbatim: "por padrão, no app (de
-    // fábrica), ela vem com a mínima largura dela [...] as suas dimensões
-    // preservadas ao recarregar a página." Lê o tamanho salvo (ver
-    // `onResizeEnd` em `_makePanelResizable`, logo abaixo); sem nada salvo
-    // ainda (instalação nova, ou quem nunca redimensionou esta janela),
-    // aplica a largura MÍNIMA permitida (220px, mesmo valor passado a
-    // `_makePanelResizable` como `minWidth` — precisa bater com aquele
-    // número pra ser de fato "a mínima largura dela") como padrão de
-    // fábrica, em vez dos 300px fixos que `.map-layers-panel` definia até
-    // então — a altura de fábrica continua a mesma de sempre (340px, só o
-    // CSS mesmo, nenhum `style.height` aqui), já que o pedido foi só sobre
-    // a LARGURA mínima.
-    const savedSize = await DB.getSetting('mapa2dCamadasPanelSize', null);
-    // Mesma proteção de corrida do `await this._ensureLayer3D()` acima —
-    // este novo `await` abre a MESMA janela de risco (outra chamada mais
-    // recente pode ter mandado fechar/reabrir tudo enquanto este esperava).
-    if (myGen !== this._layersPanelGen) { panel.remove(); return; }
-    if (savedSize && savedSize.w && savedSize.h) {
-      panel.style.width = savedSize.w + 'px';
-      panel.style.height = savedSize.h + 'px';
-    } else {
-      panel.style.width = '220px';
-    }
-    this._renderLayersPanel();
-    this._applyRememberedPanelPos(panel, 'layers');
-    // Abrir (e qualquer interação depois) conta como "selecionar" este
-    // painel — deve ficar na frente de Ferramentas/Histórico (pedido do
-    // usuário, ver Utils.bringToFront).
-    Utils.bringToFront(panel);
-    panel.addEventListener('pointerdown', () => Utils.bringToFront(panel), true);
-    panel.addEventListener('pointerup', () => Utils.bringToFront(panel), true); // [15/09/2026 UTC] "No clique e após soltar o botão esquerdo do mouse"
-  },
-  async _openLayersPanel(...args) { return this._camadasGuardAsync(() => this._openLayersPanelImpl(...args), 'abrir janela de camadas')(); },
-
-  _closeLayersPanelImpl() {
-    Utils.releaseFront(this._layersPanelEl); // [15/09/2026 UTC] "ao fechar, volta pro z-index normal"
-    this._layersPanelEl?.remove();
-    this._layersPanelEl = null;
-  },
-  _closeLayersPanel(...args) { return this._camadasGuard(() => this._closeLayersPanelImpl(...args), 'fechar janela de camadas')(); },
 
   // ---------- Janela "🎨 Cores" — editor de contorno/preenchimento do(s)
   // item(ns) selecionado(s) na grade (ver comentário na declaração de
@@ -25545,7 +26423,7 @@ const MapView = {
     });
     if (!changed) return;
     Mapping.recalcBounds(this._map);
-    await this._saveMap();
+    await this._saveMap('_coresApplyToSelection');
     this._redrawDirty = true;
   },
 
@@ -25719,611 +26597,6 @@ const MapView = {
     modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
   },
 
-  /** Redesenha o CONTEÚDO do painel de camadas (mantém o painel aberto) —
-   *  chamado depois de qualquer mudança (criar/duplicar/mesclar/reordenar/
-   *  excluir/alternar visibilidade/trocar a selecionada), em vez de reabrir
-   *  do zero. Reaplica _makePanelDraggable/_makePanelResizable a cada chamada
-   *  porque o innerHTML é todo reconstruído — os elementos antigos (cabeçalho
-   *  arrastável, alça de redimensionar) somem junto, então os listeners
-   *  precisam ser recolocados nos novos.
-   *
-   *  Layout (pedido do usuário, estilo Paint.NET): cada linha só tem o NOME
-   *  da camada + o olho de visibilidade à direita — nada mais. Os 7 botões de
-   *  ação (Adicionar/Remover/Duplicar/Mesclar/Mover cima/Mover baixo/
-   *  Propriedades) ficam juntos numa barra FIXA embaixo do painel, como
-   *  quadrados alinhados à esquerda, e agem sobre a camada SELECIONADA (a
-   *  linha com `.active` — é a mesma noção de "camada ativa" que recebe
-   *  elementos novos ao desenhar, ver _activeLayerId). Bloqueio (🔒) não tem
-   *  mais botão na linha — mora dentro de "⚙️ Propriedades" agora. */
-  /** Clicar/arrastar/soltar pra reordenar a lista de camadas (pedido do
-   *  usuário — "As lógicas de flip aplique elas nas camadas também"), além
-   *  dos botões ↑/↓ que já existiam (continuam funcionando do mesmo jeito,
-   *  um passo por vez). Um clique PARADO (sem deslocamento vertical de
-   *  verdade) continua só selecionando a camada — igual sempre foi; só um
-   *  arraste de fato (> 6px) entra em modo "reordenar". Usa listeners no
-   *  `document` (não na própria linha) pro arraste continuar acompanhando o
-   *  dedo/mouse mesmo depois que `_renderLayersPanel` reconstrói a lista do
-   *  zero no meio do gesto (cada linha nova é um elemento DOM diferente). */
-  _wireLayerRowDrag(row, id) {
-    row.addEventListener('pointerdown', this._camadasGuard((e) => {
-      if (e.target.closest('button')) return; // não atrapalha o olho de visibilidade
-      // Evita que o gesto de clicar-e-arrastar comece selecionando o TEXTO
-      // do nome da camada (comportamento padrão do navegador pra um
-      // mousedown+mousemove em cima de texto) — pedido do usuário. `_layersPanelEl.style.userSelect`
-      // (ver _onLayerRowDragMove) cobre o resto do arraste; isto aqui cobre
-      // o instante inicial, antes mesmo de saber se vai virar um arraste de
-      // verdade (limiar de 6px).
-      e.preventDefault();
-      this._layerRowDrag = { id, startY: e.clientY, dragging: false };
-      const onMove = (ev) => this._onLayerRowDragMove(ev);
-      const onUp = this._camadasGuard(() => {
-        document.removeEventListener('pointermove', onMove);
-        document.removeEventListener('pointerup', onUp);
-        document.removeEventListener('pointercancel', onUp);
-        this._onLayerRowDragEnd();
-      }, 'terminar arraste de camada');
-      document.addEventListener('pointermove', onMove);
-      document.addEventListener('pointerup', onUp);
-      document.addEventListener('pointercancel', onUp);
-    }, 'iniciar arraste de camada'));
-    row.addEventListener('click', this._camadasGuard(() => {
-      // Um clique que terminou em arraste de verdade não deve TAMBÉM contar
-      // como "selecionar" (senão a seleção trocaria pra qualquer camada só
-      // de passar o dedo por cima ao arrastar) — ver _layerRowDragMoved,
-      // ligado em _onLayerRowDragMove e desligado aqui.
-      if (this._layerRowDragMoved) { this._layerRowDragMoved = false; return; }
-      this._activeLayerId = id;
-      this._saveMap();
-      this._renderLayersPanel();
-    }, 'selecionar camada'));
-    // 22/08/2026, pedido do usuário: "dois cliques em cima de uma camada
-    // deve ser o mesmo que ir em configurações da camada selecionada" —
-    // seleciona (mesmo efeito do clique simples acima) e já abre o painel
-    // "⚙️ Propriedades da camada" (o mesmo do botão ⚙️ na barra de baixo),
-    // num só gesto.
-    row.addEventListener('dblclick', this._camadasGuard((e) => {
-      if (e.target.closest('button')) return; // não conflita com o botão de visibilidade
-      this._activeLayerId = id;
-      this._saveMap();
-      this._renderLayersPanel();
-      this._openLayerPropertiesPanel(id);
-    }, 'abrir propriedades por duplo clique'));
-  },
-
-  _onLayerRowDragMove(e) {
-    const drag = this._layerRowDrag;
-    const panel = this._layersPanelEl;
-    if (!drag || !panel || !this._map) return;
-    if (!drag.dragging) {
-      if (Math.abs(e.clientY - drag.startY) < 6) return;
-      drag.dragging = true;
-      this._layerRowDragMoved = true;
-      // Impede seleção de texto durante o arraste (pedido do usuário) — sem
-      // isso, o gesto de clicar-e-arrastar em cima do nome da camada
-      // seleciona o TEXTO da linha (comportamento padrão do navegador),
-      // o que não faz sentido no meio de um arraste de reordenar.
-      panel.style.userSelect = 'none';
-      // Pedido do usuário, 25/08/2026: "ao clicar e arrastar uma camada, a
-      // camada deve mover junto com o cursor do mouse até o 'soltar'. Não
-      // deve 'magnetizar' na próxima posição de camada." — `drag.startRowTop`
-      // guarda a posição de TELA da linha (sem nenhum transform ainda) bem
-      // no instante em que o arraste passa a valer de verdade (limiar de
-      // 6px acima) — é o "zero" a partir do qual a distância total
-      // percorrida pelo cursor (ver _followDraggedLayerRow, chamada no fim
-      // desta função) é medida, pro resto do gesto inteiro.
-      const row = panel.querySelector(`.map-layer-row[data-id="${drag.id}"]`);
-      drag.startRowTop = row ? row.getBoundingClientRect().top : e.clientY;
-      // Pedido do usuário: "a movimentação vertical da camada que está
-      // sendo arrastada deve ficar limitada ao retângulo formado pelas
-      // camadas presentes. Por exemplo, se há 3 camadas, o retângulo
-      // limitador terá altura de 3 camadas." Medido uma única vez aqui, no
-      // início do arraste: a ALTURA total (nº de camadas × altura de cada
-      // linha) não muda durante o gesto — só a ORDEM interna muda — então
-      // esse retângulo continua válido do início ao fim, sem precisar
-      // remedir a cada troca de posição.
-      const rowsTodas = [...panel.querySelectorAll('.map-layer-row')];
-      if (rowsTodas.length) {
-        const rects = rowsTodas.map((r) => r.getBoundingClientRect());
-        drag.listTop = Math.min(...rects.map((r) => r.top));
-        drag.listBottom = Math.max(...rects.map((r) => r.bottom));
-        // Pedido do usuário, 25/08/2026: "se movo muito rápido a camada
-        // arrastada, a mais da ponta acaba não flipando... o que importa é a
-        // variação em y" — altura média de UMA linha, medida uma única vez
-        // aqui (todas as linhas têm a mesma altura), usada abaixo pra
-        // calcular a posição-ALVO a partir do DESLOCAMENTO vertical
-        // acumulado do cursor, em vez de testar se o cursor está (na hora
-        // exata deste evento) dentro do retângulo de tela de alguma outra
-        // linha — ver o motivo desse troca logo abaixo.
-        drag.rowH = rects.length ? (drag.listBottom - drag.listTop) / rects.length : 0;
-      }
-    }
-    const now = performance.now();
-    const rows = [...panel.querySelectorAll('.map-layer-row')];
-    rows.forEach((r) => { r.style.opacity = r.dataset.id === drag.id ? '0.55' : ''; });
-    // "Uma vez ativado o flip (de cima pra baixo ou de baixo pra cima), ele
-    // não pode ser interrompido até terminar, então é liberado para um novo
-    // flip" (pedido do usuário) — enquanto a animação do ÚLTIMO flip ainda
-    // está rodando (`drag.lockedUntil`, ver _LAYER_FLIP_DURATION_MS/
-    // _flipLayerRows), nenhuma TROCA DE POSIÇÃO nova pode disparar. Isto
-    // agora só governa as OUTRAS linhas "flipando" pra abrir espaço — a
-    // própria linha arrastada nunca fica presa por este bloqueio: ela
-    // acompanha o cursor sempre (chamada incondicional no fim desta função),
-    // troca de posição ou não (pedido do usuário: "a flipagem fica por
-    // conta apenas das camadas que devem deixar o seu lugar atual para
-    // liberar a posição para a camada que está sendo arrastada").
-    if (!(drag.lockedUntil && now < drag.lockedUntil)) {
-      // Pedido do usuário, 25/08/2026: "se movo muito rápido a camada
-      // arrastada, a mais da ponta acaba não flipando. Não pode ser por
-      // tempo ou por estar apenas dentro da área da janela das camadas...
-      // o que importa é a variação em y." — o critério ANTIGO era testar se
-      // `e.clientY` (a posição do cursor NESTE evento específico) caía
-      // dentro do retângulo de tela de alguma OUTRA linha: num arraste
-      // rápido, o navegador manda bem menos eventos de pointermove do que
-      // pixels percorridos, então o cursor podia "pular" de uma linha
-      // direto pra outra bem mais longe sem NUNCA estar, num evento sequer,
-      // sobre as linhas do meio — e como só uma troca de posição acontece
-      // por chamada, a farthest (mais na ponta) nunca era alcançada. Além
-      // disso, esse teste não pegava o cursor saindo da JANELA (nenhuma
-      // linha tem retângulo até lá), mesmo sendo um arraste válido.
-      //
-      // Novo critério: a posição-ALVO (índice na lista) é calculada a
-      // partir do DESLOCAMENTO vertical acumulado do cursor desde o início
-      // do arraste (`e.clientY - drag.startY`) — a MESMA distância usada
-      // por _followDraggedLayerRow pra mover a linha arrastada — aplicada
-      // à posição NATURAL da linha (`drag.startRowTop`) e então limitada ao
-      // retângulo da lista (`drag.listTop`/`drag.listBottom`), exatamente
-      // como a própria linha arrastada já fica limitada visualmente. O
-      // índice é só "em qual dos N espaços de altura `drag.rowH` (a partir
-      // do topo da lista) o CENTRO dessa posição cai" — uma conta direta,
-      // sem nenhum teste de "está dentro do retângulo de tela de outra
-      // linha AGORA", então nunca pula nem depende de o cursor estar
-      // fisicamente sobre a janela.
-      const fromIdx = this._map.layers.findIndex((l) => l.id === drag.id);
-      let toIdx = fromIdx;
-      if (fromIdx !== -1 && drag.listTop != null && drag.listBottom != null && drag.rowH > 0) {
-        let desiredTop = drag.startRowTop + (e.clientY - drag.startY);
-        const maxTop = Math.max(drag.listTop, drag.listBottom - drag.rowH);
-        desiredTop = Utils.clamp(desiredTop, drag.listTop, maxTop);
-        const desiredCenter = desiredTop + drag.rowH / 2;
-        toIdx = Utils.clamp(Math.floor((desiredCenter - drag.listTop) / drag.rowH), 0, this._map.layers.length - 1);
-      }
-      if (fromIdx !== -1 && toIdx !== -1 && fromIdx !== toIdx) {
-        Mapping.reorderLayerToIndex(this._map, drag.id, toIdx);
-        this._renderLayersPanel(); // reconstrói a lista já na nova ordem — FLIP cuida das OUTRAS linhas (a arrastada segue o cursor à parte, ver _followDraggedLayerRow)
-        drag.lockedUntil = now + this._LAYER_FLIP_DURATION_MS; // trava novas TROCAS até a animação deste flip terminar (não afeta o acompanhamento do cursor)
-      }
-    }
-    this._followDraggedLayerRow(e);
-  },
-
-  /** Mantém a linha ARRASTADA (ver _onLayerRowDragMove) grudada no cursor
-   *  durante o gesto inteiro, sem "magnetizar" pra posição da próxima camada
-   *  — pedido do usuário, 25/08/2026. Mede a posição NATURAL da linha agora
-   *  (sem nenhum transform — mesma técnica de _flipLayerRows, só que
-   *  aplicada a CADA movimento do cursor em vez de uma vez só depois de
-   *  reconstruir) e desloca ela (translateY) pra bater exatamente com
-   *  `drag.startRowTop` + a distância total percorrida pelo cursor desde o
-   *  início do arraste. Funciona tanto entre trocas de posição (linha
-   *  parada no DOM, só acompanha o cursor por transform) quanto NA HORA de
-   *  uma troca (a linha é reconstruída num índice novo por
-   *  `_renderLayersPanel`, dentro de _onLayerRowDragMove, e este método é
-   *  chamado de novo logo em seguida — reancora o deslocamento a partir da
-   *  nova posição natural, sem nenhum "pulo" visual pro usuário). */
-  _followDraggedLayerRow(e) {
-    const drag = this._layerRowDrag;
-    const panel = this._layersPanelEl;
-    if (!drag?.dragging || !panel || drag.startRowTop == null) return;
-    const row = panel.querySelector(`.map-layer-row[data-id="${drag.id}"]`);
-    if (!row) return;
-    row.style.transform = ''; // some por um instante pra medir a posição NATURAL (sem transform) abaixo
-    row.style.zIndex = '5'; // sempre por cima das outras linhas enquanto arrasta, mesmo passando visualmente por cima delas
-    const naturalRect = row.getBoundingClientRect();
-    let desiredTop = drag.startRowTop + (e.clientY - drag.startY);
-    // Pedido do usuário: limita o deslocamento vertical ao retângulo
-    // formado pelas camadas (ver `drag.listTop`/`drag.listBottom`, medidos
-    // uma vez no início do arraste) — a linha nunca sai por cima da
-    // primeira camada nem por baixo da última. `maxTop` desconta a própria
-    // altura da linha (`naturalRect.height`) do limite de baixo, senão ela
-    // poderia ultrapassar o fundo do retângulo antes de encostar a base nele.
-    if (drag.listTop != null && drag.listBottom != null) {
-      const maxTop = Math.max(drag.listTop, drag.listBottom - naturalRect.height);
-      desiredTop = Utils.clamp(desiredTop, drag.listTop, maxTop);
-    }
-    const offset = desiredTop - naturalRect.top;
-    row.style.transform = Math.abs(offset) > 0.5 ? `translateY(${offset}px)` : '';
-  },
-
-  _onLayerRowDragEnd() {
-    const wasDragging = this._layerRowDrag?.dragging;
-    this._layerRowDrag = null;
-    if (this._layersPanelEl) this._layersPanelEl.style.userSelect = '';
-    if (wasDragging) { this._saveMap(); this._renderLayersPanel(); } // tira a opacidade de "arrastando" e persiste a ordem final
-  },
-
-  /** Anima (FLIP) cada linha que MUDOU de posição de tela entre a
-   *  reconstrução anterior (`prevRects`, capturado no início de
-   *  _renderLayersPanel) e a atual — só requestAnimationFrame PRÓPRIO
-   *  (`_layersFlipLoopId`/`_layerFlipAnims`), nunca CSS transition, mesmo
-   *  padrão de organizeview.js/photogrid.js (ver `_flipAnims`/
-   *  `_ensureFlipLoop` lá — replicado aqui pra uma lista comum de linhas
-   *  HTML em vez de um grid desenhado em canvas). */
-  _flipLayerRows(prevRects) {
-    const panel = this._layersPanelEl;
-    if (!panel || !prevRects || !prevRects.size) return;
-    this._layerFlipAnims = this._layerFlipAnims || new Map();
-    // Pedido do usuário, 25/08/2026 ("não deve magnetizar"): a linha sendo
-    // arrastada agora tem posição PRÓPRIA, grudada no cursor o tempo todo
-    // (ver _followDraggedLayerRow) — nunca entra no FLIP, que é só pras
-    // OUTRAS linhas "deixando o lugar" pra abrir espaço pra ela (pedido do
-    // usuário: "a flipagem fica por conta apenas das camadas que devem
-    // deixar o seu lugar atual"). Sem esta exclusão, as duas animações
-    // ficariam brigando pelo mesmo `row.style.transform` a cada quadro —
-    // _followDraggedLayerRow rodando a cada pointermove, o laço do FLIP
-    // (_ensureLayersFlipLoop) rodando a cada requestAnimationFrame.
-    const draggedId = this._layerRowDrag?.dragging ? this._layerRowDrag.id : null;
-    panel.querySelectorAll('.map-layer-row').forEach((row) => {
-      if (row.dataset.id === draggedId) { this._layerFlipAnims.delete(row.dataset.id); return; }
-      const prev = prevRects.get(row.dataset.id);
-      if (!prev) return;
-      const cur = row.getBoundingClientRect();
-      const dy = prev.top - cur.top;
-      if (Math.abs(dy) < 0.5) return;
-      this._layerFlipAnims.set(row.dataset.id, { dy, start: performance.now() });
-    });
-    this._ensureLayersFlipLoop();
-  },
-
-  _ensureLayersFlipLoop() {
-    if (this._layersFlipLoopId) return;
-    const DURATION = this._LAYER_FLIP_DURATION_MS;
-    const step = () => {
-      const panel = this._layersPanelEl;
-      if (!panel || !this._layerFlipAnims || !this._layerFlipAnims.size) { this._layersFlipLoopId = null; return; }
-      const now = performance.now();
-      for (const [id, anim] of this._layerFlipAnims) {
-        const row = panel.querySelector(`.map-layer-row[data-id="${id}"]`);
-        if (!row) { this._layerFlipAnims.delete(id); continue; }
-        const t = Math.min(1, (now - anim.start) / DURATION);
-        const eased = 1 - Math.pow(1 - t, 3); // ease-out cúbico
-        const offset = anim.dy * (1 - eased);
-        row.style.transform = Math.abs(offset) > 0.5 ? `translateY(${offset}px)` : '';
-        if (t >= 1) { row.style.transform = ''; this._layerFlipAnims.delete(id); }
-      }
-      this._layersFlipLoopId = requestAnimationFrame(step);
-    };
-    this._layersFlipLoopId = requestAnimationFrame(step);
-  },
-
-  _renderLayersPanel(...args) { return this._camadasGuard(() => this._renderLayersPanelImpl(...args), 'desenhar a lista de camadas')(); },
-
-  _renderLayersPanelImpl() {
-    const panel = this._layersPanelEl;
-    if (!panel || !this._map) return;
-    const layers = this._map.layers || [];
-    const idx = layers.findIndex((l) => l.id === this._activeLayerId);
-    const isTopmost = idx <= 0;
-    const isBottommost = idx === -1 || idx === layers.length - 1;
-    const semSelecao = idx === -1;
-    // FLIP (First/Last/Invert/Play — mesma técnica de organizeview.js/
-    // photogrid.js: só requestAnimationFrame próprio, NUNCA CSS transition)
-    // pra reordenar arrastando (ver _wireLayerRowDrag) — guarda a posição
-    // de cada linha ANTES de reconstruir o innerHTML abaixo; sem isso a
-    // linha "pularia" direto pro lugar novo sem nenhuma transição.
-    const prevRects = new Map();
-    panel.querySelectorAll('.map-layer-row').forEach((row) => prevRects.set(row.dataset.id, row.getBoundingClientRect()));
-    // Pedido do usuário: "algo está acontecendo quando se clica em uma das
-    // camadas mais abaixo, acaba voltando sozinha para cima o scroll" —
-    // TODA troca de seleção/visibilidade/etc. reconstrói `panel.innerHTML`
-    // do zero (FLIP acima cuida da posição das LINHAS, mas não da rolagem
-    // da lista em si), o que recria `#map-layers-list` como um elemento
-    // NOVO — e um elemento novo sempre nasce com scrollTop=0, mesmo que a
-    // pessoa estivesse rolada mais pra baixo. Guarda a rolagem ANTES de
-    // reconstruir e reaplica no elemento novo logo abaixo, na mesma
-    // posição de antes.
-    const prevScrollTop = panel.querySelector('#map-layers-list')?.scrollTop || 0;
-    panel.innerHTML = `
-      <div class="map-panel-clip">
-        <div class="map-panel-head" id="map-layers-head"><b>🗂️ Camadas</b><button type="button" class="icon-btn sm map-panel-close" id="map-layers-close" title="Fechar">✕</button></div>
-        <div class="map-layers-list" id="map-layers-list">
-          ${layers.map((l) => `
-          <div class="map-layer-row ${l.id === this._activeLayerId ? 'active' : ''}" data-id="${l.id}" title="${Utils.escapeHtml(l.nome)} — clique para selecionar, clique e arraste para reordenar">
-            <span class="map-layer-name-label">${l.bloqueada ? '🔒 ' : ''}${Utils.escapeHtml(l.nome)}</span>
-            <button type="button" class="icon-btn sm map-layer-vis" data-act="vis" title="${l.visivel === false ? 'Camada oculta — clique pra mostrar' : 'Camada visível — clique pra ocultar'}">${l.visivel === false ? '🚫' : '👁️'}</button>
-          </div>
-          `).join('')}
-        </div>
-        <div class="map-layers-toolbar">
-          <button type="button" class="map-layers-tbtn" data-act="add" title="Adicionar nova camada">➕</button>
-          <button type="button" class="map-layers-tbtn" data-act="del" ${layers.length <= 1 ? 'disabled' : ''} title="${layers.length <= 1 ? 'Precisa sobrar ao menos 1 camada' : 'Remover camada selecionada — exclui tudo que estiver nela (dá pra desfazer com Ctrl+Z)'}">🗑️</button>
-          <button type="button" class="map-layers-tbtn" data-act="dup" ${semSelecao ? 'disabled' : ''} title="Duplicar camada selecionada">⧉</button>
-          <button type="button" class="map-layers-tbtn" data-act="merge" ${isBottommost ? 'disabled' : ''} title="${isBottommost ? 'Não há camada abaixo pra mesclar' : 'Mesclar com a camada de baixo'}">⬇⧉</button>
-          <button type="button" class="map-layers-tbtn" data-act="up" ${isTopmost ? 'disabled' : ''} title="Mover a camada selecionada para cima">↑</button>
-          <button type="button" class="map-layers-tbtn" data-act="down" ${isBottommost ? 'disabled' : ''} title="Mover a camada selecionada para baixo">↓</button>
-          <button type="button" class="map-layers-tbtn" data-act="props" ${semSelecao ? 'disabled' : ''} title="Propriedades da camada selecionada">⚙️</button>
-        </div>
-      </div>
-    `;
-    const newList = panel.querySelector('#map-layers-list');
-    if (newList) newList.scrollTop = prevScrollTop;
-    panel.querySelector('#map-layers-close').onclick = () => this._closeLayersPanel();
-    panel.querySelectorAll('.map-layer-row').forEach((row) => {
-      const id = row.dataset.id;
-      row.querySelector('[data-act="vis"]').onclick = this._camadasGuard((e) => {
-        e.stopPropagation();
-        const l = this._map.layers.find((l) => l.id === id);
-        Mapping.setLayerVisible(this._map, id, l.visivel === false);
-        this._saveMap();
-        this._renderLayersPanel();
-      }, 'alternar visibilidade da camada');
-      // Um arraste em ANDAMENTO (ver _wireLayerRowDrag/_layerRowDrag) chegou
-      // aqui no meio da reconstrução do zero — reaplica o estado "sendo
-      // arrastada" nesta linha nova pra não perder o feedback visual.
-      if (this._layerRowDrag?.dragging && this._layerRowDrag.id === id) row.style.opacity = '0.55';
-      this._wireLayerRowDrag(row, id);
-    });
-    this._flipLayerRows(prevRects);
-    const tbtn = (act) => panel.querySelector(`.map-layers-tbtn[data-act="${act}"]`);
-    tbtn('add').onclick = this._camadasGuard(() => {
-      const l = Mapping.addLayer(this._map);
-      this._activeLayerId = l.id;
-      this._saveMap();
-      this._renderLayersPanel();
-    }, 'adicionar camada');
-    // Pedido do usuário (22/08/2026): "Quando uma camada é excluída, tudo
-    // que estiver na grade através dela também deve ser excluído" —
-    // Mapping.removeLayer já cuida de paredes/pontos/objetos/
-    // textos/portas/janelas (ver lá), mas os PINOS DE PATRIMÔNIO
-    // (`map.itens`, ver _refreshItensNoMapa) não vivem dentro do `map` —
-    // são registros à parte no banco (mapaLayerId), então precisam ser
-    // "removidos da grade" aqui, à parte (mesma ação de "Remover do mapa":
-    // zera mapaX/mapaY/mapaPiso, sem apagar o cadastro do item — ver
-    // view3d.js _removeWithTool, que já faz exatamente isso). Guarda um
-    // snapshot ANTES/DEPOIS pra dar pra desfazer (Ctrl+Z) — precisa ser uma
-    // cópia PROFUNDA (JSON round-trip) porque os arrays de `this._map` são
-    // mutados diretamente no lugar por Mapping.removeLayer, então uma cópia
-    // rasa (`{...map}` ou DB.getMap, que faz o mesmo) acabaria "seguindo" a
-    // mutação em vez de preservar o estado de antes.
-    const PLANTA_CAMPOS = ['walls', 'points', 'trilha', 'objects', 'textos', 'portas', 'janelas', 'layers', 'bounds'];
-    const plantaSnapshot = () => JSON.parse(JSON.stringify(
-      Object.fromEntries(PLANTA_CAMPOS.map((c) => [c, this._map[c]])),
-    ));
-    // Qual camada fica selecionada depois de excluir a atual — pedido do
-    // usuário (22/08/2026): "A atual é excluída e a seleção de camada vai
-    // para a de baixo, em vez de não selecionar coisa alguma. A não ser que
-    // esteja selecionada a última camada (mais embaixo), então ao excluí-la,
-    // a de cima passa a ser a selecionada. Isso tudo até, caso aconteça,
-    // chegar a uma só camada". `idx` é a posição da camada excluída ANTES
-    // da remoção; depois que `Mapping.removeLayer` tira ela do array, tudo
-    // que estava ABAIXO sobe uma posição — então `layers[idx]` (já sem a
-    // excluída) é exatamente "a que ficou logo abaixo dela". Se a excluída
-    // era a última (idx == length ANTES, ou seja, não sobra nada nessa
-    // posição depois), `Math.min` cai pro último índice válido — "a que
-    // ficou acima dela", agora virando a nova última.
-    const proximaSelecao = (layers, idx) => layers[Math.min(idx, layers.length - 1)]?.id || null;
-    tbtn('del').onclick = this._camadasGuard(() => {
-      if (this._map.layers.length <= 1 || !this._activeLayerId) return;
-      const deletedId = this._activeLayerId;
-      const deletedIdx = this._map.layers.findIndex((l) => l.id === deletedId);
-      const layerNome = (this._map.layers.find((l) => l.id === deletedId) || {}).nome || 'Camada';
-      const nElementos = Mapping.countInLayer(this._map, deletedId);
-      const itensNaCamada = (this._map.itens || []).filter((it) => it.layerId === deletedId);
-      const mapId = this._map.id;
-      const antes = plantaSnapshot();
-      const ok = Mapping.removeLayer(this._map, deletedId);
-      if (!ok) return;
-      this._activeLayerId = proximaSelecao(this._map.layers, deletedIdx);
-      // Pedido do usuário: "as exclusões de camada devem ser imediatas, não
-      // devem esperar guardar no banco de dados" — tudo que é ESTADO (o
-      // `map` em memória, incluindo os pinos de patrimônio que somem da
-      // grade) já mudou acima/abaixo SINCRONAMENTE; a interface (toast,
-      // painel, desfazer) reage na hora, e só a GRAVAÇÃO de verdade
-      // (`DB.updateItem`/`_saveMap`) roda em segundo plano, sem travar nada
-      // disso — mesmo espírito da correção anterior no botão "OK" das
-      // Propriedades da camada.
-      this._map.itens = (this._map.itens || []).filter((it) => it.layerId !== deletedId);
-      const depois = plantaSnapshot();
-      const partes = [`${nElementos} elemento(s)`];
-      if (itensNaCamada.length) partes.push(`${itensNaCamada.length} patrimônio(s) removido(s) da grade`);
-      Utils.toast(`Camada "${layerNome}" removida — ${partes.join(' e ')} junto.`, { type: 'ok' });
-      this._renderLayersPanel();
-      (async () => {
-        for (const it of itensNaCamada) await DB.updateItem(it.id, { mapaX: null, mapaY: null, mapaPiso: 0 });
-        await this._saveMap();
-      })();
-      History.push({
-        label: `Camada "${layerNome}" removida`,
-        undo: async () => {
-          const m = await DB.getMap(mapId);
-          if (!m) return;
-          Object.assign(m, antes);
-          for (const it of itensNaCamada) await DB.updateItem(it.id, { mapaX: it.x, mapaY: it.y, mapaPiso: it.piso });
-          await DB.saveMap(m);
-          await this._reloadMapIfShowing(mapId);
-          if (this._map?.id === mapId) {
-            this._activeLayerId = deletedId;
-            if (itensNaCamada.length) await this._refreshItensNoMapa();
-            this._renderLayersPanel();
-          }
-        },
-        redo: async () => {
-          const m = await DB.getMap(mapId);
-          if (!m) return;
-          Object.assign(m, depois);
-          for (const it of itensNaCamada) await DB.updateItem(it.id, { mapaX: null, mapaY: null, mapaPiso: 0 });
-          await DB.saveMap(m);
-          await this._reloadMapIfShowing(mapId);
-          if (this._map?.id === mapId) {
-            this._activeLayerId = proximaSelecao(this._map.layers, deletedIdx);
-            if (itensNaCamada.length) await this._refreshItensNoMapa();
-            this._renderLayersPanel();
-          }
-        },
-      });
-    }, 'excluir camada');
-    tbtn('dup').onclick = this._camadasGuard(() => {
-      if (!this._activeLayerId) return;
-      const nova = Mapping.duplicateLayer(this._map, this._activeLayerId);
-      if (nova) {
-        this._activeLayerId = nova.id;
-        this._saveMap();
-        Utils.toast(`Camada duplicada: "${nova.nome}".`, { type: 'ok' });
-        this._renderLayersPanel();
-      }
-    }, 'duplicar camada');
-    tbtn('merge').onclick = this._camadasGuard(() => {
-      const i = this._map.layers.findIndex((l) => l.id === this._activeLayerId);
-      if (i === -1 || i === this._map.layers.length - 1) return;
-      const destinoId = this._map.layers[i + 1].id;
-      const ok = Mapping.mergeLayerDown(this._map, this._activeLayerId);
-      if (ok) {
-        this._activeLayerId = destinoId;
-        this._saveMap();
-        Utils.toast('Camadas mescladas.', { type: 'ok' });
-        this._renderLayersPanel();
-      }
-    }, 'mesclar camadas');
-    tbtn('up').onclick = this._camadasGuard(() => {
-      if (!this._activeLayerId) return;
-      Mapping.reorderLayer(this._map, this._activeLayerId, 'up');
-      this._saveMap();
-      this._renderLayersPanel();
-    }, 'mover camada pra cima');
-    tbtn('down').onclick = this._camadasGuard(() => {
-      if (!this._activeLayerId) return;
-      Mapping.reorderLayer(this._map, this._activeLayerId, 'down');
-      this._saveMap();
-      this._renderLayersPanel();
-    }, 'mover camada pra baixo');
-    tbtn('props').onclick = this._camadasGuard(() => { if (this._activeLayerId) this._openLayerPropertiesPanel(this._activeLayerId); }, 'abrir propriedades da camada');
-
-    this._makePanelDraggable(panel, 'layers');
-    // [10/09/2026] NOVO — pedido verbatim: "a janela 'Camadas' deve ter as
-    // suas dimensões preservadas ao recarregar a página." Persiste via
-    // `DB.setSetting` (MESMO mecanismo/convenção de nome já usado por toda
-    // outra preferência de UI deste app — ver `mapa2dGrade`/`mapa2dReguas`/
-    // `mapa2dSnapGrade` etc. logo acima neste arquivo) — não em
-    // `_panelPositions` (que só dura a sessão, nunca sobrevive a um F5, ver
-    // comentário grande em `_applyRememberedPanelPos`) nem em
-    // `localStorage` direto (o app já padroniza tudo em `DB.getSetting`/
-    // `setSetting`, que passa pelo IndexedDB — mesmo lugar que a posição
-    // NÃO usa hoje, mas que TAMANHO precisa por ser um pedido explícito de
-    // sobreviver a recarregar). Salva só no soltar o redimensionamento
-    // (`onResizeEnd`, ver `_makePanelResizable`), nunca a cada pixel.
-    this._makePanelResizable(panel, {
-      minWidth: 220, minHeight: 200, maxWidth: 560, maxHeight: 640,
-      onResizeEnd: (w, h) => { DB.setSetting('mapa2dCamadasPanelSize', { w, h }); },
-    });
-  },
-
-  /** Painel de propriedades da camada (botão "⚙️" na barra de baixo do
-   *  painel de camadas) — nome, visibilidade, bloqueio e opacidade num só
-   *  lugar, igual ao diálogo de propriedades de camada do Paint.NET.
-   *
-   *  Pedido do usuário (20/08/2026): deixou de reaproveitar o painel
-   *  flutuante genérico (_openPanel — não-modal, igual todos os outros
-   *  painéis do app) e virou um MODAL de verdade — fundo cobrindo a tela
-   *  inteira (bloqueia clique/toque em qualquer outra coisa, inclusive
-   *  cabeçalho/outros painéis, enquanto está aberto) com dois botões no
-   *  rodapé: "OK" (confirma e salva) e "Cancelar" (desfaz tudo que foi
-   *  mexido nesta sessão do painel — volta nome/visível/bloqueada/opacidade
-   *  pro valor de quando abriu — e fecha sem salvar). A opacidade agora tem
-   *  um campo numérico editável direto, além da barra (os dois ficam
-   *  sincronizados, mexer num atualiza o outro). Nenhuma mudança é
-   *  persistida no banco (`_saveMap`) até OK ou Cancelar — enquanto o
-   *  usuário mexe nos campos, só o desenho em tela (`_renderer.setMapData`)
-   *  e a lista de camadas por trás (`_renderLayersPanel`) refletem ao vivo. */
-  _openLayerPropertiesPanel(...args) { return this._camadasGuard(() => this._openLayerPropertiesPanelImpl(...args), 'abrir propriedades da camada')(); },
-
-  _openLayerPropertiesPanelImpl(layerId) {
-    const l = (this._map?.layers || []).find((l) => l.id === layerId);
-    if (!l) return;
-    this._closeLayerPropertiesModal();
-    const orig = { nome: l.nome, visivel: l.visivel !== false, bloqueada: !!l.bloqueada, opacidade: l.opacidade ?? 255 };
-    const backdrop = document.createElement('div');
-    backdrop.className = 'map-layerprops-modal-backdrop';
-    // SEM escurecer o fundo (pedido do usuário) — a opacidade que a pessoa
-    // está ajustando no painel precisa continuar visível por trás dele, sem
-    // nenhum tingimento por cima atrapalhando a comparação visual. O
-    // bloqueio de interação (o "resto do app não responde enquanto isto
-    // está aberto") continua igual — vem do próprio fundo `fixed`/`inset:0`
-    // capturando todo pointerdown/click (ver abaixo), não da cor dele.
-    backdrop.style.cssText = 'position:fixed; inset:0; background:transparent; z-index:99999; display:flex; align-items:center; justify-content:center; touch-action:none;';
-    backdrop.innerHTML = window.MapDynamicCards.layerPropertiesPanel.call(this, l);
-    document.body.appendChild(backdrop);
-    this._layerPropsModalEl = backdrop;
-    // Prioridade exclusiva: qualquer toque FORA do cartão (no próprio fundo
-    // escurecido) é engolido aqui — não fecha sozinho (evita fechar sem
-    // querer/perder o que estava digitando; só OK/Cancelar fecham de
-    // propósito), mas também não deixa vazar pro que está atrás.
-    backdrop.addEventListener('pointerdown', (e) => e.stopPropagation());
-    backdrop.addEventListener('click', (e) => e.stopPropagation());
-
-    const nomeEl = backdrop.querySelector('#layerprops-nome');
-    const visEl = backdrop.querySelector('#layerprops-visivel');
-    const bloqEl = backdrop.querySelector('#layerprops-bloqueada');
-    const rangeEl = backdrop.querySelector('#layerprops-opacidade');
-    const numEl = backdrop.querySelector('#layerprops-opacidade-num');
-
-    nomeEl.oninput = this._camadasGuard((e) => { Mapping.renameLayer(this._map, layerId, e.target.value); this._renderLayersPanel(); }, 'renomear camada');
-    visEl.onchange = this._camadasGuard((e) => { Mapping.setLayerVisible(this._map, layerId, e.target.checked); this._renderer?.setMapData(this._map); this._renderLayersPanel(); }, 'alternar visibilidade nas propriedades');
-    bloqEl.onchange = this._camadasGuard((e) => { Mapping.setLayerLocked(this._map, layerId, e.target.checked); this._renderLayersPanel(); }, 'alternar bloqueio da camada');
-    // Barra E campo numérico ficam sincronizados — mexer num reflete no outro na hora.
-    const applyOpacidade = this._camadasGuard((v) => {
-      v = Utils.clamp(parseInt(v, 10) || 0, 0, 255);
-      rangeEl.value = v;
-      numEl.value = v;
-      Mapping.setLayerOpacity(this._map, layerId, v);
-      this._renderer?.setMapData(this._map);
-    }, 'ajustar opacidade da camada');
-    rangeEl.oninput = (e) => applyOpacidade(e.target.value);
-    numEl.oninput = (e) => applyOpacidade(e.target.value);
-
-    // 22/08/2026, pedido do usuário: "o botão de ok deve funcionar
-    // imediatamente, não esperar que seja guardado no banco de dados" —
-    // cada campo (nome/visível/bloqueada/opacidade) já aplica a mudança em
-    // `this._map` NA HORA (ver nomeEl/visEl/bloqEl/applyOpacidade acima),
-    // então fechar o painel não depende de esperar o `_saveMap()` (a
-    // gravação em si) terminar — só dispara ela em segundo plano.
-    const confirmarOk = this._camadasGuard(() => {
-      this._closeLayerPropertiesModal();
-      this._saveMap();
-    }, 'confirmar propriedades da camada');
-    backdrop.querySelector('#layerprops-ok').onclick = confirmarOk;
-    // Pedido do usuário, 26/08/2026: "Pressionar ENTER no campo do nome ou
-    // no campo do número da transparência deve ter a mesma função de quando
-    // se clica em 'OK'." — o valor mais recente já foi aplicado em
-    // `this._map` a cada tecla (ver nomeEl.oninput/numEl.oninput acima), o
-    // ENTER só precisa confirmar/fechar, exatamente como o botão OK.
-    nomeEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); confirmarOk(); } });
-    numEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); confirmarOk(); } });
-    // Pedido do usuário: "ao dar dois cliques em cima da camada, a janela...
-    // deve vir com o texto do nome já selecionado" — foca e seleciona todo
-    // o texto do campo "Nome" assim que o painel abre (por qualquer
-    // caminho — duplo clique na linha ou o botão "⚙️ Propriedades" da barra
-    // de baixo, ambos chamam esta mesma função), pronto pra já digitar por
-    // cima sem precisar apagar o nome antigo primeiro.
-    nomeEl.focus();
-    nomeEl.select();
-    backdrop.querySelector('#layerprops-cancelar').onclick = this._camadasGuardAsync(async () => {
-      // Desfaz tudo que foi mexido nesta sessão do painel, voltando aos
-      // valores de quando abriu — e persiste esse estado revertido (caso
-      // algum campo já tivesse sido salvo antes por outro caminho).
-      Mapping.renameLayer(this._map, layerId, orig.nome);
-      Mapping.setLayerVisible(this._map, layerId, orig.visivel);
-      Mapping.setLayerLocked(this._map, layerId, orig.bloqueada);
-      Mapping.setLayerOpacity(this._map, layerId, orig.opacidade);
-      this._renderer?.setMapData(this._map);
-      await this._saveMap();
-      this._renderLayersPanel();
-      this._closeLayerPropertiesModal();
-    }, 'cancelar propriedades da camada');
-  },
-
-  _closeLayerPropertiesModalImpl() {
-    this._layerPropsModalEl?.remove();
-    this._layerPropsModalEl = null;
-  },
-  _closeLayerPropertiesModal(...args) { return this._camadasGuard(() => this._closeLayerPropertiesModalImpl(...args), 'fechar propriedades da camada')(); },
 
   /** Alças de redimensionar genéricas — 8 no total, uma em cada borda e
    *  canto (ver RESIZE_DIRS abaixo), injetadas dinamicamente (não fazem
@@ -26397,9 +26670,10 @@ const MapView = {
         // pedido do usuário) — getBoundingClientRect() já vem relativo à
         // JANELA, sem precisar descontar nenhum wrapRect.
         const panelRect = panel.getBoundingClientRect();
+        const _fo = Utils.fixedOrigin(panel);   // [44ª] ver Utils.fixedOrigin (Workspace: bloco contentor = tela)
         startW = panelRect.width; startH = panelRect.height;
-        startLeft = panelRect.left;
-        startTop = panelRect.top;
+        startLeft = panelRect.left - _fo.x;
+        startTop = panelRect.top - _fo.y;
         // Sai do ancoramento original (right/margin fixos) igual o arraste
         // pelo título — necessário aqui também porque redimensionar pelos
         // lados esquerdo/superior muda `left`/`top`, não só largura/altura.
@@ -26608,7 +26882,28 @@ const MapView = {
     // ex.: js/capture.js, fluxo de foto recém-tirada).
     this._photoPlacementConfirmCb = onConfirm || null;
     if (this._screen !== 'planta') await this._showScreen('planta');
+    // [30/09/2026] NOVO — pedido verbatim: "Em 'Foto', ao tirar uma foto e
+    // ir em 'Vincular a um lugar no mapa', deve ficar selecionada a
+    // ferramenta 'Selecionar' neste momento. A ferramenta que estava
+    // selecionada antes deve ficar guardada, pois é só para este
+    // instante." MESMO padrão já usado em `enterItemPlacementMode` (ver
+    // `_restoreFerramentaAntesItemPlacement`) — estado PRÓPRIO
+    // (`_photoPlacementFerramentaAnterior`), pra nunca se confundir com o
+    // do modo de item caso, por algum motivo incomum, os dois se
+    // sobrepusessem.
+    if (this._photoPlacementFerramentaAnterior === undefined) this._photoPlacementFerramentaAnterior = this._ptool || null;
+    if (!this._navMode) this._setPTool('select', { skipModeReset: true });
     this._showPhotoPlacementBanner();
+  },
+
+  /** Restaura a ferramenta que estava ativa ANTES de `enterPhotoPlacementMode`
+   *  trocar pra "Selecionar" (ver comentário lá) — chamado nos dois jeitos
+   *  de sair do modo (`_cancelPhotoPlacement` e `_placePhotoPinAtWorld`). */
+  _restoreFerramentaAntesPhotoPlacement() {
+    if (this._photoPlacementFerramentaAnterior === undefined) return;
+    const anterior = this._photoPlacementFerramentaAnterior;
+    this._photoPlacementFerramentaAnterior = undefined;
+    if (anterior && !this._navMode) this._setPTool(anterior, { skipModeReset: true });
   },
 
   /** Faixa persistente ("Toque no mapa para posicionar esta foto —
@@ -26796,6 +27091,7 @@ const MapView = {
     this._photoPlacementCancelCb = null;
     this._photoPlacementConfirmCb = null;
     this._hidePhotoPlacementBanner();
+    this._restoreFerramentaAntesPhotoPlacement();
     if (photoId && cb) cb(photoId);
   },
 
@@ -26832,6 +27128,7 @@ const MapView = {
     this._photoPlacementCancelCb = null;
     this._photoPlacementConfirmCb = null;
     this._hidePhotoPlacementBanner();
+    this._restoreFerramentaAntesPhotoPlacement();
     if (!photoId) return;
     const photo = await DB.getAmbientePhoto(photoId);
     if (!photo) { Utils.toast('Esta foto não foi encontrada (pode ter sido excluída).', { type: 'warn' }); return; }
@@ -26933,7 +27230,28 @@ const MapView = {
     // `onConfirm` em enterPhotoPlacementMode/ambientephotos.js _openMapLinkFlow.
     this._itemPlacementConfirmCb = onConfirm || null;
     if (this._screen !== 'planta') await this._showScreen('planta');
+    // [30/09/2026] NOVO -- pedido verbatim: "Ao cadastrar um novo patrimônio
+    // e ir para vincular a uma posição no mapa, deve ficar selecionada a
+    // ferramenta 'Selecionar' neste momento. A ferramenta que estava
+    // selecionada antes deve ficar guardada, pois é só para este instante."
+    // Guarda a ferramenta atual (`_ptool`) UMA vez só (não sobrescreve se já
+    // houver uma guardada de uma sessão anterior deste mesmo modo que não
+    // tenha sido restaurada por algum motivo) e troca pra "Selecionar" —
+    // restaurada em `_placeNewItemPinAtWorld`/`_cancelItemPlacement` abaixo,
+    // os dois jeitos de sair deste modo.
+    if (this._itemPlacementFerramentaAnterior === undefined) this._itemPlacementFerramentaAnterior = this._ptool || null;
+    if (!this._navMode) this._setPTool('select', { skipModeReset: true });
     this._showItemPlacementBanner();
+  },
+
+  /** Restaura a ferramenta que estava ativa ANTES de `enterItemPlacementMode`
+   *  trocar pra "Selecionar" (ver comentário lá) — chamado nos dois jeitos
+   *  de sair do modo (`_cancelItemPlacement` e `_placeNewItemPinAtWorld`). */
+  _restoreFerramentaAntesItemPlacement() {
+    if (this._itemPlacementFerramentaAnterior === undefined) return;
+    const anterior = this._itemPlacementFerramentaAnterior;
+    this._itemPlacementFerramentaAnterior = undefined;
+    if (anterior && !this._navMode) this._setPTool(anterior, { skipModeReset: true });
   },
 
   /** Faixa persistente ("Mova/dê zoom... — Marcar aqui — Cancelar") sobreposta
@@ -26982,6 +27300,7 @@ const MapView = {
     this._itemPlacementCancelCb = null;
     this._itemPlacementConfirmCb = null;
     this._hideItemPlacementBanner();
+    this._restoreFerramentaAntesItemPlacement();
     if (itemId && cb) cb(itemId);
   },
 
@@ -27017,6 +27336,7 @@ const MapView = {
     this._itemPlacementCancelCb = null;
     this._itemPlacementConfirmCb = null;
     this._hideItemPlacementBanner();
+    this._restoreFerramentaAntesItemPlacement();
     if (!itemId) return;
     const item = await DB.getItem(itemId);
     if (!item) { Utils.toast('Este patrimônio não foi encontrado (pode ter sido excluído).', { type: 'warn' }); return; }
@@ -27040,7 +27360,16 @@ const MapView = {
     // padrão de sempre, usado pelo modal de item recém-criado), em vez de
     // deixar a pessoa "solta" dentro do editor 2D sem ter escolhido nenhuma
     // ferramenta.
-    if (confirmCb) confirmCb(itemId); else await this._showScreen('entry');
+    // [30/09/2026] MUDADO -- pedido verbatim: as 'configurações 2D' ganharam a seção "📍 Vincular
+    // a um lugar no mapa" -> bloco "📋 Tabela", com as mesmas 2 opções que já existiam pra "📷 Foto"
+    // (ver mapconfig.js/_placePhotoPinAtWorld acima): 'permanecer' (padrão, NÃO navega, fica em
+    // Mapa->Planta baixa) ou 'tabela' (volta pra tela "📋 Tabela"). Antes, sem confirmCb, este 'else'
+    // SEMPRE chamava _showScreen('entry') (a entrada do Mapa) -- comportamento fixo, sem opção.
+    if (confirmCb) { confirmCb(itemId); return; }
+    const acaoTabela = await DB.getSetting('tabelaMarcarAquiAcao', 'permanecer');
+    if (acaoTabela === 'tabela') { window.App?.navigate?.('tabela'); return; }
+    // else ('permanecer', padrão): não navega — fica em Mapa->Planta baixa, mesmo espírito de
+    // _placePhotoPinAtWorld.
   },
 
   // ---------- [15/09/2026 UTC] Modo genérico "escolher uma posição X/Y no
@@ -27196,4 +27525,17 @@ const MapView = {
 };
 
 window.Map2DRenderer = Map2DRenderer;
+// [01/10/2026] contador de reconstruções (🐞): transforma os campos que guardam o elemento de cada janela em acessores que contam toda atribuição de um elemento NOVO (≠ do anterior, não nulo).
+['_panelEl', '_fotoPinWheelEl', '_layersPanelEl', '_coresPanelEl', '_objectPickerEl', '_debugWindowEl'].forEach((campo) => {
+  let valor = MapView[campo] ?? null;
+  Object.defineProperty(MapView, campo, {
+    configurable: true, enumerable: true,
+    get() { return valor; },
+    set(v) { if (v && v !== valor) _debugWinContagem[campo] = (_debugWinContagem[campo] || 0) + 1; valor = v; },
+  });
+});
 window.MapView = MapView;
+
+// [01/10/2026] NOVO — "Coloque no painel do IndexedDB um jeito de poder ver a lista das 29 esperas do mapa [...]". Declara no Monitor do
+// IndexedDB as 25 chamadas nomeadas `await this._saveMap('...')` deste arquivo (aparecem na aba "Funções que gravam" mesmo com 0 chamadas).
+try { if (window.DBMonitor && window.DBMonitor.declarar) window.DBMonitor.declarar(['_mountPlanta', '_clipboardCutOrCopy', '_deleteSelection', '_clipboardPaste', '_openMapConfig #1', '_openMapConfig #2', '_onCanvasClick #1', '_onCanvasClick #2', '_onObjectsPointerUp #1', '_onObjectsPointerUp #2', '_onObjectsPointerUp #3', '_onObjectsPointerUp #4', '_onObjectsPointerUp #5', '_onObjectsPointerUp #6', '_onObjectsPointerUp #7', '_onObjectsPointerUp #8', '_onObjectsPointerUp #9', '_onObjectsPointerUp #10', '_onObjectsPointerUp #11', '_onObjectsPointerUp #12', '_onObjectsPointerUp #13', '_onObjectsPointerUp #14', '_finalizeFormaDraft #1', '_finalizeFormaDraft #2', '_coresApplyToSelection'], 'espera'); } catch (e) { /* monitor é opcional */ }

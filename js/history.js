@@ -311,11 +311,13 @@ const History = {
   _makeHistoryPanelDraggable(panel) {
     const head = panel.querySelector('.map-panel-head');
     if (!head) return;
-    let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0, startWidth = 0;
+    let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0, startWidth = 0, foW = window.innerWidth, foH = window.innerHeight;
     head.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.map-panel-close, button')) return;
       const r = panel.getBoundingClientRect();
-      startLeft = r.left; startTop = r.top; startWidth = r.width;
+      const fo = Utils.fixedOrigin(panel);   // [01/10/2026] CORRIGIDO (44ª rodada) — salto no Workspace, ver Utils.fixedOrigin
+      foW = fo.w; foH = fo.h;
+      startLeft = r.left - fo.x; startTop = r.top - fo.y; startWidth = r.width;
       startX = e.clientX; startY = e.clientY;
       dragging = true;
       head.setPointerCapture(e.pointerId);
@@ -331,8 +333,8 @@ const History = {
       // usado nos painéis de mapview.js (_makePanelDraggable). Antes o
       // limite era travado em 0, impedindo arrastar a janela do Histórico
       // além da borda esquerda (bug relatado pelo usuário).
-      const left = Utils.clamp(startLeft + (e.clientX - startX), -startWidth + 60, window.innerWidth - 60);
-      const top = Utils.clamp(startTop + (e.clientY - startY), 0, window.innerHeight - 44);
+      const left = Utils.clamp(startLeft + (e.clientX - startX), -startWidth + 60, foW - 60);
+      const top = Utils.clamp(startTop + (e.clientY - startY), 0, foH - 44);
       panel.style.left = left + 'px';
       panel.style.top = top + 'px';
       // Lembra a posição pra reaplicar da próxima vez que o painel for
@@ -375,7 +377,8 @@ const History = {
       handle.title = 'Arraste para redimensionar';
       handle.addEventListener('pointerdown', (e) => {
         const r = panel.getBoundingClientRect();
-        startW = r.width; startH = r.height; startLeft = r.left; startTop = r.top;
+        const fo = Utils.fixedOrigin(panel);   // [44ª] ver Utils.fixedOrigin
+        startW = r.width; startH = r.height; startLeft = r.left - fo.x; startTop = r.top - fo.y;
         panel.style.left = startLeft + 'px'; panel.style.top = startTop + 'px';
         panel.style.width = startW + 'px'; panel.style.height = startH + 'px';
         startX = e.clientX; startY = e.clientY;

@@ -141,6 +141,14 @@ const OBJECT3D_PROFILES = {
   caixa_piso4: { shape: 'box', w: 0.13, d: 0.13, h: 0.06, y0: 0, color: 0xe9ebee },
   abracadeira_velcro: { shape: 'box', w: 0.03, d: 0.014, h: 0.03, y0: 0, color: 0x2b2e33 },
   abracadeira_nylon: { shape: 'box', w: 0.03, d: 0.014, h: 0.03, y0: 0, color: 0xe8e6de },
+  // [28/09/2026 UTC] NOVO -- 🖥️ Simulador de Montagem e Manutenção de Hardware (ver
+  // js/hardware-catalog.js `CHASSIS`/js/hardware-sim.js). Caixa placeholder = a carcaça externa do
+  // chassi (mesmas dimensões de `HardwareCatalog.CHASSIS[tipo]`); as peças internas (placa-mãe,
+  // CPU, RAM, drives, offboard) são desenhadas por `HardwareSimulator.construirGrupo3D` dentro dela.
+  pc_gabinete: { shape: 'box', w: 0.2, d: 0.45, h: 0.45, y0: 0, color: 0x24272c },
+  notebook: { shape: 'box', w: 0.36, d: 0.25, h: 0.02, y0: 0, color: 0x3a3e44 },
+  workstation: { shape: 'box', w: 0.22, d: 0.5, h: 0.5, y0: 0, color: 0x1f2225 },
+  servidor_rack: { shape: 'box', w: 0.4826, d: 0.7, h: 0.0889, y0: 0, color: 0x2b2f36 },
   // Eletrocalha: peça de tamanho fixo (seção 200x100 mm, comprimento padrão 2m -- `obj.profundidade`), builder genérico.
   eletrocalha: { shape: 'box', w: 0.2, d: 2, h: 0.1, y0: 0, color: 0x9aa3ad },
   // Canaleta PVC: peça de tamanho fixo (seção 50x20 mm, comprimento padrão 2m -- `obj.profundidade`), builder genérico.
@@ -185,6 +193,9 @@ const OBJECT3D_PROFILES = {
   // ~10x15cm (tamanho comum de porta-retrato de mesa pequeno), 3cm de
   // espessura.
   'quadro-mesa': { shape: 'box', w: 0.1, d: 0.03, h: 0.15, y0: 0, color: 0xd4af6a },
+  // [01/10/2026] NOVO (37ª rodada) — "Folha de Papel" (A4 real 21x29,7cm, 2mm de espessura) e "Luminária de mesa" (~20x20x50cm), vindos do HTML enviado. y0:0 — empilham sobre mesas pela lógica padrão de empilhamento.
+  'folha-papel': { shape: 'box', w: 0.21, d: 0.297, h: 0.002, y0: 0, color: 0xfef08a },
+  'luminaria-mesa': { shape: 'box', w: 0.2, d: 0.36, h: 0.5, y0: 0, color: 0xf59e0b },
   // [13/09/2026] NOVO — "carro dirigível" (pedido verbatim: "Faça um
   // carro, que é possível entrar nele e sair andando [...] considerando a
   // inércia de movimento [...] Deve ter rodas, vidros e um formato de
@@ -220,6 +231,8 @@ const OBJECT3D_PROFILES = {
   bebedouro: { shape: 'cylinder', r: 0.18, h: 1.0, y0: 0, color: 0xd7dee6 },
   lixeira: { shape: 'cylinder', r: 0.16, h: 0.5, y0: 0, color: 0x556070 },
   coluna: { shape: 'cylinder', r: 0.18, h: 2.6, y0: 0, color: 0x9aa4b2 },
+  // [69ª rodada] Texto 3D (objecttypes/texto3d.js): a malha é gerada por código; w/d/h aqui só valem de reserva (ghost) — o objeto grava as medidas reais.
+  texto3d: { shape: 'box', w: 0.7, d: 0.3, h: 0.06, y0: 0, color: 0xe6e9ee },
   // [15/09/2026 UTC] ALTERADO — pedido verbatim: "Faça o mesmo para o
   // vaso." (mesmo tratamento dado à cadeira acima: um modelo de verdade em
   // vez de uma forma única genérica). `r`/`h` continuam com o MESMO
@@ -287,6 +300,8 @@ const OBJECT3D_PROFILES = {
   // fina (0.2m) — cor branco-gelo (mais clara que o cinza-concreto do
   // piso) pra parecer forro, não laje estrutural.
   'teto-modular': { shape: 'box', w: 10, d: 10, h: 0.2, y0: 0, color: 0xf3f4f6 },
+  // [87ª rodada] Telha/telhado (CustomRoof, js/objecttypes/telha-custom.js): pegada padrão 6×4 m; a malha 3D sai do contorno/retângulo + obj.telha (material, formato, inclinação). h = espessura nominal p/ hit-test.
+  'telha': { shape: 'box', w: 6, d: 4, h: 0.1, y0: 0, color: 0xb4502c },
   // Teto de gesso: liso, branco puro, SEM textura de grade (ao contrário do
   // modular) — as "rodelas de acesso" (pequenos discos cinza-claro,
   // simulando as tampas circulares de acesso a fiação/dutos comuns em forro

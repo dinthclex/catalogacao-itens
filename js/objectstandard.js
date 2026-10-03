@@ -350,6 +350,138 @@ window.ObjectStandard = {
     return ` <span class="objstd-hist-dot" style="color:${cor}" title="Este objeto já tem histórico registrado">●</span>`;
   },
 
+  // -------------------------------------------------------------------
+  // [30/09/2026] NOVO — mesmo espírito do indicador de Histórico acima,
+  // agora para "📋 Especificações/Hardware" — pedido verbatim: "Deve ser
+  // possível ativar este destaque com alterações feitas tanto no
+  // 'Histórico' quanto nas 'Especificações'. Cada uma deve ter o seu
+  // 'ícone' [...] Os ícones devem coexistir." Usado tanto pelo botão
+  // "📋 Especificações" (2D/3D) quanto pelo selo no espaço 3D (ver
+  // `engine3d.js` `_addEspecDestaque`, mesmo esquema do Histórico).
+  // -------------------------------------------------------------------
+
+  /** `true` se o objeto tem alguma especificação cadastrada OU uma
+   *  descrição não vazia — mesmo critério usado pra decidir se a seção
+   *  "📋 Especificações" tem algo a mostrar. */
+  temEspecificacoes(entity) {
+    const itens = Array.isArray(entity?.especificacoes) ? entity.especificacoes : [];
+    return itens.length > 0 || !!(entity?.descricao && String(entity.descricao).trim());
+  },
+
+  /** [30/09/2026] MUDADO — pedido verbatim: "Estes destaques devem ser [...]
+   *  a bolinha verde ou o losango (que deve ser verde também). A cor indica
+   *  o tempo." Mesmo esquema de `corIndicadorHistorico` acima (verde =
+   *  editado hoje/esta semana, cinza = mais antigo), lendo `especModificadoEm`
+   *  (carimbado em `object-panel-card.js` `salvarCampo` sempre que
+   *  `especificacoes`/`descricao` mudam). HONESTIDADE DE ESCOPO: objetos
+   *  com especificações/descrição de ANTES desta rodada não têm esse
+   *  carimbo ainda — tratados como "antigo" (cinza) por padrão, até a
+   *  próxima edição, já que a data real da última mudança é desconhecida.
+   *  Devolve `null` só quando o objeto não tem especificação/descrição
+   *  nenhuma (mesmo critério de `temEspecificacoes`). */
+  corIndicadorEspec(entity) {
+    if (!this.temEspecificacoes(entity)) return null;
+    const carimbo = entity?.especModificadoEm;
+    if (!carimbo) return '#9aa3ad'; // sem data conhecida -> trata como antigo
+    const dias = (Date.now() - Number(carimbo)) / 86400000;
+    return dias <= 7 ? '#3ecf6e' : '#9aa3ad';
+  },
+
+  /** [30/09/2026] NOVO (20ª rodada) — pedido verbatim: "Para o botão de 'especificações', deve ser algo semelhante: [descrição] [botão editar] / [entrada] [botao editar] [botão excluir] ... [entrada nova][botão para adicionar a nova entrada]." HTML da seção de Especificações no mesmo molde da lista de Histórico (`historicoHtml`): linha da descrição com ✏️, uma linha por especificação (rótulo/valor) com ✏️ e 🗑️, e uma linha de nova entrada com ➕. `editavel` false = só leitura (Modo Navegação). */
+  especHtml(entity, idPrefix, editavel) {
+    const E = (v) => Utils.escapeHtml(String(v ?? ''));
+    const itens = Array.isArray(entity?.especificacoes) ? entity.especificacoes : [];
+    const desc = entity?.descricao ? String(entity.descricao) : '';
+    const btnEdit = (kind, i) => editavel ? `<button type="button" class="icon-btn xs objstd-espec-edit" data-kind="${kind}" data-idx="${i}" title="Editar">✏️ Editar</button>` : '';
+    const btnDel = (i) => editavel ? `<button type="button" class="icon-btn xs objstd-espec-del" data-idx="${i}" title="Remover esta especificação">🗑️</button>` : '';
+    const linhaDesc = `<div class="objstd-hist-row objstd-espec-row" data-kind="desc" data-idx="-1">
+        <span class="objstd-hist-texto">${desc ? `<span style="white-space:pre-wrap">${E(desc)}</span>` : '<span style="color:var(--text-dim)">Sem descrição.</span>'}</span>
+        <span class="objstd-hist-acoes">${btnEdit('desc', -1)}</span>
+      </div>`;
+    const linhas = itens.length
+      ? itens.map((it, i) => `<div class="objstd-hist-row objstd-espec-row" data-kind="item" data-idx="${i}">
+        <span class="objstd-hist-texto"><span style="color:var(--text-dim)">${E(it.label || '(sem rótulo)')}</span>: <span>${E(it.value || '')}</span></span>
+        <span class="objstd-hist-acoes">${btnEdit('item', i)}${btnDel(i)}</span>
+      </div>`).join('')
+      : '<div class="objstd-hist-vazio">Nenhuma especificação cadastrada.</div>';
+    return `
+      <div class="objstd-espec">
+        <div class="objstd-hist-lista">${linhaDesc}${linhas}</div>
+        ${editavel ? `<div class="objstd-hist-add" style="flex-wrap:wrap">
+          <input type="text" id="${idPrefix}-espec-label" class="objstd-hist-input" placeholder="Nova especificação: rótulo…" style="flex:1; min-width:90px">
+          <input type="text" id="${idPrefix}-espec-valor" class="objstd-hist-input" placeholder="valor…" style="flex:1; min-width:90px">
+          <button type="button" class="btn secondary sm" id="${idPrefix}-espec-add">➕ Adicionar</button>
+        </div>` : ''}
+      </div>`;
+  },
+
+  /** [30/09/2026] NOVO (20ª rodada) — liga os eventos de `especHtml` (adicionar/editar/excluir, descrição inclusa). Carimba `especModificadoEm` (mesmo campo que `corIndicadorEspec` lê, ver acima) a cada mudança; `onChange()` deixa quem chamou salvar o mapa e atualizar o selo 3D. */
+  wireEspecUi(container, entity, idPrefix, onChange, editavel) {
+    if (!container || !editavel) return;
+    const rerender = () => {
+      const wrap = container.querySelector('.objstd-espec');
+      if (!wrap) return;
+      wrap.outerHTML = this.especHtml(entity, idPrefix, true);
+      this.wireEspecUi(container, entity, idPrefix, onChange, true);
+    };
+    const mudou = () => { entity.especModificadoEm = Date.now(); onChange?.(); };
+    const addBtn = container.querySelector(`#${idPrefix}-espec-add`);
+    const inLabel = container.querySelector(`#${idPrefix}-espec-label`);
+    const inValor = container.querySelector(`#${idPrefix}-espec-valor`);
+    const addFn = () => {
+      const label = (inLabel?.value || '').trim();
+      const value = (inValor?.value || '').trim();
+      if (!label && !value) return;
+      if (!Array.isArray(entity.especificacoes)) entity.especificacoes = [];
+      entity.especificacoes.push({ label, value });
+      mudou(); rerender();
+    };
+    if (addBtn) addBtn.onclick = addFn;
+    [inLabel, inValor].forEach((inp) => { if (inp) inp.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addFn(); } }; });
+    container.querySelectorAll('.objstd-espec-edit').forEach((btn) => {
+      btn.onclick = () => {
+        const kind = btn.dataset.kind; const idx = parseInt(btn.dataset.idx, 10);
+        const row = btn.closest('.objstd-espec-row');
+        if (!row) return;
+        if (kind === 'desc') {
+          row.innerHTML = `<textarea class="objstd-hist-edit-input">${Utils.escapeHtml(entity.descricao || '')}</textarea>
+            <span class="objstd-hist-acoes"><button type="button" class="btn primary xs objstd-espec-save">💾 Salvar</button><button type="button" class="btn secondary xs objstd-espec-cancel">Cancelar</button></span>`;
+          const ta = row.querySelector('textarea'); ta?.focus();
+          row.querySelector('.objstd-espec-save').onclick = () => { entity.descricao = ta.value.trim(); mudou(); rerender(); };
+        } else {
+          const it = (entity.especificacoes || [])[idx]; if (!it) return;
+          row.innerHTML = `<span class="objstd-hist-texto" style="display:flex; gap:6px; flex-wrap:wrap"><input type="text" class="objstd-hist-input objstd-espec-ed-label" value="${Utils.escapeHtml(it.label || '')}" style="flex:1; min-width:80px"><input type="text" class="objstd-hist-input objstd-espec-ed-valor" value="${Utils.escapeHtml(it.value || '')}" style="flex:1; min-width:80px"></span>
+            <span class="objstd-hist-acoes"><button type="button" class="btn primary xs objstd-espec-save">💾 Salvar</button><button type="button" class="btn secondary xs objstd-espec-cancel">Cancelar</button></span>`;
+          row.querySelector('.objstd-espec-ed-label')?.focus();
+          row.querySelector('.objstd-espec-save').onclick = () => {
+            it.label = row.querySelector('.objstd-espec-ed-label').value.trim();
+            it.value = row.querySelector('.objstd-espec-ed-valor').value.trim();
+            mudou(); rerender();
+          };
+        }
+        row.querySelector('.objstd-espec-cancel').onclick = () => rerender();
+      };
+    });
+    container.querySelectorAll('.objstd-espec-del').forEach((btn) => {
+      btn.onclick = () => {
+        if (!confirm('Excluir esta especificação?')) return;
+        (entity.especificacoes || []).splice(parseInt(btn.dataset.idx, 10), 1);
+        mudou(); rerender();
+      };
+    });
+  },
+
+  /** HTML do losango (ou `''` se o objeto não tem especificações/descrição
+   *  nenhuma) — pra colar direto ao lado do texto de um botão. Losango (não
+   *  bolinha) DE PROPÓSITO — precisa ser visualmente diferente do pontinho
+   *  ● do Histórico mesmo agora que os dois usam o mesmo esquema de cor
+   *  verde/cinza, já que os dois podem coexistir no mesmo objeto/botão. */
+  indicadorEspecHtml(entity) {
+    const cor = this.corIndicadorEspec(entity);
+    if (!cor) return '';
+    return ` <span class="objstd-espec-dot" style="color:${cor}" title="Este objeto tem especificações/descrição cadastradas">◆</span>`;
+  },
+
   /** Devolve `entity.historico` (array de `{data, texto, modificadoEm?}`)
    *  SEM criar nada se ainda não existir (usado por quem só quer LER/
    *  mostrar — ex.: pra decidir se mostra a seção "📜 Histórico" ou não, já
@@ -521,6 +653,9 @@ window.ObjectStandard = {
         this.addHistoricoEntry(entity, v);
         onChange?.();
         rerender();
+        // [01/10/2026] NOVO (33ª rodada) — pedido verbatim: "Na janela de propriedades do objeto, na seção de histórico, ao dar enter em uma entrada de histórico, deve ir para a próxima entrada de histórico vazia." Depois de gravar (a lista é re-renderizada), o foco vai pra próxima entrada VAZIA — o campo "Nova entrada do histórico". Reconsulta por id (o painel pode ter sido refeito) e repete no próximo quadro por segurança.
+        const focarVazia = () => { const n = document.getElementById(`${idPrefix}-hist-input`); if (n) { n.focus(); return true; } return false; };
+        focarVazia(); requestAnimationFrame(focarVazia);
       };
       addBtn.onclick = addFn;
       input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addFn(); } };

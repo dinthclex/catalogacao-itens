@@ -150,13 +150,43 @@ const PRIMITIVE_CATALOG = {
   ],
   outros: [
     {
+      // [67ª rodada] Texto 3D de verdade, com as propriedades do objeto Text do Blender (ver ModelerMesh.textoMesh). Cabeçalhos (`heading`), inteiros
+      // com limites (`isInt`), caixa de marcação (`isBool`) e grupos de botões lado a lado (`isChoice`) são desenhados por `_renderCreateProps`.
       key: 'texto', label: 'Texto', icone: '🔤',
-      gerar: (p) => ModelerMesh.textoPlaceholderMesh(p.texto, p.altura, p.profundidade),
-      defaultParams: { texto: 'Texto', altura: 0.3, profundidade: 0.06 },
+      gerar: (p) => ModelerMesh.textoMesh(p),
+      defaultParams: { ...ModelerMesh.TEXTO_DEFAULTS },
       params: [
-        { key: 'texto', label: 'Texto', value: 'Texto', isText: true },
-        { key: 'altura', label: 'Altura', value: 0.3, step: 0.02 },
-        { key: 'profundidade', label: 'Profundidade', value: 0.06, step: 0.01 },
+        { key: 'texto', label: 'Texto', value: 'Texto', isText: true, multiline: true },
+        { heading: 'Forma' },
+        { key: 'curveSegments', label: 'Resolução da curva', value: 8, isInt: true, min: 1, max: 64, minDecimals: 0, step: 1 },
+        { heading: 'Geometria' },
+        { heading: 'Modificação', sub: true },
+        { key: 'offset', label: 'Offset (contorno)', value: 0, step: 0.005, minDecimals: 3 },
+        { key: 'depth', label: 'Profundidade (extrusão)', value: 0.06, step: 0.01, minDecimals: 3, min: 0.001 },
+        { heading: 'Chanfro', sub: true },
+        { key: 'bevelEnabled', label: 'Chanfro (bevel)', value: false, isBool: true },
+        { key: 'bevelThickness', label: 'Espessura do chanfro', value: 0.01, step: 0.005, minDecimals: 3, min: 0 },
+        { key: 'bevelSegments', label: 'Segmentos do chanfro', value: 3, isInt: true, min: 1, max: 16, minDecimals: 0, step: 1 },
+        { heading: 'Fonte' },
+        { key: 'size', label: 'Tamanho', value: 0.3, step: 0.02, minDecimals: 3, min: 0.005 },
+        { key: 'shear', label: 'Inclinação (shear)', value: 0, step: 0.05, minDecimals: 3 },
+        { heading: 'Parágrafo' },
+        { key: 'alignH', label: 'Alinhamento horizontal', value: 'center', isChoice: [['left', 'Esquerdo'], ['center', 'Centro'], ['right', 'Direito'], ['justify', 'Justificado']] },
+        { key: 'alignV', label: 'Alinhamento vertical', value: 'center', isChoice: [['top', 'Topo'], ['center', 'Centro'], ['bottom', 'Baixo']] },
+        { heading: 'Espaçamento', sub: true },
+        { key: 'letterSpacing', label: 'Espaço entre letras', value: 0, step: 0.005, minDecimals: 3 },
+        { key: 'wordSpacing', label: 'Espaço entre palavras', value: 0, step: 0.01, minDecimals: 3 },
+        { key: 'lineHeight', label: 'Espaço entre linhas', value: 1, step: 0.05, minDecimals: 3, min: 0.1 },
+        { heading: 'Deslocamento', sub: true },
+        { key: 'offsetX', label: 'Deslocamento X', value: 0, step: 0.02, minDecimals: 3 },
+        { key: 'offsetY', label: 'Deslocamento Y', value: 0, step: 0.02, minDecimals: 3 },
+        { heading: 'Caixa de texto (0 = automático)' },
+        { heading: 'Dimensões', sub: true },
+        { key: 'boxWidth', label: 'Largura da caixa', value: 0, step: 0.05, minDecimals: 3, min: 0 },
+        { key: 'boxHeight', label: 'Altura da caixa', value: 0, step: 0.05, minDecimals: 3, min: 0 },
+        { heading: 'Deslocamento', sub: true },
+        { key: 'boxOffsetX', label: 'Deslocamento da caixa X', value: 0, step: 0.02, minDecimals: 3 },
+        { key: 'boxOffsetY', label: 'Deslocamento da caixa Y', value: 0, step: 0.02, minDecimals: 3 },
       ],
     },
     { key: 'armature', label: 'Armature', icone: '🦴', gerar: () => ModelerMesh.markerArmatureMesh(), defaultParams: {}, params: [] },
@@ -164,7 +194,12 @@ const PRIMITIVE_CATALOG = {
     { key: 'empty', label: 'Empty', icone: '✛', gerar: () => ModelerMesh.markerEmptyMesh(), defaultParams: {}, params: [] },
     { key: 'speaker', label: 'Speaker', icone: '🔊', gerar: () => ModelerMesh.markerSpeakerMesh(), defaultParams: {}, params: [] },
     // Marcador de câmera (`markerCameraMesh`), pelo mesmo motivo dos outros marcadores acima.
-    { key: 'camera', label: 'Câmera', icone: '🎥', gerar: () => ModelerMesh.markerCameraMesh(), defaultParams: {}, params: [] },
+    // ÍCONE CORRIGIDO (29/09/2026), pedido verbatim: "coloque o mesmo ícone do
+    // botão 'Câmera' na janela 'Ferramentas' do mapa 2D" — era '🎥' (câmera de
+    // filmar), agora '📷' igual ao botão `{ id: 'foto-orb', icon: '📷', ... }`
+    // de mapview.js (o botão em si já cria o objeto Câmera de verdade desde a
+    // correção anterior — `_criarCameraViaPainelCriar` — isto é só o ícone).
+    { key: 'camera', label: 'Câmera', icone: '📷', gerar: () => ModelerMesh.markerCameraMesh(), defaultParams: {}, params: [] },
   ],
 };
 
@@ -528,7 +563,7 @@ const ModelerUI = {
     // O elemento do DOM é a ÚNICA fonte de verdade sobre aberto/fechado.
     const abrindo = !panel.classList.contains('open');
     panel.classList.toggle('open', abrindo);
-    toggle.classList.toggle('active', abrindo);
+    toggle.classList.toggle('open', abrindo); // [73ª rodada] estado aberto = classe `open` (como o '+' da direita); `active` = só destaque de mouse por cima
     // Pedido do usuário: "Quando o menu lateral estiver aberto, então, o '+'
     // deve virar uma seta" (mesma convenção já usada no "+" existente do
     // lado direito, `js/view3d.js` `_toggleObjectCatalogPanel`, reaproveitada
@@ -542,7 +577,10 @@ const ModelerUI = {
     // Modelador fica na borda ESQUERDA — copiar a mesma seta sem espelhar
     // apontava pro lado ERRADO (pra dentro da tela, não pra onde o painel
     // de fato vai ao recolher). Trocado por '⟸' (aponta pra esquerda).
-    toggle.textContent = abrindo ? '⟸' : '+';
+    // [74ª rodada] ícone de recolher = o MESMO glifo preenchido '➜' da lateral direita, só espelhado (aponta p/ a esquerda).
+    if (abrindo) toggle.innerHTML = '<span style="display:inline-block;transform:scaleX(-1)">➜</span>'; else toggle.textContent = '+';
+    // [01/10/2026] NOVO (36ª rodada) — "O botão da lateral esquerda ('+') deve ter um botão de 'recolher' as opções também [...] a seta deve ser para o outro lado." O botão já virava '⟸' mas ficava escondido na borda; o CSS (.m3d-sidebar-toggle.active) agora o desloca pra borda do painel aberto, espelhando o da direita.
+    toggle.title = abrindo ? 'Recolher menu lateral' : 'Criar / Ferramentas';
     if (abrindo) this.renderSidebar(view3d);
   },
 
@@ -565,7 +603,9 @@ const ModelerUI = {
     // de fechar, volta sozinho pra "Criar" em vez de ficar numa aba que
     // sumiu.
     if (!emEdicao && ctx._sidebarTab === 'ferramentas') ctx._sidebarTab = 'criar';
-    const abas = emEdicao ? [{ key: 'ferramentas', label: 'Ferramentas' }, { key: 'criar', label: 'Criar' }] : [{ key: 'criar', label: 'Criar' }];
+    // [70ª] Fora do Modelador, a aba "Texto" mostra as definições do objeto Texto (selecionado/criado por último).
+    if (emEdicao && ctx._sidebarTab === 'texto') ctx._sidebarTab = 'criar';
+    const abas = emEdicao ? [{ key: 'ferramentas', label: 'Ferramentas' }, { key: 'criar', label: 'Criar' }] : [{ key: 'criar', label: 'Criar' }, { key: 'texto', label: 'Texto' }];
     tabsEl.innerHTML = '';
     abas.forEach((t) => {
       const b = document.createElement('button');
@@ -585,6 +625,7 @@ const ModelerUI = {
     contentEl.innerHTML = '';
     contentEl.appendChild(
       ctx._sidebarTab === 'ferramentas' ? this._buildFerramentasPanel(ctx)
+        : (!emEdicao && ctx._sidebarTab === 'texto') ? this._buildTextoPanelBase(view3d)
         : emEdicao ? this._buildCriarPanel(ctx)
         : this._buildCriarPanelBase(view3d, ctx),
     );
@@ -607,6 +648,38 @@ const ModelerUI = {
    *  `view3d._createPrimitiveObjectAndEnter`) — a partir daí, reabrir este
    *  MESMO painel (agora com uma sessão ativa) mostra a versão completa
    *  (`_buildCriarPanel`) e a aba "Ferramentas" some/aparece sozinha. */
+  /** [70ª] Aba "Texto" da tela base: mesmos campos do Texto (subtítulos incluídos) para o objeto Texto 3D alvo. */
+  _buildTextoPanelBase(view3d) {
+    const wrap = document.createElement('div');
+    // [71ª rodada] CAUSA RAIZ do "sem scroll vertical": esta aba usava a classe `m3d-sidebar-tabcontent-criar`, que tem `overflow-y:hidden`
+    // (só faz sentido na aba "Criar", cuja região de Propriedades rola sozinha). Com os campos do Texto (muito mais altos que o painel) o
+    // excedente era cortado. Agora usa só `m3d-sidebar-tabcontent` (overflow-y:auto) + classe própria para garantir min-height:0.
+    wrap.className = 'm3d-sidebar-tabcontent m3d-sidebar-tabcontent-texto';
+    const objs = (view3d._map && view3d._map.objects || []).filter((o) => o.tipo === 'texto3d' && !o.customMesh);
+    const alvo = objs.find((o) => o.id === view3d._textoAlvoId) || objs[objs.length - 1];
+    if (!alvo || !window.Texto3D) { wrap.innerHTML = '<div class="m3d-sidebar-props-empty">Nenhum Texto na cena. Crie um em "Criar → Outros → Texto" (ou clique num Texto existente, no Modo Edição).</div>'; return wrap; }
+    view3d._textoAlvoId = alvo.id;
+    // [71ª rodada] Vários Textos na cena: seletor no topo (além de clicar no Texto no cenário) — a aba edita o Texto escolhido.
+    if (objs.length > 1) {
+      const sel = document.createElement('select');
+      sel.style.cssText = 'width:100%;box-sizing:border-box;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.18);border-radius:6px;color:#e8ecf2;font-size:12px;padding:4px 6px';
+      objs.forEach((o, i) => {
+        const op = document.createElement('option'); op.value = o.id;
+        const tx = String((o.texto3d && o.texto3d.texto) != null ? o.texto3d.texto : 'Texto').replace(/\s+/g, ' ').slice(0, 24);
+        op.textContent = (o.nome || ('Texto ' + (i + 1))) + ' — "' + tx + '"'; op.selected = o.id === alvo.id; sel.appendChild(op);
+      });
+      sel.onchange = () => { view3d._textoAlvoId = sel.value; this.renderSidebar(view3d); };
+      wrap.appendChild(sel);
+    }
+    const campos = document.createElement('div'); campos.innerHTML = window.Texto3D.fieldsHtml(alvo); wrap.appendChild(campos);
+    window.Texto3D.wireFields(campos, () => (view3d._map.objects || []).find((o) => o.id === alvo.id) || alvo, (patch) => {
+      const o = Mapping.updateObject(view3d._map, alvo.id, patch);
+      DB.saveMap(view3d._map);
+      try { if (!view3d._engine.rebuildObjectIncremental(o)) { /* ok */ } } catch (err) { view3d._rebuildScene?.(); }
+    });
+    return wrap;
+  },
+
   _buildCriarPanelBase(view3d, ctx) {
     const wrap = document.createElement('div');
     wrap.className = 'm3d-sidebar-tabcontent m3d-sidebar-tabcontent-criar';
@@ -617,7 +690,18 @@ const ModelerUI = {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'm3d-btn m3d-sidebar-primbtn'; b.title = entry.label;
         b.innerHTML = '<span class="m3d-sidebar-primicon">' + entry.icone + '</span><span>' + entry.label + '</span>';
-        b.onclick = () => view3d._createPrimitiveObjectAndEnter(entry);
+        // CORRIGIDO (29/09/2026), pedido verbatim: "o botão 'Câmera' [...]
+        // deve colocar o mesmo objeto Câmera do botão 'Câmera' da janela
+        // 'Ferramentas', do mapa 2D. Atualmente, acaba colocando uma outra
+        // forma 3D." `entry.key === 'camera'` aqui é o marcador decorativo
+        // do Modelador (`PRIMITIVE_CATALOG.outros`, ver comentário grande em
+        // `view3d.js _criarCameraViaPainelCriar`) — nesta aba "Criar" da
+        // tela BASE (fora de uma sessão do Modelador), a intenção do botão é
+        // sempre "colocar uma Câmera de verdade", nunca a malha decorativa;
+        // os outros itens de "Outros" (Texto, Seta, etc. — sem ligação com
+        // nenhum objeto de verdade do app) continuam indo por
+        // `_createPrimitiveObjectAndEnter` normalmente.
+        b.onclick = () => (entry.key === 'camera' ? view3d._criarCameraViaPainelCriar() : view3d._createPrimitiveObjectAndEnter(entry));
         grid.appendChild(b);
       });
       wrap.appendChild(glabel); wrap.appendChild(grid);
@@ -1002,6 +1086,7 @@ const ModelerUI = {
         b.onclick = () => {
           state._lastPrimitiveCatalog = entry;
           ModelerInput.criarPrimitiva(state, entry.gerar, { ...entry.defaultParams }, entry.label);
+          if (entry.params && entry.params.length > 6) setCollapsed(true); // [67ª] muitas propriedades (Texto 3D): recolhe os botões para dar espaço aos campos
           // NOVO (02/09/2026) — ver comentário grande em PRIMITIVE_CATALOG.
           // lampada, acima. Só os 5 marcadores do grupo "Lâmpada" têm
           // `entry.luz`; Mesh/Outros seguem sem nenhuma luz de verdade
@@ -1123,14 +1208,54 @@ const ModelerUI = {
     wrap.appendChild(title);
 
     entry.params.forEach((fieldCfg) => {
+      // [67ª] cabeçalho de grupo (ex.: "Forma", "Geometria", "Parágrafo")
+      if (fieldCfg.heading) {
+        const h = document.createElement('div'); h.className = 'm3d-nf-grouplabel m3d-sidebar-heading' + (fieldCfg.sub ? ' m3d-sidebar-subheading' : ''); h.textContent = fieldCfg.heading;
+        wrap.appendChild(h);
+        return;
+      }
+      // [67ª] caixa de marcação (ex.: chanfro ligado/desligado)
+      if (fieldCfg.isBool) {
+        const row = document.createElement('label'); row.className = 'm3d-sidebar-check';
+        const cb = document.createElement('input'); cb.type = 'checkbox';
+        cb.checked = lp.params[fieldCfg.key] != null ? !!lp.params[fieldCfg.key] : !!fieldCfg.value;
+        cb.addEventListener('change', () => ModelerInput.ajustarUltimaPrimitiva(state, { [fieldCfg.key]: cb.checked }));
+        cb.addEventListener('mousedown', (ev) => ev.stopPropagation());
+        const sp = document.createElement('span'); sp.textContent = fieldCfg.label;
+        row.appendChild(cb); row.appendChild(sp); wrap.appendChild(row);
+        return;
+      }
+      // [67ª] grupo de botões lado a lado, só um ativo (alinhamentos do Texto) — equivalente a botões de rádio estilizados
+      if (fieldCfg.isChoice) {
+        const row = document.createElement('div'); row.className = 'm3d-sidebar-textfield';
+        const flbl = document.createElement('label'); flbl.textContent = fieldCfg.label + ':';
+        const grp = document.createElement('div'); grp.className = 'm3d-seg'; grp.setAttribute('role', 'radiogroup');
+        const atual = lp.params[fieldCfg.key] != null ? lp.params[fieldCfg.key] : fieldCfg.value;
+        fieldCfg.isChoice.forEach(([val, txt]) => {
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'm3d-seg-btn' + (val === atual ? ' active' : '');
+          b.textContent = txt; b.dataset.value = val; b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', val === atual ? 'true' : 'false');
+          b.addEventListener('mousedown', (ev) => ev.stopPropagation());
+          b.addEventListener('click', () => {
+            grp.querySelectorAll('.m3d-seg-btn').forEach((o) => { const on = o === b; o.classList.toggle('active', on); o.setAttribute('aria-checked', on ? 'true' : 'false'); });
+            ModelerInput.ajustarUltimaPrimitiva(state, { [fieldCfg.key]: val });
+          });
+          grp.appendChild(b);
+        });
+        row.appendChild(flbl); row.appendChild(grp); wrap.appendChild(row);
+        return;
+      }
       if (fieldCfg.isText) {
         // "Texto" é uma string, não um número — campo de texto simples em
         // vez do widget `_createNumField` (que só entende número).
         const row = document.createElement('div'); row.className = 'm3d-sidebar-textfield';
         const flbl = document.createElement('label'); flbl.textContent = fieldCfg.label + ':';
-        const inp = document.createElement('input');
-        inp.type = 'text'; inp.value = lp.params[fieldCfg.key] != null ? lp.params[fieldCfg.key] : fieldCfg.value;
+        // [67ª] `multiline` (Texto 3D): caixa de várias linhas — Enter insere quebra de linha; atualiza a malha ao digitar (input) e ao sair (change)
+        const inp = document.createElement(fieldCfg.multiline ? 'textarea' : 'input');
+        if (fieldCfg.multiline) { inp.rows = 2; inp.style.resize = 'vertical'; } else inp.type = 'text';
+        inp.value = lp.params[fieldCfg.key] != null ? lp.params[fieldCfg.key] : fieldCfg.value;
         inp.addEventListener('change', () => ModelerInput.ajustarUltimaPrimitiva(state, { [fieldCfg.key]: inp.value }));
+        if (fieldCfg.multiline) inp.addEventListener('input', () => ModelerInput.ajustarUltimaPrimitiva(state, { [fieldCfg.key]: inp.value }));
+        inp.addEventListener('keydown', (ev) => ev.stopPropagation());
         inp.addEventListener('mousedown', (ev) => ev.stopPropagation());
         row.appendChild(flbl); row.appendChild(inp);
         wrap.appendChild(row);
@@ -1142,7 +1267,7 @@ const ModelerUI = {
         value: val,
         step: fieldCfg.step,
         minDecimals: fieldCfg.minDecimals != null ? fieldCfg.minDecimals : 3,
-        onCommit: (v) => ModelerInput.ajustarUltimaPrimitiva(state, { [fieldCfg.key]: fieldCfg.minDecimals === 0 ? Math.max(1, Math.round(v)) : v }),
+        onCommit: (v) => { let nv = fieldCfg.isInt || fieldCfg.minDecimals === 0 ? Math.round(v) : v; if (fieldCfg.min != null) nv = Math.max(fieldCfg.min, nv); else if (fieldCfg.minDecimals === 0) nv = Math.max(1, nv); if (fieldCfg.max != null) nv = Math.min(fieldCfg.max, nv); ModelerInput.ajustarUltimaPrimitiva(state, { [fieldCfg.key]: nv }); },
       });
       wrap.appendChild(field.el);
     });
@@ -1927,8 +2052,16 @@ const ModelerUI = {
       _persistPendente = null;
     };
     const persist = (patch) => {
+      // [65ª rodada] malha própria: Escala/Dimensões mudaram => espelha em Largura/Altura/Profundidade do painel de propriedades (mesmos valores)
+      if (patch && patch.customMeshXform && obj.customMesh && Array.isArray(obj.customMesh.vertices) && window.ModelerMesh) {
+        try {
+          const bb = window.ModelerMesh.localBBox(obj.customMesh.vertices), x = patch.customMeshXform;
+          patch = { ...patch, largura: Math.max(0.01, (bb.maxX - bb.minX) * Math.abs(x.scaleX ?? 1)), altura: Math.max(0.01, (bb.maxY - bb.minY) * Math.abs(x.scaleY ?? 1)), profundidade: Math.max(0.01, (bb.maxZ - bb.minZ) * Math.abs(x.scaleZ ?? 1)) };
+        } catch (_) { /* ignora */ }
+      }
       Object.assign(obj, patch);
       view3d._refreshObjectLiveTransform?.(obj);   // efeito na malha 3D: IMEDIATO, sem esperar debounce nenhum
+      view3d._objPanelSyncFromObject?.(obj);   // [46ª rodada] espelha no painel de propriedades (campos equivalentes)
       _persistPendente = Object.assign(_persistPendente || {}, patch);
       clearTimeout(_persistDebounce);
       _persistDebounce = setTimeout(_persistAgora, 200);
@@ -1959,7 +2092,8 @@ const ModelerUI = {
       { axis: 'y', value: (obj.angulo || 0) * 180 / Math.PI, step: 0.1, formatMode: 'rotation', suffix: '°', onCommit: (v) => persist({ angulo: v * Math.PI / 180 }) },
       { axis: 'z', value: (xf0.rotZ || 0) * 180 / Math.PI, step: 0.1, formatMode: 'rotation', suffix: '°', onCommit: (v) => persist({ customMeshXform: { ...(obj.customMeshXform || {}), rotZ: v * Math.PI / 180 } }) },
     ];
-    contentWrap.appendChild(this._buildGroup('Rotação:', rotFields).el);
+    const rotGroupSimples = this._buildGroup('Rotação:', rotFields);
+    contentWrap.appendChild(rotGroupSimples.el);
 
     // ---------- Escala ----------
     // [15/09/2026 UTC] CORRIGIDO — pedido verbatim: "A escala (x, y e z)
@@ -1995,6 +2129,7 @@ const ModelerUI = {
     // aqui como `scaleGroup` — sem recriar um 2º grupo "Escala:" duplicado.
     const scaleGroup = escalaGroup;
     let dimGroup = null;
+    let dimPropGroup = null;   // [62ª] grupo "Dimensões" do objeto sem malha própria (Largura/Altura/Profundidade) -- espelhado pela janela de propriedades (sync)
     if (temMalha) {
       aoMudarEscala = () => {
         const bb2 = ModelerMesh.localBBox(obj.customMesh.vertices);
@@ -2018,15 +2153,17 @@ const ModelerUI = {
         { axis: 'z', value: (bb.maxZ - bb.minZ) * Math.abs(xf0.scaleZ ?? 1), step: 0.01, minDecimals: 5, onCommit: (v) => setScaleFromDim('z', v) },
       ]);
       contentWrap.appendChild(dimGroup.el);
-    } else if (obj.largura != null || obj.profundidade != null || obj.altura != null) {
+    } else if (obj.largura != null || obj.profundidade != null || obj.altura != null || (obj.forma === 'poligono' && obj.raio != null)) {
       // Objeto com dimensões PRÓPRIAS (forma desenhada — retângulo/polígono,
       // ex.: um objeto antigo ainda com esses campos) — editável direto,
       // sem passar por escala nenhuma (não há malha-base pra multiplicar).
-      contentWrap.appendChild(this._buildGroup('Dimensões:', [
-        { axis: 'x', value: obj.largura ?? 0.5, step: 0.05, minDecimals: 2, onCommit: (v) => persist({ largura: Math.max(0.05, v) }) },
+      dimPropGroup = this._buildGroup('Dimensões:', [
+        // [60ª] forma redonda sem largura/profundidade próprias: mostra o diâmetro (2 x raio) e, ao editar, passa a elipse largura x profundidade (o 3D e o 2D já seguem esses campos)
+        { axis: 'x', value: obj.largura ?? (obj.forma === 'poligono' && obj.raio != null ? obj.raio * 2 : 0.5), step: 0.05, minDecimals: 2, onCommit: (v) => persist({ largura: Math.max(0.05, v), profundidade: obj.profundidade ?? (obj.forma === 'poligono' && obj.raio != null ? obj.raio * 2 : 0.5) }) },
         { axis: 'y', value: obj.altura ?? 0.5, step: 0.05, minDecimals: 2, onCommit: (v) => persist({ altura: Math.max(0.05, v) }) },
-        { axis: 'z', value: obj.profundidade ?? 0.5, step: 0.05, minDecimals: 2, onCommit: (v) => persist({ profundidade: Math.max(0.05, v) }) },
-      ]).el);
+        { axis: 'z', value: obj.profundidade ?? (obj.forma === 'poligono' && obj.raio != null ? obj.raio * 2 : 0.5), step: 0.05, minDecimals: 2, onCommit: (v) => persist({ profundidade: Math.max(0.05, v), largura: obj.largura ?? (obj.forma === 'poligono' && obj.raio != null ? obj.raio * 2 : 0.5) }) },
+      ]);
+      contentWrap.appendChild(dimPropGroup.el);
     } else {
       // Objeto comum de catálogo sem malha nem campo de dimensão próprio
       // (ex.: "Mesa"/"Pilar" novos) — nada aqui pra editar; mostra o
@@ -2042,8 +2179,33 @@ const ModelerUI = {
       contentWrap.appendChild(note);
     }
 
+    // [46ª rodada] sincronia painel de propriedades -> widget "Transformação": relê o objeto e atualiza os campos
+    // equivalentes via setValue (não dispara onCommit, não recria o DOM; não mexe em campo que está sendo arrastado/editado).
+    view3d._objTransformUI = {
+      id: obj.id,
+      sync: () => {
+        const o = (view3d._map?.objects || []).find((q) => q.id === obj.id) || obj;
+        const aP = view3d._map?.alturaPiso || 2.8;
+        const x = o.customMeshXform || {};
+        posGroup.setValue('x', o.x || 0);
+        posGroup.setValue('y', (o.piso || 0) * aP + (o.elevacao || 0));
+        posGroup.setValue('z', o.y || 0);
+        rotGroupSimples.setValue('y', (o.angulo || 0) * 180 / Math.PI);
+        rotGroupSimples.setValue('x', (x.rotX || 0) * 180 / Math.PI);
+        rotGroupSimples.setValue('z', (x.rotZ || 0) * 180 / Math.PI);
+        // [62ª] espelha as dimensões da janela de propriedades (Forma: Largura/Profundidade/Altura) e a escala
+        if (dimPropGroup) {
+          const circ = o.forma === 'poligono' && o.raio != null;
+          dimPropGroup.setValue('x', o.largura ?? (circ ? o.raio * 2 : 0.5));
+          dimPropGroup.setValue('y', o.altura ?? 0.5);
+          dimPropGroup.setValue('z', o.profundidade ?? (circ ? o.raio * 2 : 0.5));
+        }
+        scaleGroup.setValue('x', x.scaleX ?? 1); scaleGroup.setValue('y', x.scaleY ?? 1); scaleGroup.setValue('z', x.scaleZ ?? 1);
+      },
+    };
     return contentWrap;
   },
 };
 
 window.ModelerUI = ModelerUI;
+window.PRIMITIVE_CATALOG = PRIMITIVE_CATALOG; // [69ª] o objeto Texto 3D (objecttypes/texto3d.js) reaproveita o esquema de campos

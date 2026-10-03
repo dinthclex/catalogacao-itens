@@ -169,6 +169,11 @@ const Mapping = {
    *  tinha mantém a identificação padrão que já existia, sem mudar nada pro
    *  usuário. */
   ensureNewFields(map) {
+    // [01/10/2026] NOVO — "o andar tem um valor em metros fixo. Este valor deve poder ser configurado nas 'configurações 2D', na seção '🗺️ Mapa 2D'". Causa raiz: `map.alturaPiso` nunca era gravado em lugar nenhum (tudo lia `map.alturaPiso || 2.8`); agora é carimbado aqui, em todo carregamento de mapa (2D e 3D), a partir de MapConfig.alturaAndarM — assim os ~30 pontos que já leem `map.alturaPiso` passam a obedecer a configuração sem mexer em cada um.
+    try {
+      const hAndar = window.MapConfig && window.MapConfig._cache && window.MapConfig._cache.alturaAndarM;
+      if (Number.isFinite(hAndar) && hAndar > 0) map.alturaPiso = hAndar;
+    } catch (e) { /* segue com o que o mapa já tinha */ }
     if (map.apelido && map.apelido.trim()) map.nome = map.apelido.trim();
     delete map.apelido;
     if (!map.nome || !map.nome.trim()) map.nome = Mapping.defaultAmbienteName(map.id);
@@ -223,6 +228,10 @@ const Mapping = {
     delete map.grupoRegras;
     // [18/09/2026 UTC] Racks sem os parametros (rackUs/rackProfundidade) --
     // ex.: criados por script/importacao -- ganham o padrao 12U x 600mm.
+    // [57ª rodada] Luminárias de mesa antigas (sem componentes) ganham o Script de fábrica; nunca pisa em componentes existentes.
+    (map.objects || []).forEach((o) => {
+      if (o.tipo === 'luminaria-mesa' && window.LuminariaMesaLigada?.componentesPadrao && !(Array.isArray(o.components) && o.components.length)) o.components = window.LuminariaMesaLigada.componentesPadrao((p) => Utils.uid(p));
+    });
     (map.objects || []).forEach((o) => {
       if (o.tipo === 'rack' && o.rackUs == null && window.RackModular) Object.assign(o, window.RackModular.patchParaObjeto(o, 12, 600));
       // [20/09/2026] Racks existentes (sem escolha de saida de cabos) passam a se auto-organizar: saida pelo Topo,
@@ -324,8 +333,9 @@ const Mapping = {
    *  realmente encontra algo pra recuperar) — mapas sem nenhum elemento
    *  órfão nunca ganham essa camada extra. */
   ensureSafeLayer(map) {
-    const existente = (map.layers || []).find((l) => l.nome === Mapping.CAMADA_SEGURA_NOME);
-    return existente ? existente.id : Mapping.addLayer(map, Mapping.CAMADA_SEGURA_NOME).id;
+    // [85ª rodada] A camada "Recuperados (camada original perdida)" foi REMOVIDA: órfãos vão para a 1ª camada real do mapa (todo mapa já nasce com uma; se não houver nenhuma, cria "Camada 1").
+    const real = (map.layers || []).find((l) => l.nome !== Mapping.CAMADA_SEGURA_NOME);
+    return real ? real.id : Mapping.addLayer(map, 'Camada 1').id;
   },
 
   /** Camada "resolvida" pra um `layerId` que pode ser nulo/ausente OU
@@ -366,6 +376,15 @@ const Mapping = {
   ensureAllElementsLayered(map) {
     if (!map.layers || !map.layers.length) return false;
     let mudou = false;
+    // [85ª rodada] mapas antigos: dissolve a camada "Recuperados..." (conteúdo vai para a 1ª camada real; some se esvaziou).
+    const rec = map.layers.filter((l) => l.nome === Mapping.CAMADA_SEGURA_NOME);
+    if (rec.length) {
+      let alvo = map.layers.find((l) => l.nome !== Mapping.CAMADA_SEGURA_NOME);
+      if (!alvo) { rec[0].nome = 'Camada 1'; alvo = rec.shift(); }
+      const ids = new Set(rec.map((l) => l.id));
+      ['walls', 'points', 'objects', 'textos', 'portas', 'janelas', 'medidas2d', 'tracos2d'].forEach((c) => (map[c] || []).forEach((el) => { if (ids.has(el.layerId)) el.layerId = alvo.id; }));
+      map.layers = map.layers.filter((l) => !ids.has(l.id)); mudou = true;
+    }
     // INVESTIGAÇÃO (03/09/2026), pedido verbatim: "No mapa 2D, veja da onde
     // vem esta camada 'Recuperados (camada original perdida)'. O porquê
     // dela ficar surgindo a toda hora." — 'medidas2d'/'tracos2d' (ferramentas
@@ -617,10 +636,12 @@ const Mapping = {
    *  (Tudo isso — `map.grupoRegras` e as funções que liam/escreviam nele —
    *  foi removido; ver comentário grande acima.) */
 
-  addLayer(map, nome) {
+  addLayer(map, nome, acimaDeId) {
     if (!map.layers) map.layers = [];
     const l = { id: Utils.uid('layer'), nome: nome || `Camada ${map.layers.length + 1}`, visivel: true, bloqueada: false, opacidade: 255, criadoEm: DB.nowISO() };
-    map.layers.push(l);
+    // [01/10/2026] NOVO — pedido verbatim: "ao criar uma nova camada, deve ser em cima da camada ativa. Atualmente, está criando sempre lá em baixo como última da lista." `acimaDeId` (opcional) = camada ativa: a nova entra IMEDIATAMENTE ACIMA dela (a lista mostra o índice 0 no topo). Sem ele (ou id inexistente), mantém o comportamento de sempre (vai pro fim) — usado pelas criações automáticas (ex.: "Adicionados no 3D", camada segura).
+    const idxAcima = acimaDeId ? map.layers.findIndex((x) => x.id === acimaDeId) : -1;
+    if (idxAcima >= 0) map.layers.splice(idxAcima, 0, l); else map.layers.push(l);
     return l;
   },
 
@@ -720,7 +741,7 @@ const Mapping = {
       .reduce((n, campo) => n + (map[campo] || []).filter((el) => el.layerId === layerId).length, 0);
   },
 
-  /** Duplica uma camada — cria uma cópia logo abaixo dela na lista, com
+  /** Duplica uma camada — cria uma cópia logo ACIMA dela na lista, com
    *  cópias de TODOS os elementos que estavam nela (ids novos, mesmos
    *  campos). A camada original não é alterada. */
   duplicateLayer(map, id) {
@@ -728,7 +749,8 @@ const Mapping = {
     if (idx === -1) return null;
     const orig = map.layers[idx];
     const nova = { id: Utils.uid('layer'), nome: `${orig.nome} (cópia)`, visivel: orig.visivel !== false, bloqueada: !!orig.bloqueada, opacidade: orig.opacidade ?? 255, criadoEm: DB.nowISO() };
-    map.layers.splice(idx + 1, 0, nova);
+    // [01/10/2026] MUDADO — pedido verbatim: "Ao duplicar uma camada, deve sempre ser colocada a duplicata da camada ativa acima da própria." Antes: idx + 1 (logo abaixo). Agora: idx (a cópia ocupa o lugar da original, que desce uma posição).
+    map.layers.splice(idx, 0, nova);
     const prefixos = { walls: 'wall', points: 'pt', objects: 'obj', textos: 'txt', portas: 'porta', janelas: 'janela' };
     // Cópias de porta/janela mantêm o `parentWallId` ORIGINAL (não remapeado
     // pra uma eventual cópia da parede feita nesta mesma operação) — caso
@@ -1120,6 +1142,7 @@ const Mapping = {
   // "Cadeira.obj" -> "Cadeira") como base do nome padrão em vez disso,
   // continuando com o mesmo sufixo ".001" incremental por tipo.
   _labelForObjectType(tipo) {
+    if (tipo === 'texto3d') return 'Texto'; // [69ª rodada]
     if (window.ObjImport?.isCustomKey?.(tipo)) {
       const item = (window.ObjImport.listImported?.() || []).find((i) => i.key === tipo);
       if (item?.label) return this._capitalizeTipo(item.label);
@@ -1195,6 +1218,28 @@ const Mapping = {
     } while (usados.has(nome));
     return nome;
   },
+  /** [01/10/2026] NOVO (34ª rodada) — clona um objeto para "Colar" EXATAMENTE como estava (pedido verbatim: "O que muda são os nomes dos objetos [...], ids, e posições"): cópia profunda de todos os campos, SEM o empilhamento automático de addObject. Muda: id (de `idMap`, ou novo), nome (único: tira o sufixo .NNN e pega o próximo livre), x/y (+dx/+dy; origem do retículo métrico junto), camada (`layerId`, se passada), criadoEm e grupoId (de `grupoMap`; sem entrada = sai do grupo). Referências por id a outros objetos do mesmo lote (rackId etc.) são remapeadas via `idMap`. Já adiciona em `map.objects`; quem chama faz recalcBounds/salvar. */
+  cloneObjectExato(map, src, { dx = 0, dy = 0, layerId, idMap, grupoMap } = {}) {
+    if (!map.objects) map.objects = [];
+    const o = (typeof structuredClone === 'function') ? structuredClone(src) : JSON.parse(JSON.stringify(src));
+    const remap = (v) => {
+      if (typeof v === 'string') return (idMap && idMap.has(v)) ? idMap.get(v) : v;
+      if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) v[i] = remap(v[i]); return v; }
+      if (v && typeof v === 'object') { for (const k of Object.keys(v)) v[k] = remap(v[k]); return v; }
+      return v;
+    };
+    remap(o);
+    o.id = (idMap && idMap.get(src.id)) || Utils.uid('obj');
+    o.x = (src.x || 0) + dx; o.y = (src.y || 0) + dy;
+    if (o.reticuloMetrico && typeof o.reticuloOrigemX === 'number' && typeof o.reticuloOrigemY === 'number') { o.reticuloOrigemX += dx; o.reticuloOrigemY += dy; }
+    if (layerId !== undefined) o.layerId = layerId;
+    if (o.grupoId) { if (grupoMap && grupoMap.has(o.grupoId)) o.grupoId = grupoMap.get(o.grupoId); else delete o.grupoId; }
+    o.criadoEm = DB.nowISO();
+    const base = String(src.nome || '').replace(/\.\d+$/, '').trim() || this._labelForObjectType(src.tipo);
+    o.nome = this._nextObjectName(map, base);
+    map.objects.push(o);
+    return o;
+  },
   addObject(map, x, y, tipo, extra = {}) {
     if (!map.objects) map.objects = [];
     const obj = { id: Utils.uid('obj'), x, y, tipo, piso: 0, angulo: 0, criadoEm: DB.nowISO(), nome: this._nextObjectName(map, this._labelForObjectType(tipo)), ...extra };
@@ -1208,6 +1253,8 @@ const Mapping = {
     // livre via `_openObjectPickerPanel`/desenho -- ficam sem classe
     // automática, já que não há tipo nenhum pra virar classe).
     if (!Array.isArray(obj.classes) && tipo) obj.classes = [tipo];
+    // [84ª rodada] CAMADA "Recuperados...": todo objeto novo sem `layerId` (geradores de salas, equipamentos de rede, 3D, importações) nascia órfão e depois era migrado para a camada de segurança. Agora nasce na 1ª camada real do mapa (nunca a de segurança); `layerId` explícito de quem chama é respeitado.
+    if (!obj.layerId) { const ly = (map.layers || []).find((l) => l.nome !== Mapping.CAMADA_SEGURA_NOME); if (ly) obj.layerId = ly.id; }
     // Luminária: fica no TETO por padrão (3m do chão) quando quem chamou não
     // já mandou uma elevação própria — a hotbar 3D já manda a elevação
     // calculada pela mira + 3m (ver view3d.js _placeWithBuildTool/
@@ -1215,6 +1262,7 @@ const Mapping = {
     // (sem noção de "mirar" — sempre teto). Pedido do usuário: "por padrão,
     // ela fica a 3 metros do chão".
     if (tipo === 'luminaria' && typeof obj.elevacao !== 'number') obj.elevacao = 3.0;
+    if (tipo === 'telha') { if (typeof obj.elevacao !== 'number') obj.elevacao = (map.alturaPiso || 2.8); { const ds = this.defaultShapeForTipo('telha'); if (ds && !(obj.largura > 0)) { obj.forma = obj.forma || ds.forma; obj.largura = ds.largura; obj.profundidade = ds.profundidade; } }   /* [89ª] o contorno nasce do MESMO tamanho do ghost */ if (!obj.telha) obj.telha = { material: 'ceramica', formato: 'romana', inclinacao: 30, aguas: 2 }; if (window.PisoCustom) window.PisoCustom.tornarEditavel(obj); }   // [88ª] águas + contorno editável desde a criação (o 2D mostra as divisões); [87ª] telhado nasce no pé-direito, cerâmica romana a 30°
     // NOVO (12/09/2026) — ver comentário grande em js/objectstandard.js:
     // molde de `components` padrão por TIPO de objeto (chave = `tipo`,
     // igual à chave usada por `OBJECT3D_PROFILES`/"Acessar modelos").
@@ -1239,7 +1287,15 @@ const Mapping = {
     if (tipo === 'relogio' && !(Array.isArray(obj.components) && obj.components.length) && window.Components?.addComponent) {
       window.Components.addComponent(obj, 'Script', { code: window.Components.DEFAULT_RELOGIO_SCRIPT_CODE });
     }
+    // [57ª rodada] Luminária de mesa nasce com Script (duplo clique liga/desliga) + Gatilho, como a Porta (só se o molde configurável não trouxe componentes).
+    if (tipo === 'luminaria-mesa' && !(Array.isArray(obj.components) && obj.components.length) && window.LuminariaMesaLigada?.componentesPadrao) {
+      obj.components = window.LuminariaMesaLigada.componentesPadrao((p) => Utils.uid(p));
+    }
     this.applyDefaultShapeToObject(obj);
+    // [69ª rodada] Texto 3D: parâmetros próprios + medidas reais derivadas da malha.
+    if (tipo === 'texto3d' && window.Texto3D && window.ModelerMesh) { obj.texto3d = obj.texto3d || {}; if (!obj.cor) obj.cor = '#e6e9ee'; window.Texto3D.sync(obj); }
+    // [58ª rodada] Pilar novo: altura = distância entre andares do mapa (agora o campo Altura vale no 3D).
+    if (tipo === 'pilar' && (extra.altura == null)) obj.altura = map.alturaPiso || 2.8;
     // Escada: nasce com as configurações de fábrica do catálogo (materializadas NO OBJETO);
     // depois disso, o que for alterado vale só para esta escada.
     if (tipo === 'escada') {
@@ -1336,12 +1392,30 @@ const Mapping = {
         }
         obj.elevacao = this.objectTopHeight(base) + extra;
         obj.semY0 = true;
+        obj._elevAuto = true;   // [01/10/2026] 43ª rodada — marca: elevação decidida pelo empilhamento automático (pode ser recalculada ao mover, ver recalcularElevacao)
       }
       else if (tipo === 'rack' && typeof _rackElevPadrao === 'number') obj.elevacao = _rackElevPadrao;
     }
     map.objects.push(obj);
     this.recalcBounds(map);
     return obj;
+  },
+
+  /** [01/10/2026] NOVO (43ª rodada) — "Sistema de Elevação Dinâmica e Empilhamento (AABB): [...] Se as caixas delimitadoras se sobreporem no plano XZ, ajuste Y do objeto para o topo da superfície [...]
+   *  Caso contrário, a altura deve voltar para o nível do chão." Equivalente do projeto à `calculateElevation(targetMesh)` com THREE.Box3: a sobreposição das "pegadas" no plano XZ
+   *  (`_findTopObjectAt`/`_boxesOverlap`, mesma fonte do empilhamento ao colocar) decide o apoio, e a altura vira o topo dele (`objectTopHeight`). Roda a cada movimento no 2D/3D, SÓ em dados
+   *  (nada de malha: o 3D só soma o deslocamento — ver Engine3D.moveObjectLive). Só mexe em objeto cuja elevação é "automática" (sem elevação ou marcada _elevAuto pelo empilhamento);
+   *  elevação definida à mão no painel nunca é sobrescrita; rack fica de fora (tem regra própria de altura). Devolve true se a elevação mudou.
+   *  LIMITE: objetos já empilhados em versões anteriores (sem a marca _elevAuto) são tratados como elevação manual e não são recalculados. */
+  recalcularElevacao(map, obj) {
+    if (!map || !obj || obj.tipo === 'rack') return false;
+    const auto = obj._elevAuto === true || typeof obj.elevacao !== 'number';
+    if (!auto) return false;
+    const antes = obj.elevacao, antesSem = obj.semY0;
+    const base = this._findTopObjectAt(map, obj.x, obj.y, obj.id, obj);
+    if (base) { obj.elevacao = this.objectTopHeight(base); obj.semY0 = true; obj._elevAuto = true; }
+    else if (obj._elevAuto) { delete obj.elevacao; delete obj.semY0; delete obj._elevAuto; }
+    return obj.elevacao !== antes || obj.semY0 !== antesSem;
   },
 
   /** Retângulo/"círculo" ocupado por um objeto no mapa, em METROS (coordenadas
@@ -1445,7 +1519,9 @@ const Mapping = {
    *  hardcode nenhum. `alturaPiso` tem 2.8 como último fallback (mesmo
    *  default usado em todo o resto do app quando `map.alturaPiso` não foi
    *  definido, ver engine3d.js `mapData.alturaPiso || 2.8`). */
-  objectTopHeightAt(o, x, y, alturaPiso) {
+  objectTopHeightAt(o, x, y, alturaPiso, map) {
+    // [89ª rodada] Telha: o personagem anda sobre a superfície INCLINADA (plano da água sob o ponto); com telhados unidos, só o membro mais alto ali cobre o ponto.
+    if (o.tipo === 'telha' && map && window.CustomRoof) { const h = window.CustomRoof.alturaNoPonto(o, map, x, y); if (h != null) return (o.elevacao || 0) + h; }
     if (o.tipo !== 'escada') return this.objectTopHeight(o);
     const elevacao = o.elevacao || 0;
     const profundidadeTotal = Math.max(0.05, o.profundidade || 3.0);
@@ -1478,6 +1554,12 @@ const Mapping = {
     const cos = Math.cos(-ang), sin = Math.sin(-ang);
     const dx = x - o.x, dy = y - o.y;
     const lx = dx * cos - dy * sin, ly = dx * sin + dy * cos;
+    // [85ª rodada] Piso com contorno livre/recortes: só a superfície sólida restante é "chão" (colisão/gravidade/hit 2D); recortes e entalhes ficam sem apoio.
+    if (window.PisoCustom && window.PisoCustom.tem(o)) {
+      const cf = window.PisoCustom.facesRapido(o); if (lx < cf.x0 || lx > cf.x1 || ly < cf.y0 || ly > cf.y1) return false;   // caixa primeiro (barato)
+      const dentro = (r) => { let c = false; for (let i = 0, j = r.length - 1; i < r.length; j = i++) { const a = r[i], b = r[j]; if (((a[1] > ly) !== (b[1] > ly)) && (lx < (b[0] - a[0]) * (ly - a[1]) / (b[1] - a[1]) + a[0])) c = !c; } return c; };
+      return cf.faces.some((f) => dentro(f.outer) && !f.holes.some(dentro));
+    }
     if (fp.forma === 'poligono') {
       const rx = fp.largura != null ? fp.largura / 2 : (fp.raio || 0.3);
       const ry = fp.profundidade != null ? fp.profundidade / 2 : (fp.raio || 0.3);
@@ -1736,6 +1818,13 @@ const Mapping = {
     return idx;
   },
 
+  /** [01/10/2026] NOVO (33ª rodada) — pedido verbatim: "Se um patrimônio estiver vinculado a um objeto, então, a sua posição de vínculo no mapa é a posição do objeto." Devolve `{x, y, objId, nome}` (x/y = posição do objeto no plano 2D; y é o eixo Z do mundo) do PRIMEIRO objeto deste mapa ao qual `itemId` está associado (`obj.itemIds`), ou `null`. Ponto único usado pela ficha do patrimônio (app.js) e pela busca do mapa 2D (mapview.js). */
+  posicaoDoItemNoMapa(map, itemId) {
+    if (!map || !itemId) return null;
+    const o = (map.objects || []).find((ob) => (ob.itemIds || []).some((e) => e && e.id === itemId) && typeof ob.x === 'number' && typeof ob.y === 'number');
+    return o ? { x: o.x, y: o.y, objId: o.id, nome: o.nome || o.tipo || 'Objeto' } : null;
+  },
+
   /** Ponto de referência avulso (vértice), usado no modo "Inserir pontos" do
    *  editor de mapa — marca um vértice na representação 2D da tela sem criar
    *  nenhuma parede. Serve como alvo de "encaixe" (snap) para o modo "Inserir
@@ -1782,15 +1871,25 @@ const Mapping = {
       endpoints.push({ wi, end: 1, x: w.x1, y: w.y1 });
       endpoints.push({ wi, end: 2, x: w.x2, y: w.y2 });
     });
+    // [70ª] ponta que já encosta (coincide) na ponta de outra parede é emenda de cadeia (Parede contínua/Curva/Lápis): não é "canto aberto" para corrigir.
+    endpoints.forEach((e, i) => { e.ligada = endpoints.some((o, k) => k !== i && o.wi !== e.wi && Math.hypot(o.x - e.x, o.y - e.y) < 1e-6); });
     for (let i = 0; i < endpoints.length; i++) {
       for (let j = i + 1; j < endpoints.length; j++) {
         const a = endpoints[i], b = endpoints[j];
+        if (a.ligada || b.ligada) continue;
         if (a.wi === b.wi) continue; // não junta as duas pontas da mesma parede
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         if (d === 0 || d > cornerJoinDist) continue; // já coincidem, ou longe demais pra ser o mesmo canto
         const wa = walls[a.wi], wb = walls[b.wi];
         const inter = this.lineIntersection({ x: wa.x1, y: wa.y1 }, { x: wa.x2, y: wa.y2 }, { x: wb.x1, y: wb.y1 }, { x: wb.x2, y: wb.y2 });
         if (!inter) continue; // retas paralelas — não há canto pra formar
+        // [70ª rodada] Reta/Curva (e Lápis) geram muitas paredes curtas quase alinhadas: a interseção das RETAS infinitas de duas delas
+        // quase paralelas cai longe, e o "canto" arrastava as pontas pra lá — sumiam trechos no 3D. Só junta se houver canto de verdade
+        // (ângulo > ~10°) e a interseção ficar perto das duas pontas.
+        { const la = Math.hypot(wa.x2 - wa.x1, wa.y2 - wa.y1) || 1, lb = Math.hypot(wb.x2 - wb.x1, wb.y2 - wb.y1) || 1;
+          const sinA = Math.abs((wa.x2 - wa.x1) * (wb.y2 - wb.y1) - (wa.y2 - wa.y1) * (wb.x2 - wb.x1)) / (la * lb);
+          if (sinA < 0.17) continue;
+          if (Math.hypot(inter.x - a.x, inter.y - a.y) > cornerJoinDist * 2 || Math.hypot(inter.x - b.x, inter.y - b.y) > cornerJoinDist * 2) continue; }
         if (a.end === 1) { wa.x1 = inter.x; wa.y1 = inter.y; } else { wa.x2 = inter.x; wa.y2 = inter.y; }
         if (b.end === 1) { wb.x1 = inter.x; wb.y1 = inter.y; } else { wb.x2 = inter.x; wb.y2 = inter.y; }
       }

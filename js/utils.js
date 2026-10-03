@@ -227,6 +227,23 @@ const Utils = {
 
   clamp(v, min, max) { return Math.max(min, Math.min(max, v)); },
 
+  /** [01/10/2026] NOVO (44ª rodada) — "[Workspace] ao clicar em qualquer janela para arrastar e movê-la, a janela dá um 'salto' de posição, em vez de ficar na posição relativa do mouse no momento
+   *  do clique." CAUSA RAIZ: as janelas flutuantes são position:fixed, e left/top de um elemento fixed são medidos a partir do seu BLOCO CONTENTOR, que normalmente é a janela do navegador. Em cada
+   *  tela do Workspace, porém, .bsp-leaf-body tem transform (de propósito, p/ conter as janelas na tela), e isso torna a tela o bloco contentor: left/top passam a ser relativos ao canto da TELA, mas
+   *  os arrastes gravavam getBoundingClientRect() (coordenadas da janela do navegador) — o painel pulava pelo deslocamento da tela. Esta função devolve a origem (x, y) e o tamanho (w, h) do bloco
+   *  contentor de um elemento position:fixed (no modo Clássico: 0, 0 e o tamanho do navegador), medidos com uma sonda fixed invisível irmã do elemento — vale para qualquer ancestral com
+   *  transform/filter/contain, sem lista de casos. Quem arrasta subtrai x/y das coordenadas de tela e limita pelo w/h. */
+  fixedOrigin(el) {
+    try {
+      const p = document.createElement('div');
+      p.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;visibility:hidden;pointer-events:none;margin:0;padding:0;border:0;transform:none';
+      (el && el.parentNode ? el.parentNode : document.body).appendChild(p);
+      const r = p.getBoundingClientRect();
+      p.remove();
+      return { x: r.left, y: r.top, w: r.width || window.innerWidth, h: r.height || window.innerHeight };
+    } catch (e) { return { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight }; }
+  },
+
   lerp(a, b, t) { return a + (b - a) * t; },
 
   easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; },
@@ -895,7 +912,12 @@ const Utils = {
         <div class="modal-sheet">
           <div class="handle"></div>
           <h3 style="margin-top:0">${this.escapeHtml(title)}</h3>
-          <input type="text" id="pick-item-search" class="ambphoto-pick-input" placeholder="Buscar por patrimônio, descrição, tipo…" autocomplete="off">
+          <!-- [01/10/2026] NOVO (32ª rodada) — pedido verbatim: "além de aparecer o caminho para que se possa cadastrar, deve aparecer o botão para cadastro de novo patrimônio ('+ Novo')." -->
+          <div style="display:flex; gap:6px; align-items:center">
+            <input type="text" id="pick-item-search" class="ambphoto-pick-input" placeholder="Buscar por patrimônio, descrição, tipo…" autocomplete="off" style="flex:1; min-width:0">
+            <button type="button" class="btn sm" id="pick-item-novo" title="Cadastrar um novo patrimônio agora (abre o mesmo formulário de Tabela → + Novo); ao salvar, ele já é escolhido aqui">+ Novo</button>
+          </div>
+          <div style="font-size:12px; color:var(--text-dim); margin:4px 2px 8px">ℹ️ Só aparecem aqui os patrimônios já cadastrados no catálogo. Pra cadastrar um novo, use o botão "+ Novo" acima, ou vá em "📷 Foto" e tire (ou anexe) uma foto do item, ou em "🗂️ Conferência de patrimônio" → "📋 Tabela" → "+ Novo".</div>
           <div id="pick-item-filters" class="pick-item-filters">
             <div id="pick-item-filters-collapsed" class="pick-filter-collapsed"></div>
             <div id="pick-item-filters-panel" class="pick-filter-panel hidden"></div>
@@ -912,6 +934,13 @@ const Utils = {
       let resolved = false;
       const finish = (id) => { if (resolved) return; resolved = true; modal.remove(); resolve(id); };
       modal.querySelector('#pick-item-cancel').onclick = () => finish(null);
+      // [01/10/2026] NOVO (32ª rodada) — "+ Novo": abre App.openItemForm (mesmo formulário de Tabela → + Novo) POR CIMA desta janela; ao salvar, o patrimônio recém-criado é o escolhido (finish). `semVinculo` pula o aviso "vincular a um lugar?" (redundante: ele já está sendo associado agora). Cancelar o formulário deixa esta janela como estava.
+      modal.querySelector('#pick-item-novo').onclick = () => {
+        if (!window.App || typeof App.openItemForm !== 'function') { this.toast('Cadastro indisponível aqui.', { type: 'warn' }); return; }
+        const q0 = (modal.querySelector('#pick-item-search').value || '').trim();
+        const pre = /^[\w./-]+$/.test(q0) && /\d/.test(q0) ? q0 : '';
+        App.openItemForm(null, { prefillPatrimonio: pre, semVinculo: true, onSaved: (saved) => { if (saved && saved.id) finish(saved.id); } });
+      };
       modal.addEventListener('mousedown', (e) => { if (e.target === modal) finish(null); });
 
       const state = { expanded: false, filters: new Map(), marcadosSet: null };

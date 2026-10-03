@@ -105,6 +105,7 @@ window.TRENA3D_ICONS_PAINEL_RAPIDO = [
       // os 3 botões (`⇔▦`/`⛓️`/`⊙`) ficam juntos, lado a lado, logo depois
       // do botão de ancoragem. Grupo dedicado 'Ponto médio da medida' deixa
       // de existir.
+      { campo: 'ToleranciaBorda', icone: '⟦▭⟧', titulo: 'Tolerância de borda: depois de mirar no topo de um objeto, a mira continua nessa superfície por uma pequena folga além dos contornos (externos e internos), para medir rente à borda', grupo: 'Continuar no nível do 1º ponto' },
       { campo: 'MostrarPontoMedio', icone: '⊙', titulo: 'Mostrar a esfera do ponto médio da medida', grupo: 'Continuar no nível do 1º ponto' },
       // [16/09/2026 UTC] MUDANÇA (RODADA 92) — pedido verbatim: "o que faz
       // a opção 'Suprimir destaque de hover durante a ancoragem'?" Tooltip

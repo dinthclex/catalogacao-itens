@@ -17,7 +17,7 @@ class EscadaMeshBuilder {
       const THREE = this.THREE;
       const largura = Math.max(0.05, obj.largura || perfil.w || 1.3);
       const profundidadeTotal = Math.max(0.05, obj.profundidade || perfil.d || 3.0);
-      const alturaTotal = Math.max(0.05, obj.alturaEscada || obj.altura || perfil.h || 2.0); // própria desta escada
+      const alturaTotal = Math.max(0.05, obj.altura || obj.alturaEscada || perfil.h || 2.0); // própria desta escada [59ª: a Altura editada (Transformação/painel) vale; alturaEscada é só o valor inicial]
       // Degraus: se `obj.escadaDegraus` não foi configurado pelo usuário, o
       // padrão agora ESCALA com `alturaTotal` visando ~18cm por degrau (medida
       // realista de escada de verdade — ~17-19cm é o padrão de construção).

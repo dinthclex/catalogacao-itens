@@ -278,6 +278,14 @@ window.MapDynamicCards.mountTopbarMapa = function (layersIcon) {
                outro conjunto estivesse ativo (era exatamente esse o problema
                antes, quando morava só dentro do conjunto Desenho). -->
           <button class="icon-btn sm" id="map-navtoggle" title="Alterna entre modo Desenho (editar/mover/selecionar tudo no mapa) e modo Navegação (só mover e dar zoom na grade — nada no mapa responde a toque, útil pra só olhar em volta sem risco de mexer em algo sem querer)">🧭 Modo Navegação</button>
+          <!-- [76ª rodada] Botões do PISO (só aparecem com um Piso selecionado): editar vértices do contorno, furo, recorte (entalhe, ex.: canto p/ pilar/viga). Ver js/piso-custom-edit.js. -->
+          <span id="tbm-piso-bar" style="display:none;gap:4px;align-items:center;margin-left:6px;padding-left:8px;border-left:1px solid var(--border,#3a4250)">
+            <span style="font-size:11px;opacity:.75">Piso</span>
+            <button type="button" class="icon-btn sm" id="tbm-piso-vertice" title="Adicionar vértice na linha do piso: ligue e clique numa aresta (do piso ou de um recorte); o vértice nasce ali e já pode ser arrastado. Esc desliga">＋ Vértice</button>
+            <button type="button" class="icon-btn sm" id="tbm-piso-recorte" title="Desenhar um recorte como polilinha (formas variadas): clique os pontos, podendo passar da borda do piso (vira entalhe) ou ficar dentro (vira furo). Feche no 1º ponto, com duplo clique ou Enter; Esc cancela">✂️ Recorte</button>
+            <button type="button" class="icon-btn sm" id="tbm-piso-rm" title="Remove o último furo/recorte" style="display:none">🗑 Último</button>
+            <button type="button" class="icon-btn sm" id="tbm-piso-rect" title="Descarta contorno, furos e recortes: volta a ser a laje retangular" style="display:none">↩ Retângulo</button>
+          </span>
         </div>
       </div>
       <div class="topbar-mapa-set topbar-mapa-set-nav" id="tbm-set-nav">
@@ -401,6 +409,8 @@ window.MapDynamicCards.mountBottombarMapa = function (zoomStepsPct) {
              "anterior"/"próximo" e "Itens:" separados do resto de .bbm-row-right (que fica só
              com os controles de zoom) num grupo PRÓPRIO (.bbm-row-nav), pra poder virar uma
              linha à parte no 2º estágio (tela ainda mais estreita) sem arrastar o zoom junto. -->
+        <!-- [90ª rodada] cauda do rodapé: ◀/▶/Itens + zoom formam UM bloco; ao estreitar, a quebra de linha vem DEPOIS do conjunto (unidade, X:Y:, mensagens) e a linha de baixo começa no ◀ -->
+        <div class="bbm-row-tail" id="bbm-row-tail">
         <div class="bbm-row-nav" id="bbm-row-nav">
           <!-- [14/09/2026] MOVIDO — pedido verbatim: "No mapa 2D, coloque
                os botões 'Enquadrar mapa' e 'Ir para o personagem' à
@@ -432,6 +442,8 @@ window.MapDynamicCards.mountBottombarMapa = function (zoomStepsPct) {
                roda com frequência e agora também sincroniza este botão). -->
           <button type="button" class="icon-btn sm" id="bbm-minimap3d-btn" title="🧊 Mostrar/ocultar a miniatura 3D sobre a grade — mesma opção de '⚙️ Configurações do mapa › Miniatura 3D'. A janelinha pode ser arrastada clicando e segurando no título dela.">🧊</button>
           <button type="button" class="icon-btn sm" id="bbm-debug-btn" title="🐞 Depuração do mapa 2D — lista janelas/painéis, objetos, fotos e itens ativos agora, com posição de cada janela flutuante (útil pra achar uma janela 'perdida' fora da tela)">🐞</button>
+          <!-- [01/10/2026] NOVO — pedido verbatim: "Coloque um botão no rodapé da grade do mapa 2D, para acessar esta janela." Abre/fecha a janela 💾 Monitor do IndexedDB (js/dbmonitor.js, DBMonitor.alternarJanela); fica azul (classe 'active') enquanto a janela está aberta, como os outros botões do rodapé. -->
+          <button type="button" class="icon-btn sm" id="bbm-dbio-btn" title="💾 Monitor do IndexedDB — gráfico das leituras e escritas do banco (tempo ocupado e bytes). Clique para abrir/fechar a janela; azul = aberta. Opções em Configurações do app › Mapa, 3D e aparelho.">💾</button>
           <!-- NOVO (07/09/2026), pedido verbatim: "Deve ter um botão de
                toggle para ele [o HUD] no rodapé, ao lado do 'debug'." — o
                HUD de performance (FPS/CPU~/RAM, ver js/perf.js) já tinha um
@@ -482,6 +494,7 @@ window.MapDynamicCards.mountBottombarMapa = function (zoomStepsPct) {
           <button type="button" class="icon-btn sm" id="bbm-zoom-minus" title="Diminuir zoom (degrau anterior)">−</button>
           <input type="range" id="bbm-zoom-slider" min="0" max="${zoomStepsPct.length - 1}" step="1" value="15" title="Zoom (degraus fixos: ${zoomStepsPct.map((p) => `${p}%`).join(', ')})">
           <button type="button" class="icon-btn sm" id="bbm-zoom-plus" title="Aumentar zoom (próximo degrau)">+</button>
+        </div>
         </div>
       </div>
     `;
@@ -572,28 +585,6 @@ window.MapDynamicCards.scriptCodeEditor = function (entity, comp) {
         <div class="map2d-toolctx-info" id="comp-code-fns">${fns.length ? `Funções detectadas nesta folha: ${fns.map((f) => Utils.escapeHtml(f) + '()').join(', ')} — qualquer uma pode ser chamada por uma ação de Gatilho de Evento.` : 'Nenhuma função de nível superior detectada ainda (escreva "function NomeQualquer() { ... }").'}</div>
         <div class="map2d-toolctx-info">Variáveis já prontas no escopo: <code>obj</code> (o próprio objeto — aceita tanto <code>obj.color</code>/<code>obj.rotation</code>/<code>obj.width</code>/<code>obj.depth</code>/<code>obj.height</code>/<code>obj.name</code> em inglês quanto <code>obj.cor</code>/<code>obj.angulo</code>/<code>obj.largura</code>/<code>obj.profundidade</code>/<code>obj.altura</code>/<code>obj.nome</code> em português — são o MESMO campo), <code>SceneObjects</code>, <code>Scripting</code>, <code>map</code>, <code>THREE</code>, <code>Utils</code>, <code>view3d</code>. <code>Start()</code> roda uma vez antes do primeiro quadro; <code>Update()</code> roda a cada quadro — ambas automáticas, sem precisar de Gatilho de Evento.</div>
       </div>`;
-};
-
-/** MapView._openLayerPropertiesPanelImpl -- painel "Propriedades da
- *  camada". `l` e o objeto da camada (`this._map.layers.find(...)`),
- *  ja resolvido em mapview.js antes da chamada. */
-window.MapDynamicCards.layerPropertiesPanel = function (l) {
-  return `
-      <div class="map2d-props-panel map-layerprops-modal" style="position:static; max-width:340px; width:90vw; max-height:85vh; overflow:auto;">
-        <div class="map-panel-head"><b>⚙️ Propriedades da camada</b></div>
-        <label class="map-panel-field"><span>Nome</span><input type="text" id="layerprops-nome" class="map-layerprops-nome" value="${Utils.escapeHtml(l.nome)}"></label>
-        <label class="map-panel-field"><span>Visível</span><input type="checkbox" id="layerprops-visivel" ${l.visivel !== false ? 'checked' : ''}></label>
-        <label class="map-panel-field"><span>Bloqueada</span><input type="checkbox" id="layerprops-bloqueada" ${l.bloqueada ? 'checked' : ''}></label>
-        <label class="map-panel-field"><span>Opacidade</span>
-          <input type="range" id="layerprops-opacidade" min="0" max="255" step="1" value="${l.opacidade ?? 255}" style="flex:1">
-          <input type="number" id="layerprops-opacidade-num" min="0" max="255" step="1" value="${l.opacidade ?? 255}" style="width:4.4em">
-        </label>
-        <div class="map-panel-actions" style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px;">
-          <button type="button" class="btn secondary sm" id="layerprops-cancelar">Cancelar</button>
-          <button type="button" class="btn sm" id="layerprops-ok">OK</button>
-        </div>
-      </div>
-    `;
 };
 
 /** MapView._renderComponentsEditor -- folha cheia "Componentes" de um

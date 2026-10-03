@@ -22,7 +22,9 @@ class PilarMeshBuilder {
   _buildPilarMesh(obj, perfil, baseY, wireframe, colWireframe) {
     const THREE = this.THREE;
     const w = perfil.w || 1.2, d = perfil.d || 0.6;
-    const h = this.mapData?.alturaPiso || 2.8;
+    // [58ª/59ª rodada] CORRIGIDO -- a altura (obj.altura: painel 2D/3D e Transformação) SEMPRE vale quando existe; alturaPiso é só o valor inicial (Mapping.addObject) / fallback sem altura.
+    const hObj = Number(obj.altura);
+    const h = (isFinite(hObj) && hObj > 0) ? hObj : (this.mapData?.alturaPiso || 2.8);
     const mat = wireframe
       ? new THREE.MeshBasicMaterial({ color: colWireframe, wireframe: true })
       : new THREE.MeshLambertMaterial({ color: perfil.color });

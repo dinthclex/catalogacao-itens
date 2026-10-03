@@ -20,6 +20,14 @@ function _iconSvg(inner) {
 }
  
 const ICON_LIBRARY = {
+  // [01/10/2026] NOVO (37ª rodada) — ícones dos tipos 'folha-papel' e 'luminaria-mesa' (HTML enviado pelo usuário).
+  'folha-papel': { label: 'Folha de Papel', svg: _iconSvg(`
+    <path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>
+    <line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="14" x2="15" y2="14"/><line x1="9" y1="17" x2="13" y2="17"/>
+  `) },
+  'luminaria-mesa': { label: 'Luminária de mesa', svg: _iconSvg(`
+    <path d="M7 4l8 0 3 7H4z"/><line x1="11" y1="11" x2="11" y2="19"/><ellipse cx="11" cy="20" rx="5" ry="1.4"/>
+  `) },
   gabinete: { label: 'Gabinete / CPU', svg: _iconSvg(`
     <rect x="7" y="2.5" width="8" height="19" rx="1.2"/>
     <circle cx="11" cy="5.5" r="0.6" fill="currentColor" stroke="none"/>
@@ -340,6 +348,27 @@ const MAP_OBJECT_EXTRAS = {
     <path d="M4 10.7 h2 v2.6 h-2z M8 10.7 h2 v2.6 h-2z M12 10.7 h2 v2.6 h-2z M16 10.7 h2 v2.6 h-2z"/>
     <path d="M3 18.4 c1.5 -3 3 -3 4.5 0" />
   `) },
+  // [28/09/2026 UTC] NOVO -- 🖥️ Simulador de Montagem e Manutenção de Hardware (ver
+  // js/hardware-catalog.js/js/hardware-sim.js). 4 chassis: PC de mesa, Notebook, Workstation e
+  // Servidor (rack). Ícones simples (silhueta da carcaça) -- a montagem/peças reais são 3D.
+  pc_gabinete: { label: 'PC de mesa (gabinete)', svg: _iconSvg(`
+    <rect x="7" y="2.5" width="8" height="19" rx="1.2"/>
+    <circle cx="11" cy="5.5" r="0.6" fill="currentColor" stroke="none"/>
+    <line x1="8.5" y1="9" x2="13.5" y2="9"/><line x1="8.5" y1="12" x2="13.5" y2="12"/>
+  `) },
+  notebook: { label: 'Notebook', svg: _iconSvg(`
+    <rect x="3" y="5" width="18" height="11" rx="1"/>
+    <path d="M1.5 19h21l-1.5-3h-18z"/>
+  `) },
+  workstation: { label: 'Workstation', svg: _iconSvg(`
+    <rect x="6" y="2.5" width="12" height="19" rx="1.2"/>
+    <line x1="8.5" y1="7" x2="15.5" y2="7"/><line x1="8.5" y1="10" x2="15.5" y2="10"/><line x1="8.5" y1="13" x2="15.5" y2="13"/>
+  `) },
+  servidor_rack: { label: 'Servidor (rack)', svg: _iconSvg(`
+    <rect x="1.5" y="8" width="21" height="8" rx="0.8"/>
+    <circle cx="4" cy="12" r="0.9" fill="currentColor" stroke="none"/>
+    <path d="M7.5 10.4h1.6v1.6H7.5zM10.5 10.4h1.6v1.6h-1.6zM13.5 10.4h1.6v1.6h-1.6z"/>
+  `) },
   guia_h1: { label: 'Guia de cabos horizontal 1U', svg: _iconSvg(`
     <rect x="1.5" y="8.5" width="21" height="7" rx="0.8"/>
     <path d="M5 8.5v7M9 8.5v7M13 8.5v7M17 8.5v7"/>
@@ -525,6 +554,10 @@ const MAP_OBJECT_EXTRAS = {
   // engine3d.js `_getProceduralFloorTexture`) — só muda o traço mais denso
   // (modular, quadrados menores) do mais esparso com um círculo central
   // (gesso, sugerindo UMA rodela de acesso).
+  'telha': { label: 'Telha (telhado de 2 águas)', svg: _iconSvg(`
+    <path d="M2 12 L12 4 L22 12"/><path d="M4 12 v7 h16 v-7"/>
+    <path d="M7 15 q1.5 -2 3 0 q1.5 2 3 0 q1.5 -2 3 0"/>
+  `) },
   'teto-modular': { label: 'Teto modular (escritório)', svg: _iconSvg(`
     <rect x="3" y="3" width="18" height="18" rx="1"/>
     <line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>

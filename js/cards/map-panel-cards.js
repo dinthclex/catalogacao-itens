@@ -23,7 +23,7 @@ window.MapPanelCards.debugWindow = () => `
         <details data-sec="win" open>
           <summary>Janelas/painéis (<span id="map-debug-win-count">0</span>)</summary>
           <div class="map-debug-tablewrap" id="map-debug-win-wrap"><table class="map-debug-table">
-            <thead><tr><th>Nome</th><th>Existe</th><th>Estado</th><th>Posição X</th><th>Posição Z</th><th>Visibilidade</th></tr></thead>
+            <thead><tr><th>Nome</th><th>Existe</th><th>Estado</th><th>Posição X</th><th>Posição Z</th><th>Visibilidade</th><th title="Quantas vezes a janela foi criada/recriada desde que a página carregou">Reconstruções</th></tr></thead>
             <tbody id="map-debug-win-body"></tbody>
           </table></div>
         </details>
@@ -89,8 +89,48 @@ window.MapPanelCards.objectPickerPanel = () => `
              com o modo "Livre" desabilitado enquanto há busca (arrastar pra reordenar não faz
              sentido numa lista já filtrada) -- ver mesmo trecho. -->
         <div class="map-obj-picker-busca-row" style="padding:6px 10px 0 10px">
-          <input type="search" id="map-obj-picker-busca" placeholder="🔎 Buscar objeto…" style="width:100%; font-size:12px; box-sizing:border-box">
+          <!-- [01/10/2026] NOVO — "coloque um botão, ao lado do campo de busca, que faz abrir uma janela em que há uma explicação de como pode ser feita a busca, com exemplos." -->
+          <div style="display:flex; gap:6px; align-items:center">
+            <input type="search" id="map-obj-picker-busca" placeholder="🔎 Buscar objeto…" style="flex:1; min-width:0; font-size:12px; box-sizing:border-box">
+            <button type="button" class="icon-btn sm" id="map-obj-picker-busca-ajuda" title="Como buscar — explicação e exemplos (mesa;gabinete, aspas, -excluir, curinga...)">❓</button>
+          </div>
+        </div>
+        <!-- [30/09/2026] NOVO (12ª rodada) — pedido verbatim: "Deve haver uma opção para o momento da busca. Esta opção deve alternar entre o método atual e um método que faz aparecer só os títulos com o(s) objeto(s) correspondente(s), sem deixar um grande 'espaço em branco'." Ver mapview.js _openObjectPickerPanel (buscaModo). -->
+        <div class="map-obj-picker-busca-modo-row" style="padding:4px 10px 0 10px; display:flex; align-items:center; gap:6px">
+          <label for="map-obj-picker-busca-modo" style="font-size:11px; color:var(--text-dim); white-space:nowrap">Ao buscar:</label>
+          <select id="map-obj-picker-busca-modo" style="flex:1; font-size:12px">
+            <option value="atual">Manter posições (os outros ficam invisíveis)</option>
+            <option value="compacto">Compactar (só os correspondentes)</option>
+          </select>
         </div>
         <div class="map-obj-picker-grid" id="map-obj-picker-grid"></div>
       </div>
     `;
+
+
+/** [01/10/2026] NOVO — conteúdo da janela de ajuda da busca de Objetos (botão ❓ ao lado do campo de busca; ver
+ *  `MapView._openBuscaObjetosAjuda`). A sintaxe descrita aqui é a de `compilarBuscaMulti` (mapview.js). */
+window.MapPanelCards.buscaObjetosAjuda = () => `
+      <div style="padding:14px 16px; max-width:460px; width:92vw; max-height:84vh; overflow:auto; font-size:13px; line-height:1.5">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px"><b style="flex:1; font-size:14px">🔎 Como buscar objetos</b><button type="button" class="icon-btn sm" id="busca-ajuda-fechar" title="Fechar">✕</button></div>
+        <p style="margin:0 0 8px; color:var(--text-dim)">A busca ignora maiúsculas e acentos e olha o nome do objeto. Combine as regras abaixo como quiser.</p>
+        <table style="width:100%; border-collapse:collapse; font-size:12.5px">
+          <thead><tr><th align="left" style="padding:4px 6px; border-bottom:1px solid var(--border)">Digite</th><th align="left" style="padding:4px 6px; border-bottom:1px solid var(--border)">O que acontece</th></tr></thead>
+          <tbody>
+            <tr><td style="padding:4px 6px"><code>mesa</code></td><td style="padding:4px 6px">Objetos cujo nome contém "mesa" (também acha "Mesa redonda", "Escrivaninha mesa"...).</td></tr>
+            <tr><td style="padding:4px 6px"><code>mesa;gabinete</code></td><td style="padding:4px 6px"><b>OU</b>: mostra os que têm "mesa" <u>ou</u> "gabinete". Também vale vírgula ou barra vertical: <code>mesa,gabinete</code> · <code>mesa|gabinete</code>.</td></tr>
+            <tr><td style="padding:4px 6px"><code>mesa redonda</code></td><td style="padding:4px 6px"><b>E</b>: o nome precisa ter as <u>duas</u> palavras, em qualquer ordem.</td></tr>
+            <tr><td style="padding:4px 6px"><code>"mesa redonda"</code> ou <code>'mesa redonda'</code></td><td style="padding:4px 6px"><b>Frase</b>: aspas duplas ou simples juntam as palavras na ordem digitada. <code>"gabinete"</code> equivale a <code>gabinete</code>.</td></tr>
+            <tr><td style="padding:4px 6px"><code>mesa -redonda</code></td><td style="padding:4px 6px"><b>Excluir</b>: com "mesa", mas <u>sem</u> "redonda". Também <code>!redonda</code>.</td></tr>
+            <tr><td style="padding:4px 6px"><code>ga*ete</code></td><td style="padding:4px 6px"><b>Curinga</b> <code>*</code>: qualquer trecho de texto no lugar do asterisco.</td></tr>
+            <tr><td style="padding:4px 6px"><code>m?sa</code></td><td style="padding:4px 6px"><b>Curinga</b> <code>?</code>: exatamente um caractere no lugar da interrogação.</td></tr>
+          </tbody>
+        </table>
+        <p style="margin:10px 0 4px"><b>Exemplos combinados</b></p>
+        <ul style="margin:0 0 8px 18px; padding:0">
+          <li><code>mesa;cadeira -gamer</code> — mesas, ou cadeiras que não sejam "gamer".</li>
+          <li><code>"rack 42u";switch</code> — a frase "rack 42u", ou qualquer "switch".</li>
+          <li><code>cam*;"ponto de acesso"</code> — tudo que começa com "cam" (câmera, camera...), ou a frase "ponto de acesso".</li>
+        </ul>
+        <p style="margin:0; color:var(--text-dim)">O texto digitado fica guardado enquanto a página não for recarregada (F5), mesmo fechando e abrindo a janela Objetos. Use o seletor "Ao buscar" para escolher entre manter as posições ou compactar o resultado.</p>
+      </div>`;

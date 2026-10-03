@@ -33,6 +33,7 @@
         window.Icons.MAP_OBJECT_EXTRAS[tipo] = { label: d.nome, svg: d.svg || SVG_PADRAO };
       }
       window.ObjCategorias?.definir(tipo, d.categoria);
+      if (d.tipoUso) window.ObjCategorias?.definirTipoUso?.(tipo, d.tipoUso);   // [83ª] 'basico' | 'especial'
     },
     /** Marca só a data de criação de um tipo que não vem do manifesto (modelo criado em "Criar novo modelo",
      *  objeto carregado com "Testar agora"), para também ganhar o selo "novo". */

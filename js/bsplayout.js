@@ -1599,8 +1599,44 @@ const BSPLayout = {
   // CONTRATO PADRÃO App.views (mount/unmount) — ver app.js `navigate()`.
   // ============================================================
 
+  // ---------- FOCO DE PAINEL (teclado) ----------
+  // [53ª rodada] Pedido: "No Workspace, cada tela deve assumir o foco. Para não acontecer de duas telas executarem a ação de uma tecla pressionada" (ex.: seta
+  // para cima/baixo no 'Ver em 3D' movendo o objeto selecionado na 'Planta baixa'). O painel (folha) do último clique/foco é o ATIVO; quem trata teclado
+  // (MapView, View3D) pergunta `containerTemFoco(seuContainer)` e ignora a tecla se outro painel está ativo. Fora do Workspace (modo Clássico, 1 painel) sempre vale.
+  _focoLeaf: null,
+  _instalarFoco(root) {
+    if (this._focoListeners) return;
+    const marcar = (e) => { const leaf = e.target && e.target.closest ? e.target.closest('.bsp-leaf') : null; if (leaf && root.contains(leaf)) this._definirFoco(leaf); };
+    root.addEventListener('pointerdown', marcar, true);
+    root.addEventListener('focusin', marcar, true);
+    root.addEventListener('wheel', marcar, { capture: true, passive: true });
+    this._focoListeners = { root, marcar };
+  },
+  _removerFoco() {
+    const l = this._focoListeners; if (!l) return;
+    l.root.removeEventListener('pointerdown', l.marcar, true); l.root.removeEventListener('focusin', l.marcar, true); l.root.removeEventListener('wheel', l.marcar, true);
+    this._focoListeners = null; this._focoLeaf = null;
+  },
+  _definirFoco(leaf) {
+    if (this._focoLeaf === leaf) return;
+    const ant = this._focoLeaf; this._focoLeaf = leaf;
+    this._root && this._root.querySelectorAll('.bsp-leaf.bsp-leaf-foco').forEach((l) => l.classList.remove('bsp-leaf-foco'));
+    leaf.classList.add('bsp-leaf-foco');
+    // quem perdeu o foco solta as teclas seguradas (senão a câmera/personagem continuaria "andando" por uma tecla que o outro painel recebeu o keyup)
+    try { document.dispatchEvent(new CustomEvent('bsp-foco-mudou', { detail: { ganhou: leaf, perdeu: ant } })); } catch (e) { /* ignora */ }
+  },
+  /** true se o teclado deve valer para o editor montado em `containerEl` (painel ativo, ou sem Workspace dividido). */
+  containerTemFoco(containerEl) {
+    if (!this._root || !containerEl || !containerEl.closest) return true;
+    const leaf = containerEl.closest('.bsp-leaf');
+    if (!leaf) return true;
+    if (!this._focoLeaf || !this._focoLeaf.isConnected) return true;   // nada clicado ainda: não bloqueia ninguém
+    return this._focoLeaf === leaf;
+  },
+
   async mount(container) {
     this._root = container;
+    this._instalarFoco(container);
     container.innerHTML = '<div class="bsp-loading">Carregando workspace…</div>';
     await this._loadLayoutsList();
     this._tree = JSON.parse(JSON.stringify(this._activeLayout().tree));
@@ -1626,6 +1662,7 @@ const BSPLayout = {
   },
 
   unmount() {
+    this._removerFoco();
     this._unmountAll(this._tree);
     this._root = null;
     this._tree = null;

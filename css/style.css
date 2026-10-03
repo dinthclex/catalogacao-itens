@@ -872,15 +872,11 @@ body:not(.view-mapa-planta) .bottombar-mapa { display: none; }
    pro início da próxima) — mais previsível que confiar no wrap automático
    por conteúdo, que quebraria pelos ÚLTIMOS itens (da direita), não pelos
    PRIMEIROS (esquerda) como este pedido exige. */
-@media (max-width: 780px) {
-  #bbm-row-main { flex-wrap: wrap; row-gap: 6px; }
-  .bbm-row-left { flex-basis: 100%; }
-}
-@media (max-width: 480px) {
-  #bbm-row-main { flex-wrap: wrap; row-gap: 6px; }
-  .bbm-row-left { flex-basis: 100%; }
-  .bbm-row-nav { flex-basis: 100%; }
-}
+/* [90ª rodada] Reflow do rodapé: [unidade | X: Y: | mensagens] = bloco da ESQUERDA (nunca quebra por dentro enquanto couber na largura); [◀ ▶ Itens | zoom] = CAUDA (.bbm-row-tail).
+   Ao estreitar, a cauda inteira desce para a linha de baixo (a quebra vem depois do conjunto da esquerda, e a linha de baixo começa no ◀); só se nem a cauda couber ela quebra por dentro. */
+#bbm-row-main { flex-wrap: wrap; row-gap: 6px; justify-content: space-between; }
+#bbm-row-main > .bbm-row-left { flex: 0 1 auto; max-width: 100%; }
+.bbm-row-tail { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; flex-wrap: wrap; row-gap: 6px; max-width: 100%; }
 
 .view-pad { padding: 12px 14px 24px; }
 
@@ -2089,7 +2085,12 @@ datalist {}
    nunca se confundir com o badge de modo/ferramenta (.map2d-modelabel, no
    canto inferior-esquerdo). */
 .map-photo-placement-banner {
-  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 11;
+  /* [30/09/2026] MUDADO -- pedido verbatim: "mova a mensagem [...] um pouco mais para baixo de modo
+     que dê para ver a régua horizontal (quando ela estiver habilitada), no mapa 2D." A régua
+     horizontal desenhada no topo do canvas (ver mapview.js _drawRulers, const BAND = 22 -- a faixa
+     tem 22px de altura) ficava tampada por esta faixa, que nascia colada no topo (top: 10px). Agora
+     nasce mais abaixo, deixando a régua sempre visível quando ligada. */
+  position: absolute; top: 34px; left: 50%; transform: translateX(-50%); z-index: 11;
   display: flex; align-items: center; gap: 10px;
   background: rgba(10,12,16,.9); border: 1px solid #ffd166; border-radius: 999px;
   padding: 6px 8px 6px 14px; font-size: 12.5px; color: #ffd166; backdrop-filter: blur(4px);
@@ -2564,10 +2565,20 @@ datalist {}
 }
 .map-obj-picker-grid .map-obj-pick-group-label:first-child { margin-top: 0; }
 .map-obj-picker-grid .map-obj-pick-group-label .cat-ic { font-size: 13px; line-height: 1; }
+/* [83ª rodada] subdivisão de cada categoria: "Mobiliário Padrão" (básicos) × "Objetos Especiais" */
+.map-obj-picker-grid .map-obj-pick-subgroup-label {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 5px;
+  margin: 2px 0 0 10px; padding: 1px 6px; font-size: 10.5px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase;
+  color: var(--text-dim, #9aa4b2); border-bottom: 1px dashed color-mix(in srgb, var(--text-dim, #9aa4b2) 45%, transparent);
+}
+.map-obj-picker-grid .map-obj-pick-subgroup-label .uso-ic { font-size: 11px; line-height: 1; }
+.map-obj-picker-grid .map-obj-pick-uso-especial { color: #e8b54a; border-bottom-color: color-mix(in srgb, #e8b54a 55%, transparent); }
 /* [21/09/2026] NOVO -- busca por nome (campo #map-obj-picker-busca): esconde SEM tirar do fluxo do
    grid (visibility, não display) -- mesmo número de células/colunas de sempre, sem distorcer o
    tamanho dos itens que sobram visíveis (ver comentário grande em mapview.js renderGrid). */
 .map-obj-picker-grid .map-obj-pick-oculto { visibility: hidden; pointer-events: none; }
+/* [30/09/2026] NOVO (12ª rodada) — busca no modo 'compacto': item sem correspondência some e libera o espaço (sem 'buraco' em branco). */
+.map-obj-picker-grid .map-obj-pick-oculto-compacto { display: none; }
 .map-obj-picker-grid .map-obj-pick-item.map-obj-pick-match { border-color: #6cc0ff; box-shadow: 0 0 0 1px rgba(108,192,255,0.5); }
 .map-obj-pick-item.map-obj-pick-novo { position: relative; }
 .map-obj-novo {
@@ -3711,6 +3722,21 @@ datalist {}
 .v3d-lockstate.locked { border: 1px solid rgba(70,220,140,.4); }
 .v3d-lockstate.locked .v3d-lockstate-hint { display: none; }
 @keyframes v3dLockHintPulse { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
+/* [30/09/2026] NOVO — botão "ℹ️ Informações" (duplo clique num objeto em
+   Modo Navegação, ver view3d.js `_armarBotaoInformacoes3D`). Posicionado
+   logo abaixo do crosshair central (que fica no centro exato da tela) —
+   `pointer-events:auto` (diferente do `.v3d-lockstate` acima, que é só
+   decorativo) porque este É clicável. z-index alto o bastante pra ficar
+   sempre por cima do canvas/HUD, igual ao resto dos overlays desta tela. */
+.v3d-info-btn {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, 28px);
+  z-index: 41; pointer-events: auto; cursor: pointer;
+  background: rgba(20,24,30,.88); color: #e8ecf2; border: 1px solid rgba(255,255,255,.25);
+  border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 600;
+  box-shadow: 0 2px 10px rgba(0,0,0,.35);
+  transition: opacity .15s ease;
+}
+.v3d-info-btn:hover { background: rgba(40,46,56,.92); border-color: rgba(255,255,255,.4); }
 /* [15/09/2026] NOVO -- pedido verbatim (Parte B, ver Modelador/view3d.js
    `_renderFotoCamOverlay`): "Sair da câmera" que
    antes vivia dentro da bandeja `.v3d-fotocam-overlay-controls (removida
@@ -4643,7 +4669,21 @@ datalist {}
   border: 1.5px dashed rgba(255,255,255,.28); margin-bottom: 4px;
   color: rgba(255,255,255,.75); font-size: 12.5px;
 }
-.v3d-objcat-import-btn { display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer; }
+/* [30/09/2026] CORRIGIDO — pedido verbatim: "faça o botão '📥 Importar
+   objeto' ficar com o mesmo fundo dos demais botões, para dar o mesmo
+   contraste." CAUSA: as outras linhas (`.v3d-objcat-row`, ex. cada tipo de
+   objeto/Câmera) são `<div>`s sem fundo próprio (só ganham fundo no
+   :hover/.active, herdado do painel escuro por trás) — mas este é um
+   `<button>` de verdade, que o navegador estiliza com o fundo/borda padrão
+   de botão do sistema (cinza claro), destoando visualmente das demais.
+   Zera esse estilo nativo pra ficar idêntico (mesmo fundo "nenhum" em
+   repouso, mesmo hover) — só o texto/ícone continuam diferentes. */
+.v3d-objcat-import-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; cursor: pointer;
+  background: none; border: none; margin: 0; padding: 0;
+  color: inherit; font: inherit; text-align: left;
+}
+.v3d-objcat-import-btn:hover { background: rgba(255,255,255,.08); }
 
 /* [15/09/2026] NOVO -- ver comentário grande em `#v3d-objcat-tab-
    propriedades`/`_renderPropriedadesPanel` (view3d.js). Mesmo padrão visual
@@ -7530,7 +7570,7 @@ body.view3d-aberto .history-widget:not(.always) { display: none; }
    `hidden` (atributo HTML, não classe) esconde/mostra — ver JS. */
 .map2d-forma-prop-btn {
   position: fixed;
-  z-index: 70;
+  z-index: 29;   /* [91ª] abaixo de TODA janela/cabeçalho/rodapé (janelas em foco ficam sempre acima destes botões do cenário) */
   transform: translate(-50%, -50%);
   width: 30px;
   height: 30px;
@@ -8243,3 +8283,27 @@ body.classic-mode-active .settings-section.only-workspace{display:none !importan
 .mc-layout-grid + .bl-bar { align-items: flex-start; max-width: 320px; }
 .v3d-hotbar-preview + .bl-bar { max-width: 520px; }
 .v3d-hotbar-preview { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; background: rgba(23,27,33,.6); border-radius: 8px; }
+
+/* [46ª rodada] Destaque do elemento em modo "Definir posição na tela": a bússola (.v3d-compass-ring) tem 0×0 px,
+   então o destaque vai no círculo dela (.v3d-compass-border): contorno âmbar pulsante + brilho + selo "✋ arraste". */
+.mapconfig-posicionador-alvo { cursor: grab; z-index: 2147483000 !important; }
+.mapconfig-posicionador-alvo .v3d-compass-border {
+  border: 3px dashed #ffb300 !important;
+  background: rgba(255,179,0,.14);
+  animation: mc-posicionador-pulso 1.1s ease-in-out infinite;
+}
+.mapconfig-posicionador-alvo::after {
+  content: '✋ arraste'; position: absolute; left: 0; top: 0; transform: translate(-50%, 78px);
+  background: #ffb300; color: #1a1200; font: 700 11px system-ui, sans-serif; padding: 2px 8px; border-radius: 9px; white-space: nowrap; pointer-events: none;
+}
+/* demais elementos posicionáveis (ex.: relógio do mundo), que têm tamanho próprio */
+.mapconfig-posicionador-alvo:not(.v3d-compass-ring) { outline: 3px dashed #ffb300; outline-offset: 4px; animation: mc-posicionador-pulso 1.1s ease-in-out infinite; }
+.mapconfig-posicionador-alvo:not(.v3d-compass-ring)::after { transform: translate(0, 100%); left: 50%; margin-left: -30px; top: 6px; }
+@keyframes mc-posicionador-pulso {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(255,179,0,.18), 0 0 12px 3px rgba(255,179,0,.5); }
+  50% { box-shadow: 0 0 0 9px rgba(255,179,0,.30), 0 0 28px 10px rgba(255,179,0,.9); }
+}
+@media (prefers-reduced-motion: reduce) { .mapconfig-posicionador-alvo .v3d-compass-border, .mapconfig-posicionador-alvo { animation: none !important; } }
+
+/* [53ª rodada] Workspace: painel com o foco do teclado (o último em que se clicou) ganha um contorno discreto. */
+.bsp-leaf.bsp-leaf-foco { box-shadow: inset 0 0 0 1px rgba(79,209,255,.55); }

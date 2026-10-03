@@ -377,7 +377,14 @@ const AmbientePhotos = {
     this._deletingMedida = false;
     this._medidaDraft = null;
     this._medidaDragging = null;
-    this._tracosVisiveis = !_opModoConferencia;
+    // [30/09/2026] MUDADO — pedido verbatim: "No modo de operação do app
+    // 'Mapeamento de ambientes' [...] no botão lateral direito, a única
+    // ferramenta que deve ficar ativa é o 'Medidas'. Atualmente, também,
+    // está ativo o 'Traço guia'." Revisa a decisão de 22/09/2026 (comentário
+    // grande acima) só pra "Traço guia": nasce sempre desligado agora (nos
+    // dois modos de operação — Conferência já era `false`), "Medidas"
+    // continua como estava (`!_opModoConferencia`, ligado em Mapeamento).
+    this._tracosVisiveis = false;
     this._placingTraco = false;
     this._deletingTraco = false;
     this._tracoDraft = null;

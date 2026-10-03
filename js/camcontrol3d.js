@@ -157,7 +157,7 @@
       [gimbal, panel].forEach((el) => el.addEventListener(ev, (e) => { e.stopPropagation(); if (ev === 'contextmenu') e.preventDefault(); }, { passive: false }));
     });
 
-    let fino = 1;   // ajuste fino: 1 = normal; 10 / 100 = a mesma passada do mouse move 10x / 100x mais devagar
+    let fino = 10;   // [30/09/2026] padrão pedido: x10 (era 1x) -- ajuste fino: 1 = normal; 10 / 100 = a mesma passada do mouse move 10x / 100x mais devagar
     // Campos = "botão triplo" (ModelerUI._createNumField): setas ◄ ►, arrastar no meio, clicar no meio para digitar.
     // `step`/`minDecimals` são getters: acompanham o ajuste fino ao vivo (o widget lê cfg.step a cada clique/arraste).
     const campos = {};
@@ -190,8 +190,9 @@
     };
     const tgl = document.createElement('div');
     tgl.className = 'cc3d-tgl';
-    tgl.innerHTML = '<button type="button" data-t="painel" title="Mostrar/ocultar a tela do Controle de câmera (gimbal + campos)">🎥 Controle</button><button type="button" data-t="aneis" title="Mostrar/ocultar o anel e as barras de rotação">◎ Anéis</button><button type="button" data-t="fino" title="Ajuste fino: alterna entre normal, 10× e 100× mais devagar (vale para anel, barras, gimbal e botões)">🎯 Fino ×1</button>';
+    tgl.innerHTML = '<button type="button" data-t="painel" title="Mostrar/ocultar a tela do Controle de câmera (gimbal + campos)">🎥 Controle</button><button type="button" data-t="aneis" title="Mostrar/ocultar o anel e as barras de rotação">◎ Anéis</button><button type="button" data-t="fino" title="Ajuste fino: alterna entre normal, 10× e 100× mais devagar (vale para anel, barras, gimbal e botões)">🎯 Fino ×10</button>';
     document.body.appendChild(tgl);
+    tgl.querySelector('[data-t="fino"]').classList.toggle('on', fino > 1);   // [30/09/2026] reflete o novo padrão x10 já no 1º render
     const rings = document.createElement('div');
     rings.className = 'cc3d-rings';
     rings.innerHTML = `

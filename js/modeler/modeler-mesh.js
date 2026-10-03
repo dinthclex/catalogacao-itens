@@ -1815,20 +1815,192 @@ const ModelerMesh = {
     return { vertices, edges: this._edgesFromFaces(faces), faces };
   },
 
-  /** Texto — "é um texto no 3D desenhado com faces" (pedido verbatim).
-   *  DECISÃO DOCUMENTADA (01/09/2026): gerar o CONTORNO REAL de cada letra
-   *  (triangulação de fonte vetorial) é um recurso grande por si só (fora de
-   *  escopo desta rodada, junto dos outros "itens grandes" ainda maiores);
-   *  em vez de nada, esta versão insere uma PLAQUINHA sólida (caixa achatada
-   *  e comprida, extrudada) do tamanho do texto digitado — um placeholder
-   *  "desenhado com faces" de verdade (não é só um ícone/sprite 2D colado),
-   *  editável/redimensionável no Modelador como qualquer outra malha, só que
-   *  sem o desenho vetorial de cada letra ainda. `texto` só é usado pro
-   *  TAMANHO (comprimento aproximado da string) — não há glifo renderizado. */
-  textoPlaceholderMesh(texto = 'Texto', altura = 0.3, profundidade = 0.06) {
-    const largura = Math.max(0.3, (String(texto).length || 1) * 0.18);
-    return this.defaultCubeMesh(largura, profundidade, altura, true);
+  /** Texto 3D — [67ª rodada] substitui a "plaquinha" antiga por texto de verdade, simulando as propriedades do objeto Text do Blender.
+   *  Pedido verbatim: "Atualize o objeto Texto [...] O comportamento deve simular as propriedades do objeto Text do Blender."
+   *
+   *  PARÂMETROS (`p`; todos opcionais, defaults em `TEXTO_DEFAULTS`):
+   *   - Forma:       curveSegments (1..64) — pontos por curva (Bézier quadrática) de cada letra.
+   *   - Geometria:   offset (dilata/contrai o contorno de cada letra, em metros, mantendo a posição relativa); depth (extrusão, metros);
+   *                  bevelEnabled / bevelThickness / bevelSegments (chanfro arredondado nas duas faces).
+   *   - Fonte:       size (altura do "em", metros); shear (inclinação/itálico: x += shear·y por linha, em torno da linha de base).
+   *   - Parágrafo:   alignH 'left'|'center'|'right'|'justify'; alignV 'top'|'center'|'bottom'; letterSpacing, wordSpacing (metros, somados ao
+   *                  avanço de cada letra/espaço), lineHeight (multiplicador do espaço entre linhas); offsetX/offsetY (desloca o BLOCO de texto
+   *                  dentro da caixa).
+   *   - Caixa:       boxWidth/boxHeight — 0 = automático (largura: linha mais larga, sem quebra automática; altura: altura do bloco);
+   *                  > 0 = quebra de linha por palavra ao atingir a largura (e linhas que ultrapassam a altura da caixa são omitidas);
+   *                  boxOffsetX/boxOffsetY — movem a caixa inteira, independente do offset do parágrafo.
+   *  GEOMETRIA: como no Blender, o texto fica DEITADO (letras no plano horizontal XZ, legível visto de cima com o norte do mapa para cima) e a
+   *  profundidade (extrusão) vai na vertical, eixo Y (±depth/2). Dentro do layout (x → direita, y → topo do texto) a linha de base da 1ª linha fica em
+   *  boxOffsetY e o canto superior-esquerdo da caixa em (boxOffsetX, boxOffsetY + ascendente); no mundo, y do layout vira −Z. Para ficar "em pé", gire
+   *  o objeto 90° em X pela Transformação. O motor 3D reassenta a base no chão.
+   *  Fonte: `window.ModelerFont` (DejaVu Sans, js/modeler/modeler-font.js). Triangulação das tampas: `THREE.ShapeUtils` (window.THREE, carregado
+   *  junto do motor 3D); sem THREE devolve a plaquinha antiga. Devolve { vertices, edges, faces } como todo gerador deste arquivo. */
+  TEXTO_DEFAULTS: {
+    texto: 'Texto', curveSegments: 8, offset: 0, depth: 0.06, bevelEnabled: false, bevelThickness: 0.01, bevelSegments: 3,
+    size: 0.3, shear: 0, alignH: 'center', alignV: 'center', letterSpacing: 0, wordSpacing: 0, lineHeight: 1, offsetX: 0, offsetY: 0,
+    boxWidth: 0, boxHeight: 0, boxOffsetX: 0, boxOffsetY: 0,
   },
+  textoMesh(params) {
+    const P = Object.assign({}, this.TEXTO_DEFAULTS, params || {});
+    const THREE = window.THREE, Font = window.ModelerFont;
+    const num = (v, d) => { const n = Number(v); return isFinite(n) ? n : d; };
+    const size = Math.max(0.005, num(P.size, 0.3)), unit = size / 1000;
+    const seg = Math.max(1, Math.min(64, Math.round(num(P.curveSegments, 8))));
+    const depth = Math.max(0.001, num(P.depth, 0.06));
+    const bevelOn = !!P.bevelEnabled;
+    const bevel = bevelOn ? Math.max(0, Math.min(num(P.bevelThickness, 0.01), depth / 2 - 1e-4)) : 0;
+    const bevSeg = bevelOn && bevel > 0 ? Math.max(1, Math.min(16, Math.round(num(P.bevelSegments, 3)))) : 0;
+    const offset = num(P.offset, 0), shear = num(P.shear, 0);
+    const letterSp = num(P.letterSpacing, 0), wordSp = num(P.wordSpacing, 0), lineH = Math.max(0.1, num(P.lineHeight, 1));
+    let texto = String(P.texto == null ? '' : P.texto).replace(/\t/g, '    ').slice(0, 400);
+    if (!Font || !texto.trim()) {
+      const largura = Math.max(0.3, (String(texto).length || 1) * 0.18);
+      return this.defaultCubeMesh(largura, depth, size, true);
+    }
+    const ShapeUtils = THREE && THREE.ShapeUtils, V2 = THREE && THREE.Vector2; // sem THREE (só o 2D carregado): sem tampas, mas contornos/medidas corretos
+
+    // ---------- 1) Layout: palavras → linhas (quebra automática só se boxWidth > 0) ----------
+    const adv = (ch) => Font.segmentos(ch).a * unit;
+    const boxW = Math.max(0, num(P.boxWidth, 0)), boxH = Math.max(0, num(P.boxHeight, 0));
+    const spaceAdv = adv(' ') + wordSp;
+    const medePalavra = (w) => { let t = 0; for (let i = 0; i < w.length; i++) t += adv(w[i]) + (i < w.length - 1 ? letterSp : 0); return t; };
+    const paragrafos = texto.split('\n');
+    const linhas = []; // { palavras:[string], w, ultima:boolean }
+    paragrafos.forEach((par) => {
+      const palavras = par.split(' ');
+      let atual = [], largAtual = 0;
+      const fecha = (ultima) => { linhas.push({ palavras: atual, w: largAtual, ultima }); atual = []; largAtual = 0; };
+      palavras.forEach((w) => {
+        const ww = medePalavra(w);
+        if (atual.length && boxW > 0 && largAtual + spaceAdv + ww > boxW + 1e-9) fecha(false);
+        largAtual += (atual.length ? spaceAdv : 0) + ww; atual.push(w);
+      });
+      fecha(true);
+    });
+    const lhPx = size * 1.2 * lineH;               // distância entre linhas de base
+    const ascent = size * 0.76;                    // do topo da caixa até a 1ª linha de base
+    let visiveis = linhas;
+    if (boxH > 0) { const maxL = Math.max(1, Math.floor((boxH - (lhPx - size * 1.2) - size * 1.2) / lhPx) + 1); visiveis = linhas.slice(0, maxL); }
+    const larguraAuto = visiveis.reduce((m, l) => Math.max(m, l.w), 0);
+    // [69ª] ALINHAMENTO relativo à ORIGEM do objeto (+ deslocamento da caixa). Caixa automática (0): esquerda = texto começa na origem, centro = centrado
+    // nela, direita = termina nela; topo/centro/base idem na vertical. Caixa > 0: a caixa se estende da origem para a direita e para baixo, e alinha dentro dela.
+    const W = boxW > 0 ? boxW : larguraAuto;      // largura usada pelo "justificado"
+    const Wref = boxW > 0 ? boxW : 0;
+    const blocoH = size * 1.2 + (visiveis.length - 1) * lhPx;
+    const Href = boxH > 0 ? boxH : 0;
+    const x0 = num(P.boxOffsetX, 0), yTopo = num(P.boxOffsetY, 0); // canto superior-esquerdo da caixa
+    const dyV = P.alignV === 'center' ? -(Href - blocoH) / 2 : P.alignV === 'bottom' ? -(Href - blocoH) : 0;
+    const offX = num(P.offsetX, 0), offY = num(P.offsetY, 0);
+
+    // ---------- 2) Contorno de cada letra (curvas achatadas em `seg` passos) ----------
+    const contornosDe = (ch) => {
+      const g = Font.segmentos(ch), contornos = []; let cur = null, ult = null;
+      g.segs.forEach((sg) => {
+        if (sg[0] === 'M') { cur = [[sg[1], sg[2]]]; ult = [sg[1], sg[2]]; }
+        else if (sg[0] === 'L') { cur.push([sg[1], sg[2]]); ult = [sg[1], sg[2]]; }
+        else if (sg[0] === 'Q') { for (let k = 1; k <= seg; k++) { const t = k / seg, u = 1 - t; cur.push([u * u * ult[0] + 2 * u * t * sg[1] + t * t * sg[3], u * u * ult[1] + 2 * u * t * sg[2] + t * t * sg[4]]); } ult = [sg[3], sg[4]]; }
+        else if (sg[0] === 'Z') { if (cur && cur.length > 2) contornos.push(cur); cur = null; }
+      });
+      return contornos.map((c) => { // tira pontos repetidos (inclusive o último == primeiro)
+        const o = [];
+        c.forEach((pt) => { const q = o[o.length - 1]; if (!q || Math.abs(q[0] - pt[0]) > 1e-6 || Math.abs(q[1] - pt[1]) > 1e-6) o.push(pt); });
+        while (o.length > 2 && Math.abs(o[0][0] - o[o.length - 1][0]) < 1e-6 && Math.abs(o[0][1] - o[o.length - 1][1]) < 1e-6) o.pop();
+        return o;
+      }).filter((c) => c.length >= 3);
+    };
+    const area = (c) => { let a = 0; for (let i = 0, n = c.length; i < n; i++) { const p = c[i], q = c[(i + 1) % n]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
+    const dentro = (pt, poly) => { let r = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if (((a[1] > pt[1]) !== (b[1] > pt[1])) && (pt[0] < (b[0] - a[0]) * (pt[1] - a[1]) / (b[1] - a[1]) + a[0])) r = !r; } return r; };
+    // Letras → "formas" {externo, furos[]} (em unidades da fonte); cache por caractere nesta chamada
+    const cacheForma = {};
+    const formasDe = (ch) => {
+      if (cacheForma[ch]) return cacheForma[ch];
+      const cs = contornosDe(ch); let ref = 0; cs.forEach((c) => { const a = area(c); if (Math.abs(a) > Math.abs(ref)) ref = a; });
+      const ext = [], furos = [];
+      cs.forEach((c) => { const a = area(c); (Math.sign(a) === Math.sign(ref) ? ext : furos).push({ c, a: Math.abs(a) }); });
+      const formas = ext.map((e) => ({ externo: e.c, furos: [], a: e.a }));
+      furos.forEach((f) => { let dono = null; formas.forEach((fm) => { if (dentro(f.c[0], fm.externo) && (!dono || fm.a < dono.a)) dono = fm; }); if (dono) dono.furos.push(f.c); });
+      return (cacheForma[ch] = formas);
+    };
+    // Desloca um contorno (material à DIREITA do sentido do traçado, convenção TrueType) `d` unidades para FORA do material (esquerda), com junção em mitra limitada
+    const desloca = (c, d) => {
+      if (!d) return c.map((p) => [p[0], p[1]]);
+      const n = c.length, out = [];
+      for (let i = 0; i < n; i++) {
+        const p0 = c[(i + n - 1) % n], p1 = c[i], p2 = c[(i + 1) % n];
+        let d1x = p1[0] - p0[0], d1y = p1[1] - p0[1], l1 = Math.hypot(d1x, d1y) || 1; d1x /= l1; d1y /= l1;
+        let d2x = p2[0] - p1[0], d2y = p2[1] - p1[1], l2 = Math.hypot(d2x, d2y) || 1; d2x /= l2; d2y /= l2;
+        const n1x = -d1y, n1y = d1x, n2x = -d2y, n2y = d2x;
+        const k = 1 + n1x * n2x + n1y * n2y; let mx = n1x + n2x, my = n1y + n2y;
+        if (k < 0.25) { mx = n1x; my = n1y; } else { mx /= k; my /= k; const ml = Math.hypot(mx, my); if (ml > 3) { mx = mx / ml * 3; my = my / ml * 3; } }
+        out.push([p1[0] + mx * d, p1[1] + my * d]);
+      }
+      return out;
+    };
+
+    // Perfil da extrusão: anéis (inset para dentro do material, z) da face da frente até a de trás, com chanfro em quarto de círculo
+    const aneis = [];
+    if (bevSeg) {
+      for (let k = 0; k <= bevSeg; k++) { const a = k / bevSeg * Math.PI / 2; aneis.push({ ins: bevel * (1 - Math.sin(a)), z: depth / 2 - bevel * (1 - Math.cos(a)) }); }
+      for (let k = bevSeg; k >= 0; k--) { const a = k / bevSeg * Math.PI / 2; aneis.push({ ins: bevel * (1 - Math.sin(a)), z: -depth / 2 + bevel * (1 - Math.cos(a)) }); }
+    } else { aneis.push({ ins: 0, z: depth / 2 }, { ins: 0, z: -depth / 2 }); }
+
+    // ---------- 3) Monta a malha: tampas (triangulação) + laterais (quadriláteros) ----------
+    const vertices = [], faces = [], outlines = [];
+    const emiteGlifo = (ch, gx, gy) => {
+      formasDe(ch).forEach((fm) => {
+        const contornos = [fm.externo].concat(fm.furos);
+        // posição final de um ponto do anel: contorno deslocado (offset + chanfro − ins: a face fica no contorno original e o chanfro CRESCE para fora, como no three.js — evita colapsar traços finos), escala, cisalhamento (em torno da linha de base) e posição na caixa
+        const anelPts = aneis.map((an) => contornos.map((c) => desloca(c, (offset + bevel - an.ins) / unit).map((q) => {
+          const lx = q[0] * unit, ly = q[1] * unit;
+          return [gx + lx + shear * ly, gy + ly];
+        })));
+        // tampas — triangula o anel da frente (inset máximo); a de trás reaproveita a mesma triangulação invertida
+        outlines.push(anelPts[0].map((c) => c.map((q) => [q[0], q[1]])));
+        let tris = [];
+        if (ShapeUtils) {
+          const topo = anelPts[0].map((c) => c.map((q) => new V2(q[0], q[1])));
+          try { tris = ShapeUtils.triangulateShape(topo[0], topo.slice(1)); } catch (e) { tris = []; }
+        }
+        const base = vertices.length, idxAneis = [];
+        anelPts.forEach((anel, ai) => { const idxC = []; anel.forEach((c) => { const ids = []; c.forEach((q) => { ids.push(vertices.length); vertices.push([q[0], q[1], aneis[ai].z]); }); idxC.push(ids); }); idxAneis.push(idxC); });
+        const planoFrente = []; idxAneis[0].forEach((ids) => ids.forEach((i) => planoFrente.push(i)));
+        const planoTras = []; idxAneis[aneis.length - 1].forEach((ids) => ids.forEach((i) => planoTras.push(i)));
+        tris.forEach((t) => {
+          let a = t[0], b = t[1], c = t[2];
+          const pa = vertices[planoFrente[a]], pb = vertices[planoFrente[b]], pc = vertices[planoFrente[c]];
+          if ((pb[0] - pa[0]) * (pc[1] - pa[1]) - (pc[0] - pa[0]) * (pb[1] - pa[1]) < 0) { const tmp = b; b = c; c = tmp; } // anti-horário visto de +Z
+          faces.push([planoFrente[a], planoFrente[b], planoFrente[c]]);
+          faces.push([planoTras[a], planoTras[c], planoTras[b]]);
+        });
+        // laterais: entre anéis consecutivos, contorno a contorno (material à direita do traçado ⇒ normal para fora = esquerda)
+        for (let ai = 0; ai < aneis.length - 1; ai++) {
+          idxAneis[ai].forEach((ids, ci) => {
+            const prox = idxAneis[ai + 1][ci], n = ids.length;
+            for (let i = 0; i < n; i++) { const j = (i + 1) % n; faces.push([ids[i], prox[i], prox[j], ids[j]]); }
+          });
+        }
+      });
+    };
+    // posiciona cada letra linha a linha
+    visiveis.forEach((ln, li) => {
+      const gy = yTopo + dyV - ascent - li * lhPx + offY; // linha de base (topo do bloco = yTopo + dyV)
+      const nEsp = Math.max(0, ln.palavras.length - 1);
+      let extra = 0;
+      if (P.alignH === 'justify' && !ln.ultima && nEsp > 0 && W > ln.w) extra = (W - ln.w) / nEsp;
+      let gx = x0 + offX + (P.alignH === 'center' ? (Wref - ln.w) / 2 : P.alignH === 'right' ? (Wref - ln.w) : 0);
+      ln.palavras.forEach((w, wi) => {
+        for (let i = 0; i < w.length; i++) { emiteGlifo(w[i], gx, gy); gx += adv(w[i]) + (i < w.length - 1 ? letterSp : 0); }
+        if (wi < nEsp) gx += spaceAdv + extra;
+      });
+    });
+    if (!faces.length) return this.defaultCubeMesh(Math.max(0.3, texto.length * 0.18), depth, size, true);
+    // Deita o texto como no Blender (letras no plano horizontal, extrusão na vertical = eixo Y do app): (x, y, z) → (x, z, −y). É uma rotação própria
+    // (−90° em X), então o sentido das faces (normais) se mantém; o topo do texto aponta para −Z (norte do mapa) — legível visto de cima.
+    for (let i = 0; i < vertices.length; i++) { const v = vertices[i]; vertices[i] = [v[0], v[2], -v[1]]; }
+    return { vertices, edges: this._edgesFromFaces(faces), faces, outlines };
+  },
+  /** Compatibilidade: nome antigo do gerador (a "plaquinha" virou o texto de verdade, ver `textoMesh`). */
+  textoPlaceholderMesh(texto = 'Texto', altura = 0.3, profundidade = 0.06) { return this.textoMesh({ texto, size: altura, depth: profundidade }); },
 
   /** Marcadores dos grupos "Lâmpada" e "Outros" do submenu "Criar" — pedido
    *  verbatim: "Ponto: um objeto lâmpada (representada como no Blender),

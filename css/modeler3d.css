@@ -294,6 +294,13 @@
   font-size: 16px; line-height: 1;
   pointer-events: auto;
 }
+.m3d-sidebar-toggle { transition: left .2s ease; }
+/* [01/10/2026] (36ª rodada) botão de recolher acompanha a borda do painel aberto. [73ª rodada] AGORA EXATAMENTE como o "+" da lateral DIREITA (`.v3d-objcat-toggle.open`,
+   style.css): aberto, o botão (seta ⟸) sai da altura central e fica encostado na borda do painel, 32px ACIMA do topo dele (painel: top:10%), com o mesmo visual
+   translúcido. `.active` volta a significar só o destaque de "mouse por cima" (cursor virtual com o ponteiro travado), sem mover o botão. */
+.m3d-sidebar-toggle { background: rgba(20,22,26,.35); border: 1px solid rgba(255,255,255,.14); border-left: none; color: rgba(255,255,255,.8); cursor: pointer; transition: left .2s ease, top .2s ease, background .15s ease; }
+.m3d-sidebar-toggle:hover { background: rgba(20,22,26,.6); color: #fff; }
+.m3d-sidebar-toggle.open { left: min(300px, 82vw); top: max(4px, calc(10% - 32px)); transform: none; }
 .m3d-sidebar-toggle.active { background: #3a7bd5; border-color: #3a7bd5; color: #fff; }
 
 /* "abre-se um sub menu que ocupa de 10% da altura do canvas até 90% da
@@ -430,3 +437,24 @@
 .m3d-history-idx { color: #6d7a89; font-size: 10.5px; min-width: 22px; text-align: right; }
 .m3d-history-label { flex: 1; color: #e8ecf2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .m3d-history-time { color: #9fb3c8; font-size: 10.5px; flex-shrink: 0; }
+
+/* [67ª rodada] Texto 3D do Modelador: cabeçalhos de grupo, caixa de marcação e grupos de botões lado a lado (alinhamento horizontal/vertical) */
+.m3d-sidebar-heading { margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.12); }
+.m3d-sidebar-check { display: flex; align-items: center; gap: 6px; margin: 4px 0; color: #e8ecf2; font-size: 12px; cursor: pointer; }
+.m3d-sidebar-textfield textarea { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; color: #e8ecf2; font-size: 12px; padding: 4px 8px; font-family: inherit; }
+.m3d-seg { display: flex; gap: 4px; flex-wrap: wrap; }
+.m3d-seg-btn { flex: 1 1 auto; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; color: #e8ecf2; font-size: 11.5px; padding: 4px 6px; cursor: pointer; font-family: inherit; }
+.m3d-seg-btn:hover { background: rgba(255,255,255,0.12); }
+.m3d-seg-btn.active { background: #3b82f6; border-color: #60a5fa; color: #fff; }
+
+.m3d-sidebar-subheading{border-top:none;padding-top:0;margin-top:6px;font-size:11px;opacity:.75;margin:6px 0 2px 8px;font-weight:600;border-left:2px solid rgba(124,255,178,.5);padding-left:6px}
+
+/* [71ª rodada] Aba "Texto" da barra lateral do 3D: rola na vertical (antes herdava overflow:hidden da aba "Criar") e os campos nativos ficam no tema escuro. */
+.m3d-sidebar-tabcontent-texto { overflow-y: auto; min-height: 0; gap: 8px; color: #e8ecf2; }
+.m3d-sidebar-tabcontent-texto details > summary { list-style: none; }
+.m3d-sidebar-tabcontent-texto details > summary::-webkit-details-marker { display: none; }
+.m3d-sidebar-tabcontent-texto details > summary::before { content: '▾ '; opacity: .7; }
+.m3d-sidebar-tabcontent-texto details:not([open]) > summary::before { content: '▸ '; }
+.m3d-sidebar-tabcontent-texto input[type=number], .m3d-sidebar-tabcontent-texto textarea { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; color: #e8ecf2; font-size: 12px; padding: 4px 8px; font-family: inherit; }
+.m3d-sidebar-tabcontent-texto .btn.sm { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; color: #e8ecf2; font-size: 11px; padding: 4px 6px; cursor: pointer; }
+.m3d-sidebar-tabcontent-texto .btn.sm.active { background: #3a7bd5; border-color: #3a7bd5; color: #fff; }

@@ -33,6 +33,12 @@
  *     // preenchido caso a caso conforme cada tipo migra (não obrigatório
  *     // logo de cara: o painel genérico já cobre os campos comuns).
  *     properties: { camposExtras: [...] },
+ *
+ *     // [81ª rodada] PRIORIDADE (regra geral da engine 3D, vale para todo tipo): devolve true quando a FORMA do
+ *     // objeto está nos dados que o 2D desenha (ex.: Piso -> obj.pisoPoligono / largura × profundidade). Aí a engine
+ *     // ignora QUALQUER molde (customMesh, molde de "Acessar modelos", .glb/.obj estáticos) e chama buildMesh3D
+ *     // com esses mesmos dados — ver `_malhaPropria` em engine3d.js `_buildOneObjectMeshCore`.
+ *     malhaPropria(obj) { ... },
  *   });
  *
  * DISPATCH: `engine3d.js`/`mapview.js` NÃO ficam com um `if (obj.tipo ===

@@ -1491,7 +1491,7 @@ const App = {
         // `alvo` acima): abre o mesmo modal de vínculo pedido pelo usuário
         // pra fotos (task #108), agora pra patrimônios (task #109) — ver
         // _openItemLinkModal abaixo.
-        if (!alvo) this._openItemLinkModal(saved);
+        if (!alvo && !opts.semVinculo) this._openItemLinkModal(saved);   // [01/10/2026] NOVO (32ª rodada) — opts.semVinculo: usado pelo '+ Novo' do seletor de patrimônio (Utils.pickItem), que já associa o item escolhido
       } catch (err) {
         // Sem isto, qualquer erro inesperado aqui dentro deixava o botão "Salvar"
         // preso (desabilitado, sem nenhum aviso) — parecendo que ele tinha
@@ -1733,7 +1733,7 @@ const App = {
         <div class="handle"></div>
         <h3 style="margin-top:0">Patrimônio cadastrado — vincular a um lugar?</h3>
         <div style="display:flex; flex-direction:column; gap:8px">
-          <button type="button" class="btn block" id="il-mapa" title="Escolher, na planta baixa 2D, onde este patrimônio fica">🗺️ Vincular a uma posição no mapa</button>
+          <button type="button" class="btn block" id="il-mapa" title="Escolher, na planta baixa 2D, onde este patrimônio fica">🗺️ Vincular a um lugar no mapa</button>
           <button type="button" class="btn secondary block" id="il-foto" title="Marcar, numa foto já existente, onde este patrimônio está">📷 Vincular a uma posição em uma foto</button>
           <button type="button" class="btn secondary block" id="il-skip" title="Guardar o item na 📦 Caixa por enquanto — dá pra vincular depois">Deixar sem vínculo por enquanto</button>
         </div>
@@ -1822,9 +1822,39 @@ const App = {
    *  (showItemDetail) quanto pela foto (ambientephotos.js), sem duplicar o
    *  fluxo de navegação. `pos` = {x, y, ambienteId} (mundo, mesmo espaço de
    *  mapaX/mapaY — ver Mapping). */
+  /** [01/10/2026] NOVO (33ª rodada) — posição do patrimônio no mapa para "Ver no mapa 2D/3D" e para a ficha: a do OBJETO ao qual ele está vinculado (Mapping.posicaoDoItemNoMapa), senão o pino próprio (mapaX/mapaY, não provisório). Devolve `{x, y, ambienteId, viaObjeto, nome?}` (y = eixo Z do mundo) ou `null`. */
+  async _posicaoMapaDoItem(item) {
+    try {
+      if (item && item.id && typeof Mapping !== 'undefined' && Mapping.posicaoDoItemNoMapa) {
+        const mapas = [];
+        const proprio = item.ambienteId ? await DB.getMap(item.ambienteId) : null;
+        if (proprio) mapas.push(proprio);
+        const todos = proprio ? [] : await DB.getAllMaps();   // só varre os demais se o mapa do item não existir/não tiver o objeto (evita clonar tudo à toa)
+        mapas.push(...todos);
+        for (const m of mapas) {
+          let p = Mapping.posicaoDoItemNoMapa(m, item.id);
+          if (p) return { x: p.x, y: p.y, ambienteId: m.id, viaObjeto: true, nome: p.nome };
+        }
+        if (proprio) {
+          for (const m of await DB.getAllMaps()) {
+            if (m.id === proprio.id) continue;
+            const p = Mapping.posicaoDoItemNoMapa(m, item.id);
+            if (p) return { x: p.x, y: p.y, ambienteId: m.id, viaObjeto: true, nome: p.nome };
+          }
+        }
+      }
+    } catch (e) { console.warn('[App] _posicaoMapaDoItem:', e); }
+    if (item && typeof item.mapaX === 'number' && typeof item.mapaY === 'number' && !item.mapaAuto) return { x: item.mapaX, y: item.mapaY, ambienteId: item.ambienteId, viaObjeto: false };
+    return null;
+  },
   async verNoMapa2D(pos) {
     if (pos.ambienteId) await DB.setSetting('ambienteAtualId', pos.ambienteId); // item 4: troca pro mapa certo, se for outro
     await this.navigate('mapa');
+    // [01/10/2026] CORRIGIDO (33ª rodada) — pedido verbatim: "ao clicar em '2D', deveria conduzir para onde o patrimônio está marcado no mapa 2D [...] Atualmente, ao clicar em '2D', vai para a tela do 'Mapa', em vez de 'Mapa'->'Planta baixa'->posição específica no mapa 2D." CAUSA RAIZ: `navigate('mapa')` só abre a tela de ENTRADA do Mapa (sub-tela 'entry'); o renderer da Planta baixa nem existe ali, então `flyViewTo`/`centerViewOnPoint` (que saem se `_renderer`/`_map` faltam) não faziam nada. Agora entra em 'planta' (a mesma troca que o botão "Planta baixa" faz) e só então voa até a posição.
+    try {
+      if (window.MapView && MapView._screen !== 'planta' && typeof MapView._showScreen === 'function') await MapView._showScreen('planta');
+      for (let i = 0; i < 20 && !(MapView._renderer && MapView._map); i++) await new Promise((r) => setTimeout(r, 50));
+    } catch (e) { console.warn('[App] verNoMapa2D: falha ao abrir a Planta baixa:', e); }
     // ATUALIZADO (07/09/2026), pedido verbatim: "melhorar a busca (o
     // deslocamento enquanto vai até o item encontrado) no 2D e 3D" -- antes
     // usava `centerViewOnPoint` (TELEPORTE instantâneo pro destino, sem
@@ -1834,7 +1864,11 @@ const App = {
     // este funil (a busca GLOBAL da aba "Buscar"). Passa a usar o MESMO
     // `flyViewTo`, com fallback pro comportamento antigo (`centerViewOnPoint`)
     // só por segurança, caso `flyViewTo` não exista por algum motivo.
-    if (typeof MapView.flyViewTo === 'function') MapView.flyViewTo(pos.x, pos.y, { zoomPct: 150 });
+    // [01/10/2026] MUDADO (34ª rodada) — o jeito da animação vem de MapConfig.modoVoo2D ('animado' padrão | 'deslizar' | 'direto'), editável na ficha do patrimônio (⚙️).
+    const cfg2d = (typeof MapConfig !== 'undefined') ? await MapConfig.get() : {};
+    const modo2d = cfg2d.modoVoo2D || 'animado';
+    if (modo2d === 'direto' && typeof MapView.centerViewOnPoint === 'function') MapView.centerViewOnPoint(pos.x, pos.y, 150);
+    else if (typeof MapView.flyViewTo === 'function') MapView.flyViewTo(pos.x, pos.y, { zoomPct: 150, modo: modo2d });
     else MapView.centerViewOnPoint?.(pos.x, pos.y, 150);
   },
   /** NOVO (04/09/2026), pedido verbatim: "No card de informações do
@@ -1885,7 +1919,28 @@ const App = {
     const cfg3d = (typeof MapConfig !== 'undefined') ? await MapConfig.get() : {};
     const mode = cfg3d.modoVoo3D || 'orbita';
     if (pos.ambienteId) await DB.setSetting('ambienteAtualId', pos.ambienteId);
-    this.openView3D(pos.ambienteId);
+    // [30/09/2026] CORRIGIDO -- pedido verbatim: "ao clicar em '👁️3D' uma animação de voo é feita.
+    // Ela acaba acontecendo só a primeira vez. Se, depois, tendo clicar neste botão de novo, vai para
+    // o 3D, porém sem mais a animação." CAUSA RAIZ: esta chamada a `this.openView3D(...)` (função
+    // ASSÍNCRONA) não era esperada (`await`) -- o código seguia direto pro poll abaixo, que só olha
+    // pra `View3D._camera`/`View3D._map` existirem, sem saber se `View3D.mount()` (chamado dentro de
+    // `openView3D`) já tinha terminado. Como `View3D.mount()` NUNCA limpa `_camera` entre uma
+    // montagem e outra (ver comentário grande em `openView3D`, mais acima), da 2ª vez em diante
+    // `_camera` já existe (sobra da visita anterior) DESDE O INÍCIO do mount() novo -- o poll então via
+    // `_camera` "pronto" cedo demais e chamava `flyCameraTo` no meio do mount() ainda em andamento;
+    // logo depois, o próprio `mount()` reseta `this._flyTo = null` (ver view3d.js, perto do fim da
+    // função, entre vários outros `await`s) por padrão de toda nova montagem, apagando a animação que
+    // acabara de ser armada. Na 1ª vez (`_camera` ainda não existia), o poll só via `_camera` pronto
+    // DEPOIS que o próprio mount() já tinha passado por aquele reset, então `flyCameraTo` chegava
+    // depois e a animação sobrevivia -- daí "só funciona a primeira vez". Corrigido dando `await` em
+    // `openView3D` (mount() garantidamente já terminou, `_flyTo` já foi resetado pra `null` pelo
+    // próprio mount, antes de `flyCameraTo` ser chamado) -- o poll abaixo fica só como rede de
+    // segurança (mesmo espírito de outros "espera X existir" no app), praticamente sempre acertando
+    // já na 1ª tentativa agora. HONESTIDADE DE ESCOPO: não foi criada nenhuma opção nova nas
+    // 'configurações 3D' porque já existe uma pra isso -- "🚀 Modo de voo 3D" (padrão "🌀 Órbita",
+    // com animação; a única opção sem animação, "🎯 Direto", já é isso mesmo por definição, um salto
+    // instantâneo) -- o problema era só este bug, não a falta de uma opção.
+    await this.openView3D(pos.ambienteId);
     // View3D.mount é assíncrono (carrega malha/objetos) — só dá pra voar
     // depois que a cena/câmera existirem de verdade; um pequeno poll
     // (mesmo espírito de outros "espera X existir" no app) evita um
@@ -2081,6 +2136,13 @@ const App = {
     // saber se o botão nasce habilitado ou não, mesmo padrão dos botões
     // "👁️2D"/"👁️3D" logo abaixo.
     const marcacaoFoto = await DB.findOrbFotoByItem(item.id);
+    // [01/10/2026] NOVO (33ª rodada) — pedido verbatim: "Se um patrimônio estiver vinculado a um objeto, então, a sua posição de vínculo no mapa é a posição do objeto." / "A posição no mapa deve ser correspondente aos eixos reais do mapa 2D, ou seja, X e Z, não X e Y". `posMapa` = posição do objeto vinculado (se houver; procura primeiro no mapa do item, depois nos demais) ou, senão, o pino do próprio patrimônio (mapaX/mapaY, que no mundo são X e Z). Eixos exibidos como X e Z.
+    const posMapa = await this._posicaoMapaDoItem(item);
+    // [01/10/2026] REMOVIDO (35ª rodada) — pedido verbatim: "Retire da janela do patrimônio a configuração de como a animação é feita. Esta configuração deve ficar nas 'configurações 2D'. Então, a configuração do 2D, para a animação, fica nas 'configurações 2D'. E a configuração 3D, para a animação, fica nas 'configurações 3D' (Órbita, De cima, Direto)." O seletor ⚙️ (34ª rodada) saiu desta ficha; 👁️2D lê MapConfig.modoVoo2D (Configurações 2D) e 👁️3D lê MapConfig.modoVoo3D (Configurações 3D) — ver verNoMapa2D/verNoMapa3D.
+    const posPropria = (typeof item.mapaX === 'number' && typeof item.mapaY === 'number') ? { x: item.mapaX, y: item.mapaY } : null;
+    const posMapaHtml = posMapa
+      ? `X=${posMapa.x.toFixed(1)} Z=${posMapa.y.toFixed(1)}${posMapa.viaObjeto ? ` <small title="Este patrimônio está vinculado a um objeto: a posição dele no mapa é a do objeto">(objeto: ${Utils.escapeHtml(posMapa.nome)})</small>` : ''}`
+      : (posPropria ? `X=${posPropria.x.toFixed(1)} Z=${posPropria.y.toFixed(1)}` : '—');
     // Ícone do item desenhado em SVG na hora — ver avatar.js.
     const iconState = await Avatar.loadIconState();
     const avatarSvg = Avatar.itemIconSvg(item, iconState);
@@ -2141,7 +2203,7 @@ const App = {
                #di-map-link abaixo), mesmo texto/mecanismo do botão análogo
                de ambientephotos.js (_openMapLinkFlow/#ambphotos-map-link):
                texto muda conforme já ter posição salva ou não. -->
-          <div class="k">Posição no mapa</div><div class="v">${typeof item.mapaX === 'number' ? `x=${item.mapaX.toFixed(1)} y=${item.mapaY.toFixed(1)}` : '—'} <button type="button" class="icon-btn sm" id="di-map-link" title="${typeof item.mapaX === 'number' ? 'Editar a posição deste patrimônio no mapa' : 'Vincular este patrimônio a um lugar no mapa'}">🗺️</button>
+          <div class="k">Posição no mapa</div><div class="v">${posMapaHtml} <button type="button" class="icon-btn sm" id="di-map-link" title="${typeof item.mapaX === 'number' ? 'Editar a posição deste patrimônio no mapa' : 'Vincular este patrimônio a um lugar no mapa'}">🗺️</button>
           <!-- NOVO (03/09/2026), pedido verbatim (item 1): "coloque também a
                possibilidade de ver onde está no mapa 2D... e no mapa 3D...
                Estes novos botões só devem ficar habilitados quando houver
@@ -2150,8 +2212,8 @@ const App = {
                autoPlaceOnMap acima) não conta como "posição definida" pra
                este botão, mesmo espírito do "—" mostrado acima quando não
                há mapaX/mapaY nenhum. -->
-          <button type="button" class="icon-btn sm" id="di-map-view2d" ${(typeof item.mapaX === 'number' && !item.mapaAuto) ? '' : 'disabled'} title="Ver no mapa 2D">👁️2D</button>
-          <button type="button" class="icon-btn sm" id="di-map-view3d" ${(typeof item.mapaX === 'number' && !item.mapaAuto) ? '' : 'disabled'} title="Ver no mapa 3D">👁️3D</button>
+          <button type="button" class="icon-btn sm" id="di-map-view2d" ${posMapa ? '' : 'disabled'} title="Ver no mapa 2D">👁️2D</button>
+          <button type="button" class="icon-btn sm" id="di-map-view3d" ${posMapa ? '' : 'disabled'} title="Ver no mapa 3D">👁️3D</button>
           </div>
           <div class="k">Geolocalização (GPS)</div><div class="v">${(typeof item.geoLat === 'number' && typeof item.geoLng === 'number') ? `<a href="${Geo.mapsLink(item.geoLat, item.geoLng)}" target="_blank" rel="noopener">${item.geoLat.toFixed(5)}, ${item.geoLng.toFixed(5)}</a>${typeof item.geoAccuracy === 'number' ? ` (±${Math.round(item.geoAccuracy)}m)` : ''}` : '—'}</div>
           <!-- Pedido do usuário (27/08/2026): removido o campo "Inserido em"
@@ -2260,11 +2322,11 @@ const App = {
     };
     modal.querySelector('#di-map-view2d').onclick = async () => {
       modal.remove();
-      await this.verNoMapa2D({ x: item.mapaX, y: item.mapaY, ambienteId: item.ambienteId });
+      await this.verNoMapa2D({ x: posMapa.x, y: posMapa.y, ambienteId: posMapa.ambienteId || item.ambienteId });   // [01/10/2026] MUDADO (33ª rodada) — posição do objeto vinculado, se houver
     };
     modal.querySelector('#di-map-view3d').onclick = async () => {
       modal.remove();
-      await this.verNoMapa3D({ x: item.mapaX, y: item.mapaY, ambienteId: item.ambienteId });
+      await this.verNoMapa3D({ x: posMapa.x, y: posMapa.y, ambienteId: posMapa.ambienteId || item.ambienteId });   // [01/10/2026] MUDADO (33ª rodada)
     };
     modal.querySelector('#di-delete').onclick = async () => {
       if (!confirm('Excluir este item definitivamente?')) return;

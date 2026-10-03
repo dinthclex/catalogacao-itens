@@ -404,6 +404,28 @@ const View3D = {
              _bindDesktopControls (onPointerLockChange) e o CSS da classe
              v3d-lockstate em style.css. -->
         <div class="v3d-lockstate" id="v3d-lockstate"><span class="v3d-lockstate-hint">🖱️ Clique para interagir com o cenário 3D</span></div>
+        <!-- [30/09/2026] NOVO -- pedido verbatim: "Nas 'configurações 3D', na seção correspondente,
+             deve ter uma opção para que a medida apareça próximo do apontamento para definir a
+             parede." Rótulo com o comprimento da parede sendo desenhada (entre o 1º ponto já marcado
+             e onde a mira resolveria agora), perto da mira -- nasce escondido (display:none),
+             mostrado/atualizado por _updateBuildGhost (ver ramo 'parede' lá) só enquanto a ferramenta
+             "🧱 Parede" está ativa E já existe um 1º ponto marcado (this._wallChainStart), e só quando
+             a opção paredeMostrarMedidaProxCrosshair3D estiver ligada (padrão ligado, ver
+             DEFAULTS/wiring em mapconfig.js). Posicionado logo abaixo do crosshair, mesmo espírito do
+             botão "ℹ️ Informações" (v3d-info-btn) logo abaixo. -->
+        <div class="v3d-wall-length" id="v3d-wall-length" style="display:none; position:absolute; left:50%; top:calc(50% + 22px); transform:translateX(-50%); background:rgba(10,12,16,.85); border:1px solid #6bdb9a; color:#6bdb9a; font:600 12px sans-serif; padding:3px 8px; border-radius:5px; pointer-events:none; z-index:5; white-space:nowrap; transition:opacity .15s linear;"></div>
+        <!-- [30/09/2026] NOVO — pedido verbatim: "No 'Modo Navegação', ao
+             dar dois cliques, deve aparecer por algum tempo algum botão de
+             'informações'. Enquanto estiver apontando ainda ou voltar ao
+             apontar para o mesmo objeto, o contador deve reiniciar. Se
+             deixar de apontar, o contador continua e, depois, de algum
+             tempo o botão desaparece [...] Ao clicar neste botão, aparece a
+             ficha do objeto." Nasce escondido (display:none) — mostrado/
+             escondido por _armarBotaoInformacoes3D/_atualizarBotaoInformacoes3D
+             (ver comentário grande lá). Posicionado logo abaixo do
+             crosshair, mesmo espírito do .v3d-lockstate acima (elemento
+             HTML simples sobre o canvas, não parte da cena 3D). -->
+        <button type="button" class="v3d-info-btn" id="v3d-info-btn" style="display:none" title="Ver a ficha deste objeto (descrição + especificações)">ℹ️ Informações</button>
         <!-- [18/09/2026 UTC] NOVO (RODADA 147), [18/09/2026 UTC] ALTERADO
              (RODADA 150) — janela de debug, pedido verbatim do usuário:
              investigar o bug do "salto" de yaw/pitch da câmera ao
@@ -641,7 +663,7 @@ const View3D = {
              escolher o objeto ativo pro botão 📦 Objeto do rodapé colocar,
              além do rolar da roda do mouse que já existia. Ver
              _toggleObjectCatalogPanel/_renderObjectCatalogPanel. -->
-        <button type="button" class="v3d-objcat-toggle" id="v3d-objcat-toggle" title="Escolher objeto para colocar (tabela)">+</button>
+        <button type="button" class="v3d-objcat-toggle" id="v3d-objcat-toggle" title="Abrir menu lateral: Objetos, Tijolos e Propriedades">+</button>
         <!-- HISTÓRICO (02/09/2026) resumido: este botão "+" da lateral
              ESQUERDA passou por 4 rodadas de correção do usuário. Tentei
              primeiro um botão novo separado; depois o MESMO botão do
@@ -946,6 +968,7 @@ const View3D = {
         // remontar a cena (setScene de novo) pra pegar efeito na hora, sem
         // exigir reabrir o 3D (diferente do antialiasing, ver painel).
         const modoAntes = this._engine?._config?.modoLuminarias3D;
+        const gradeAntes = this._engine?._config?.quadriculadoChao3D, chaoAntes = this._engine?._config?.tipoChao3D, sombrasAntes = this._engine?._config?.sombras3D;   // [01/10/2026] 37ª rodada — chão/sombras valem na hora (remonta a cena)
         // `paredeJuncaoTipo` (pedido do usuário, seção "🧱 Parede" — ver
         // mapconfig.js) MUDA a malha construída em setScene (as "capas" de
         // quina, ver engine3d.js _buildCornerFillMesh) — mesmo motivo do
@@ -958,6 +981,11 @@ const View3D = {
         // objeto em `_buildOneObjectMesh`, não recalculada a cada quadro.
         const contornoAntes = this._engine?._config?.itemAssociado3DContorno;
         const seloAntes = this._engine?._config?.itemAssociado3DSelo;
+        // [30/09/2026] NOVO — `destaqueAlteracoes3D` (seção "🔔 Destaque de
+        // alteração", ver mapconfig.js) — MESMO motivo: os selos de
+        // Histórico/Especificações também são montados junto com o objeto
+        // em `_buildOneObjectMesh`.
+        const destaqueAlteracoesAntes = this._engine?._config?.destaqueAlteracoes3D;
         // `destaqueExtra3DRaioAtivo`/`destaqueExtra3DDouradoAtivo` ("Destacar
         // mais", pedido do usuário 26/08/2026, 2ª rodada — dois efeitos
         // independentes agora, ver mapconfig.js DEFAULTS) — MESMO motivo das
@@ -987,13 +1015,20 @@ const View3D = {
           this._engine?.setCustomRes3D?.(c.resolucaoCustom3D || null);
           this._applyResolucaoCustom3D(canvas, c.resolucaoCustom3D || null);
         }
+        // [01/10/2026] NOVO (24ª rodada) — troca de layout/modo da ficha vale NA HORA para as fichas abertas (ver _v3dReabrirFichasAbertas).
+        const fichaChave = (x) => (x?.fichaObjeto3DLayout || 'completo') + '|' + (x?.fichaObjeto3DFlutuante !== false);
+        const refracaoAntes = !!this._engine?._config?.refracaoVidros3D, vidroJanelaAntes = this._engine?._config?.vidroJanela3D || 'atual';
+        const fichaAntes = fichaChave(this._engine?._config);
         this._engine?.setConfig(c);
-        if (c.modoLuminarias3D !== modoAntes || c.paredeJuncaoTipo !== juncaoAntes
+        try { if (fichaChave(c) !== fichaAntes) this._v3dReabrirFichasAbertas(); } catch (err) { console.warn('[View3D] reabrir fichas após mudança de config:', err); }
+        if (c.quadriculadoChao3D !== gradeAntes || c.tipoChao3D !== chaoAntes || c.sombras3D !== sombrasAntes || c.modoLuminarias3D !== modoAntes || c.paredeJuncaoTipo !== juncaoAntes
           || c.itemAssociado3DContorno !== contornoAntes || c.itemAssociado3DSelo !== seloAntes
           || c.destaqueExtra3DRaioAtivo !== destaqueRaioAntes || c.destaqueExtra3DDouradoAtivo !== destaqueDouradoAntes
           || c.itemBadge3DAtravesParedesAtivo !== atravesParedesPlaquinhaAntes
           || c.anelDourado3DAtravesParedesAtivo !== atravesParedesDouradoAntes
-          || c.raioAzul3DAtravesParedesAtivo !== atravesParedesRaioAntes) this._rebuildScene();
+          || c.raioAzul3DAtravesParedesAtivo !== atravesParedesRaioAntes
+          || !!c.refracaoVidros3D !== refracaoAntes || (c.vidroJanela3D || 'atual') !== vidroJanelaAntes
+          || c.destaqueAlteracoes3D !== destaqueAlteracoesAntes) this._rebuildScene();
         // Snaps da ferramenta 🧱 Parede (ver _resolveWallSnap) são lidos a
         // cada QUADRO (dentro de _updateBuildGhost, chamado no loop de
         // render) — não dá pra usar `await MapConfig.get()` ali (sem
@@ -1120,7 +1155,16 @@ const View3D = {
     // novo) — MapConfig.get() é cacheado, então não tem custo extra, só
     // evita uma 2ª leitura redundante.
     this._layerIdOrigem2D = window.MapView?._activeLayerId || null;
-    this._camada3DConfig = cfgInicial?.camada3DNovosItens || 'separada';
+    // [30/09/2026] CORRIGIDO — pedido verbatim (de novo): "a opção padrão
+    // que deve ficar marcada no app deve ser a 'A camada que estava ativa
+    // no 2D'." CAUSA: `mapconfig.js` DEFAULTS já tinha `camada3DNovosItens:
+    // 'atual'` (mudado numa rodada anterior), mas este fallback aqui
+    // (usado quando `cfgInicial.camada3DNovosItens` ainda não existe de
+    // verdade no banco — instalação nova, ou config carregada antes do
+    // valor salvo) continuava hardcoded em `'separada'`, o valor ANTIGO —
+    // os dois defaults nunca bateram. Corrigido pra `'atual'`, igual ao
+    // DEFAULTS de verdade.
+    this._camada3DConfig = cfgInicial?.camada3DNovosItens || 'atual';
     this._layer3DId = null; // resolvido de novo (achado ou criado) na 1ª construção deste mount — ver _layerIdParaNovosItens
     // Config da seção "🧱 Parede" (snaps/junção — ver mapconfig.js e
     // _resolveWallSnap abaixo) — lida uma vez aqui (cfgInicial já buscado
@@ -1385,7 +1429,9 @@ const View3D = {
   },
 
   unmount() {
-    try { document.body.classList.remove('view3d-aberto'); } catch (e) { /* ignora */ }   // [26/09/2026] NOVO -- ver mount()
+    try { document.body.classList.remove('view3d-aberto'); } catch (e) { /* ignora */ }
+    try { this._v3dRemoveAllWallLabels(); } catch (e) { /* ignora */ }
+    try { this._v3dFecharFichaFlutuante(); } catch (e) { /* ignora */ }   // [30/09/2026] NOVO (12ª rodada)   // [30/09/2026] NOVO (11ª rodada) — caixas de medida das paredes colocadas   // [26/09/2026] NOVO -- ver mount()
     if (this._stopAutoPose3D) { this._stopAutoPose3D(); this._stopAutoPose3D = null; }
     // [22/09/2026] NOVO -- "Configurações 3D" → seção "📡 Access Point" → "Desligar o mapa de calor ao
     // sair do 'Ver em 3D'" (ver mapconfig.js DEFAULTS.apDesligarMapaAoSairDoVer3D). Roda ANTES de
@@ -1696,6 +1742,8 @@ const View3D = {
     // vai efetivamente desenhar logo abaixo.
     await window.ObjectAssets?.ensureMeshesReadyForMap?.(mapaVisivel);
     this._engine.setScene({ ...mapaVisivel, walls });
+    // [01/10/2026] NOVO (44ª rodada) — linha de base de cada objeto desenhado (ver Engine3D.syncObjectLive): é com ela que o 2D->3D em tempo real sabe o quanto cada malha precisa andar.
+    try { this._engine._liveBaseline(); } catch (e) { console.warn('[View3D] linha de base 2D->3D:', e); }
     // [14/09/2026] NOVO — pedido verbatim: "Faça um jeito de integrar os
     // scripts de objeto com o que acabamos de fazer." Dispara
     // onModelSpawn/onInstanceSpawn (assets/modelos|instancias/) pra
@@ -2234,7 +2282,7 @@ const View3D = {
     { tool: 'orb', icon: '📍', label: 'Adicionar orb' },
     // [16/09/2026 UTC] NOVO — pedido verbatim: "Dá para estender a 'Trena'
     // (da grade do mapa 2D) e dar a possibilidade de ficar 3D nas duas
-    // extremidades de cada medida." Mesma ferramenta "📏 Trena (de medir)"
+    // extremidades de cada medida." Mesma ferramenta "📏 Trena"
     // do mapa 2D (mapview.js `_ptool==='medida'`), mas operando dentro do
     // 3D via mira central (mesmo padrão desta hotbar) — ver `_trena3DClick`/
     // comentário grande no topo de `trena3d.js` pra lógica completa
@@ -2304,13 +2352,30 @@ const View3D = {
     let active = !preview && !slot.extra && this._buildTool === slot.tool;
     if (slot.extra) {
       sub = Utils.escapeHtml(slot.label);
-      active = !preview && this._buildTool === 'objeto' && this._objectCatalog[this._objectIndex]?.key === slot.objKey;
+      active = !preview && this._buildTool === 'objeto' && (this._objectCatalog || [])[this._objectIndex]?.key === slot.objKey;
     } else if (!preview) {
-      const objEntry = this._objectCatalog[this._objectIndex];
-      const itemEntry = this._unsortedItems[this._itemIndex];
+      // [30/09/2026] CORRIGIDO — "Uncaught TypeError: Cannot read properties
+      // of undefined (reading 'undefined')" ao clicar em "Ver em 3D". CAUSA
+      // RAIZ: `_onMapConfigChange` (que chama `_renderHotbar` → aqui) é
+      // registrado em `MapConfig.onChange` ANTES de `this._objectCatalog`/
+      // `this._unsortedItems` serem inicializados, mais adiante no MESMO
+      // `mount()` (que é assíncrono, com vários `await`s no meio) — se
+      // QUALQUER `MapConfig.set(...)` disparar nesse intervalo (ex.: o
+      // patch de "sobreviver ao F5" que `_unmountPlanta`, em mapview.js,
+      // grava ao SAIR da Planta baixa — exatamente a sequência do relato:
+      // clicar "Ver em 3D" primeiro desmonta o Mapa 2D, que salva essa
+      // config, que já dispara este handler mesmo com o "Ver em 3D" ainda
+      // no meio do próprio carregamento), `this._objectCatalog`/
+      // `this._unsortedItems` ainda são `undefined` aqui, e
+      // `undefined[undefined]` é exatamente esse erro. `|| []` cobre esse
+      // intervalo (o rodapé simplesmente renderiza sem "sub" nenhum,
+      // igual a antes de qualquer catálogo carregar) sem precisar mexer na
+      // ordem de inicialização do resto de `mount()` (risco maior).
+      const objEntry = (this._objectCatalog || [])[this._objectIndex];
+      const itemEntry = (this._unsortedItems || [])[this._itemIndex];
       const trena3DPoli = this._trena3D && this._trena3D._trena3DModo && this._trena3D._trena3DModo() === 'poli';
       if (slot.tool === 'trena3d' && trena3DPoli) { icon = '➰'; label = 'Polilinha 3D'; }
-      if (slot.tool === 'objeto') sub = objEntry ? Utils.escapeHtml(objEntry.label) : (this._objectCatalog.length ? '' : '(nenhum)');
+      if (slot.tool === 'objeto') sub = objEntry ? Utils.escapeHtml(objEntry.label) : ((this._objectCatalog || []).length ? '' : '(nenhum)');
       if (slot.tool === 'item') sub = itemEntry ? Utils.escapeHtml(itemEntry.patrimonio || itemEntry.descricao || '—') : '(nenhum sem lugar)';
     }
     return `
@@ -2593,11 +2658,14 @@ const View3D = {
       // '+', deve virar uma seta que aponta para a direita (indicando que
       // clicando ali, a janela se recolhe)."
       toggle.textContent = '➜';
+      // [01/10/2026] NOVO (36ª rodada) — "coloque um title mais condizente com a ação que este botão desempenha."
+      toggle.title = 'Recolher menu lateral';
       requestAnimationFrame(() => { panel.classList.add('open'); });
       this._setV3dRightTab(this._v3dRightTab || 'objetos');
     } else {
       toggle.classList.remove('open');
       toggle.textContent = '+';
+      toggle.title = 'Abrir menu lateral: Objetos, Tijolos e Propriedades';   // [01/10/2026] 36ª rodada
       panel.classList.remove('open');
       setTimeout(() => panel.classList.add('hidden'), 220); // espera a transição (.2s, ver CSS) antes de sumir de vez
     }
@@ -3051,8 +3119,13 @@ const View3D = {
    *  mais na lista nova (não deveria acontecer — a lista só cresce). */
   _refreshObjectCatalog() {
     const chaveAtual = this._objectCatalog?.[this._objectIndex]?.key;
+    // [73ª rodada] "todos os objetos do app": além do catálogo de objetos e dos importados, entra o Piso (laje; no 2D ele é uma ferramenta, mas no 3D
+    // tem perfil próprio — engine3d-profiles `piso`). Porta/Janela/Parede/Texto aparecem na seção "Ferramentas" do painel (ver _renderObjectCatalogPanel).
+    const _pisoExtra = (typeof Icons !== 'undefined' && Icons.MAP_OBJECT_EXTRAS && Icons.MAP_OBJECT_EXTRAS.piso && !(Icons._objetosExcluidos && Icons._objetosExcluidos.has('piso')))
+      ? [{ key: 'piso', label: 'Piso', svg: Icons.MAP_OBJECT_EXTRAS.piso.svg }] : [];
     this._objectCatalog = [
       ...((typeof Icons !== 'undefined') ? Icons.mapObjectCatalog() : []),
+      ..._pisoExtra,
       ...(window.ObjImport?.getCatalogEntries?.() || []),
     ];
     const idx = chaveAtual ? this._objectCatalog.findIndex((e) => e.key === chaveAtual) : -1;
@@ -3101,7 +3174,29 @@ const View3D = {
       <span class="v3d-objcat-ic">📷</span>
       <span class="v3d-objcat-label">Câmera</span>
     </div>`;
+    // [73ª rodada] "No botão '+' da lateral direita, aba 'Objetos', deve aparecer todos os objetos do app": faltavam os elementos que no 2D são FERRAMENTAS
+    // (Parede, Porta, Janela — ativam a ferramenta de construção do 3D, que já existia no rodapé) e o Texto (mesmo objeto do botão "Texto" do 2D).
+    const _ferr = (typeof Icons !== 'undefined' && Icons.ferramentaCatalog) ? Icons.ferramentaCatalog().filter((o) => o.key !== 'piso') : [];
+    html += `<div class="v3d-objcat-panel-title" style="margin-top:6px">Ferramentas</div>`;
+    _ferr.forEach((o) => {
+      html += `<div class="v3d-objcat-row ${this._buildTool === o.key ? 'active' : ''}" data-ferr="${o.key}">
+        <span class="v3d-objcat-ic">${o.svg || '🧱'}</span>
+        <span class="v3d-objcat-label">${Utils.escapeHtml(o.label || o.key)}</span>
+      </div>`;
+    });
+    html += `<div class="v3d-objcat-row" data-ferr="texto3d">
+      <span class="v3d-objcat-ic">🔤</span>
+      <span class="v3d-objcat-label">Texto</span>
+    </div>`;
     list.innerHTML = html;
+    list.querySelectorAll('.v3d-objcat-row[data-ferr]').forEach((row) => {
+      row.onclick = () => {
+        const k = row.dataset.ferr;
+        if (k === 'texto3d') this._criarTextoNaCena();
+        else { this._selectBuildTool(k); this._renderObjectCatalogPanel(); }
+        this._toggleObjectCatalogPanel();
+      };
+    });
     list.querySelectorAll('.v3d-objcat-row[data-idx]').forEach((row) => {
       row.onclick = () => {
         this._objectIndex = parseInt(row.dataset.idx, 10) || 0;
@@ -3880,6 +3975,37 @@ const View3D = {
           return;
         }
       }
+      // [30/09/2026] NOVO — pedido verbatim: "No 'Ver em 3D', logo que marca
+      // a parede, o último valor definido para a parede deve ficar por
+      // algum tempo e ir sumindo depois." CAUSA: o HUD `#v3d-wall-length`
+      // (Rodada 9) só mostra a distância AO VIVO até a mira; como a cadeia
+      // continua a partir do ponto final da parede recém-criada (ver
+      // `this._wallChainStart` logo abaixo), no quadro seguinte a mira já
+      // está quase em cima desse ponto e a medida caía pra perto de 0 na
+      // hora, sem dar tempo de ver o valor que acabou de ser definido.
+      // Guarda aqui o último valor + o instante da colocação;
+      // `_updateBuildGhost` (mais abaixo) usa isso pra manter o texto
+      // visível por `V3D_WALL_LEN_FADE_MS`, desvanecendo a opacidade no
+      // fim desse período, antes de voltar a seguir a medida ao vivo.
+      // [30/09/2026] MUDADO (11ª rodada) — pedido verbatim: "No 'Ver em 3D', ao colocar uma parede,
+      // para cada parede colocada, deve ficar a caixa com a medida por algum tempo e depois
+      // desaparecer. Não é a mesma caixa. Se desenhar várias paredes rapidamente, por exemplo, fica
+      // uma caixa de medida para cada uma." CAUSA da versão anterior (10ª rodada): um único valor
+      // global (`_v3dWallLastPlaced`) reaproveitava a MESMA caixa do HUD ao vivo; ao colocar outra
+      // parede, o valor anterior era sobrescrito e a caixa antiga sumia na hora. Agora cada parede
+      // colocada ganha a SUA própria caixa (ver `_v3dSpawnWallLabel`), ancorada no ponto médio da
+      // parede no mundo 3D, com o próprio temporizador/fade independente.
+      // [30/09/2026] MUDADO (12ª rodada) — pedido verbatim: "Em vez de cada caixa, depois do 2º clique, ficar no
+      // meio da parede, ela deve ficar na posição relativa em que estava sendo mostrada, no momento do
+      // clique." A caixa nova nasce EXATAMENTE onde a caixa ao vivo (#v3d-wall-length, perto da mira) estava
+      // na tela no instante do clique (ver _v3dSpawnWallLabel) e fica parada ali — não mais ancorada no meio
+      // da parede no mundo 3D.
+      // [30/09/2026] MUDADO (13ª rodada) — pedido verbatim: "Sobre as caixas de medidas, no 'Ver em 3D', é a mesma
+      // posição relativa não da tela, mas da parede que ficou para trás. Deste modo, elas não ficarão
+      // sobrepostas." Na 12ª rodada a caixa ficava FIXA NA TELA (todas no mesmo ponto → sobrepostas). Agora ela
+      // nasce no mesmo lugar em que a medida ao vivo estava (logo abaixo da mira) mas ANCORADA NO MUNDO 3D, no
+      // ponto da parede que a mira apontava; ao andar/virar, a caixa fica junto da parede que ficou pra trás.
+      this._v3dSpawnWallLabel(this._formatWallLenHUD(comprimento), px, pz);
       const novaParede = Mapping.addWall(this._map, p0.x, p0.y, px, pz, { layerId: this._layerIdParaNovosItens() });
       // Conversão automática de quinas no PONTO FINAL do segmento — mesma
       // ideia do ponto inicial acima ("quando uma parede livre toca uma
@@ -7588,10 +7714,84 @@ const View3D = {
    *  (não a malha exata — ex.: a mesa não mostra as 4 pernas no ghost, só a
    *  caixa inteira), pra não precisar duplicar toda lógica de malha real
    *  aqui; a peça de verdade (já com a malha certa) só nasce ao clicar. */
+  /** [30/09/2026] NOVO (11ª rodada) — pedido verbatim: "para cada parede colocada, deve ficar a
+   *  caixa com a medida por algum tempo e depois desaparecer. Não é a mesma caixa. Se desenhar
+   *  várias paredes rapidamente, por exemplo, fica uma caixa de medida para cada uma." Cria uma
+   *  caixa NOVA (HTML, mesmo visual do HUD ao vivo #v3d-wall-length) ancorada em (x, z) do mundo —
+   *  o ponto médio da parede — e guarda em `this._v3dWallLabels`; `_v3dUpdateWallLabels` (chamada
+   *  a cada quadro em _loop) projeta cada uma na tela, faz o fade e remove quando o tempo acaba.
+   *  Independente: várias caixas podem existir ao mesmo tempo, cada uma com o seu relógio. */
+  _v3dSpawnWallLabel(texto, px, pz) {
+    const base = this._container?.querySelector('#v3d-wall-length');
+    const pai = base?.parentNode || this._container;
+    if (!pai) return;
+    // [30/09/2026] MUDADO (13ª rodada) — âncora no MUNDO: ponto do raio central (mira) cuja projeção no plano
+    // XZ é o fim da parede (px, pz) — recupera a altura (y) em que a mira realmente apontava (chão ou face de
+    // uma parede) em vez de chutar uma altura. A caixa é desenhada 22px ABAIXO da projeção desse ponto, igual
+    // à caixa ao vivo (top: 50% + 22px) — então, no instante do clique, aparece exatamente onde estava.
+    // [30/09/2026] MUDADO (14ª rodada) — pedido verbatim: "A caixa deve ficar próxima do 2º ponto da parede que acabou de ser
+    // colocada, não no cursor do mouse." Âncora = o 2º ponto da parede (px, pz) a ~1,2m do chão (meia altura de uma parede
+    // comum), SEM depender de onde a mira está (a versão anterior reconstruía o ponto pelo raio da mira e a caixa acabava
+    // colada no cursor). A caixa é centrada nesse ponto e acompanha o mundo 3D.
+    const ancora = { x: px, y: 1.2, z: pz };
+    const el = document.createElement('div');
+    el.className = 'v3d-wall-length v3d-wall-length-placed';
+    el.textContent = texto;
+    el.style.cssText = 'position:absolute; left:-9999px; top:0; transform:translate(-50%,-50%); background:rgba(10,12,16,.85); border:1px solid #6bdb9a; color:#6bdb9a; font:600 12px sans-serif; padding:3px 8px; border-radius:5px; pointer-events:none; z-index:5; white-space:nowrap;';
+    pai.appendChild(el);
+    if (!this._v3dWallLabels) this._v3dWallLabels = [];
+    this._v3dWallLabels.push({ el, x: ancora.x, y: ancora.y, z: ancora.z, atMs: (typeof performance !== 'undefined' ? performance.now() : Date.now()) });
+    this._v3dUpdateWallLabels();
+  },
+
+  /** [30/09/2026] MUDADO (13ª rodada) — ver `_v3dSpawnWallLabel`. Projeta cada caixa (âncora no mundo) na
+   *  tela, aplica o fade e remove as expiradas. `_v3dRemoveAllWallLabels` limpa tudo (unmount). */
+  _v3dUpdateWallLabels() {
+    const lista = this._v3dWallLabels;
+    if (!lista || !lista.length) return;
+    const DURACAO_MS = 2500, FADE_MS = 900;
+    const agora = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const cam = this._engine?.camera3;
+    const pai = lista[0].el.parentNode;
+    const W = pai?.clientWidth || 0, H = pai?.clientHeight || 0;
+    for (let i = lista.length - 1; i >= 0; i--) {
+      const it = lista[i];
+      const idade = agora - it.atMs;
+      if (idade >= DURACAO_MS || !it.el.isConnected) { it.el.remove(); lista.splice(i, 1); continue; }
+      const restante = DURACAO_MS - idade;
+      it.el.style.opacity = restante < FADE_MS ? String(Math.max(0, restante / FADE_MS)) : '1';
+      if (!cam || !W || !H) continue;
+      const v = new THREE.Vector3(it.x, it.y, it.z).project(cam);
+      if (v.z > 1 || v.z < -1) { it.el.style.display = 'none'; continue; } // atrás da câmera
+      it.el.style.display = '';
+      it.el.style.left = ((v.x * 0.5 + 0.5) * W) + 'px';
+      it.el.style.top = ((-v.y * 0.5 + 0.5) * H) + 'px';   // [30/09/2026] MUDADO (14ª rodada) — sem o deslocamento de 22px da caixa ao vivo
+    }
+  },
+
+  _v3dRemoveAllWallLabels() {
+    (this._v3dWallLabels || []).forEach((it) => { try { it.el.remove(); } catch (e) { /* ignora */ } });
+    this._v3dWallLabels = [];
+  },
+
+  /** [30/09/2026] NOVO — formata uma distância (metros) para o HUD de
+   *  medida de parede do 3D, usado tanto na medida AO VIVO quanto no valor
+   *  que permanece visível por um tempo após a parede ser colocada (ver `_v3dWallLastPlaced`
+   *  logo acima, em `_placeWithBuildTool`). Extraído pra não duplicar o
+   *  mesmo formato (cm abaixo de 1m, m acima) nos dois lugares. */
+  _formatWallLenHUD(dist) {
+    return dist < 1 ? `${(dist * 100).toFixed(2)}cm` : `${dist.toFixed(2)}m`;
+  },
+
   _updateBuildGhost() {
     const eng = this._engine;
     if (!eng?._ready) return;
     eng.hideAllGhosts?.();
+    // [30/09/2026] NOVO -- escondido por padrão a cada quadro; só o ramo 'parede' com
+    // this._wallChainStart já marcado (mais abaixo) volta a mostrar/atualizar. Cobre de uma vez só
+    // trocar de ferramenta, cancelar a cadeia (Esc) ou sair do modo de construção.
+    if (this._v3dWallLengthEl === undefined) this._v3dWallLengthEl = this._container?.querySelector('#v3d-wall-length') || null;
+    if (this._v3dWallLengthEl) { this._v3dWallLengthEl.style.display = 'none'; this._v3dWallLengthEl.style.opacity = '1'; }
     // Raio X (tecla X — ver onKeyDown/_xrayActive/Engine3D.setXRayTarget)
     // começa DESLIGADO a cada quadro — só o ramo 'objeto' abaixo (o único
     // que pousa em cima de outro objeto) volta a ligar quando de fato se
@@ -7631,6 +7831,26 @@ const View3D = {
       }
       const resolved = this._resolveWallSnap(rawX, rawZ, this._wallChainStart);
       eng.showGhostWall?.(resolved.x, resolved.z, this._wallChainStart);
+      // [30/09/2026] NOVO -- pedido verbatim: "Nas 'configurações 3D', nas seção correspondente,
+      // deve ter uma opção para que a medida apareça próximo do apontamento para definir a parede."
+      // Ver DEFAULTS.paredeMostrarMedidaProxCrosshair3D em mapconfig.js e #v3d-wall-length em
+      // mount(). `this._wallChainStart` só existe depois do 1º clique (ver comentário do campo, mais
+      // acima) -- exatamente quando faz sentido medir "daqui até a mira".
+      if (this._wallChainStart && this._v3dWallLengthEl && this._paredeConfig?.paredeMostrarMedidaProxCrosshair3D !== false) {
+        const dist = Math.hypot(resolved.x - this._wallChainStart.x, resolved.z - this._wallChainStart.y);
+        // [30/09/2026] MUDADO (11ª rodada) — o valor da parede recém-colocada NÃO é mais mostrado
+        // aqui (antes: uma única caixa compartilhada, sobrescrita a cada parede). Cada parede
+        // colocada ganha a sua própria caixa (ver `_v3dSpawnWallLabel`). Esta caixa mostra só a
+        // medida AO VIVO; fica escondida enquanto a mira está praticamente em cima do ponto inicial
+        // (< 2cm, logo após um clique), pra não piscar "0.00cm" ao lado da caixa da parede nova.
+        if (dist < 0.02) {
+          this._v3dWallLengthEl.style.display = 'none';
+        } else {
+          this._v3dWallLengthEl.textContent = this._formatWallLenHUD(dist);
+          this._v3dWallLengthEl.style.opacity = '1';
+          this._v3dWallLengthEl.style.display = '';
+        }
+      }
       // "Cursor Fantasma com Efeito Mola" + guias inteligentes (pedido do
       // usuário) — ver Engine3D.showWallSpringGhost/showSmartGuides.
       eng.showWallSpringGhost?.(rawX, rawZ, resolved.x, resolved.z);
@@ -8081,6 +8301,8 @@ const View3D = {
       // em `window`, ver Modeler3D._bindEvents) — os dois nunca devem agir
       // ao mesmo tempo sobre a mesma tecla.
       if (window.Modeler3D?.isActive?.()) return;
+      // [53ª rodada] Workspace: outro painel (ex.: 'Planta baixa') tem o foco -> esta tecla não é do 'Ver em 3D'.
+      if (window.BSPLayout?.containerTemFoco && !window.BSPLayout.containerTemFoco(this._container)) return;
       // [22/09/2026] NOVO -- pedido verbatim: "quando um campo de inserção de valor assumir o foco, as
       // setas devem ficar nele [...] ao clicar em um campo de número [...] e pressionar a seta [...] o
       // scroll é que acaba acontecendo". Causa: este handler global de teclado (câmera/atalhos) capturava
@@ -8469,8 +8691,13 @@ const View3D = {
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    // [53ª rodada] Workspace: ao perder o foco para outro painel, solta as teclas seguradas (a câmera não pode continuar andando por um keyup que foi para o outro painel).
+    if (this._onBspFoco) document.removeEventListener('bsp-foco-mudou', this._onBspFoco);
+    document.addEventListener('bsp-foco-mudou', this._onBspFoco = (ev) => { const d = ev.detail || {}; if (this._container && d.perdeu && d.perdeu.contains(this._container)) this._keys = {}; });
 
     const onClick = (e) => {
+
+      if (this._pisoSuppressClick) { this._pisoSuppressClick = false; return; } // [74ª] soltou um vértice do Piso: o clique não vale como seleção/colocação
       // Pedido do usuário: "somente o botão esquerdo do mouse serve para
       // inserir [a porta] no mapa". O evento "click" do navegador já só
       // dispara pro botão PRIMÁRIO (esquerdo) por padrão — botão direito
@@ -8480,6 +8707,7 @@ const View3D = {
       // algum dia um listener de terceiros disparar "click" sintético com
       // outro botão) — 0 é sempre o botão esquerdo.
       if (e && typeof e.button === 'number' && e.button !== 0) return;
+      // [73ª rodada] o clique que sucede um arraste/clique no gizmo 3D do Texto não deve virar interação com a cena.
       // [18/09/2026 UTC] NOVO (RODADA 155) — guarda o instante (ms,
       // `performance.now()`) de cada clique esquerdo simples, num buffer de
       // no máximo 2 entradas — pedido do usuário: "a velocidade com que se
@@ -8683,6 +8911,17 @@ const View3D = {
         // NOVA REGRA: MODO NAVEGACAO interage por DOIS CLIQUES (`onDblClick`); MODO EDICAO
         // (`_modelarObjetosHabilitado`) mostra as opcoes com o clique ESQUERDO. O botao direito
         // volta a ser so o hook `onModelContextmenu`.
+        // [30/09/2026] NOVO — pedido verbatim: "Ao apontar para ele e o
+        // raycaster 'bater' nele, então, clica-se e abre-se a janela de
+        // 'informações'." O selo "ℹ️" (modo "acompanha o objeto", padrão)
+        // é mirado/clicado com um clique ESQUERDO simples, mesmo com o
+        // Modelador desligado — furando a regra "só duplo clique" de cima
+        // de propósito, já que o selo só existe DEPOIS de um duplo clique
+        // anterior (ver `_dispatchMouseHit3D`/`_armarBotaoInformacoes3D`).
+        if (this._fichaObjetoArmado && this._miraNoInfoBadge) {
+          this._abrirFichaObjeto3D(this._fichaObjetoArmado.entity);
+          return;
+        }
         if (this._modelarObjetosHabilitado) {
           try { this._cliqueEdicao3D(); } catch (err) { console.error('[View3D] clique no Modo Edicao falhou:', err); }
         }
@@ -8849,6 +9088,64 @@ const View3D = {
       this._middleButtonHeld = true;
     };
     canvas.addEventListener('mousedown', onMouseDownMiddle);
+    // [01/10/2026] NOVO (43ª rodada) — "Atualização 3D ➔ 2D (O Recíproco): quando o usuário arrastar um elemento na viewport 3D, [...] Raycaster combinado com um plano de projeção horizontal [...]
+    // atualize a posição, escreva de volta no Estado Central [e] redesenhe o Canvas 2D em tempo real." No nosso projeto o botão esquerdo no 3D já é mira/seleção/navegação, então o arraste
+    // é ALT + arrastar sobre um objeto (sem Pointer Lock, sem Modelador). A cada movimento: raio da câmera -> interseção com o plano XZ na altura do objeto (nada de malha nova: só
+    // Engine3D.moveObjectLive) -> atualiza o objeto do 3D, espelha x/y/elevação no objeto de mesmo id do mapa 2D (se o 2D estiver aberto) e marca o 2D pra redesenhar. Ao soltar: reconstrução
+    // final da malha (acerta selos/luzes) e gravação. Limites: arrasta um objeto por vez (grupos não acompanham); objeto em pool de instâncias cai na reconstrução incremental.
+    const onAltDragDown = (e) => {
+      if (e.button !== 0 || !e.altKey || document.pointerLockElement === canvas || window.Modeler3D?.isActive?.() || !this._engine) return;
+      const hit = this._pickAtClientPoint(e.clientX, e.clientY, canvas);
+      const obj = hit && hit.type === 'object' ? hit.ref : null;
+      if (!obj || !(this._map?.objects || []).includes(obj)) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      const planoY = (hit.pos && typeof hit.pos.y === 'number') ? hit.pos.y : 0;
+      const pontoNoPlano = (ev) => {
+        const rect = canvas.getBoundingClientRect();
+        const custom = this._engine?._customRes;
+        const box = this._computeContainRect(rect, canvas.width, canvas.height, !!(custom && custom.fit === 'caber'));
+        const ray = this._engine.rayFromScreenPoint(((ev.clientX - box.left) / box.width) * 2 - 1, -(((ev.clientY - box.top) / box.height) * 2 - 1));
+        if (!ray || Math.abs(ray.dir.y) < 1e-6) return null;
+        const t = (planoY - ray.origin.y) / ray.dir.y;
+        if (t < 0) return null;
+        return { x: ray.origin.x + ray.dir.x * t, z: ray.origin.z + ray.dir.z * t };
+      };
+      const p0 = pontoNoPlano(e);
+      if (!p0) return;
+      const offX = obj.x - p0.x, offZ = obj.y - p0.z;
+      let moveu = false;
+      const espelho2D = () => { const mv = window.MapView; return (mv && mv._map && mv._map.id === this._map.id) ? (mv._map.objects || []).find((o) => o.id === obj.id) : null; };
+      const onMove = (ev) => {
+        const p = pontoNoPlano(ev);
+        if (!p) return;
+        const nx = p.x + offX, nz = p.z + offZ;
+        const dx = nx - obj.x, dz = nz - obj.y;
+        if (!dx && !dz) return;
+        moveu = true;
+        const efet = (o) => (o.elevacao || 0) + (o.semY0 ? 0 : ((typeof OBJECT3D_PROFILES !== 'undefined' && OBJECT3D_PROFILES[o.tipo] && OBJECT3D_PROFILES[o.tipo].y0) || 0));
+        const efAntes = efet(obj);
+        obj.x = nx; obj.y = nz;
+        try { window.Mapping?.recalcularElevacao?.(this._map, obj); } catch (err) { /* ignora */ }
+        this._engine.moveObjectLive(obj, dx, dz, efet(obj) - efAntes);
+        const o2 = espelho2D();
+        if (o2) {
+          o2.x = obj.x; o2.y = obj.y;
+          ['elevacao', 'semY0', '_elevAuto'].forEach((k) => { if (k in obj) o2[k] = obj[k]; else delete o2[k]; });
+          window.MapView._redrawDirty = true;
+        }
+      };
+      const onUp = async () => {
+        window.removeEventListener('mousemove', onMove, true);
+        window.removeEventListener('mouseup', onUp, true);
+        if (!moveu) return;
+        try { this._engine.rebuildObjectIncremental(obj); } catch (err) { console.warn('[View3D] acerto final do arraste:', err); }
+        const o2 = espelho2D();
+        try { if (o2 && window.MapView?._saveMap) await window.MapView._saveMap('arraste 3D'); else await DB.saveMap(this._map); } catch (err) { console.warn('[View3D] gravar arraste 3D:', err); }
+      };
+      window.addEventListener('mousemove', onMove, true);
+      window.addEventListener('mouseup', onUp, true);
+    };
+    canvas.addEventListener('mousedown', onAltDragDown, true);
     const onMouseUpMiddle = (e) => {
       if (e.button !== 1) return;
       // NOVO (08/09/2026, 39a rodada) -- MESMO guard ja aplicado em
@@ -8873,6 +9170,13 @@ const View3D = {
     // do Pointer Lock, e o mouseup fica no `document` (não só no canvas)
     // pra não "grudar" pressionado caso o usuário solte o botão fora da
     // área do canvas.
+    // [74ª rodada] arrastar vértices do Piso editável (contorno/furos): MIRE a esfera, segure o botão esquerdo e mova — ver js/piso-custom-edit.js. Em captura, para ganhar da navegação/colocação.
+    const onMouseDownPiso = (e) => {
+      if (e.button !== 0 || document.pointerLockElement !== canvas || window.Modeler3D?.isActive?.()) return;
+      if (window.PisoCustomEdit?.mouseDown3D(this, e)) { e.preventDefault(); e.stopImmediatePropagation(); this._pisoSuppressClick = true; }
+    };
+    canvas.addEventListener('mousedown', onMouseDownPiso, true);
+    document.addEventListener('mouseup', (e) => { if (e.button === 0) window.PisoCustomEdit?.mouseUp3D(this); });
     const onMouseDownTijolo = (e) => {
       if (e.button !== 0 || document.pointerLockElement !== canvas) return;
       if (this._buildTool !== 'tijolo') return;
@@ -9002,6 +9306,8 @@ const View3D = {
       // decide cursor/seleção/gizmo (ver modeler-input.js), o View3D nunca
       // deve mexer em `canvas.style.cursor` por cima.
       if (window.Modeler3D?.isActive?.()) return;
+      // [74ª rodada] arrastando um vértice do Piso editável: o mouse move o vértice (não a câmera).
+      if (window.PisoCustomEdit?.e3.drag && window.PisoCustomEdit.mouseMove3D(this, e)) return;
       // [10/09/2026] NOVO — pedido verbatim: "o cursor do mouse deve
       // aparecer para ir apontando para as coisas, poder selecioná-las".
       // `_fotoCamMode` SAI do Pointer Lock ao entrar (ver
@@ -9312,6 +9618,38 @@ const View3D = {
       });
     });
 
+    // [30/09/2026] NOVO — botão "ℹ️ Informações" (ver comentário grande em
+    // `_armarBotaoInformacoes3D`/HTML do template acima). MESMO espírito dos
+    // botões da bússola logo acima: com o Pointer Lock ativo, o navegador
+    // manda todo clique real pro <canvas> mesmo (Pointer Lock API) — este
+    // botão só recebe o clique já destravado (depois do Esc), igual a
+    // qualquer outro elemento HTML flutuante desta tela.
+    this._container?.querySelector('#v3d-info-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const alvo = this._fichaObjetoArmado?.entity;
+      if (alvo) this._abrirFichaObjeto3D(alvo);
+    });
+    // [30/09/2026] NOVO — pedido verbatim: "Ao clicar em outro botão para
+    // fazer outra coisa, o botão de 'informações' deve desaparecer."
+    // Delegado (fase de captura) em `this._container` inteiro: qualquer
+    // `<button>` clicado, EXCETO o próprio "ℹ️ Informações" (que abre a
+    // ficha, tratado acima) e qualquer botão DENTRO da própria ficha (ex.
+    // "Fechar", "Ver ficha do patrimônio" — não faz sentido a ficha se
+    // fechar clicando nela mesma), desarma o selo/botão na hora — mesmo
+    // clique continua propagando normalmente pro botão de verdade agir.
+    this._container?.addEventListener('click', (e) => {
+      if (!this._fichaObjetoArmado) return;
+      const btn = e.target?.closest?.('button');
+      if (!btn || btn.id === 'v3d-info-btn' || btn.closest('.v3d-ficha-objeto-overlay') || btn.closest('.v3d-ficha-objeto-flutuante')) return;
+      // [30/09/2026] NOVO (13ª rodada) — enquanto a ficha deste objeto estiver aberta, o "ℹ️" continua ativo (não desarma).
+      if (this._v3dFichaAbertaDe(this._fichaObjetoArmado.entity?.id)) return;
+      this._fichaObjetoArmado = null;
+      this._miraNoInfoBadge = false;
+      const infoBtn = this._container?.querySelector('#v3d-info-btn');
+      if (infoBtn) infoBtn.style.display = 'none';
+      try { this._engine?.clearInfoBadge?.(); } catch (err) { /* ignora */ }
+    }, true);
+
     // Pedido do usuário (28/08/2026): recurso visual pra saber se o clique
     // já "entrou" no canvas (Pointer Lock ativo — interagindo direto com o
     // cenário 3D) ou se ainda está "fora" (precisa clicar pra habilitar).
@@ -9581,6 +9919,21 @@ const View3D = {
   // Modelador) — pra qualquer coisa que ainda lê essas 3 medidas fora do
   // Modelador (ex.: view de cima 2D) mostrar um tamanho plausível, não o
   // 0,5m fixo de `ensureCustomMesh` (que só serve pro cubo padrão).
+  /** [73ª rodada] Cria um Texto (mesmo objeto do botão "Texto" do 2D) à frente da câmera e abre a aba "Texto" para editá-lo. Usado pela lista "Objetos" da lateral direita. */
+  _criarTextoNaCena() {
+    if (!this._map || !window.Texto3D) { Utils.toast?.('Nenhum ambiente/mapa selecionado.', { type: 'warn' }); return null; }
+    const fwd = Cam3DMath.cameraForwardFlat(this._camera);
+    const x = this._camera.x + fwd.x * 1.2, y = this._camera.z + fwd.z * 1.2;
+    const t = Mapping.addObject(this._map, x, y, 'texto3d', { forma: 'retangulo', layerId: this._layerIdParaNovosItens() });
+    DB.saveMap(this._map);
+    this._rebuildScene();
+    this._textoAlvoId = t.id;
+    const sh = ModelerUI._sidebarCtx(this); sh._sidebarTab = 'texto';
+    { const pn = this._container.querySelector('#m3d-sidebar-panel'); if (pn && !pn.classList.contains('open')) ModelerUI.toggleSidebar(this); else ModelerUI.renderSidebar(this); }
+    Utils.toast?.('🔤 Texto criado — edite as definições na aba "Texto" da barra lateral esquerda.', { type: 'ok' });
+    return t;
+  },
+
   _createPrimitiveObjectAndEnter(entry) {
     if (typeof Modeler3D === 'undefined') { Utils.toast?.('Modelador 3D não carregado.', { type: 'danger' }); return; }
     if (!this._map) { Utils.toast?.('Nenhum ambiente/mapa selecionado.', { type: 'warn' }); return; }
@@ -9591,6 +9944,18 @@ const View3D = {
     // CORREÇÃO (03/09/2026) — mesmo bug/mesma causa raiz do comentário grande
     // em _createAndEnterNewCube3D logo acima ("Recuperados (camada original
     // perdida)" surgindo à toa): também faltava layerId aqui.
+    // [69ª rodada] "Texto" do Criar = MESMO objeto do botão "Texto" da janela Ferramentas do 2D (tipo 'texto3d'): aparece no 2D e no 3D juntos,
+    // sem entrar no Modelador (propriedades pelo painel do objeto; "Modelar em 3D" continua disponível).
+    if (entry.key === 'texto' && window.Texto3D) {
+      const t = Mapping.addObject(this._map, x, y, 'texto3d', { forma: 'retangulo', layerId: this._layerIdParaNovosItens() });
+      DB.saveMap(this._map);
+      this._rebuildScene();
+      this._textoAlvoId = t.id;
+      const sh = ModelerUI._sidebarCtx(this); sh._sidebarTab = 'texto';
+      { const pn = this._container.querySelector('#m3d-sidebar-panel'); if (pn && !pn.classList.contains('open')) ModelerUI.toggleSidebar(this); else ModelerUI.renderSidebar(this); } // reabre o painel já na aba "Texto" (foi fechado acima)
+      Utils.toast?.('🔤 Texto criado — aparece no 2D e no 3D. Edite as definições na aba "Texto" da barra lateral.', { type: 'ok' });
+      return t;
+    }
     const novo = Mapping.addObject(this._map, x, y, null, { layerId: this._layerIdParaNovosItens() });
     const malha = entry.gerar({ ...entry.defaultParams });
     const customMesh = {
@@ -9616,12 +9981,80 @@ const View3D = {
     // é capturável por quem chamou esta função, então precisa da própria
     // proteção.
     setTimeout(() => {
-      try { Modeler3D.enter(this, novo, { enterOrbital: !this._fotoCamMode }); } // [12/09/2026 — ITEM C]
-      catch (err) {
+      try {
+        Modeler3D.enter(this, novo, { enterOrbital: !this._fotoCamMode }); // [12/09/2026 — ITEM C]
+        // [67ª rodada] Texto 3D criado pelo botão "Criar" da tela base: já entra com as propriedades do Texto (Forma/Geometria/Fonte/Parágrafo/Caixa)
+        // editáveis ao vivo no painel "Criar" — mesmo rastreio de `_lastPrimitive` que `ModelerInput._colocarPrimitiva` faz nas inserções feitas dentro do Modelador.
+        if (entry.key === 'texto') {
+          let tentativas = 0;
+          const prepara = () => {
+            const st = window.Modeler3D && Modeler3D._state;
+            if (!st || !st.active || !st.cm || st.obj !== novo) { if (++tentativas < 40) setTimeout(prepara, 100); return; }
+            st._lastPrimitiveCatalog = entry;
+            st._lastPrimitive = { geradorFn: entry.gerar, params: { ...entry.defaultParams }, label: entry.label, vOffset: 0, vCount: st.cm.vertices.length, eOffset: 0, eCount: st.cm.edges.length, fOffset: 0, fCount: st.cm.faces.length };
+            st._sidebarTab = 'criar';
+            if (!st._sidebarUI) st._sidebarUI = { editarCollapsed: false, historicoCollapsed: false, primitivaCollapsed: false };
+            st._sidebarUI.primitivaCollapsed = true; // recolhe os botões de primitiva: dá espaço aos campos do Texto
+            const painel = this._container.querySelector('#m3d-sidebar-panel');
+            if (!painel || !painel.classList.contains('open')) ModelerUI.toggleSidebar(this); else ModelerUI.renderSidebar?.(this);
+            ModelerUI._renderCreateProps(st);
+          };
+          prepara();
+        }
+      } catch (err) {
         if (typeof ModuleHost !== 'undefined') ModuleHost.showLoadError('Modelador 3D', err);
         else console.error('Falha ao entrar no Modelador 3D:', err);
       }
     }, 0);
+  },
+
+  // NOVO (29/09/2026), pedido verbatim: "No 'Ver em 3D', no botão lateral
+  // esquerdo ('+'), na aba 'Criar', em 'Outros', há o botão 'Câmera', ele
+  // deve colocar o mesmo objeto Câmera do botão 'Câmera' da janela
+  // 'Ferramentas', do mapa 2D. Atualmente, acaba colocando uma outra forma
+  // 3D, no lugar." CAUSA RAIZ: o botão "Câmera" dentro de "Outros" é uma
+  // entrada do `PRIMITIVE_CATALOG` do MODELADOR (`modeler-ui.js`,
+  // `gerar: () => ModelerMesh.markerCameraMesh()`) — pensada pra inserir um
+  // MARCADOR decorativo em forma de câmera DENTRO de um modelo 3D que está
+  // sendo editado (um adereço, sem nenhuma ligação com o objeto Câmera de
+  // verdade do app). Reaproveitada sem distinção também na aba "Criar" da
+  // tela BASE (fora de uma sessão do Modelador — ver
+  // `ModelerUI._buildCriarPanelBase`), ela acabava chamando
+  // `_createPrimitiveObjectAndEnter` pra ESSE mesmo marcador: cria um objeto
+  // comum com aquela malha decorativa e entra editando no Modelador — nada
+  // a ver com uma Câmera de verdade (`CameraPin`/`map.cameras`, o mesmo tipo
+  // que a ferramenta "📷 Câmera" da janela "Ferramentas" do mapa 2D cria via
+  // `mapview.js _placeFotoOrbAtWorld`). Esta função é o equivalente 3D
+  // daquela: cria a MESMA Câmera independente (sem foto, editável depois
+  // pelo painel de propriedades dela) 1,2m à frente de onde a câmera do
+  // visualizador está olhando agora — mesmo posicionamento de
+  // `_createPrimitiveObjectAndEnter`/`_createAndEnterNewCube3D`, só que sem
+  // entrar no Modelador (uma Câmera não é editada lá, é editada pelo painel
+  // de propriedades de sempre — ver `mapview.js _openFotoPinPopover`/
+  // `js/cards/foto-pin-card.js`, reaproveitado igual pra 2D e 3D).
+  async _criarCameraViaPainelCriar() {
+    if (!this._map) { Utils.toast?.('Nenhum ambiente/mapa selecionado.', { type: 'warn' }); return; }
+    ModelerUI.toggleSidebar(this); // fecha o painel "+" (mesmo gesto de _createPrimitiveObjectAndEnter)
+    document.exitPointerLock?.();
+    const fwd = Cam3DMath.cameraForwardFlat(this._camera);
+    const x = this._camera.x + fwd.x * 1.2, y = this._camera.z + fwd.z * 1.2;
+    const cam = await CameraPin.create(this._map, {
+      x, y, piso: 0, layerId: this._layerIdParaNovosItens ? this._layerIdParaNovosItens() : null, altura: 1.6,
+    });
+    await this._buildFotosNoMapa();
+    await this._rebuildScene();
+    Utils.toast('Câmera colocada — anexe uma foto pelo painel de propriedades quando quiser.', { type: 'ok', duration: 4000 });
+    History.push({
+      label: 'colocar câmera',
+      undo: async () => { await CameraPin.delete(this._map, cam.id); await this._buildFotosNoMapa(); this._rebuildScene(); },
+      redo: async () => {
+        if (!this._map.cameras) this._map.cameras = [];
+        if (!this._map.cameras.find((c) => c.id === cam.id)) this._map.cameras.push({ ...cam });
+        DB.saveMap(this._map);
+        await this._buildFotosNoMapa();
+        this._rebuildScene();
+      },
+    });
   },
 
   // Pedido do usuário: "ao capturar o mouse, não é mais possível clicar
@@ -9801,7 +10234,400 @@ const View3D = {
       const comps = window.Components?.ensureComponents?.(hit.ref) || [];
       const temOnDbl = comps.some((c) => c.type === 'EventTrigger' && c.enabled !== false && (c.events || []).some((ev) => ev.event === 'onDoubleClick'));
       if (temOnDbl) window.SceneEventBus?.emit?.('onDoubleClick', hit.ref, { pointer: null, camera: this._camera }, { map: this._map, view3d: this });
+      // [30/09/2026] NOVO — pedido verbatim: "No 'Modo Navegação', ao dar
+      // dois cliques, deve aparecer por algum tempo algum botão de
+      // 'informações' [...] (opcional por decisão na seção que trata disso
+      // nas 'configurações 3D')." Este `_dispatchMouseHit3D` só roda com
+      // `evento==='DoubleClick'` a partir do listener `dblclick` de
+      // `mount()`, que já garante Modo Navegação (`!this._modelarObjetosHabilitado`)
+      // — não precisa checar de novo aqui. `hit.ref` só existe pra
+      // porta/janela/objeto/fotoPin (todos com descrição/especificações
+      // suportadas por `ObjectStandard`), nunca pra parede/piso.
+      if (this._engine?._config?.fichaObjeto3DAtiva !== false) this._armarBotaoInformacoes3D(hit.ref);
     }
+  },
+
+  /** [30/09/2026] NOVO — "arma"/reinicia o botão "ℹ️ Informações" (pedido
+   *  verbatim, ver comentário grande no HTML do template/`_dispatchMouseHit3D`
+   *  acima) pra `entity`: guarda `{ entity, expiraEm }` em
+   *  `this._fichaObjetoArmado` e mostra o botão. `DURACAO_MS` — "por algum
+   *  tempo" — 4s sem mirar no objeto antes de sumir (bem mais que o
+   *  suficiente pra notar e clicar, sem "piscar" rápido demais). Chamado
+   *  tanto pelo duplo clique inicial (`_dispatchMouseHit3D`) quanto, todo
+   *  quadro, por `_atualizarBotaoInformacoes3D` enquanto o jogador continuar
+   *  mirando no MESMO objeto (reinicia o contador, pedido verbatim:
+   *  "Enquanto estiver apontando ainda ou voltar ao apontar para o mesmo
+   *  objeto, o contador deve reiniciar"). */
+  _armarBotaoInformacoes3D(entity) {
+    if (!entity) return;
+    this._fichaObjetoArmado = { entity, expiraEm: performance.now() + 4000 };
+    // [30/09/2026] MUDADO — pedido verbatim: "Deve ser opcional a janela ser
+    // fixa (como é atualmente) ou ficar aparecendo de acordo com a posição
+    // do objeto no mundo 3D em tempo real. Por padrão, deve ser este
+    // último jeito." `fichaObjeto3DFixa === true` (opt-in, ver
+    // mapconfig.js) volta ao botão HTML fixo de sempre; por padrão
+    // (`!== true`) usa o selo no espaço 3D (`Engine3D.setInfoBadgeWorldPos`),
+    // atualizado todo quadro por `_atualizarBotaoInformacoes3D` abaixo.
+    const fixa = this._engine?._config?.fichaObjeto3DFixa === true;
+    const btn = this._container?.querySelector('#v3d-info-btn');
+    if (fixa) { if (btn) btn.style.display = ''; }
+    else { if (btn) btn.style.display = 'none'; this._miraNoInfoBadge = false; }
+  },
+
+  /** [30/09/2026] NOVO — chamada todo quadro (ver `_update`/`delta` acima).
+   *  Guard barato: sai cedo se nada estiver "armado" (imensa maioria dos
+   *  quadros — só existe algo armado depois de um duplo clique recente).
+   *  Enquanto armado: raycasta a mira central (MESMO raio de
+   *  `_dispatchMouseHit3D`) e, se o objeto mirado AGORA for o MESMO que
+   *  armou o botão, reinicia o contador (`_armarBotaoInformacoes3D` de
+   *  novo) — "continue mirando (ou volte a mirar) o mesmo objeto pra
+   *  renovar o tempo". Se não estiver mais mirando nele, o contador
+   *  simplesmente CONTINUA (não reinicia, não pausa) até expirar — pedido
+   *  verbatim: "Se deixar de apontar, o contador continua". Ao expirar,
+   *  esconde o botão e limpa o estado (precisa de outro duplo clique pra
+   *  voltar). */
+  _atualizarBotaoInformacoes3D() {
+    const armado = this._fichaObjetoArmado;
+    if (!armado) return;
+    let ray = null;
+    if (this._engine && this._camera) {
+      try {
+        ray = this._engine.centerRay(this._camera);
+        const hit = this._engine.pickFromRay(ray.origin, ray.dir);
+        if (hit && hit.ref && hit.ref.id === armado.entity.id) {
+          armado.expiraEm = performance.now() + 4000;
+        }
+      } catch (err) { /* raycaster indisponível num quadro de transição — ignora, o contador só continua correndo */ }
+    }
+    // [30/09/2026] NOVO (13ª rodada) — pedido verbatim: "Se o botão 'i' for clicado, então, deve ficar ativo até fechar
+    // a janela de informações." Enquanto houver ficha aberta deste objeto, o contador de 4s não expira o "ℹ️".
+    if (this._v3dFichaAbertaDe(armado.entity?.id)) armado.expiraEm = performance.now() + 4000;
+    // [30/09/2026] NOVO (14ª rodada) — pedido verbatim: "Ao apontar para o botão 'i', ele deve receber um destaque suave e deve
+    // resetar o contador também." Mirando o PRÓPRIO selo: destaque suave (Engine3D.setInfoBadgeHover) + renova os 4s.
+    // (Engine3D.pickFromRay/hoverPick já devolvem null enquanto a mira está no selo — nada atrás dele é atingido.)
+    const _fixaBadge = this._engine?._config?.fichaObjeto3DFixa === true;
+    const _naBadge = !_fixaBadge && !!ray && !!this._engine?.hitTestInfoBadge?.(ray.origin, ray.dir);
+    try { this._engine?.setInfoBadgeHover?.(_naBadge); } catch (err) { /* ignora */ }
+    if (_naBadge) armado.expiraEm = performance.now() + 4000;
+    if (performance.now() >= armado.expiraEm) {
+      this._fichaObjetoArmado = null;
+      this._miraNoInfoBadge = false;
+      const btn = this._container?.querySelector('#v3d-info-btn');
+      if (btn) btn.style.display = 'none';
+      try { this._engine?.clearInfoBadge?.(); } catch (err) { /* ignora */ }
+      return;
+    }
+    // [30/09/2026] NOVO — modo "acompanha o objeto" (padrão, ver
+    // `_armarBotaoInformacoes3D`): reposiciona o selo "ℹ️" no topo do
+    // objeto TODO quadro (posição sempre fresca, ver
+    // `Engine3D.getPickableTopWorldPos`) e testa se a mira central está
+    // em cima DELE (não do objeto) — é isso que decide se o clique
+    // seguinte abre a ficha (ver `onClick`/`_miraNoInfoBadge`).
+    const fixa = this._engine?._config?.fichaObjeto3DFixa === true;
+    if (!fixa && this._engine) {
+      try {
+        const topo = this._engine.getPickableTopWorldPos(armado.entity.id);
+        if (topo) {
+          this._engine.setInfoBadgeWorldPos(topo);
+          this._miraNoInfoBadge = ray ? this._engine.hitTestInfoBadge(ray.origin, ray.dir) : false;
+        } else {
+          this._engine.clearInfoBadge();
+          this._miraNoInfoBadge = false;
+        }
+      } catch (err) { console.error('[View3D] selo "ℹ️ Informações" (acompanhar objeto) falhou:', err); }
+    }
+  },
+
+  /** [30/09/2026] NOVO — "ficha do objeto": janelinha SIMPLES (descrição +
+   *  lista de especificações, somente leitura) — pedido verbatim: "aparece
+   *  a ficha do objeto. Uma janelinha simples, com a descrição e as
+   *  especificações do objeto." Reaproveita o MESMO conteúdo/critério já
+   *  usado pelo botão "📋 Especificações" do cartão de clique (ver
+   *  `object-card.js`), só num popup autônomo — não depende de nenhum
+   *  cartão já aberto, já que o botão "ℹ️ Informações" pode aparecer sem
+   *  nenhum cartão na tela. Lê o objeto FRESCO de `this._map` (mesmo
+   *  cuidado de sempre, ver comentário grande equivalente em
+   *  `object-card.js`). */
+  async _abrirFichaObjeto3D(entity) {
+    if (!entity) return;
+    const alvo = (this._map?.objects || []).find((o) => o.id === entity.id)
+      || (this._map?.portas || []).find((o) => o.id === entity.id)
+      || (this._map?.janelas || []).find((o) => o.id === entity.id)
+      || entity;
+    const nome = alvo.nome || alvo.tipo || 'Objeto';
+    const itens = Array.isArray(alvo.especificacoes) ? alvo.especificacoes : [];
+    const descricaoHtml = alvo.descricao
+      ? `<div style="margin-bottom:8px; white-space:pre-wrap">${Utils.escapeHtml(alvo.descricao)}</div>`
+      : '<div style="color:var(--text-dim); margin-bottom:8px">Sem descrição.</div>';
+    const itensHtml = itens.length
+      ? itens.map((it) => `<div style="display:flex; justify-content:space-between; gap:8px; padding:3px 0; border-bottom:1px solid var(--border)"><span style="color:var(--text-dim)">${Utils.escapeHtml(it.label || '(sem rótulo)')}</span><span>${Utils.escapeHtml(it.value || '')}</span></div>`).join('')
+      : '<div style="color:var(--text-dim)">Nenhuma especificação cadastrada.</div>';
+    // [30/09/2026] NOVO — pedido verbatim: "Deve aparecer na janela de
+    // 'informações' [...] se há ou não patrimônio. Se houver, além do
+    // número deve aparecer um botão para acessar a janela das informações
+    // do patrimônio (já tem no app [...])." Mesmo campo `obj.itemIds`
+    // (array de `{id, patrimonio}`) usado pela janela de propriedades
+    // (`object-panel-card.js`) — reaproveita `App.showItemDetail(id)`, a
+    // MESMA ficha completa já usada em qualquer outro lugar do app, em vez
+    // de duplicar o conteúdo dela aqui.
+    const itemEntries = Array.isArray(alvo.itemIds) ? alvo.itemIds : [];
+    const patrimonioHtml = itemEntries.length
+      ? itemEntries.map((entry) => `
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 0; border-bottom:1px solid var(--border)">
+            <span>🔗 ${Utils.escapeHtml(entry.patrimonio || '(sem número)')}</span>
+            <button type="button" class="btn secondary sm v3d-ficha-ver-patrimonio" data-item-id="${Utils.escapeHtml(entry.id)}" title="Abrir a ficha completa deste patrimônio (número, descrição, tipo, setor, inserido, modificado)">Ver patrimônio</button>
+          </div>`).join('')
+      : '<div style="color:var(--text-dim)">Nenhum patrimônio associado a este objeto.</div>';
+    const existente = this._container?.querySelector('.v3d-ficha-objeto-overlay');
+    existente?.remove();
+    // [30/09/2026] NOVO (12ª rodada) — pedido verbatim: "Deve haver uma outra opção que, ao clicar no botão
+    // 'i', não fique uma janela fixa na tela com as informações, mas sim um janela flutuante em cima do
+    // objeto com as informações do mundo 3D." Opção "fichaObjeto3DFlutuante" (Configurações 3D; padrão
+    // DESLIGADA = janela fixa/modal de sempre). Ligada: a MESMA ficha vira um cartão que fica em cima do
+    // objeto e o acompanha na tela (projeção mundo→tela a cada quadro, ver _v3dUpdateFichaFlutuante).
+    const flutuante = this._engine?._config?.fichaObjeto3DFlutuante !== false;   // [30/09/2026] MUDADO (14ª rodada) — padrão agora LIGADO (ver mapconfig.js DEFAULTS)
+    const el = document.createElement('div');
+    // [30/09/2026] NOVO (22ª rodada) — pedido verbatim: "Sobre a ficha, nas 'configurações 3D' deve ter opção para isso também, o jeito atual e mais dois outros jeitos cada uma mais enxuto e compacto para exibir as informações em um cartão menor." Opção fichaObjeto3DLayout: 'completo' (jeito de sempre), 'compacto' (letra menor, descrição em 2 linhas, especificações em linhas curtas) e 'minimo' (cartão bem pequeno: título, resumo em uma linha, patrimônios como botões pequenos).
+    const layoutFicha = ['compacto', 'minimo'].includes(this._engine?._config?.fichaObjeto3DLayout) ? this._engine._config.fichaObjeto3DLayout : 'completo';
+    const E_ = (v) => Utils.escapeHtml(String(v ?? ''));
+    // [01/10/2026] NOVO (24ª rodada) — pedido verbatim: "Deve haver um botão '📜' para acessar o histórico ao lado do patrimônio da 'Compacta' e 'Mínima'. Na 'Completa' pode ficar em baixo." (ver _abrirHistoricoObjeto3D)
+    const patrimonioBotoesPequenos = itemEntries.map((entry) => `<button type="button" class="btn secondary xs v3d-ficha-ver-patrimonio" data-item-id="${E_(entry.id)}" title="Abrir a ficha completa deste patrimônio" style="padding:1px 6px; font-size:11px">🔗 ${E_(entry.patrimonio || '(sem número)')}</button>`).join(' ');
+    // [01/10/2026] NOVO (32ª rodada) — pedido verbatim: "No 'Ver em 3D', na ficha 'Completa', as entradas do histórico devem aparecer. Implemente algum jeito, para o caso de que sejam muitas entradas de histórico." Só no layout Completa: lista SOMENTE LEITURA (mesma ordem da lista editável: ObjectStandard._ordenarHistoricoIndices, mais novas em cima) numa caixa com altura máxima e rolagem própria; com mais de 5 entradas aparece um campo de filtro (texto ou data) com contador "x de N". Editar/adicionar continua no botão 📜 abaixo.
+    const histLista = window.ObjectStandard ? window.ObjectStandard.getHistorico(alvo) : [];
+    const fmtHist = (iso) => { try { return new Date(iso).toLocaleString('pt-BR'); } catch (e) { return iso || ''; } };
+    const histOrdem = histLista.length ? window.ObjectStandard._ordenarHistoricoIndices(histLista) : [];
+    const histLinhasHtml = histOrdem.map((i) => { const h = histLista[i]; const datas = h.modificadoEm ? `${fmtHist(h.data)} · editado ${fmtHist(h.modificadoEm)}` : fmtHist(h.data); return `<div class="v3d-ficha-hist-linha" data-busca="${E_((datas + ' ' + (h.texto || '')).toLowerCase())}" style="padding:3px 0; border-bottom:1px solid var(--border)"><div style="font-size:11px; color:var(--text-dim)">${E_(datas)}</div><div style="white-space:pre-wrap; word-break:break-word">${E_(h.texto || '')}</div></div>`; }).join('');
+    const historicoSecaoHtml = histLista.length ? `
+        <div style="font-size:12.5px; font-weight:600; color:var(--text-dim); margin:10px 0 4px">📜 Histórico (<span class="v3d-ficha-hist-cont">${histLista.length}</span>${histLista.length > 5 ? ` de ${histLista.length}` : ''})</div>
+        ${histLista.length > 5 ? '<input type="text" class="v3d-ficha-hist-filtro" placeholder="Filtrar histórico (texto ou data)…" style="width:100%; box-sizing:border-box; margin-bottom:4px">' : ''}
+        <div class="v3d-ficha-hist-lista" style="max-height:150px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; padding:0 6px">${histLinhasHtml}<div class="v3d-ficha-hist-nada" style="display:none; color:var(--text-dim); padding:4px 0">Nenhuma entrada encontrada.</div></div>` : '';
+    const botaoHistPequeno = '<button type="button" class="btn secondary xs v3d-ficha-hist" title="Histórico deste objeto" style="padding:1px 6px; font-size:11px">📜</button>';
+    const conteudoHtml = (cabecalho) => layoutFicha === 'compacto' ? `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:4px">
+          <div style="font-size:13px; font-weight:700; line-height:1.2">${cabecalho}${E_(nome)}</div>
+          <button type="button" class="icon-btn xs" id="v3d-ficha-fechar" title="Fechar">✕</button>
+        </div>
+        ${alvo.descricao ? `<div style="font-size:11.5px; color:var(--text-dim); margin-bottom:4px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden" title="${E_(alvo.descricao)}">${E_(alvo.descricao)}</div>` : ''}
+        ${itens.length ? `<div style="font-size:11.5px; line-height:1.35">${itens.map((it) => `<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis"><span style="color:var(--text-dim)">${E_(it.label || '(sem rótulo)')}:</span> ${E_(it.value || '')}</div>`).join('')}</div>` : '<div style="font-size:11.5px; color:var(--text-dim)">Sem especificações.</div>'}
+        <div style="margin-top:5px; display:flex; flex-wrap:wrap; gap:4px">${patrimonioBotoesPequenos}${botaoHistPequeno}</div>`
+      : layoutFicha === 'minimo' ? `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:6px">
+          <div style="font-size:12px; font-weight:700; line-height:1.2">${cabecalho}${E_(nome)}</div>
+          <button type="button" class="icon-btn xs" id="v3d-ficha-fechar" title="Fechar">✕</button>
+        </div>
+        <!-- [01/10/2026] MUDADO (24ª rodada) — pedido verbatim: "A Mínima pode ser só o valor da especificação." Só o valor, um por linha (o rótulo vai no tooltip). -->
+        ${itens.length ? `<div style="font-size:11px; line-height:1.3; margin-top:2px">${itens.map((it) => `<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="${E_((it.label || '') + ': ' + (it.value || ''))}">${E_(it.value || it.label || '')}</div>`).join('')}</div>` : '<div style="font-size:11px; color:var(--text-dim); margin-top:2px">Sem especificações</div>'}
+        <div style="margin-top:3px; display:flex; flex-wrap:wrap; gap:3px">${patrimonioBotoesPequenos}${botaoHistPequeno}</div>`
+      : `
+        <h3 style="margin-top:0">${cabecalho}${Utils.escapeHtml(nome)}</h3>
+        ${descricaoHtml}
+        <div style="font-size:12.5px; font-weight:600; color:var(--text-dim); margin-bottom:4px">📋 Especificações</div>
+        ${itensHtml}
+        <div style="font-size:12.5px; font-weight:600; color:var(--text-dim); margin:10px 0 4px">🔗 Patrimônio(s) associado(s)</div>
+        ${patrimonioHtml}
+        ${historicoSecaoHtml}
+        <button type="button" class="btn secondary block sm v3d-ficha-hist" style="margin-top:10px">📜 Histórico deste objeto</button>
+        <button type="button" class="btn secondary block sm" id="v3d-ficha-fechar" style="margin-top:6px">Fechar</button>`;
+    if (flutuante) {
+      // [30/09/2026] NOVO (13ª rodada) — pedido verbatim: "Deve haver algum jeito intuitivo de evidenciar a qual
+      // objeto pertence cada ficha flutuante, em caso de ter múltiplas fichas ativas ao mesmo tempo." Várias
+      // fichas podem coexistir (uma por objeto; abrir de novo a do mesmo objeto só a recria). Cada ficha ganha
+      // uma COR + NÚMERO próprios (cabeçalho do cartão) e, no objeto, uma bolinha da mesma cor/número, ligada ao
+      // cartão por uma linha da mesma cor (SVG). Passar o mouse sobre o cartão destaca a bolinha/linha do objeto.
+      if (!this._v3dFichasFlutuantes) this._v3dFichasFlutuantes = new Map();
+      this._v3dFecharFichaFlutuante(alvo.id);
+      const CORES = ['#ff9f43', '#2ecc71', '#e84393', '#54a0ff', '#feca57', '#a29bfe', '#ff6b6b', '#1dd1a1'];
+      // [30/09/2026] CORRIGIDO (15ª rodada) — pedido verbatim: "O número do botão 'i' está incrementando a cada clique, deve ir
+      // aumentando conforme uma nova ficha flutuante aparece. O contador deve refletir a quantidade de fichas ativas também."
+      // Antes: um contador global (_v3dFichaSeq) só crescia, a cada abertura. Agora o número = posição da ficha entre as ATIVAS
+      // (1ª aberta = 1, 2ª = 2 ...); ao fechar uma, as demais são renumeradas (_v3dRenumerarFichas) — o maior número sempre
+      // é a quantidade de fichas ativas. Reabrir a ficha do mesmo objeto não gasta número novo.
+      const num = (this._v3dFichasFlutuantes ? this._v3dFichasFlutuantes.size : 0) + 1, cor = CORES[(num - 1) % CORES.length];
+      el.className = 'v3d-ficha-objeto-flutuante';
+      el.style.cssText = 'position:absolute; left:-9999px; top:0; transform:translate(-50%,-100%); z-index:3; width:300px; max-width:80%; max-height:60%; overflow:auto; box-sizing:border-box; text-align:left; font-size:12.5px; padding:10px 12px; border-radius:10px; background:var(--bg-card,#1e222b); color:var(--text,#e8ecf3); border:2px solid ' + cor + '; box-shadow:0 6px 24px rgba(0,0,0,.5); pointer-events:auto';
+      if (layoutFicha !== 'completo') el.style.width = layoutFicha === 'minimo' ? '140px' : '190px';   // [01/10/2026] MUDADO (24ª rodada) — largura que era da Mínima (190) agora é da Compacta; Mínima mais estreita (140)   // [30/09/2026] NOVO (22ª rodada) — cartão menor nos layouts enxutos
+      if (layoutFicha === 'minimo') { el.style.padding = '3px 6px'; el.style.borderRadius = '8px'; el.style.lineHeight = '1.2'; }   // [01/10/2026] NOVO (25ª rodada) — pedido verbatim: "Na Mínima, diminua os paddings." (antes 10px 12px, igual aos outros layouts)
+      const cab = `<span class="v3d-ficha-num" style="display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:${cor}; color:#111; font:700 12px sans-serif; margin-right:6px; vertical-align:middle">${num}</span>`;
+      el.innerHTML = conteudoHtml(cab);
+      // Marcador no objeto + linha de ligação
+      // [30/09/2026] MUDADO (14ª rodada) — pedido verbatim: "A ficha flutuante não deve ficar 'escorregando' nos cantos da tela
+      // quando o objeto já não estiver mais no campo de visão. Ela deve ir sendo clipada conforme vai saindo do campo de visão
+      // também." Cartões/bolinhas/linhas vivem numa CAMADA própria (overflow:hidden, ocupa a tela toda, não captura cliques) e
+      // NÃO são mais "presos" às bordas (removido o clamp): saem da tela junto com o objeto e são recortados pela borda.
+      // [01/10/2026] CORRIGIDO (36ª rodada) — "O z-index destas fichas de informação devem ser inferiores ao z-index dos botões de cabeçalho do 'Ver em 3D'."
+      // CAUSA RAIZ: a camada ia pra this._container, FORA de .view3d-wrap (stacking context z-index:0 que contém o cabeçalho z-index:33) —
+      // qualquer z-index dela vencia o cabeçalho. Agora vive DENTRO do wrap, com z-index 32 < 33.
+      const _wrap3d = this._container.querySelector('.view3d-wrap') || this._container;
+      let pai = _wrap3d.querySelector('.v3d-fichas-camada');
+      if (!pai) {
+        pai = document.createElement('div');
+        pai.className = 'v3d-fichas-camada';
+        pai.style.cssText = 'position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:32';   // [01/10/2026] CORRIGIDO (35ª rodada) — "os botões de cabeçalho desta tela devem ficar acima do que vem do 'Ver em 3D'. Atualmente, as fichas de informação dos objetos estão ficando acima dos botões de cabeçalho." CAUSA RAIZ: esta camada tinha z-index:54 e a barra de cabeçalho do 3D (.view3d-wrap .camera-topbar, style.css) tem z-index:33 — a camada das fichas ficava POR CIMA da barra. Agora 32 (acima do overlay da câmera, 30; abaixo da barra, 33). As janelas modais (ficha modal 55, histórico 56) não mudaram.
+        _wrap3d.appendChild(pai);   // [01/10/2026] 36ª rodada — dentro do wrap (ver comentário acima)
+      }
+      let svg = pai.querySelector('.v3d-fichas-linhas');
+      if (!svg) {
+        svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'v3d-fichas-linhas');
+        svg.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; overflow:hidden';
+        pai.appendChild(svg);
+      }
+      const linha = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      linha.setAttribute('stroke', cor); linha.setAttribute('stroke-width', '2'); linha.setAttribute('stroke-dasharray', '5 3');
+      svg.appendChild(linha);
+      const marcador = document.createElement('div');
+      marcador.className = 'v3d-ficha-marcador';
+      marcador.textContent = String(num);
+      marcador.style.cssText = 'position:absolute; left:-9999px; top:0; transform:translate(-50%,-50%); z-index:2; width:22px; height:22px; border-radius:50%; background:' + cor + '; color:#111; border:2px solid #fff; font:700 12px/18px sans-serif; text-align:center; box-shadow:0 0 0 2px rgba(0,0,0,.45); pointer-events:none';
+      pai.appendChild(marcador);
+      pai.appendChild(el);   // cartão dentro da camada recortada (ver acima)
+      el.addEventListener('mouseenter', () => { marcador.style.transform = 'translate(-50%,-50%) scale(1.5)'; linha.setAttribute('stroke-width', '4'); });
+      el.addEventListener('mouseleave', () => { marcador.style.transform = 'translate(-50%,-50%)'; linha.setAttribute('stroke-width', '2'); });
+      el.querySelector('#v3d-ficha-fechar').onclick = () => this._v3dFecharFichaFlutuante(alvo.id);
+      this._v3dFichasFlutuantes.set(alvo.id, { el, marcador, linha, entityId: alvo.id });
+      this._v3dRenumerarFichas();
+    } else {
+      el.className = 'v3d-ficha-objeto-overlay';
+      el.style.cssText = 'position:absolute; inset:0; z-index:32; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.35)';
+      el.innerHTML = `<div class="modal-sheet" style="max-width:${layoutFicha === 'minimo' ? '190px' : layoutFicha === 'compacto' ? '240px' : '360px'}; ${layoutFicha === 'minimo' ? 'padding:4px 6px;' : ''} text-align:left; position:static">${conteudoHtml('ℹ️ ')}</div>`;
+      // [30/09/2026] NOVO (13ª rodada) — o "ℹ️" fica ativo enquanto esta janela estiver aberta (ver _v3dFichaAbertaDe).
+      if (!this._v3dFichasModais) this._v3dFichasModais = new Set();
+      this._v3dFichasModais.add(alvo.id);
+      const fecharModal = () => { el.remove(); this._v3dFichasModais?.delete(alvo.id); if (this._fichaObjetoArmado) this._fichaObjetoArmado.expiraEm = performance.now() + 4000; };
+      el.addEventListener('click', (e) => { if (e.target === el) fecharModal(); });
+      el.querySelector('#v3d-ficha-fechar').onclick = fecharModal;
+    }
+    el.querySelectorAll('.v3d-ficha-hist').forEach((btn) => { btn.onclick = () => this._abrirHistoricoObjeto3D(alvo); });
+    // [01/10/2026] NOVO (32ª rodada) — filtro do histórico da ficha Completa (ver historicoSecaoHtml): esconde linhas que não contêm o texto; atualiza "x de N".
+    const histFiltro = el.querySelector('.v3d-ficha-hist-filtro');
+    if (histFiltro) {
+      histFiltro.addEventListener('keydown', (e) => e.stopPropagation());
+      histFiltro.addEventListener('input', () => {
+        const q = histFiltro.value.trim().toLowerCase(); let n = 0;
+        el.querySelectorAll('.v3d-ficha-hist-linha').forEach((ln) => { const ok = !q || ln.dataset.busca.includes(q); ln.style.display = ok ? '' : 'none'; if (ok) n++; });
+        const c = el.querySelector('.v3d-ficha-hist-cont'); if (c) c.textContent = String(n);
+        const nada = el.querySelector('.v3d-ficha-hist-nada'); if (nada) nada.style.display = n ? 'none' : '';
+      });
+    }   // [01/10/2026] NOVO (24ª rodada)
+    el.querySelectorAll('.v3d-ficha-ver-patrimonio').forEach((btn) => {
+      btn.onclick = () => { const id = btn.dataset.itemId; if (id && window.App?.showItemDetail) App.showItemDetail(id); };
+    });
+    if (!flutuante) (this._container.querySelector('.view3d-wrap') || this._container).appendChild(el);   // [01/10/2026] 36ª rodada — ficha modal também dentro do wrap, abaixo do cabeçalho (z 33)   // a flutuante já foi anexada à camada recortada
+  },
+
+  /** [01/10/2026] NOVO (24ª rodada) — janelinha com o Histórico do objeto (mesma lista editável do cartão de opções: ObjectStandard.historicoHtml/wireHistoricoUi), aberta pelo botão 📜 da ficha. */
+  _abrirHistoricoObjeto3D(entity) {
+    if (!entity || !window.ObjectStandard) return;
+    document.exitPointerLock?.();
+    const alvo = (this._map?.objects || []).find((o) => o.id === entity.id)
+      || (this._map?.portas || []).find((o) => o.id === entity.id)
+      || (this._map?.janelas || []).find((o) => o.id === entity.id)
+      || entity;
+    this._container?.querySelector('.v3d-hist-overlay')?.remove();
+    const ov = document.createElement('div');
+    ov.className = 'v3d-hist-overlay';
+    ov.style.cssText = 'position:absolute; inset:0; z-index:56; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.35)';
+    ov.innerHTML = '<div class="modal-sheet" style="max-width:380px; width:90%; max-height:80%; overflow:auto; text-align:left; position:static"><h3 style="margin-top:0">📜 Histórico — ' + Utils.escapeHtml(alvo.nome || alvo.tipo || 'Objeto') + '</h3><div id="v3d-hist-ficha-host"></div><button type="button" class="btn secondary block sm" id="v3d-hist-ficha-fechar" style="margin-top:10px">Fechar</button></div>';
+    const host = ov.querySelector('#v3d-hist-ficha-host');
+    host.innerHTML = window.ObjectStandard.historicoHtml(alvo, 'v3d-hist-ficha');
+    window.ObjectStandard.wireHistoricoUi(host, alvo, 'v3d-hist-ficha', () => {
+      DB.saveMap(this._map);
+      try { if ((this._map?.objects || []).some((o) => o.id === alvo.id)) this._engine?.rebuildObjectIncremental?.(alvo); } catch (err) { console.warn('[View3D] atualizar selo de histórico ao vivo:', err); }
+    });
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+    ov.querySelector('#v3d-hist-ficha-fechar').onclick = () => ov.remove();
+    this._container.appendChild(ov);
+  },
+
+  /** [01/10/2026] NOVO (24ª rodada) — pedido verbatim: "A troca deve ser imediata [...] enquanto a janela ainda está aberta, ela deve ficar no novo formato ao vivo." Fecha todas as fichas abertas (flutuantes e a modal) e reabre cada uma, na mesma ordem, lendo a config nova (layout e/ou flutuante-vs-fixa). Chamada por _onMapConfigChange. */
+  _v3dReabrirFichasAbertas() {
+    const ids = [...(this._v3dFichasFlutuantes ? this._v3dFichasFlutuantes.keys() : []), ...(this._v3dFichasModais ? this._v3dFichasModais : [])];
+    if (!ids.length) return;
+    [...(this._v3dFichasFlutuantes ? this._v3dFichasFlutuantes.keys() : [])].forEach((id) => this._v3dFecharFichaFlutuante(id));
+    this._container?.querySelector('.v3d-ficha-objeto-overlay')?.remove();
+    this._v3dFichasModais?.clear();
+    ids.forEach((id) => {
+      const ent = (this._map?.objects || []).find((o) => o.id === id)
+        || (this._map?.portas || []).find((o) => o.id === id)
+        || (this._map?.janelas || []).find((o) => o.id === id);
+      if (ent) this._abrirFichaObjeto3D(ent);
+    });
+  },
+
+  /** [30/09/2026] NOVO (13ª rodada) — há ficha aberta (flutuante ou modal) deste objeto? Usado pra manter o "ℹ️" ativo. */
+  _v3dFichaAbertaDe(entityId) {
+    if (entityId == null) return false;
+    if (this._v3dFichasFlutuantes?.has(entityId)) return true;
+    const m = this._v3dFichasModais;
+    if (m?.has(entityId)) {
+      // modal já removida do DOM por outro caminho (ex.: unmount)? limpa o registro
+      if (!this._container?.querySelector('.v3d-ficha-objeto-overlay')) { m.delete(entityId); return false; }
+      return true;
+    }
+    return false;
+  },
+
+  /** [30/09/2026] NOVO (15ª rodada) — renumera as fichas flutuantes ativas 1..N (ordem de abertura) e atualiza número/cor do
+   *  cartão (borda + bolinha do cabeçalho), da bolinha no objeto e da linha de ligação. Ver comentário em _abrirFichaObjeto3D. */
+  _v3dRenumerarFichas() {
+    const mapa = this._v3dFichasFlutuantes;
+    if (!mapa) return;
+    const CORES = ['#ff9f43', '#2ecc71', '#e84393', '#54a0ff', '#feca57', '#a29bfe', '#ff6b6b', '#1dd1a1'];
+    let i = 0;
+    mapa.forEach((f) => {
+      i++;
+      const cor = CORES[(i - 1) % CORES.length];
+      f.el.style.borderColor = cor;
+      const nb = f.el.querySelector('.v3d-ficha-num');
+      if (nb) { nb.textContent = String(i); nb.style.background = cor; }
+      f.marcador.textContent = String(i);
+      f.marcador.style.background = cor;
+      f.linha.setAttribute('stroke', cor);
+    });
+  },
+
+  /** [30/09/2026] NOVO (13ª rodada) — fecha UMA ficha flutuante (entityId) ou TODAS (sem argumento). Remove
+   *  cartão, bolinha do objeto e linha de ligação; apaga o SVG quando não sobra nenhuma. */
+  _v3dFecharFichaFlutuante(entityId) {
+    const mapa = this._v3dFichasFlutuantes;
+    if (!mapa) return;
+    const ids = entityId === undefined ? Array.from(mapa.keys()) : [entityId];
+    ids.forEach((id) => {
+      const f = mapa.get(id);
+      if (!f) return;
+      try { f.el.remove(); f.marcador.remove(); f.linha.remove(); } catch (e) { /* ignora */ }
+      mapa.delete(id);
+    });
+    if (!mapa.size) { try { this._container?.querySelector('.v3d-fichas-camada')?.remove(); } catch (e) { /* ignora */ } }
+    this._v3dRenumerarFichas();
+    if (entityId !== undefined && this._fichaObjetoArmado) this._fichaObjetoArmado.expiraEm = performance.now() + 4000;
+  },
+
+  /** [30/09/2026] NOVO (12ª rodada, ampliado na 13ª) — chamada a cada quadro (_loop): pra CADA ficha flutuante,
+   *  projeta o topo do objeto (mesmo ponto do selo "i", Engine3D.getPickableTopWorldPos) na tela, posiciona a bolinha
+   *  ali, o cartão logo acima e a linha ligando os dois; esconde tudo se o objeto estiver atrás da câmera/sumiu. */
+  _v3dUpdateFichaFlutuante() {
+    const mapa = this._v3dFichasFlutuantes;
+    if (!mapa || !mapa.size) return;
+    const eng = this._engine, cam = eng?.camera3, pai = this._container;
+    if (!eng || !cam || !pai) return;
+    const camada = pai.querySelector('.v3d-fichas-camada') || pai;
+    const W = camada.clientWidth, H = camada.clientHeight;
+    mapa.forEach((f, id) => {
+      if (!f.el.isConnected) { mapa.delete(id); try { f.marcador.remove(); f.linha.remove(); } catch (e) { /* ignora */ } return; }
+      const topo = eng.getPickableTopWorldPos?.(id);
+      let v = null;
+      if (topo) { v = new THREE.Vector3(topo.x, topo.y + 0.1, topo.z).project(cam); if (v.z > 1 || v.z < -1) v = null; }
+      if (!v) { f.el.style.display = 'none'; f.marcador.style.display = 'none'; f.linha.style.display = 'none'; return; }
+      f.el.style.display = ''; f.marcador.style.display = ''; f.linha.style.display = '';
+      const mx = (v.x * 0.5 + 0.5) * W, my = (-v.y * 0.5 + 0.5) * H;
+      f.marcador.style.left = mx + 'px'; f.marcador.style.top = my + 'px';
+      // [30/09/2026] MUDADO (14ª rodada) — SEM clamp nas bordas: o cartão fica logo acima da bolinha e sai da tela junto com o
+      // objeto (recortado pela camada com overflow:hidden), em vez de "escorregar" pelos cantos.
+      const x = mx, y = my - 18;
+      f.el.style.left = x + 'px'; f.el.style.top = y + 'px';
+      f.linha.setAttribute('x1', x); f.linha.setAttribute('y1', y); f.linha.setAttribute('x2', mx); f.linha.setAttribute('y2', my);
+    });
   },
 
   /** [18/09/2026 UTC] RODADA 164 — grava um patch de montagem/equipamentos no
@@ -9906,7 +10732,67 @@ const View3D = {
       }
       if (ehRede) { this._openRedeMenu(hit.ref, ray); return; }
     }
-    this._tryPick(hit);
+    // [28/09/2026] NOVO -- "Exploded View Assembly" do gabinete de hardware (pedido verbatim:
+    // "Preciso implementar um sistema mecânico e interativo de um gabinete de computador [...]
+    // onde o usuário pode interagir e montar/desmontar as peças reais através de cliques na
+    // tela"). MESMA técnica do Rack acima (2º raycast restrito, `hardwarePecaSob`, ver
+    // js/objecttypes/hardware-gabinete.js): se o clique (Modo Edição) bateu numa peça REMOVÍVEL do
+    // gabinete, alterna ela (monta<->desmonta, com animação de trilho -- ver
+    // `ExplodedAssembly.tick`, já rodando no loop principal acima) em vez de abrir a ficha padrão
+    // do objeto. Clique na estrutura central (não removível) ou fora de qualquer peça cai no
+    // `_tryPick` de sempre (ficha do objeto).
+    const ehHardwareGabinete = hit.type === 'object' && hit.ref && hit.ref.tipo === 'pc_gabinete' && !!window.HardwareExploded;
+    if (ehHardwareGabinete) {
+      // [28/09/2026] NOVO -- botão de ligar/desligar tem PRIORIDADE sobre as tampas (pedido
+      // verbatim: "Observe como o objeto Switch liga/desliga. O Gabinete deve ser do mesmo jeito,
+      // só que deve estar apontando para o botão ligar/desligar. Use pixel perfect para isso.").
+      // `hardwareBotaoPowerSob` faz um raycast REAL (triângulo-a-triângulo, não o OBB grosso das
+      // tampas) só contra a malha pequena do botão -- então só aciona quando o usuário mira nele
+      // de verdade, do jeito que o modo 'pixelperfect' de "Configurações 3D" já faz pro resto da
+      // cena.
+      if (this._engine.hardwareBotaoPowerSob?.(hit.ref, ray.origin, ray.dir)) {
+        if (this._hardwareConfirmaDuploClique(hit.ref.id + ':power')) {
+          const assembly = this._engine.hardwareAssemblyDe?.(hit.ref);
+          if (assembly) {
+            const ligado = assembly.alternarEnergia();
+            Utils.toast(ligado ? 'Gabinete ligado.' : 'Gabinete desligado.', { type: 'ok', duration: 1400 });
+          }
+        }
+        return;
+      }
+      const peca = this._engine.hardwarePecaSob?.(hit.ref, ray.origin, ray.dir);
+      if (peca) {
+        if (this._hardwareConfirmaDuploClique(hit.ref.id + ':' + peca)) {
+          const assembly = this._engine.hardwareAssemblyDe?.(hit.ref);
+          if (assembly) assembly.alternarPeca(peca);
+        }
+        return;
+      }
+    }
+    // [30/09/2026] CORRIGIDO — 17ª rodada, pedido verbatim: "No 'Modo Edição', ao clicar em uma objeto, aparece direto a janela de patrimônio, não deve ser assim. Deve aparecer a janela de opções". Causa raiz: o clique de Edição reaproveitava _tryPick, que tem atalho 'objeto com patrimônio => abre a ficha do patrimônio'. Agora passa modoEdicao:true e o atalho é pulado. [18ª rodada: a edição da 17ª tinha ficado só pela metade — esta linha, a assinatura de _tryPick e o método _abrirPatrimoniosDoObjeto3D não tinham sido gravados, causando 'opts is not defined'.]
+    this._tryPick(hit, { modoEdicao: true });
+  },
+
+  /** [29/09/2026] NOVO — pedido verbatim: "Deve ser dois cliques (não um clique) para
+   *  ligar/desligar e para tirar as laterais." O clique no Modo Edição (`_cliqueEdicao3D`, onde o
+   *  botão de energia/as tampas do gabinete são detectados) normalmente já age no 1º clique --
+   *  este helper exige um 2º clique no MESMO alvo (`chave`, ex. `'12:power'`/`'12:chapaLateral
+   *  Direita'`) dentro de `JANELA_MS` pra "confirmar" a ação, sem depender do `dblclick` nativo do
+   *  navegador (que só dispara em Modo Navegação, ver comentário grande de `onDblClick` mais
+   *  acima -- o gabinete precisa disso funcionando também/só no Modo Edição). Devolve `true` só no
+   *  2º clique (dispara a ação); no 1º, só registra e devolve `false` (nada acontece ainda -- nem
+   *  abre a ficha do objeto, ver os 2 `return` logo após cada chamada acima). Mirar em OUTRO alvo
+   *  reinicia a contagem (não conta como par). */
+  _hardwareConfirmaDuploClique(chave) {
+    const JANELA_MS = 450;
+    const agora = performance.now();
+    const p = this._hwCliquePendente;
+    if (p && p.chave === chave && (agora - p.tMs) <= JANELA_MS) {
+      this._hwCliquePendente = null;
+      return true;
+    }
+    this._hwCliquePendente = { chave, tMs: agora };
+    return false;
   },
 
   /** Instala um novo equipamento de rede (`tipo`) na 1a U livre do rack `rack`. */
@@ -9923,13 +10809,30 @@ const View3D = {
   // [18/09/2026 UTC] RODADA 167 -- `_openRedeMenu` (equipamentos de rede)
   // foi para js/view3d-rede.js (mesclado neste objeto ao carregar).
 
-  _tryPick(hitOverride) {
+  /** [30/09/2026] NOVO (17ª rodada, completado na 18ª) — abre a(s) ficha(s) de patrimônio do objeto (lógica extraída de _tryPick; usada também pelo botão do cartão de opções). */
+  _abrirPatrimoniosDoObjeto3D(obj) {
+    if (!obj || !obj.itemIds || !obj.itemIds.length) return;
+    const ids = obj.itemIds.map((e) => e && e.id).filter(Boolean);
+    Promise.all(ids.map((id) => DB.getItem(id))).then((items) => {
+      const validIds = ids.filter((id, i) => items[i]);
+      if (!validIds.length) this._showOrphanPatrimonioCard3D(obj);
+      else if (validIds.length === 1) this._showFlashcard3D({ id: validIds[0] });
+      else this._showMultiFlashcard3D(validIds);
+    });
+  },
+
+  _tryPick(hitOverride, opts) {
     let hit = hitOverride;
     if (hit === undefined) {
       const ray = this._engine.centerRay(this._camera);
       hit = this._engine.pickFromRay(ray.origin, ray.dir);
     }
     if (!hit) return;
+    // [71ª rodada] Selecionar (clicar/mirar) um Texto entre vários faz a aba vertical "Texto" passar a editar ESTE Texto. Antes o alvo só era gravado em
+    // _showObjectCard3D, que não roda quando o Modelo do tipo trata o clique (ObjectAssets.dispatchClick3D) nem quando há gatilho onClick.
+    // [73ª rodada] o gizmo 3D (setas X/Y/Z) acompanha o Texto selecionado; selecionar outra coisa o esconde.
+    this._pisoEditId = (hit.type === 'object' && hit.ref && window.PisoCustom?.tem(hit.ref)) ? hit.ref.id : null; // [74ª] alças dos vértices do Piso editável
+    if (hit.type === 'object' && hit.ref && hit.ref.tipo === 'texto3d' && this._textoAlvoId !== hit.ref.id) { this._textoAlvoId = hit.ref.id; try { ModelerUI.refreshSharedSidebar(this); } catch (_) {} }
     // [09/09/2026] Ajuste solicitado pelo usuário: "Todos os objetos devem
     // poder ter scripts (portas, janelas, etc.)." — o gatilho "rodar ao
     // clicar/mirar+tocar" (pedido original, 07/09/2026: "interações por
@@ -9988,14 +10891,9 @@ const View3D = {
     // Mapping.addItemToObject `patrimonio`), com botão pra apagar essa
     // informação residual (pedido do usuário, 27/08/2026 — ver
     // _showOrphanPatrimonioCard3D) — em vez do cartão genérico do objeto.
-    else if (hit.type === 'object' && hit.ref.itemIds && hit.ref.itemIds.length) {
-      const ids = hit.ref.itemIds.map((e) => e && e.id).filter(Boolean);
-      Promise.all(ids.map((id) => DB.getItem(id))).then((items) => {
-        const validIds = ids.filter((id, i) => items[i]);
-        if (!validIds.length) this._showOrphanPatrimonioCard3D(hit.ref);
-        else if (validIds.length === 1) this._showFlashcard3D({ id: validIds[0] });
-        else this._showMultiFlashcard3D(validIds);
-      });
+    // [30/09/2026] MUDADO (17ª rodada) — em Modo Edição o atalho abaixo é pulado (ver _cliqueEdicao3D); o patrimônio fica acessível por botão no cartão de opções.
+    else if (hit.type === 'object' && hit.ref.itemIds && hit.ref.itemIds.length && !(opts && opts.modoEdicao)) {
+      this._abrirPatrimoniosDoObjeto3D(hit.ref);
     } else if (hit.type === 'object') {
       // NOVO (12/09/2026) — mesmo raciocínio acima: câmera/fotoPin. `chave`
       // é o `tipo` de catálogo do objeto (ex.: 'gabinete') — cai no
@@ -10022,6 +10920,7 @@ const View3D = {
     // textura, nunca entra na fusão) ainda não tem cartão dedicado —
     // ignorado aqui de propósito (mesmo comportamento de antes: sem
     // cartão), só o aglomerado fundido ganhou o novo cartão.
+    else if ((hit.type === 'porta' || hit.type === 'janela') && hit.ref) { if (opts && opts.modoEdicao) this._showAberturaCard3D(hit); } // [66ª] Modo Edição: cartão de opções da porta/janela
     else if (hit.type === 'tijolo' && hit.id === 'tijolos-merged') this._showTijoloAglomeradoCard3D();
     else if (hit.type === 'tijolo') { /* tijolo individual (cunha/textura) — sem cartão próprio ainda, evita cair no cartão de item genérico abaixo */ }
     else this._showFlashcard3D(hit.ref); // item (ou pickable antigo sem `type`, por segurança)
@@ -10094,7 +10993,12 @@ const View3D = {
     toggle.onclick = () => {
       if (host.classList.contains('hidden') && !host.dataset.built) {
         host.innerHTML = window.ObjectStandard.historicoHtml(entity, hostId);
-        window.ObjectStandard.wireHistoricoUi(host, entity, hostId, () => { DB.saveMap(this._map); });
+        window.ObjectStandard.wireHistoricoUi(host, entity, hostId, () => {
+          DB.saveMap(this._map);
+          // [30/09/2026] NOVO (15ª rodada) — pedido verbatim: "coloquei uma entrada no histórico e não apareceu destaque visual no
+          // 'Ver em 3D'". Antes, só salvava; o selo ● só aparecia depois de reconstruir a cena inteira. Agora refaz este objeto na hora.
+          try { if ((this._map?.objects || []).some((o) => o.id === entity.id)) this._engine?.rebuildObjectIncremental?.(entity); } catch (err) { console.warn('[View3D] atualizar selo de histórico ao vivo:', err); }
+        });
         host.dataset.built = '1';
       }
       host.classList.toggle('hidden');
@@ -10104,6 +11008,7 @@ const View3D = {
   /** Cartão simples ao mirar/selecionar um objeto do mapa em 3D — só
    *  informativo (o objeto não tem "detalhes" pra ver, como um item). */
   _showObjectCard3D(obj) {
+    if (obj && obj.tipo === 'texto3d') { this._textoAlvoId = obj.id; try { ModelerUI.refreshSharedSidebar(this); } catch (_) {} } // [70ª] aba "Texto" da barra lateral segue o Texto clicado
     // [13/09/2026] CORRIGIDO — bug relatado: "ao clicar em um objeto no
     // cenário, agora, é como se tivesse pressionado ESC" (Pointer Lock
     // solto + mensagem 'Clique para interagir' aparecendo, SEM o cartão do
@@ -10139,6 +11044,65 @@ const View3D = {
       this._container.appendChild(el);
       el.querySelector('#v3d-fc-close').onclick = () => el.remove();
     }
+  },
+
+  /** [66ª rodada] NOVO — bug relatado: "No 'Ver em 3D', no 'Modo Edição', alguns objetos não estão abrindo a janela com opções ao clicar. É o caso
+   *  dos objetos Porta e Janela." Causa: `_tryPick` só tratava `hit.type === 'object'` (e foto/tijolo); porta/janela (`hit.type` 'porta'/'janela')
+   *  caíam no último `else` (`_showFlashcard3D`, ficha de ITEM/patrimônio) e nada aparecia. Agora, no Modo Edição, abrem este cartão de opções
+   *  (mesmo estilo `flashcard3d-overlay`): 📐 Propriedades (nome, tipo, largura, altura, altura do chão, abertura da porta, cor — grava no mapa e
+   *  reconstrói a cena), 🧩 Scripts e 🗑️ Excluir. Se existir um Modelo próprio (assets/modelos/porta.model.js / janela.model.js) com `onModelClick`, ele manda. */
+  _showAberturaCard3D(hit) {
+    document.exitPointerLock?.();
+    const ehPorta = hit.type === 'porta';
+    const lista = ehPorta ? (this._map.portas || []) : (this._map.janelas || []);
+    const ent = lista.find((x) => x.id === hit.ref.id) || hit.ref;
+    const chave = ehPorta ? 'porta' : 'janela';
+    const modelDef = window.ObjectAssets?._models?.[chave];
+    if (modelDef && typeof modelDef.onModelClick === 'function') {
+      try { if (window.ObjectAssets.dispatchClick3D(chave, ent, { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map })) return; } catch (e) { console.error('[View3D] modelo da', chave, 'falhou:', e); }
+    }
+    // Mesmo cartão dos objetos (cards/object-card.js): Propriedades, Scripts, Especificações, Histórico, Excluir (+ 'Modelar em 3D' só p/ objetos)
+    const ctx = window.ObjectAssets?.buildCtx
+      ? window.ObjectAssets.buildCtx({ view3d: this, DB: window.DB, Utils: window.Utils, map: this._map })
+      : { view3d: this, DB: window.DB, Utils: window.Utils, map: this._map };
+    ctx.abertura = chave;
+    window.CardSystem?.mount(this._container, 'object', ent, ctx);
+  },
+
+  /** [66ª rodada] Janela de propriedades da porta/janela no 3D (ver `_showAberturaCard3D`). Cada campo grava no mapa e reconstrói a cena ao confirmar. */
+  _abrirPropsAbertura3D(ent, ehPorta, aoFechar) {
+    const prev = this._container.querySelector('.v3d-abertura-props'); if (prev) prev.remove();
+    const tipos = ehPorta ? (window.DOOR_TYPES3D || window.DOOR_TYPES || {}) : (window.WINDOW_TYPES3D || window.WINDOW_TYPES || {});
+    const esc = (t) => (window.Utils?.escapeHtml ? Utils.escapeHtml(String(t == null ? '' : t)) : String(t == null ? '' : t));
+    const def = (ehPorta ? { l: 0.8, a: 2.1, p: 0 } : { l: 1.2, a: 1.2, p: 0.9 });
+    const rgb = ent.colorRGB || [138, 90, 52];
+    const hex = '#' + rgb.map((v) => Math.max(0, Math.min(255, v | 0)).toString(16).padStart(2, '0')).join('');
+    const el = document.createElement('div');
+    el.className = 'map2d-props-panel v3d-abertura-props';
+    el.style.cssText = 'position:absolute; right:12px; top:70px; z-index:60; width:270px; max-height:80%; overflow:auto;';
+    el.innerHTML = `
+      <div class="map-panel-head"><b>${ehPorta ? '🚪 Porta' : '🪟 Janela'}</b><button type="button" class="icon-btn sm map-panel-close" title="Fechar">✕</button></div>
+      <label class="map-panel-field"><span>Nome</span><input type="text" id="ab-nome" value="${esc(ent.nome || '')}"></label>
+      ${Object.keys(tipos).length ? `<label class="map-panel-field"><span>Tipo</span><select id="ab-tipo">${Object.entries(tipos).map(([k, v]) => `<option value="${esc(k)}" ${k === (ent.tipo || (ehPorta ? 'padrao' : '')) ? 'selected' : ''}>${esc(v.label || k)}</option>`).join('')}</select></label>` : ''}
+      ${ehPorta ? `<label class="map-panel-field"><span>Abertura (lado da dobradiça)</span><select id="ab-abertura"><option value="esquerda" ${ent.abertura === 'esquerda' ? 'selected' : ''}>Esquerda</option><option value="direita" ${ent.abertura !== 'esquerda' ? 'selected' : ''}>Direita</option></select></label>` : ''}
+      <label class="map-panel-field"><span>Largura (m)</span><input type="number" step="0.05" min="0.2" id="ab-largura" value="${(ent.largura || def.l).toFixed(2)}"></label>
+      <label class="map-panel-field"><span>Altura (m)</span><input type="number" step="0.05" min="0.2" id="ab-altura" value="${(ent.altura || def.a).toFixed(2)}"></label>
+      <label class="map-panel-field"><span>Altura em relação ao chão (m)</span><input type="number" step="0.05" min="0" id="ab-peitoril" value="${(ent.alturaPeitoril != null ? ent.alturaPeitoril : def.p).toFixed(2)}"></label>
+      <label class="map-panel-field"><span>Cor</span><input type="color" id="ab-cor" value="${hex}"></label>`;
+    this._container.appendChild(el);
+    const fechar = () => { el.remove(); if (aoFechar) aoFechar(); };
+    el.querySelector('.map-panel-close').onclick = fechar;
+    const aplicar = async (patch) => {
+      if (ehPorta) Mapping.updateDoor(this._map, ent.id, patch); else Mapping.updateWindow(this._map, ent.id, patch);
+      Object.assign(ent, patch);
+      await this._afterMapMutated();
+    };
+    const num = (id, campo, min) => el.querySelector('#' + id)?.addEventListener('change', (e) => { const v = parseFloat(e.target.value); if (isFinite(v) && v >= min) aplicar({ [campo]: v }); });
+    el.querySelector('#ab-nome')?.addEventListener('change', (e) => aplicar({ nome: e.target.value }));
+    el.querySelector('#ab-tipo')?.addEventListener('change', (e) => aplicar({ tipo: e.target.value }));
+    el.querySelector('#ab-abertura')?.addEventListener('change', (e) => aplicar({ abertura: e.target.value }));
+    num('ab-largura', 'largura', 0.2); num('ab-altura', 'altura', 0.2); num('ab-peitoril', 'alturaPeitoril', 0);
+    el.querySelector('#ab-cor')?.addEventListener('change', (e) => { const h = e.target.value; aplicar({ colorRGB: [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)] }); });
   },
 
   /** Corpo de verdade de `_showObjectCard3D` acima — separado só pra poder
@@ -10391,8 +11355,12 @@ const View3D = {
         panel.classList.add('dragged');
         panel.style.right = 'auto'; panel.style.bottom = 'auto';
         panel.style.width = w + 'px';
-        panel.style.left = Math.max(10, (window.innerWidth - w) / 2) + 'px';
-        panel.style.top = Math.max(10, (window.innerHeight - h) / 2) + 'px';
+        // [01/10/2026] CORRIGIDO (46ª rodada) — "[Modo Edição] ao apontar para um objeto e clicar, abre-se uma janela. Clicando-se em 'Propriedades', ela deveria surgir no meio horizontal da tela, porém
+        // acaba ficando mais para a direita." CAUSA RAIZ: o painel é position:fixed e left/top são medidos no BLOCO CONTENTOR dele — no Workspace é a tela do 3D (que tem transform), não o navegador;
+        // centralizar com window.innerWidth/innerHeight jogava o painel para a direita/baixo. Agora centraliza no bloco contentor (Utils.fixedOrigin: no Clássico = a janela do navegador).
+        const fo = Utils.fixedOrigin(panel);
+        panel.style.left = Math.max(10, (fo.w - w) / 2) + 'px';
+        panel.style.top = Math.max(10, (fo.h - h) / 2) + 'px';
       });
     }).catch((e) => console.warn('[View3D] centralizar propriedades:', e));
     return abrir;
@@ -10445,6 +11413,14 @@ const View3D = {
     [
       '_openObjectPanel', '_openPanel', '_hideOrRemovePanel', '_showPersistentPanel',
       '_makePanelDraggable', '_bringPanelToFront', '_saveMap', '_closePanel',
+      // CORRIGIDO (30/09/2026) — "Uncaught TypeError: this._rewireDragResize
+      // is not a function" ao apagar uma especificação (ou qualquer ação que
+      // chame `_openObjectPanel` de novo) dentro do "Ver em 3D". CAUSA RAIZ:
+      // `_rewireDragResize` (novo, ver `_openObjectPanel`) chama por sua vez
+      // `_makePanelResizable` — nenhum dos dois estava nesta lista de cópia,
+      // então `this._rewireDragResize` ficava `undefined` quando `this` é o
+      // `View3D` (só existe de verdade em `window.MapView.prototype`).
+      '_rewireDragResize', '_makePanelResizable',
       // [27/09/2026] NOVO — pedido verbatim: "No 'Ver em 3D', não está
       // sendo possível mover a janela do botão 'Scripts'."
       // Causa raiz: `_openScriptsPanel3D` nunca
@@ -11441,7 +12417,7 @@ const View3D = {
       // um valor fixo desconectado do pé-direito real (ver comentário grande
       // em Mapping.objectTopHeightAt) — pra qualquer objeto que não seja
       // 'escada' esse argumento extra é simplesmente ignorado.
-      const top = Mapping.objectTopHeightAt(o, x, z, this._map?.alturaPiso);
+      const top = Mapping.objectTopHeightAt(o, x, z, this._map?.alturaPiso, this._map);
       if (top <= best) continue; // já achamos algo mais alto (ou igual) nesta mesma varredura
       if (top <= feetY + this.STEP_MAX + 1e-4) best = top; // alcançável andando (degrau) ou já vindo de cima dele
     }
@@ -11459,6 +12435,11 @@ const View3D = {
     // "Ver em 3D", com o mesmo `t` (ms, performance.now()) que o próprio
     // requestAnimationFrame já entrega.
     if (window.TWEEN && typeof window.TWEEN.update === 'function') window.TWEEN.update(t);
+    // [28/09/2026] NOVO -- mesmo princípio do TWEEN.update acima, mas pro motor de "Exploded View
+    // Assembly" do gabinete de hardware (js/hardware-exploded.js/js/objecttypes/hardware-
+    // gabinete.js): sem isto, alternarPeca()/desmontarTudo()/montarTudo() registram a animação mas
+    // nenhuma peça se move de verdade -- é aqui que ela avança, quadro a quadro, com o mesmo `t`.
+    if (this._engine?._hardwareRuntime) this._engine._hardwareRuntime.forEach((rt) => rt.assembly.tick(t));
     // [18/09/2026 UTC] NOVO (RODADA 152) — WATCHDOG por QUADRO, pedido
     // verbatim do usuário: "a solução que você implementou funciona, porém
     // ainda existe o salto (agora o salto que tinha antes + o salto de
@@ -11760,6 +12741,8 @@ const View3D = {
       // conseguir (a própria `_trena3DRebuildLines` desliga a flag sozinha
       // assim que tiver sucesso) — resolve sem precisar sair/entrar de novo
       // no "Ver em 3D".
+      // [30/09/2026] NOVO (12ª rodada) — guarda a pose REALMENTE renderizada neste quadro (voo/sobrevoo/câmera de foto incluídos) pro rodapé x/y/z/yaw/pitch.
+      this._v3dRenderPose = renderCam;
       this._engine.render(renderCam);
       // [16/09/2026 UTC] NOVO — prévia ao vivo da "📏 Trena 3D" (indicador
       // de onde o clique vai cair + linha guia tracejada + distância ao
@@ -11802,6 +12785,9 @@ const View3D = {
       // `this._engine.render(renderCam)`). A própria função decide sozinha
       // se há algo a desenhar (sai cedo, sem nenhum custo, no modo 3D).
       this._trena3D.afterRender(this._engine?.camera3);
+      // [30/09/2026] NOVO (11ª rodada) — caixas de medida das paredes já colocadas (ver _v3dSpawnWallLabel).
+      try { this._v3dUpdateWallLabels(); } catch (e) { /* ignora */ }
+      try { this._v3dUpdateFichaFlutuante(); } catch (e) { /* ignora */ }   // [30/09/2026] NOVO (12ª rodada) — ficha flutuante sobre o objeto
       Perf.markFrameEnd();
       // [13/09/2026] NOVO — pedido verbatim: "Entre eles [posição X/Y/Z e
       // FPS], coloque a quantidade de objetos que está sendo renderizada
@@ -11834,9 +12820,17 @@ const View3D = {
     // Posição da câmera (x/y/z) associada a esta visualização 3D, pedida pelo
     // usuário pro HUD — mesmas coordenadas usadas pelo motor (this._camera),
     // x/z no plano do chão e y a altura (ver EYE_HEIGHT/física em _update).
+    // [30/09/2026] CORRIGIDO (12ª rodada) — pedido verbatim: "No 'Ver em 3D', [...] clicar em 'Ir' [...] é feita
+    // uma animação de voo. No rodapé [...] aparece os valores de x, y e z do personagem. Porém, durante a
+    // animação, esses valores acabam não sendo atualizados. Os valores [...] sempre devem ser atualizados
+    // com os valores atuais das variáveis." CAUSA RAIZ: durante o voo (_flyToActive), o sobrevoo e o "ver
+    // através" de câmera, a pose renderizada (renderCam) é calculada à parte e `this._camera` NÃO é tocado
+    // até o fim do voo (_finishFlyTo) — mas o rodapé lia só `this._camera`, congelado durante o trajeto.
+    // Agora lê a pose realmente renderizada neste quadro (`_v3dRenderPose`), caindo em `this._camera`
+    // quando nada a substitui (são o MESMO objeto nesse caso). Vale também pro Yaw/Pitch logo abaixo.
     const posEl = this._container?.querySelector('#v3d-pos');
     if (posEl) {
-      const c = this._camera;
+      const c = ((this._flyToActive || this._flythroughActive || this._fotoCamMode || this._camTransition) && this._v3dRenderPose) || this._camera;
       posEl.textContent = `x ${c.x.toFixed(1)} · y ${c.y.toFixed(1)} · z ${c.z.toFixed(1)}`;
     }
     // [18/09/2026 UTC] NOVO (RODADA 145) — yaw/pitch ao vivo da câmera, em
@@ -11846,7 +12840,7 @@ const View3D = {
     // arquivo, ex. _pointerLockSavedYaw/Pitch).
     const angleEl = this._container?.querySelector('#v3d-angle');
     if (angleEl) {
-      const c = this._camera;
+      const c = ((this._flyToActive || this._flythroughActive || this._fotoCamMode || this._camTransition) && this._v3dRenderPose) || this._camera;   // [30/09/2026] CORRIGIDO (12ª rodada) — mesma causa do x/y/z acima
       const yawDeg = Math.round((c.yaw || 0) * 180 / Math.PI);
       const pitchDeg = Math.round((c.pitch || 0) * 180 / Math.PI);
       angleEl.textContent = `Yaw ${yawDeg}° · Pitch ${pitchDeg}°`;
@@ -12817,6 +13811,12 @@ const View3D = {
     // TODO ScriptComponent ativo (ver _updateScriptLifecycle acima) —
     // roda TODO quadro, independente de proximidade/clique.
     this._updateScriptLifecycle(delta);
+    // [30/09/2026] NOVO — mantém/expira o botão "ℹ️ Informações" (ver
+    // `_armarBotaoInformacoes3D`/`_atualizarBotaoInformacoes3D` — comentário
+    // grande lá). Roda todo quadro em Modo Navegação, MESMO sem nada
+    // "armado" ainda (guard barato logo no topo da função — `if
+    // (!this._fichaObjetoArmado) return`).
+    this._atualizarBotaoInformacoes3D();
     // [13/09/2026] NOVO — "carro dirigível": enquanto `_carroControlado`
     // estiver ativo, o controle NORMAL do jogador (WASD/gravidade/pulo,
     // todo o resto desta função abaixo) fica CONGELADO — mesmo espírito
@@ -12852,6 +13852,8 @@ const View3D = {
     // [a mira] variar [de alvo] e o raio bater em uma superfície." Checado a
     // cada quadro (não só no clique) — ver _updateTijoloDrag.
     this._updateTijoloDrag();
+    try { window.PisoCustomEdit?.update3D(this); } catch (err) { /* as alças nunca derrubam o quadro */ }
+    try { window.Texto3DCruz?.update(this); } catch (err) { /* a cruz nunca derruba o quadro */ }
     const cam = this._camera;
     const forward = Cam3DMath.cameraForwardFlat(cam);
     const right = Cam3DMath.cameraRightFlat(cam);

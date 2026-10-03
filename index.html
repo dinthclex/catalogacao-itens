@@ -326,6 +326,8 @@
      próprio loop de checagem (setInterval), nada depende de outro script
      carregar antes (usa window.DB/window.SceneEventBus com `?.`). -->
 <script src="js/relogio-mundo.js"></script>
+<!-- [01/10/2026] js/dbmonitor.js -- monitor de leituras/escritas do IndexedDB (gráfico/janela/miniatura). Carregado ANTES de js/db.js (db.js chama `window.DBMonitor?.` a cada transação); não depende de nenhum outro arquivo. -->
+<script src="js/dbmonitor.js"></script>
 <script src="js/db.js"></script>
 <!-- NOVO (13/09/2026), pedido verbatim: "Implemente um pipeline de
      carregamento de modelo (ex. GLTFLoader do three.js) e um novo campo no
@@ -552,6 +554,16 @@
 <script src="js/wifi-signal-avancado.js"></script>
 <script src="js/rede-passiva.js"></script>
 <script src="js/rede-equip.js"></script>
+<!-- [28/09/2026 UTC] NOVO -- 🖥️ Simulador de Montagem e Manutenção de Hardware (PC/Notebook/Workstation/Servidor).
+     hardware-catalog.js (dados/matriz de compatibilidade) precisa carregar ANTES de hardware-sim.js (motor de
+     simulação, lê window.HardwareCatalog). Ver comentário completo no topo dos dois arquivos. -->
+<script src="js/hardware-catalog.js"></script>
+<script src="js/hardware-sim.js"></script>
+<!-- [28/09/2026 UTC] NOVO -- motor de "Exploded View Assembly" do gabinete (raycaster/animação de
+     trilho/estado montada-desmontada por peça, window.HardwareExploded) -- decoupled de
+     hardware-sim.js/hardware-catalog.js de propósito (não depende de nenhum dos dois), ver
+     comentário completo no topo de js/hardware-exploded.js. -->
+<script src="js/hardware-exploded.js"></script>
 <!-- [19/09/2026 UTC] NOVO (RODADA 171) -- classes de lógica (sem Three.js) pros novos objetos No-break/UPS, Storage (NAS/SAN/Disk Shelf) e Unidades de Disco (HD/SSD): StorageDevice.insertDrive/removeDrive, UPSDevice.calculateLoad. Ver comentário completo no topo de js/rede-storage-energia.js. -->
 <script src="js/rede-storage-energia.js"></script>
 <!-- [19/09/2026 UTC] NOVO (RODADA 178) -- PatchCord dinâmico (sem Three.js na lógica, testável em Node): classe PatchCord (estados idle/ghost/connected), Plug_A/Plug_B com exitVector de ancoragem, curva de Bézier cúbica com barriga de gravidade e restrição anti-clipping contra a porta do rack (constrainCableCurvature). AINDA NÃO conectado a nenhuma tela do app (arquitetura pronta, integração com o cabeamento existente é trabalho futuro) -- ver comentário completo no topo de js/patch-cord.js. -->
@@ -619,6 +631,11 @@
      topo do próprio arquivo. Carregado depois de engine3d-rede-mesh.js
      (usa Engine3D.prototype._buildRackMesh, definido lá). -->
 <script src="js/objecttypes/rack.js"></script>
+<!-- [28/09/2026 UTC] js/objecttypes/hardware-gabinete.js -- "Exploded View Assembly" do gabinete
+     'pc_gabinete' (motor em js/hardware-exploded.js, carregado bem mais acima -- ver comentário
+     grande no topo do próprio arquivo). MESMO padrão do rack.js acima (Engine3D.prototype patch +
+     Object3D.register): carregado depois de engine3d.js/engine3d-rede-mesh.js. -->
+<script src="js/objecttypes/hardware-gabinete.js"></script>
 <!-- js/objecttypes/eletrocalha.js, eletroduto.js, canaleta.js, leito.js: peças únicas de tamanho fixo (builder genérico); rede-equip.js: família "rede". Carregados depois de engine3d-rede-mesh.js. -->
 <script src="js/objecttypes/eletrocalha.js"></script>
 <script src="js/objecttypes/eletroduto.js"></script>
@@ -650,6 +667,13 @@
 <script src="js/objecttypes/mostrador-canvas.js"></script>
 <script src="js/objecttypes/relogio.js"></script>
 <script src="js/objecttypes/quadro-mesa.js"></script>
+<!-- [01/10/2026] NOVO (37ª rodada) — folha-papel.js e luminaria-mesa.js: objetos vindos do HTML "folhas de anotação realistas" enviado pelo usuário. -->
+<!-- [50ª rodada] atlas de texturas das folhas (carregar ANTES de folha-papel.js) -->
+<script src="js/objecttypes/folha-atlas.js"></script>
+<!-- [63ª rodada] gravador de passos (step events): pílula no canto inferior esquerdo, exporta JSON -->
+<script src="js/steprecorder.js"></script>
+<script src="js/objecttypes/folha-papel.js"></script>
+<script src="js/objecttypes/luminaria-mesa.js"></script>
 <!-- [20/09/2026 UTC] js/objecttypes/teto-gesso.js, carro.js -- quarto
      lote, mesmo padrão. Tipos independentes (obj.tipo próprio), ordem
      entre eles/os anteriores não importa. -->
@@ -759,11 +783,19 @@
      motor) e ANTES de js/mapview.js/js/view3d.js (que CHAMAM
      window.Modeler3D — botão "🔧 Modelar" no painel de objeto e no cartão do
      3D). -->
+<script src="js/modeler/modeler-font.js"></script>
 <script src="js/modeler/modeler-mesh.js"></script>
 <script src="js/modeler/modeler-gizmo.js"></script>
 <script src="js/modeler/modeler-render.js"></script>
 <script src="js/modeler/modeler-input.js"></script>
 <script src="js/modeler/modeler-ui.js"></script>
+<script src="js/objecttypes/texto3d.js"></script>
+<script src="js/texto3d-cruz.js"></script>
+<script src="js/polybool2d.js"></script>
+<script src="js/objecttypes/piso-custom.js"></script>
+<script src="js/objecttypes/teto-custom.js"></script>
+<script src="js/objecttypes/telha-custom.js"></script>
+<script src="js/piso-custom-edit.js"></script>
 <script src="js/modeler/modeler-core.js"></script>
 <script src="js/email.js"></script>
 <script src="js/autosave.js"></script>
@@ -791,6 +823,8 @@
 <script src="lib/codemirror/lib/codemirror.js"></script>
 <script src="lib/codemirror/mode/javascript/javascript.js"></script>
 <script src="js/mapview.js"></script>
+<!-- [01/10/2026] js/mapview-camadas.js -- extraído de mapview.js (pedido verbatim: "Os códigos da janela 'Camadas' devem ser modulares e independentes o máximo possível do restante dos códigos do app." / "todo o app deve funcionar em 'file:///'"). Script comum (sem módulos ES). Carregado IMEDIATAMENTE depois de js/mapview.js. -->
+<script src="js/mapview-camadas.js"></script>
 <!-- [20/09/2026 UTC] js/mapview-rede-2d.js -- extraído de mapview.js
      (pedido verbatim: "deixe apenas o core do projeto quanto ao Mapa").
      Cobre os cabos entre portas do editor 2D: desenho (Map2DRenderer,
@@ -810,6 +844,7 @@
 <script src="js/rede-docs.js"></script>
 <script src="js/ap-docs.js"></script>
 <script src="js/scripts-docs.js"></script>
+<script src="js/hardware-docs.js"></script>
 <!-- NOVO (08/09/2026), pedido verbatim: "Será o 'Info'." — módulo novo
      (window.InfoBar) que mostra título + botões 👁️/⚙️ dentro de uma divisão
      do Workspace, reaproveitando os mesmos handlers do cabeçalho global (ver
